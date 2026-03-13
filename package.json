@@ -2,7 +2,7 @@
   "name": "repoarena",
   "version": "0.1.0",
   "private": true,
-  "description": "Local-first evaluation and replay platform for AI coding agents.",
+  "description": "Open-source benchmark and replay tool for comparing AI coding agents in real repositories.",
   "packageManager": "pnpm@10.6.1",
   "engines": {
     "node": ">=22.0.0"
