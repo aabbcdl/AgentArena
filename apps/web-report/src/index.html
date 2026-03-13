@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RepoArena Web Report</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <p class="eyebrow">RepoArena</p>
+          <h1>Web Report</h1>
+          <p class="muted">Load a `summary.json` file and inspect benchmark results interactively.</p>
+        </div>
+
+        <label class="file-picker">
+          <span>Load Summary</span>
+          <input id="summary-file" type="file" accept=".json,application/json" />
+        </label>
+
+        <div id="run-info" class="panel hidden"></div>
+
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Agents</h2>
+            <span id="agent-count" class="muted">0</span>
+          </div>
+          <div id="agent-list" class="agent-list empty-state">No report loaded.</div>
+        </section>
+      </aside>
+
+      <main class="content">
+        <section id="empty-state" class="hero">
+          <p class="eyebrow">Interactive Viewer</p>
+          <h2>Inspect one run without scrolling through a giant static page.</h2>
+          <p class="muted">
+            Load a RepoArena `summary.json` file from `.repoarena/runs/&lt;run-id&gt;/summary.json`.
+          </p>
+        </section>
+
+        <section id="dashboard" class="hidden">
+          <div class="topbar">
+            <div>
+              <p class="eyebrow">Run Overview</p>
+              <h2 id="task-title">Task</h2>
+              <p id="task-meta" class="muted"></p>
+            </div>
+            <div class="actions">
+              <button id="expand-all" type="button">Expand Logs</button>
+              <button id="collapse-all" type="button">Collapse Logs</button>
+            </div>
+          </div>
+
+          <section id="metrics" class="metrics"></section>
+          <section id="preflights" class="preflights"></section>
+
+          <section class="result-layout">
+            <div id="result-summary" class="card result-summary"></div>
+            <div id="result-details" class="result-details"></div>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

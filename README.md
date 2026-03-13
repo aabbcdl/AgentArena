@@ -25,6 +25,7 @@ This repository already contains a runnable prototype with:
 - a working `codex` adapter
 - `claude-code` and `cursor` adapters with auth-aware failure reporting
 - static HTML and JSON report generation
+- an interactive `apps/web-report` viewer for `summary.json`
 
 ## Quick Start
 
@@ -116,6 +117,7 @@ docs/
 ## Documentation
 
 - [Project overview](./docs/overview.md)
+- [Web report app](./apps/web-report/README.md)
 
 ## License
 

@@ -18,7 +18,7 @@ The current version focuses on a runnable local benchmark loop:
 - isolated workspaces per run
 - versioned task pack loading
 - diff detection
-- JSON and HTML report generation
+- JSON, static HTML, and interactive web report generation
 - support for demo adapters plus external CLI-based adapters
 
 ## Design Principles
