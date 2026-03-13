@@ -104,19 +104,6 @@ const demoProfiles: Record<string, DemoProfile> = {
   }
 };
 
-const CURSOR_INTERNAL_CLI = path.join(
-  "D:",
-  "soft",
-  "cursor",
-  "resources",
-  "app",
-  "extensions",
-  "cursor-agent",
-  "dist",
-  "claude-agent-sdk",
-  "cli.js"
-);
-
 const DEFAULT_AGENT_TIMEOUT_MS = 15 * 60 * 1_000;
 
 async function sleep(durationMs: number): Promise<void> {
@@ -163,6 +150,89 @@ function agentTimeoutMs(): number {
 
 function formatTimeoutMessage(timeoutMs: number): string {
   return `Process timed out after ${timeoutMs}ms.`;
+}
+
+async function pathExists(targetPath: string): Promise<boolean> {
+  try {
+    await fs.access(targetPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function findExecutableOnPath(names: string[]): Promise<string | undefined> {
+  const pathEntries = (process.env.PATH ?? "")
+    .split(path.delimiter)
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  for (const entry of pathEntries) {
+    for (const name of names) {
+      const candidate = path.join(entry, name);
+      if (await pathExists(candidate)) {
+        return candidate;
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function cursorAgentCliFromBinary(binaryPath: string): string {
+  const binaryDir = path.dirname(binaryPath);
+  return path.resolve(
+    binaryDir,
+    "..",
+    "extensions",
+    "cursor-agent",
+    "dist",
+    "claude-agent-sdk",
+    "cli.js"
+  );
+}
+
+async function resolveCursorAgentCliPath(): Promise<string | undefined> {
+  if (process.env.REPOARENA_CURSOR_AGENT_CLI?.trim()) {
+    const explicitPath = process.env.REPOARENA_CURSOR_AGENT_CLI.trim();
+    if (await pathExists(explicitPath)) {
+      return explicitPath;
+    }
+  }
+
+  const pathBinary = await findExecutableOnPath(
+    process.platform === "win32" ? ["cursor.cmd", "cursor.exe", "cursor"] : ["cursor"]
+  );
+  if (pathBinary) {
+    const derivedCliPath = cursorAgentCliFromBinary(pathBinary);
+    if (await pathExists(derivedCliPath)) {
+      return derivedCliPath;
+    }
+  }
+
+  const installRoots = process.platform === "win32"
+    ? [
+        path.join(process.env.LOCALAPPDATA ?? "", "Programs", "Cursor", "resources", "app", "bin", "cursor.cmd"),
+        path.join(process.env.ProgramFiles ?? "", "Cursor", "resources", "app", "bin", "cursor.exe"),
+        path.join("D:", "soft", "cursor", "resources", "app", "bin", "cursor.cmd")
+      ]
+    : [
+        "/Applications/Cursor.app/Contents/Resources/app/bin/cursor",
+        path.join(process.env.HOME ?? "", ".local", "bin", "cursor")
+      ];
+
+  for (const candidate of installRoots) {
+    if (!(await pathExists(candidate))) {
+      continue;
+    }
+
+    const derivedCliPath = cursorAgentCliFromBinary(candidate);
+    if (await pathExists(derivedCliPath)) {
+      return derivedCliPath;
+    }
+  }
+
+  return undefined;
 }
 
 async function writeDemoArtifacts(
@@ -470,20 +540,20 @@ async function resolveCursorInvocation(): Promise<InvocationSpec> {
     return { command, argsPrefix: [], displayCommand: command };
   }
 
-  try {
-    await fs.access(CURSOR_INTERNAL_CLI);
+  const cursorAgentCliPath = await resolveCursorAgentCliPath();
+  if (cursorAgentCliPath) {
     return {
       command: process.execPath,
-      argsPrefix: [CURSOR_INTERNAL_CLI],
-      displayCommand: `${process.execPath} ${CURSOR_INTERNAL_CLI}`
-    };
-  } catch {
-    return {
-      command: "cursor",
-      argsPrefix: [],
-      displayCommand: "cursor"
+      argsPrefix: [cursorAgentCliPath],
+      displayCommand: `${process.execPath} ${cursorAgentCliPath}`
     };
   }
+
+  return {
+    command: "cursor",
+    argsPrefix: [],
+    displayCommand: "cursor"
+  };
 }
 
 async function resolveClaudeInvocation(): Promise<InvocationSpec> {
