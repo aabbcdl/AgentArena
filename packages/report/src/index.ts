@@ -37,6 +37,19 @@ function sanitizePath(value: string, basePath: string, prefix: string): string {
   return path.basename(value);
 }
 
+function sanitizeWorkspaceScopedPath(value: string, workspacePath: string, agentId: string): string {
+  const relativePath = normalizePath(path.relative(workspacePath, value));
+  if (relativePath === "") {
+    return `workspace/${agentId}`;
+  }
+
+  if (!relativePath.startsWith("..")) {
+    return `workspace/${agentId}/${relativePath}`;
+  }
+
+  return path.basename(value);
+}
+
 function sanitizeRun(run: BenchmarkRun): BenchmarkRun {
   return {
     ...run,
@@ -52,6 +65,10 @@ function sanitizeRun(run: BenchmarkRun): BenchmarkRun {
         ...result.preflight,
         command: undefined
       },
+      judgeResults: result.judgeResults.map((judge) => ({
+        ...judge,
+        cwd: sanitizeWorkspaceScopedPath(judge.cwd, result.workspacePath, result.agentId)
+      })),
       tracePath: sanitizePath(result.tracePath, run.outputPath, "run"),
       workspacePath: `workspace/${path.basename(result.workspacePath)}`
     }))
@@ -92,11 +109,35 @@ function renderAgentCards(run: BenchmarkRun): string {
                 (judge) =>
                   `<li><strong>${escapeHtml(judge.label)}</strong>: ${
                     judge.success ? "pass" : "fail"
-                  } (${escapeHtml(formatDuration(judge.durationMs))})</li>`
+                  } (${escapeHtml(formatDuration(judge.durationMs))})${
+                    judge.stdout || judge.stderr
+                      ? `<details><summary>Debug output</summary>${
+                          judge.stdout
+                            ? `<p class="meta"><strong>stdout</strong></p><pre>${escapeHtml(judge.stdout)}</pre>`
+                            : ""
+                        }${
+                          judge.stderr
+                            ? `<p class="meta"><strong>stderr</strong></p><pre>${escapeHtml(judge.stderr)}</pre>`
+                            : ""
+                        }<p class="meta">cwd: ${escapeHtml(judge.cwd)}</p></details>`
+                      : ""
+                  }</li>`
               )
               .join("");
 
       const changedFiles = result.changedFiles;
+      const addedFiles =
+        result.diff.added.length === 0
+          ? "<li>None</li>"
+          : result.diff.added.map((file) => `<li>${escapeHtml(file)}</li>`).join("");
+      const changedDiffFiles =
+        result.diff.changed.length === 0
+          ? "<li>None</li>"
+          : result.diff.changed.map((file) => `<li>${escapeHtml(file)}</li>`).join("");
+      const removedFiles =
+        result.diff.removed.length === 0
+          ? "<li>None</li>"
+          : result.diff.removed.map((file) => `<li>${escapeHtml(file)}</li>`).join("");
 
       return `
         <section class="card">
@@ -121,6 +162,13 @@ function renderAgentCards(run: BenchmarkRun): string {
               ? "<li>No diff detected.</li>"
               : changedFiles.map((file) => `<li>${escapeHtml(file)}</li>`).join("")
           }</ul>
+          <h3>Diff Breakdown</h3>
+          <p class="meta">Added</p>
+          <ul>${addedFiles}</ul>
+          <p class="meta">Changed</p>
+          <ul>${changedDiffFiles}</ul>
+          <p class="meta">Removed</p>
+          <ul>${removedFiles}</ul>
           <p class="meta">Trace: ${escapeHtml(result.tracePath)}</p>
           <p class="meta">Workspace: ${escapeHtml(result.workspacePath)}</p>
         </section>
@@ -235,6 +283,16 @@ function renderHtml(run: BenchmarkRun): string {
         color: var(--muted);
         font-size: 0.9rem;
         word-break: break-word;
+      }
+      pre {
+        overflow-x: auto;
+        padding: 12px;
+        border-radius: 12px;
+        background: rgba(31, 27, 22, 0.06);
+        white-space: pre-wrap;
+      }
+      details {
+        margin-top: 8px;
       }
       footer {
         margin-top: 24px;
