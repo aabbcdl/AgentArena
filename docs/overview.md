@@ -16,7 +16,7 @@ Which agent performs best on real tasks inside my repository, under the same con
 The current version focuses on a runnable local benchmark loop:
 - adapter preflight checks
 - isolated workspaces per run
-- task pack loading
+- versioned task pack loading
 - diff detection
 - JSON and HTML report generation
 - support for demo adapters plus external CLI-based adapters
@@ -36,7 +36,7 @@ Different coding agents should plug into the same execution and reporting model.
 If an agent is blocked by missing authentication or local setup, RepoArena should report that clearly instead of pretending the benchmark was fair.
 
 ## Near-term Priorities
-- strengthen task pack format
+- expand task pack schema beyond command-based judges
 - add richer judges
 - improve report UX
 - add CI-friendly execution entrypoints

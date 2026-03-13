@@ -1,6 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { TaskPack } from "@repoarena/core";
+import { CommandJudge, TASK_PACK_SCHEMA_V1, TaskPack } from "@repoarena/core";
 
 function assertString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.trim().length === 0) {
@@ -8,6 +8,48 @@ function assertString(value: unknown, label: string): string {
   }
 
   return value;
+}
+
+function assertOptionalString(value: unknown, label: string): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  return assertString(value, label);
+}
+
+function assertOptionalPositiveInteger(value: unknown, label: string): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
+    throw new Error(`Task pack field "${label}" must be a positive integer when provided.`);
+  }
+
+  return value;
+}
+
+function normalizeJudge(
+  value: Record<string, unknown>,
+  index: number,
+  defaultIdPrefix: string
+): CommandJudge {
+  const type = value.type === undefined ? "command" : value.type;
+  if (type !== "command") {
+    throw new Error(`Task pack judge at index ${index} has unsupported type "${String(type)}".`);
+  }
+
+  return {
+    id:
+      assertOptionalString(value.id, `judges[${index}].id`) ??
+      `${defaultIdPrefix}-${index + 1}`,
+    label: assertString(value.label, `judges[${index}].label`),
+    type: "command",
+    command: assertString(value.command, `judges[${index}].command`),
+    cwd: assertOptionalString(value.cwd, `judges[${index}].cwd`),
+    timeoutMs: assertOptionalPositiveInteger(value.timeoutMs, `judges[${index}].timeoutMs`)
+  };
 }
 
 export async function loadTaskPack(taskPath: string): Promise<TaskPack> {
@@ -20,23 +62,34 @@ export async function loadTaskPack(taskPath: string): Promise<TaskPack> {
 
   const rawContent = await fs.readFile(resolvedPath, "utf8");
   const parsed = JSON.parse(rawContent) as Record<string, unknown>;
+  const taskId = assertString(parsed.id, "id");
+  const schemaVersion =
+    parsed.schemaVersion === undefined
+      ? TASK_PACK_SCHEMA_V1
+      : assertString(parsed.schemaVersion, "schemaVersion");
 
-  const successCommands = Array.isArray(parsed.successCommands) ? parsed.successCommands : [];
+  if (schemaVersion !== TASK_PACK_SCHEMA_V1) {
+    throw new Error(`Unsupported task pack schema version "${schemaVersion}".`);
+  }
+
+  const judgesInput = Array.isArray(parsed.judges)
+    ? parsed.judges
+    : Array.isArray(parsed.successCommands)
+      ? parsed.successCommands
+      : [];
 
   return {
-    id: assertString(parsed.id, "id"),
+    schemaVersion: TASK_PACK_SCHEMA_V1,
+    id: taskId,
     title: assertString(parsed.title, "title"),
     description: typeof parsed.description === "string" ? parsed.description : undefined,
     prompt: assertString(parsed.prompt, "prompt"),
-    successCommands: successCommands.map((value, index) => {
+    judges: judgesInput.map((value, index) => {
       if (!value || typeof value !== "object") {
-        throw new Error(`Task pack success command at index ${index} must be an object.`);
+        throw new Error(`Task pack judge at index ${index} must be an object.`);
       }
 
-      return {
-        label: assertString((value as Record<string, unknown>).label, `successCommands[${index}].label`),
-        command: assertString((value as Record<string, unknown>).command, `successCommands[${index}].command`)
-      };
+      return normalizeJudge(value as Record<string, unknown>, index, taskId);
     })
   };
 }

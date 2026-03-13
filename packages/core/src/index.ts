@@ -2,17 +2,24 @@ import { createHash, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
-export interface TaskCommand {
+export const TASK_PACK_SCHEMA_V1 = "repoarena.taskpack/v1";
+
+export interface CommandJudge {
+  id: string;
   label: string;
+  type: "command";
   command: string;
+  cwd?: string;
+  timeoutMs?: number;
 }
 
 export interface TaskPack {
+  schemaVersion: typeof TASK_PACK_SCHEMA_V1;
   id: string;
   title: string;
   description?: string;
   prompt: string;
-  successCommands: TaskCommand[];
+  judges: CommandJudge[];
 }
 
 export interface TraceEvent {
@@ -65,13 +72,16 @@ export interface AgentAdapter {
 }
 
 export interface JudgeResult {
+  judgeId: string;
   label: string;
+  type: "command";
   command: string;
   exitCode: number | null;
   success: boolean;
   stdout: string;
   stderr: string;
   durationMs: number;
+  cwd: string;
 }
 
 export interface DiffSummary {

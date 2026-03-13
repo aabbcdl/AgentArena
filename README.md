@@ -6,6 +6,8 @@
 
 RepoArena lets you run Claude Code, Codex, Cursor, Devin, and open source agents against the same repository tasks, then compare success rate, duration, cost, diffs, and replay traces in one report.
 
+Task packs use a versioned schema. The current format is `repoarena.taskpack/v1`, with structured `judges` definitions for command-based evaluation.
+
 ## What It Does
 
 - Runs multiple coding agents against the same task pack
@@ -61,6 +63,23 @@ repoarena run \
 ```
 
 Then inspect the generated report in `.repoarena/runs/`.
+
+## Task Pack Schema
+
+RepoArena currently supports `repoarena.taskpack/v1`.
+
+Each task pack defines:
+- repository task metadata
+- a single benchmark prompt
+- a list of structured `judges`
+
+Each command judge can define:
+- `id`
+- `label`
+- `type: "command"`
+- `command`
+- optional `cwd`
+- optional `timeoutMs`
 
 ## Design Principles
 

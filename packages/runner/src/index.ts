@@ -6,6 +6,7 @@ import {
   AdapterPreflightResult,
   AgentRunResult,
   BenchmarkRun,
+  CommandJudge,
   DiffSummary,
   JudgeResult,
   copyRepository,
@@ -41,12 +42,23 @@ function judgeTimeoutMs(): number {
   return resolveTimeoutMs(process.env.REPOARENA_JUDGE_TIMEOUT_MS, DEFAULT_JUDGE_TIMEOUT_MS);
 }
 
-async function runCommand(label: string, command: string, cwd: string): Promise<JudgeResult> {
+function resolveJudgeWorkingDirectory(workspacePath: string, judge: CommandJudge): string {
+  const candidatePath = judge.cwd ? path.resolve(workspacePath, judge.cwd) : workspacePath;
+  const relativePath = path.relative(workspacePath, candidatePath);
+  if (relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
+    throw new Error(`Judge "${judge.id}" cwd must stay inside the workspace.`);
+  }
+
+  return candidatePath;
+}
+
+async function runCommand(judge: CommandJudge, workspacePath: string): Promise<JudgeResult> {
   const startedAt = Date.now();
-  const timeoutMs = judgeTimeoutMs();
+  const timeoutMs = judge.timeoutMs ?? judgeTimeoutMs();
+  const cwd = resolveJudgeWorkingDirectory(workspacePath, judge);
 
   return await new Promise((resolve) => {
-    const child = spawn(command, {
+    const child = spawn(judge.command, {
       cwd,
       shell: true,
       stdio: ["ignore", "pipe", "pipe"]
@@ -71,26 +83,32 @@ async function runCommand(label: string, command: string, cwd: string): Promise<
     child.on("close", (exitCode) => {
       clearTimeout(timeoutHandle);
       resolve({
-        label,
-        command,
+        judgeId: judge.id,
+        label: judge.label,
+        type: "command",
+        command: judge.command,
         exitCode,
         success: exitCode === 0 && !timedOut,
         stdout: stdout.trim(),
         stderr: `${stderr}${timedOut ? `\nJudge timed out after ${timeoutMs}ms.` : ""}`.trim(),
-        durationMs: Date.now() - startedAt
+        durationMs: Date.now() - startedAt,
+        cwd
       });
     });
 
     child.on("error", (error) => {
       clearTimeout(timeoutHandle);
       resolve({
-        label,
-        command,
+        judgeId: judge.id,
+        label: judge.label,
+        type: "command",
+        command: judge.command,
         exitCode: -1,
         success: false,
         stdout,
         stderr: `${stderr}\n${error.message}`.trim(),
-        durationMs: Date.now() - startedAt
+        durationMs: Date.now() - startedAt,
+        cwd
       });
     });
   });
@@ -181,7 +199,7 @@ async function runAgent(
     });
 
     const judgeResults = await Promise.all(
-      task.successCommands.map((command) => runCommand(command.label, command.command, workspacePath))
+      task.judges.map((judge) => runCommand(judge, workspacePath))
     );
 
     const afterSnapshot = await snapshotDirectory(workspacePath);

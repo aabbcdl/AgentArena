@@ -1,14 +1,19 @@
 {
+  "schemaVersion": "repoarena.taskpack/v1",
   "id": "demo-repo-health",
   "title": "Demo Repo Health Check",
   "description": "A starter task pack that exercises the RepoArena vertical slice against a real repository snapshot.",
   "prompt": "Inspect the repository, leave a concise benchmark note in repoarena-demo/, and keep the repo in a healthy state.",
-  "successCommands": [
+  "judges": [
     {
+      "id": "readme-exists",
+      "type": "command",
       "label": "Repository contains README",
       "command": "node -e \"const fs = require('node:fs'); process.exit(fs.existsSync('README.md') ? 0 : 1)\""
     },
     {
+      "id": "package-manifest-exists",
+      "type": "command",
       "label": "Repository contains package manifest",
       "command": "node -e \"const fs = require('node:fs'); process.exit(fs.existsSync('package.json') ? 0 : 1)\""
     }
