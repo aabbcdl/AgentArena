@@ -30,6 +30,18 @@ function assertOptionalPositiveInteger(value: unknown, label: string): number | 
   return value;
 }
 
+function assertStringArray(value: unknown, label: string): string[] {
+  if (value === undefined) {
+    return [];
+  }
+
+  if (!Array.isArray(value)) {
+    throw new Error(`Task pack field "${label}" must be an array of strings when provided.`);
+  }
+
+  return value.map((entry, index) => assertString(entry, `${label}[${index}]`));
+}
+
 function normalizeJudge(
   value: Record<string, unknown>,
   index: number,
@@ -103,6 +115,7 @@ export async function loadTaskPack(taskPath: string): Promise<TaskPack> {
     title: assertString(parsed.title, "title"),
     description: typeof parsed.description === "string" ? parsed.description : undefined,
     prompt: assertString(parsed.prompt, "prompt"),
+    envAllowList: assertStringArray(parsed.envAllowList, "envAllowList"),
     setupCommands: setupCommandsInput.map((value, index) => {
       if (!value || typeof value !== "object") {
         throw new Error(`Task pack setup command at index ${index} must be an object.`);

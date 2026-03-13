@@ -284,11 +284,13 @@ async function runProcess(
   command: string,
   args: string[],
   cwd: string,
-  timeoutMs = agentTimeoutMs()
+  timeoutMs = agentTimeoutMs(),
+  environment?: NodeJS.ProcessEnv
 ): Promise<ProcessResult> {
   return await new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd,
+      env: environment,
       stdio: ["ignore", "pipe", "pipe"]
     });
 
@@ -756,7 +758,13 @@ class CodexCliAdapter implements AgentAdapter {
       }
     });
 
-    const execution = await runProcess(invocation.command, args, context.workspacePath);
+    const execution = await runProcess(
+      invocation.command,
+      args,
+      context.workspacePath,
+      agentTimeoutMs(),
+      context.environment
+    );
     const parsed = parseCodexEvents(execution.stdout, context.workspacePath);
     const lastMessage = await fs.readFile(outputLastMessagePath, "utf8").catch(() => "");
     const summary =
@@ -879,7 +887,13 @@ abstract class ClaudeLikeAdapter implements AgentAdapter {
       }
     });
 
-    const execution = await runProcess(invocation.command, args, context.workspacePath);
+    const execution = await runProcess(
+      invocation.command,
+      args,
+      context.workspacePath,
+      agentTimeoutMs(),
+      context.environment
+    );
     const parsed = parseClaudeEvents(execution.stdout);
     const summary =
       parsed.summaryFromEvents ||

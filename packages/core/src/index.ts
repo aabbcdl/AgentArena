@@ -22,6 +22,7 @@ export interface TaskPack {
   title: string;
   description?: string;
   prompt: string;
+  envAllowList: string[];
   setupCommands: CommandExecutionSpec[];
   judges: CommandJudge[];
   teardownCommands: CommandExecutionSpec[];
@@ -39,6 +40,7 @@ export interface AdapterExecutionContext {
   agentId: string;
   repoPath: string;
   workspacePath: string;
+  environment: NodeJS.ProcessEnv;
   task: TaskPack;
   trace: (event: Omit<TraceEvent, "agentId" | "timestamp">) => Promise<void>;
 }
@@ -144,6 +146,23 @@ export interface FileSnapshotEntry {
 }
 
 const INTERNAL_IGNORED_NAMES = new Set([".repoarena", ".git"]);
+const BASELINE_ENV_NAMES = [
+  "PATH",
+  "Path",
+  "PATHEXT",
+  "SystemRoot",
+  "SYSTEMROOT",
+  "ComSpec",
+  "COMSPEC",
+  "WINDIR",
+  "HOME",
+  "USERPROFILE",
+  "TMP",
+  "TEMP",
+  "LANG",
+  "TERM",
+  "PWD"
+];
 
 export function createRunId(date = new Date()): string {
   const stamp = date.toISOString().replace(/[:.]/g, "-");
@@ -152,6 +171,19 @@ export function createRunId(date = new Date()): string {
 
 export function normalizePath(inputPath: string): string {
   return inputPath.split(path.sep).join("/");
+}
+
+export function buildExecutionEnvironment(allowedNames: string[]): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+
+  for (const name of [...BASELINE_ENV_NAMES, ...allowedNames]) {
+    const value = process.env[name];
+    if (value !== undefined) {
+      env[name] = value;
+    }
+  }
+
+  return env;
 }
 
 export async function ensureDirectory(dirPath: string): Promise<void> {

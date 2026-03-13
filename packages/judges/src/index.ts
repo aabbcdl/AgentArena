@@ -33,7 +33,11 @@ function resolveCommandWorkingDirectory(workspacePath: string, step: CommandExec
   return candidatePath;
 }
 
-export async function runJudge(judge: CommandJudge, workspacePath: string): Promise<JudgeResult> {
+export async function runJudge(
+  judge: CommandJudge,
+  workspacePath: string,
+  environment: NodeJS.ProcessEnv
+): Promise<JudgeResult> {
   const startedAt = Date.now();
   const timeoutMs = judge.timeoutMs ?? defaultJudgeTimeoutMs();
   const cwd = resolveJudgeWorkingDirectory(workspacePath, judge);
@@ -41,6 +45,7 @@ export async function runJudge(judge: CommandJudge, workspacePath: string): Prom
   return await new Promise((resolve) => {
     const child = spawn(judge.command, {
       cwd,
+      env: environment,
       shell: true,
       stdio: ["ignore", "pipe", "pipe"]
     });
@@ -95,13 +100,18 @@ export async function runJudge(judge: CommandJudge, workspacePath: string): Prom
   });
 }
 
-export async function runJudges(judges: CommandJudge[], workspacePath: string): Promise<JudgeResult[]> {
-  return await Promise.all(judges.map(async (judge) => await runJudge(judge, workspacePath)));
+export async function runJudges(
+  judges: CommandJudge[],
+  workspacePath: string,
+  environment: NodeJS.ProcessEnv
+): Promise<JudgeResult[]> {
+  return await Promise.all(judges.map(async (judge) => await runJudge(judge, workspacePath, environment)));
 }
 
 export async function runCommandStep(
   step: CommandExecutionSpec,
-  workspacePath: string
+  workspacePath: string,
+  environment: NodeJS.ProcessEnv
 ): Promise<CommandStepResult> {
   const startedAt = Date.now();
   const timeoutMs = step.timeoutMs ?? defaultJudgeTimeoutMs();
@@ -110,6 +120,7 @@ export async function runCommandStep(
   return await new Promise((resolve) => {
     const child = spawn(step.command, {
       cwd,
+      env: environment,
       shell: true,
       stdio: ["ignore", "pipe", "pipe"]
     });
@@ -164,7 +175,10 @@ export async function runCommandStep(
 
 export async function runCommandSteps(
   steps: CommandExecutionSpec[],
-  workspacePath: string
+  workspacePath: string,
+  environment: NodeJS.ProcessEnv
 ): Promise<CommandStepResult[]> {
-  return await Promise.all(steps.map(async (step) => await runCommandStep(step, workspacePath)));
+  return await Promise.all(
+    steps.map(async (step) => await runCommandStep(step, workspacePath, environment))
+  );
 }

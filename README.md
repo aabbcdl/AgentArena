@@ -72,7 +72,10 @@ RepoArena currently supports `repoarena.taskpack/v1`.
 Each task pack defines:
 - repository task metadata
 - a single benchmark prompt
+- an optional task-level `envAllowList`
+- optional `setupCommands`
 - a list of structured `judges`
+- optional `teardownCommands`
 
 Each command judge can define:
 - `id`
@@ -81,6 +84,8 @@ Each command judge can define:
 - `command`
 - optional `cwd`
 - optional `timeoutMs`
+
+Environment handling is allowlist-based. Task packs can expose specific host variables through `envAllowList`, and RepoArena only passes that filtered environment to setup commands, judges, teardown commands, and agent execution.
 
 ## Design Principles
 

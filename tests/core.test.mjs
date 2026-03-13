@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { diffSnapshots, uniqueSorted } from "../packages/core/dist/index.js";
+import { buildExecutionEnvironment, diffSnapshots, uniqueSorted } from "../packages/core/dist/index.js";
 
 test("uniqueSorted removes duplicates and sorts values", () => {
   assert.deepEqual(uniqueSorted(["b", "a", "b"]), ["a", "b"]);
@@ -22,4 +22,15 @@ test("diffSnapshots reports added, changed, and removed files", () => {
     changed: ["README.md"],
     removed: []
   });
+});
+
+test("buildExecutionEnvironment includes only baseline and allowlisted variables", () => {
+  process.env.REPOARENA_ALLOWED_TEST = "visible";
+  process.env.REPOARENA_BLOCKED_TEST = "hidden";
+
+  const environment = buildExecutionEnvironment(["REPOARENA_ALLOWED_TEST"]);
+
+  assert.equal(environment.REPOARENA_ALLOWED_TEST, "visible");
+  assert.equal(environment.REPOARENA_BLOCKED_TEST, undefined);
+  assert.ok(environment.PATH || environment.Path);
 });

@@ -7,6 +7,7 @@ import {
   BenchmarkRun,
   CommandStepResult,
   DiffSummary,
+  buildExecutionEnvironment,
   copyRepository,
   createRunId,
   diffSnapshots,
@@ -120,6 +121,7 @@ async function runAgent(
   const workspacePath = path.join(workspaceRootPath, preflight.agentId);
   const tracePath = path.join(agentOutputPath, "trace.jsonl");
   const traceRecorder = new JsonlTraceRecorder(tracePath);
+  const executionEnvironment = buildExecutionEnvironment(task.envAllowList);
 
   if (preflight.status === "missing" || preflight.status === "blocked") {
     await ensureDirectory(agentOutputPath);
@@ -161,7 +163,7 @@ async function runAgent(
     }
   });
 
-  const setupResults = await runCommandSteps(task.setupCommands, workspacePath);
+  const setupResults = await runCommandSteps(task.setupCommands, workspacePath, executionEnvironment);
   await traceRecorder.record({
     agentId: preflight.agentId,
     timestamp: new Date().toISOString(),
@@ -220,6 +222,7 @@ async function runAgent(
       agentId: preflight.agentId,
       repoPath,
       workspacePath,
+      environment: executionEnvironment,
       task,
       trace: async (event) => {
         await traceRecorder.record({
@@ -230,11 +233,15 @@ async function runAgent(
       }
     });
 
-    const judgeResults = await runJudges(task.judges, workspacePath);
+    const judgeResults = await runJudges(task.judges, workspacePath, executionEnvironment);
 
     const afterSnapshot = await snapshotDirectory(workspacePath);
     const diff = diffSnapshots(beforeSnapshot, afterSnapshot);
-    const teardownResults = await runCommandSteps(task.teardownCommands, workspacePath);
+    const teardownResults = await runCommandSteps(
+      task.teardownCommands,
+      workspacePath,
+      executionEnvironment
+    );
     const durationMs = Date.now() - startedAt;
     const success =
       adapterResult.status === "success" &&

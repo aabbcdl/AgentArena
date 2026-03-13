@@ -17,6 +17,7 @@ test("loadTaskPack parses schema v1 judges", async () => {
         id: "demo",
         title: "Demo Task",
         prompt: "Do the thing",
+        envAllowList: ["CI", "REPOARENA_TOKEN"],
         judges: [
           {
             id: "lint",
@@ -37,6 +38,7 @@ test("loadTaskPack parses schema v1 judges", async () => {
   const taskPack = await loadTaskPack(taskPath);
 
   assert.equal(taskPack.schemaVersion, "repoarena.taskpack/v1");
+  assert.deepEqual(taskPack.envAllowList, ["CI", "REPOARENA_TOKEN"]);
   assert.equal(taskPack.judges[0].id, "lint");
   assert.equal(taskPack.judges[0].cwd, "app");
   assert.equal(taskPack.judges[0].timeoutMs, 15000);
@@ -73,6 +75,7 @@ test("loadTaskPack keeps backward compatibility with successCommands", async () 
   const taskPack = await loadTaskPack(taskPath);
 
   assert.equal(taskPack.schemaVersion, "repoarena.taskpack/v1");
+  assert.deepEqual(taskPack.envAllowList, []);
   assert.equal(taskPack.judges[0].id, "legacy-1");
   assert.equal(taskPack.judges[0].type, "command");
   assert.equal(taskPack.judges[0].label, "README exists");
@@ -94,6 +97,7 @@ test("loadTaskPack parses setup and teardown commands", async () => {
         id: "with-hooks",
         title: "Hooked Task",
         prompt: "Run setup and teardown",
+        envAllowList: ["REPOARENA_TOKEN"],
         setupCommands: [
           {
             label: "Prepare fixtures",
@@ -118,6 +122,7 @@ test("loadTaskPack parses setup and teardown commands", async () => {
 
   const taskPack = await loadTaskPack(taskPath);
 
+  assert.deepEqual(taskPack.envAllowList, ["REPOARENA_TOKEN"]);
   assert.equal(taskPack.setupCommands[0].id, "with-hooks-setup-1");
   assert.equal(taskPack.setupCommands[0].cwd, "scripts");
   assert.equal(taskPack.teardownCommands[0].id, "with-hooks-teardown-1");

@@ -19,6 +19,7 @@ test("writeReport sanitizes shareable output paths", async () => {
       id: "demo",
       title: "Demo",
       prompt: "Prompt",
+      envAllowList: [],
       setupCommands: [],
       judges: [],
       teardownCommands: []

@@ -17,6 +17,7 @@ The current version focuses on a runnable local benchmark loop:
 - adapter preflight checks
 - isolated workspaces per run
 - versioned task pack loading
+- task-level environment allowlists
 - diff detection
 - JSON, static HTML, and interactive web report generation
 - support for demo adapters plus external CLI-based adapters
