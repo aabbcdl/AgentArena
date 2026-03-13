@@ -114,14 +114,7 @@ export interface FileSnapshotEntry {
   hash: string;
 }
 
-const DEFAULT_IGNORED_NAMES = new Set([
-  ".repoarena",
-  ".git",
-  ".next",
-  "coverage",
-  "dist",
-  "node_modules"
-]);
+const INTERNAL_IGNORED_NAMES = new Set([".repoarena", ".git"]);
 
 export function createRunId(date = new Date()): string {
   const stamp = date.toISOString().replace(/[:.]/g, "-");
@@ -138,13 +131,13 @@ export async function ensureDirectory(dirPath: string): Promise<void> {
 
 export async function copyRepository(sourcePath: string, destinationPath: string): Promise<void> {
   await fs.cp(sourcePath, destinationPath, {
-    force: true,
-    recursive: true,
-    filter: (itemPath) => {
-      const name = path.basename(itemPath);
-      return !DEFAULT_IGNORED_NAMES.has(name);
-    }
-  });
+      force: true,
+      recursive: true,
+      filter: (itemPath) => {
+        const name = path.basename(itemPath);
+        return !INTERNAL_IGNORED_NAMES.has(name);
+      }
+    });
 }
 
 export async function snapshotDirectory(rootPath: string): Promise<Map<string, FileSnapshotEntry>> {
@@ -158,7 +151,7 @@ export async function snapshotDirectory(rootPath: string): Promise<Map<string, F
       const relativePath = normalizePath(path.relative(rootPath, absolutePath));
 
       if (entry.isDirectory()) {
-        if (DEFAULT_IGNORED_NAMES.has(entry.name)) {
+        if (INTERNAL_IGNORED_NAMES.has(entry.name)) {
           continue;
         }
 
