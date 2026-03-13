@@ -24,6 +24,40 @@ function statusTone(status: AdapterPreflightResult["status"]): string {
   }
 }
 
+function normalizePath(value: string): string {
+  return value.split(path.sep).join("/");
+}
+
+function sanitizePath(value: string, basePath: string, prefix: string): string {
+  const relativePath = normalizePath(path.relative(basePath, value));
+  if (relativePath.length > 0 && !relativePath.startsWith("..")) {
+    return `${prefix}/${relativePath}`;
+  }
+
+  return path.basename(value);
+}
+
+function sanitizeRun(run: BenchmarkRun): BenchmarkRun {
+  return {
+    ...run,
+    repoPath: ".",
+    outputPath: ".",
+    preflights: run.preflights.map((preflight) => ({
+      ...preflight,
+      command: undefined
+    })),
+    results: run.results.map((result) => ({
+      ...result,
+      preflight: {
+        ...result.preflight,
+        command: undefined
+      },
+      tracePath: sanitizePath(result.tracePath, run.outputPath, "run"),
+      workspacePath: `workspace/${path.basename(result.workspacePath)}`
+    }))
+  };
+}
+
 function renderPreflights(run: BenchmarkRun): string {
   return run.preflights
     .map((preflight) => {
@@ -62,7 +96,7 @@ function renderAgentCards(run: BenchmarkRun): string {
               )
               .join("");
 
-      const changedFiles = [...result.diff.added, ...result.diff.changed, ...result.diff.removed];
+      const changedFiles = result.changedFiles;
 
       return `
         <section class="card">
@@ -212,9 +246,9 @@ function renderHtml(run: BenchmarkRun): string {
     <main>
       <header>
         <h1>RepoArena Report</h1>
-        <p class="lede">${escapeHtml(run.task.title)} in ${escapeHtml(
-          run.repoPath
-        )}. Generated at ${escapeHtml(run.createdAt)} for run ${escapeHtml(run.runId)}.</p>
+        <p class="lede">${escapeHtml(run.task.title)} in ${escapeHtml(run.repoPath)}. Generated at ${escapeHtml(
+          run.createdAt
+        )} for run ${escapeHtml(run.runId)}.</p>
       </header>
       <h2 class="section-title">Adapter Preflight</h2>
       <section class="preflights">
@@ -234,12 +268,13 @@ function renderHtml(run: BenchmarkRun): string {
 
 export async function writeReport(run: BenchmarkRun): Promise<{ htmlPath: string; jsonPath: string }> {
   await ensureDirectory(run.outputPath);
+  const publicRun = sanitizeRun(run);
 
   const jsonPath = path.join(run.outputPath, "summary.json");
   const htmlPath = path.join(run.outputPath, "report.html");
 
-  await fs.writeFile(jsonPath, JSON.stringify(run, null, 2), "utf8");
-  await fs.writeFile(htmlPath, renderHtml(run), "utf8");
+  await fs.writeFile(jsonPath, JSON.stringify(publicRun, null, 2), "utf8");
+  await fs.writeFile(htmlPath, renderHtml(publicRun), "utf8");
 
   return { htmlPath, jsonPath };
 }
