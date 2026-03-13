@@ -142,3 +142,71 @@ test("runBenchmark supports step-level env allowlists and inline overrides", asy
 
   await rm(tempDir, { recursive: true, force: true });
 });
+
+test("runBenchmark executes setup and teardown commands in declaration order", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-runner-"));
+  const repoPath = path.join(tempDir, "repo");
+  const outputPath = path.join(tempDir, "output");
+  const taskPath = path.join(tempDir, "task.json");
+
+  await mkdir(repoPath, { recursive: true });
+
+  await writeFile(path.join(repoPath, "README.md"), "# Temp Repo\n", "utf8");
+  await writeJson(path.join(repoPath, "package.json"), { name: "temp-repo", version: "0.0.0" });
+
+  await writeJson(taskPath, {
+    schemaVersion: "repoarena.taskpack/v1",
+    id: "ordered-hooks",
+    title: "Ordered Hooks",
+    prompt: "Run ordered setup and teardown hooks.",
+    setupCommands: [
+      {
+        label: "Create initial marker",
+        command:
+          "node -e \"setTimeout(()=>{require('node:fs').writeFileSync('order.txt','first\\n')},150)\""
+      },
+      {
+        label: "Append second marker",
+        command:
+          "node -e \"const fs=require('node:fs');if(!fs.existsSync('order.txt'))process.exit(1);fs.appendFileSync('order.txt','second\\n')\""
+      }
+    ],
+    judges: [
+      {
+        id: "ordered-judge",
+        type: "command",
+        label: "Setup commands ran in order",
+        command:
+          "node -e \"const fs=require('node:fs');process.exit(fs.readFileSync('order.txt','utf8')==='first\\nsecond\\n' ? 0 : 1)\""
+      }
+    ],
+    teardownCommands: [
+      {
+        label: "Create teardown marker",
+        command:
+          "node -e \"setTimeout(()=>{require('node:fs').writeFileSync('cleanup.txt','cleanup-1\\n')},150)\""
+      },
+      {
+        label: "Validate teardown order and cleanup",
+        command:
+          "node -e \"const fs=require('node:fs');if(!fs.existsSync('cleanup.txt'))process.exit(1);fs.appendFileSync('cleanup.txt','cleanup-2\\n');const value=fs.readFileSync('cleanup.txt','utf8');if(value!=='cleanup-1\\ncleanup-2\\n')process.exit(1);fs.rmSync('cleanup.txt',{force:true});fs.rmSync('order.txt',{force:true})\""
+      }
+    ]
+  });
+
+  const benchmark = await runBenchmark({
+    repoPath,
+    taskPath,
+    agentIds: ["demo-fast"],
+    outputPath
+  });
+
+  assert.equal(benchmark.results[0].status, "success");
+  assert.equal(benchmark.results[0].setupResults[0].success, true);
+  assert.equal(benchmark.results[0].setupResults[1].success, true);
+  assert.equal(benchmark.results[0].judgeResults[0].success, true);
+  assert.equal(benchmark.results[0].teardownResults[0].success, true);
+  assert.equal(benchmark.results[0].teardownResults[1].success, true);
+
+  await rm(tempDir, { recursive: true, force: true });
+});

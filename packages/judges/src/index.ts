@@ -197,7 +197,11 @@ export async function runCommandSteps(
   workspacePath: string,
   baseAllowedNames: string[]
 ): Promise<CommandStepResult[]> {
-  return await Promise.all(
-    steps.map(async (step) => await runCommandStep(step, workspacePath, baseAllowedNames))
-  );
+  const results: CommandStepResult[] = [];
+
+  for (const step of steps) {
+    results.push(await runCommandStep(step, workspacePath, baseAllowedNames));
+  }
+
+  return results;
 }
