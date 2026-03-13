@@ -1,0 +1,20 @@
+{
+  "name": "@repoarena/runner",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "@repoarena/adapters": "workspace:*",
+    "@repoarena/core": "workspace:*",
+    "@repoarena/taskpacks": "workspace:*",
+    "@repoarena/trace": "workspace:*"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
+}

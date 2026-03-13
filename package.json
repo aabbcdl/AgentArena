@@ -1,0 +1,24 @@
+{
+  "name": "repoarena",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local-first evaluation and replay platform for AI coding agents.",
+  "packageManager": "pnpm@10.6.1",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "build": "pnpm -r --if-present build",
+    "demo": "pnpm build && node packages/cli/dist/index.js run --repo . --task examples/taskpacks/demo-repo-health.json --agents demo-fast,demo-thorough,demo-budget",
+    "demo:codex": "pnpm build && node packages/cli/dist/index.js run --repo . --task examples/taskpacks/demo-repo-health.json --agents codex",
+    "demo:arena": "pnpm build && node packages/cli/dist/index.js run --repo . --task examples/taskpacks/demo-repo-health.json --agents demo-fast,codex,claude-code,cursor",
+    "doctor": "pnpm build && node packages/cli/dist/index.js doctor --agents codex,claude-code,cursor,demo-fast --probe-auth",
+    "lint": "pnpm -r --if-present lint",
+    "test": "pnpm -r --if-present test",
+    "typecheck": "pnpm -r --if-present typecheck"
+  },
+  "devDependencies": {
+    "@types/node": "^24.5.2",
+    "typescript": "^5.9.2"
+  }
+}

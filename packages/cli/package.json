@@ -1,0 +1,23 @@
+{
+  "name": "@repoarena/cli",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "repoarena": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "@repoarena/adapters": "workspace:*",
+    "@repoarena/core": "workspace:*",
+    "@repoarena/report": "workspace:*",
+    "@repoarena/runner": "workspace:*"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
+}
