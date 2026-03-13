@@ -14,7 +14,7 @@
     "demo:arena": "pnpm build && node packages/cli/dist/index.js run --repo . --task examples/taskpacks/demo-repo-health.json --agents demo-fast,codex,claude-code,cursor",
     "doctor": "pnpm build && node packages/cli/dist/index.js doctor --agents codex,claude-code,cursor,demo-fast --probe-auth",
     "lint": "pnpm -r --if-present lint",
-    "test": "pnpm -r --if-present test",
+    "test": "pnpm build && node --test tests/*.test.mjs",
     "typecheck": "pnpm -r --if-present typecheck"
   },
   "devDependencies": {
