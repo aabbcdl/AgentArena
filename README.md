@@ -14,6 +14,7 @@ Task packs use a versioned schema. The current format is `repoarena.taskpack/v1`
 - Records traces and file changes in isolated workspaces
 - Evaluates outcomes with shared checks
 - Exports JSON, Markdown, and HTML reports
+- Exports a `badge.json` endpoint for report artifacts and status badges
 - Surfaces environment and authentication blockers before a benchmark starts
 
 ## Current Status
@@ -98,6 +99,12 @@ repoarena run \
 ```
 
 Then inspect the generated report in `.repoarena/runs/`.
+
+Each run now also writes:
+- `summary.json`
+- `summary.md`
+- `report.html`
+- `badge.json`
 
 ## Task Pack Schema
 

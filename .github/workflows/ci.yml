@@ -107,6 +107,7 @@ jobs:
         with:
           name: repoarena-smoke-report
           path: |
+            .repoarena/ci-smoke/badge.json
             .repoarena/ci-smoke/summary.json
             .repoarena/ci-smoke/summary.md
             .repoarena/ci-smoke/report.html

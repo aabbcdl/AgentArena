@@ -83,9 +83,10 @@ test("writeReport sanitizes shareable output paths", async () => {
     ]
   };
 
-  const { jsonPath, markdownPath } = await writeReport(benchmarkRun);
+  const { jsonPath, markdownPath, badgePath } = await writeReport(benchmarkRun);
   const summary = JSON.parse(await readFile(jsonPath, "utf8"));
   const markdown = await readFile(markdownPath, "utf8");
+  const badge = JSON.parse(await readFile(badgePath, "utf8"));
 
   assert.equal(summary.repoPath, ".");
   assert.equal(summary.outputPath, ".");
@@ -95,10 +96,14 @@ test("writeReport sanitizes shareable output paths", async () => {
   assert.equal(summary.results[0].judgeResults[0].cwd, "workspace/demo-fast");
   assert.equal(summary.results[0].judgeResults[0].target, "README.md");
   assert.match(markdown, /# RepoArena Summary/);
+  assert.match(markdown, /- Success Rate: `1\/1`/);
+  assert.match(markdown, /- Badge Endpoint: `badge\.json`/);
   assert.match(markdown, /\| Agent \| Status \| Duration \| Tokens \| Cost \| Changed Files \| Judges \|/);
   assert.match(markdown, /`run\/agents\/demo-fast\/trace\.jsonl`/);
   assert.match(markdown, /target=README\.md/);
   assert.doesNotMatch(markdown, /C:\\temp\\workspace/);
+  assert.equal(badge.label, "RepoArena");
+  assert.equal(badge.message, "1/1 passing");
 
   await rm(tempDir, { recursive: true, force: true });
 });

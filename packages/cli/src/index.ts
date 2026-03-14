@@ -316,7 +316,7 @@ async function runBenchmarkCommand(parsed: ParsedArgs): Promise<void> {
 
 function buildBenchmarkOutputSummary(
   benchmark: BenchmarkRun,
-  report: { jsonPath: string; markdownPath: string; htmlPath: string }
+  report: { jsonPath: string; markdownPath: string; htmlPath: string; badgePath: string }
 ) {
   return {
     runId: benchmark.runId,

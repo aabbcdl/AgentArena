@@ -274,6 +274,7 @@ test("repoarena run supports JSON output", async () => {
   assert.equal(payload.results[0].agentId, "demo-fast");
   assert.equal(payload.results[0].judges.passed, 1);
   assert.match(payload.report.jsonPath, /summary\.json$/);
+  assert.match(payload.report.badgePath, /badge\.json$/);
 
   await rm(tempDir, { recursive: true, force: true });
 });

@@ -72,6 +72,22 @@
           </div>
 
           <section id="metrics" class="metrics"></section>
+
+          <section class="detail-card">
+            <div class="panel-header">
+              <h3>Run Compare</h3>
+            </div>
+            <div class="filter-bar">
+              <select id="run-compare-sort">
+                <option value="created">Created At (newest first)</option>
+                <option value="success">Success Rate (high to low)</option>
+                <option value="tokens">Tokens (high to low)</option>
+                <option value="cost">Known Cost (low to high)</option>
+              </select>
+            </div>
+            <div id="run-compare-table" class="compare-table-wrap"></div>
+          </section>
+
           <section id="preflights" class="preflights"></section>
 
           <section class="detail-card">
@@ -83,7 +99,6 @@
                 <option value="all">All Statuses</option>
                 <option value="success">Success</option>
                 <option value="failed">Failed</option>
-                <option value="skipped">Skipped</option>
               </select>
               <select id="compare-sort">
                 <option value="status">Status</option>

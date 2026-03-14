@@ -21,6 +21,8 @@ const elements = {
   taskTitle: document.querySelector("#task-title"),
   taskMeta: document.querySelector("#task-meta"),
   metrics: document.querySelector("#metrics"),
+  runCompareSort: document.querySelector("#run-compare-sort"),
+  runCompareTable: document.querySelector("#run-compare-table"),
   preflights: document.querySelector("#preflights"),
   compareStatusFilter: document.querySelector("#compare-status-filter"),
   compareSort: document.querySelector("#compare-sort"),
@@ -46,6 +48,10 @@ const judgeFilters = {
 const compareFilters = {
   status: "all",
   sort: "status"
+};
+
+const runCompareFilters = {
+  sort: "created"
 };
 
 function escapeHtml(value) {
@@ -203,6 +209,87 @@ function renderMetrics(run) {
   `;
 }
 
+function summarizeRunForCompare(run) {
+  const successCount = run.results.filter((result) => result.status === "success").length;
+  const totalTokens = run.results.reduce((total, result) => total + result.tokenUsage, 0);
+  const knownCost = run.results
+    .filter((result) => result.costKnown)
+    .reduce((total, result) => total + result.estimatedCostUsd, 0);
+
+  return {
+    successCount,
+    totalAgents: run.results.length,
+    totalTokens,
+    knownCost
+  };
+}
+
+function getRunCompareRows() {
+  const rows = state.runs.map((run) => ({
+    run,
+    summary: summarizeRunForCompare(run)
+  }));
+
+  return rows.sort((left, right) => {
+    switch (runCompareFilters.sort) {
+      case "success":
+        return right.summary.successCount / Math.max(right.summary.totalAgents, 1) -
+          left.summary.successCount / Math.max(left.summary.totalAgents, 1);
+      case "tokens":
+        return right.summary.totalTokens - left.summary.totalTokens;
+      case "cost":
+        return left.summary.knownCost - right.summary.knownCost;
+      case "created":
+      default:
+        return right.run.createdAt.localeCompare(left.run.createdAt);
+    }
+  });
+}
+
+function renderRunCompareTable() {
+  if (state.runs.length === 0) {
+    elements.runCompareTable.innerHTML = `<p class="empty-state">No runs loaded.</p>`;
+    return;
+  }
+
+  const rows = getRunCompareRows();
+  elements.runCompareTable.innerHTML = `
+    <table class="compare-table">
+      <thead>
+        <tr>
+          <th>Run</th>
+          <th>Task</th>
+          <th>Created</th>
+          <th>Success</th>
+          <th>Agents</th>
+          <th>Tokens</th>
+          <th>Known Cost</th>
+          <th>Markdown</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows
+          .map(({ run, summary }) => {
+            const isActive = run.runId === state.selectedRunId ? "active" : "";
+            return `
+              <tr class="${isActive}" data-compare-run-id="${escapeHtml(run.runId)}">
+                <td><code>${escapeHtml(run.runId)}</code></td>
+                <td>${escapeHtml(run.task.title)}</td>
+                <td>${escapeHtml(run.createdAt)}</td>
+                <td>${summary.successCount}/${summary.totalAgents}</td>
+                <td>${summary.totalAgents}</td>
+                <td>${summary.totalTokens}</td>
+                <td>$${summary.knownCost.toFixed(2)}</td>
+                <td>${state.markdownByRunId.has(run.runId) ? "linked" : "none"}</td>
+              </tr>
+            `;
+          })
+          .join("")}
+      </tbody>
+    </table>
+  `;
+}
+
 function renderPreflights(run) {
   elements.preflights.innerHTML = run.preflights
     .map(
@@ -253,10 +340,8 @@ function compareStatusRank(status) {
       return 0;
     case "failed":
       return 1;
-    case "skipped":
-      return 2;
     default:
-      return 3;
+      return 2;
   }
 }
 
@@ -598,6 +683,7 @@ function renderDashboard(run) {
 
   renderRunInfo(run);
   renderMetrics(run);
+  renderRunCompareTable();
   renderPreflights(run);
   renderAgentList(run);
   renderCompareTable(run);
@@ -616,6 +702,7 @@ function render() {
     elements.agentCount.textContent = "0";
     elements.agentList.className = "agent-list empty-state";
     elements.agentList.textContent = "No report loaded.";
+    elements.runCompareTable.innerHTML = "";
     renderMarkdownPanel();
     return;
   }
@@ -719,6 +806,17 @@ elements.compareTable.addEventListener("click", (event) => {
   renderSelectedAgent();
 });
 
+elements.runCompareTable.addEventListener("click", (event) => {
+  const row = event.target.closest("[data-compare-run-id]");
+  if (!row) {
+    return;
+  }
+
+  state.selectedRunId = row.getAttribute("data-compare-run-id");
+  updateCurrentRun();
+  render();
+});
+
 elements.expandAll.addEventListener("click", () => {
   document.querySelectorAll("details").forEach((element) => {
     element.open = true;
@@ -758,4 +856,9 @@ elements.compareSort.addEventListener("change", (event) => {
   if (state.run) {
     renderCompareTable(state.run);
   }
+});
+
+elements.runCompareSort.addEventListener("change", (event) => {
+  runCompareFilters.sort = String(event.target.value ?? "created");
+  renderRunCompareTable();
 });

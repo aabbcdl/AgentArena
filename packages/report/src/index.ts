@@ -2,6 +2,13 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { AdapterPreflightResult, BenchmarkRun, ensureDirectory, formatDuration } from "@repoarena/core";
 
+interface BadgePayload {
+  schemaVersion: 1;
+  label: string;
+  message: string;
+  color: string;
+}
+
 function escapeHtml(value: string): string {
   return value
     .replaceAll("&", "&amp;")
@@ -82,6 +89,49 @@ function sanitizeRun(run: BenchmarkRun): BenchmarkRun {
       tracePath: sanitizePath(result.tracePath, run.outputPath, "run"),
       workspacePath: `workspace/${path.basename(result.workspacePath)}`
     }))
+  };
+}
+
+function summarizeRun(run: BenchmarkRun): {
+  totalAgents: number;
+  successCount: number;
+  failedCount: number;
+  totalTokens: number;
+  knownCostUsd: number;
+} {
+  const successCount = run.results.filter((result) => result.status === "success").length;
+  const failedCount = run.results.filter((result) => result.status === "failed").length;
+  const totalTokens = run.results.reduce((total, result) => total + result.tokenUsage, 0);
+  const knownCostUsd = run.results
+    .filter((result) => result.costKnown)
+    .reduce((total, result) => total + result.estimatedCostUsd, 0);
+
+  return {
+    totalAgents: run.results.length,
+    successCount,
+    failedCount,
+    totalTokens,
+    knownCostUsd
+  };
+}
+
+function buildBadgePayload(run: BenchmarkRun): BadgePayload {
+  const summary = summarizeRun(run);
+  const message = `${summary.successCount}/${summary.totalAgents} passing`;
+  const color =
+    summary.totalAgents === 0
+      ? "lightgrey"
+      : summary.successCount === summary.totalAgents
+        ? "2f6945"
+        : summary.successCount > 0
+          ? "8d6715"
+          : "8f3426";
+
+  return {
+    schemaVersion: 1,
+    label: "RepoArena",
+    message,
+    color
   };
 }
 
@@ -389,6 +439,7 @@ function renderHtml(run: BenchmarkRun): string {
 }
 
 function renderMarkdown(run: BenchmarkRun): string {
+  const summary = summarizeRun(run);
   const failedResults = run.results.filter((result) => result.status !== "success");
   const lines: string[] = [
     "# RepoArena Summary",
@@ -397,6 +448,10 @@ function renderMarkdown(run: BenchmarkRun): string {
     `- Created At: \`${run.createdAt}\``,
     `- Task: \`${run.task.title}\``,
     `- Repository: \`${run.repoPath}\``,
+    `- Success Rate: \`${summary.successCount}/${summary.totalAgents}\``,
+    `- Failed: \`${summary.failedCount}\``,
+    `- Total Tokens: \`${summary.totalTokens}\` | Known Cost: \`$${summary.knownCostUsd.toFixed(2)}\``,
+    `- Badge Endpoint: \`badge.json\``,
     ""
   ];
 
@@ -451,7 +506,7 @@ function renderMarkdown(run: BenchmarkRun): string {
     }
 
     if (result.judgeResults.length > 0) {
-        lines.push("- Judges:");
+      lines.push("- Judges:");
       for (const judge of result.judgeResults) {
         lines.push(
           `  - ${judge.label}: ${judge.success ? "pass" : "fail"} (${formatDuration(judge.durationMs)})${
@@ -468,17 +523,19 @@ function renderMarkdown(run: BenchmarkRun): string {
 
 export async function writeReport(
   run: BenchmarkRun
-): Promise<{ htmlPath: string; jsonPath: string; markdownPath: string }> {
+): Promise<{ htmlPath: string; jsonPath: string; markdownPath: string; badgePath: string }> {
   await ensureDirectory(run.outputPath);
   const publicRun = sanitizeRun(run);
 
   const jsonPath = path.join(run.outputPath, "summary.json");
   const htmlPath = path.join(run.outputPath, "report.html");
   const markdownPath = path.join(run.outputPath, "summary.md");
+  const badgePath = path.join(run.outputPath, "badge.json");
 
   await fs.writeFile(jsonPath, JSON.stringify(publicRun, null, 2), "utf8");
   await fs.writeFile(htmlPath, renderHtml(publicRun), "utf8");
   await fs.writeFile(markdownPath, renderMarkdown(publicRun), "utf8");
+  await fs.writeFile(badgePath, JSON.stringify(buildBadgePayload(publicRun), null, 2), "utf8");
 
-  return { htmlPath, jsonPath, markdownPath };
+  return { htmlPath, jsonPath, markdownPath, badgePath };
 }
