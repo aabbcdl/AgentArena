@@ -46,6 +46,23 @@ function formatCost(result) {
   return result.costKnown ? `$${result.estimatedCostUsd.toFixed(2)}` : "n/a";
 }
 
+function formatJudgeType(type) {
+  switch (type) {
+    case "file-exists":
+      return "File Exists";
+    case "file-contains":
+      return "File Contains";
+    case "json-value":
+      return "JSON Value";
+    case "glob":
+      return "Glob";
+    case "file-count":
+      return "File Count";
+    default:
+      return "Command";
+  }
+}
+
 function statusClass(status) {
   return `status-${status}`;
 }
@@ -231,6 +248,84 @@ function renderStepCards(title, steps) {
   return `<section class="detail-card"><h3>${escapeHtml(title)}</h3>${content}</section>`;
 }
 
+function renderJudgeCards(result) {
+  const judges = result.judgeResults;
+  const byType = judges.reduce((map, judge) => {
+    map.set(judge.type, (map.get(judge.type) ?? 0) + 1);
+    return map;
+  }, new Map());
+
+  const overview =
+    judges.length === 0
+      ? `<p class="empty-state">No judges executed.</p>`
+      : `
+        <div class="judge-overview">
+          ${Array.from(byType.entries())
+            .map(
+              ([type, count]) => `
+                <div class="judge-chip">
+                  <span>${escapeHtml(formatJudgeType(type))}</span>
+                  <strong>${count}</strong>
+                </div>
+              `
+            )
+            .join("")}
+        </div>
+      `;
+
+  const content =
+    judges.length === 0
+      ? ""
+      : `<div class="step-list">${judges
+          .map(
+            (judge) => `
+              <details class="step-card judge-card">
+                <summary>
+                  <strong>${escapeHtml(judge.label)}</strong>
+                  <span class="judge-kind">${escapeHtml(formatJudgeType(judge.type))}</span>
+                  <span class="status-badge ${statusClass(judge.success ? "success" : "failed")}">${
+                    judge.success ? "pass" : "fail"
+                  }</span>
+                  <span class="muted">${escapeHtml(formatDuration(judge.durationMs))}</span>
+                </summary>
+                ${
+                  judge.target
+                    ? `<div class="detail-row"><span>Target</span><code>${escapeHtml(judge.target)}</code></div>`
+                    : ""
+                }
+                ${
+                  judge.expectation
+                    ? `<div class="detail-row"><span>Expectation</span><code>${escapeHtml(judge.expectation)}</code></div>`
+                    : ""
+                }
+                ${
+                  judge.command
+                    ? `<div class="detail-row"><span>Command</span><code>${escapeHtml(judge.command)}</code></div>`
+                    : ""
+                }
+                ${
+                  judge.cwd
+                    ? `<div class="detail-row"><span>CWD</span><code>${escapeHtml(judge.cwd)}</code></div>`
+                    : ""
+                }
+                ${
+                  judge.stdout
+                    ? `<p class="muted">stdout</p><pre>${escapeHtml(judge.stdout)}</pre>`
+                    : ""
+                }
+                ${
+                  judge.stderr
+                    ? `<p class="muted">stderr</p><pre>${escapeHtml(judge.stderr)}</pre>`
+                    : ""
+                }
+              </details>
+            `
+          )
+          .join("")}</div>`;
+
+  return `<section class="detail-card"><h3>Judges</h3>${overview}${content}</section>`;
+}
+
 function renderDiff(result) {
   const sections = [
     ["Added", result.diff.added],
@@ -279,6 +374,9 @@ function renderSelectedAgent() {
       <div class="summary-row"><span>Tokens</span><strong>${result.tokenUsage}</strong></div>
       <div class="summary-row"><span>Cost</span><strong>${escapeHtml(formatCost(result))}</strong></div>
       <div class="summary-row"><span>Changed Files</span><strong>${result.changedFiles.length}</strong></div>
+      <div class="summary-row"><span>Judge Types</span><strong>${escapeHtml(
+        Array.from(new Set(result.judgeResults.map((judge) => formatJudgeType(judge.type)))).join(", ") || "None"
+      )}</strong></div>
       <div class="summary-row"><span>Trace</span><code>${escapeHtml(result.tracePath)}</code></div>
       <div class="summary-row"><span>Workspace</span><code>${escapeHtml(result.workspacePath)}</code></div>
     </div>
@@ -287,7 +385,7 @@ function renderSelectedAgent() {
 
   elements.resultDetails.innerHTML = [
     renderStepCards("Setup", result.setupResults),
-    renderStepCards("Judges", result.judgeResults),
+    renderJudgeCards(result),
     renderStepCards("Teardown", result.teardownResults),
     `
       <section class="detail-card">

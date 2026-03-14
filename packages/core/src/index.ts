@@ -44,7 +44,32 @@ export interface JsonValueJudge {
   expected: unknown;
 }
 
-export type TaskJudge = CommandJudge | FileExistsJudge | FileContainsJudge | JsonValueJudge;
+export interface GlobJudge {
+  id: string;
+  label: string;
+  type: "glob";
+  pattern: string;
+  minMatches?: number;
+  maxMatches?: number;
+}
+
+export interface FileCountJudge {
+  id: string;
+  label: string;
+  type: "file-count";
+  pattern: string;
+  equals?: number;
+  min?: number;
+  max?: number;
+}
+
+export type TaskJudge =
+  | CommandJudge
+  | FileExistsJudge
+  | FileContainsJudge
+  | JsonValueJudge
+  | GlobJudge
+  | FileCountJudge;
 
 export interface TaskPack {
   schemaVersion: typeof TASK_PACK_SCHEMA_V1;

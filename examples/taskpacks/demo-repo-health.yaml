@@ -1,0 +1,26 @@
+schemaVersion: repoarena.taskpack/v1
+id: demo-repo-health-yaml
+title: Demo Repo Health Check (YAML)
+description: A YAML version of the starter task pack with built-in file, glob, and JSON judges.
+prompt: Inspect the repository, leave a concise benchmark note in repoarena-demo/, and keep the repo in a healthy state.
+judges:
+  - id: readme-exists
+    type: file-exists
+    label: Repository contains README
+    path: README.md
+  - id: source-tree-present
+    type: glob
+    label: Repository has TypeScript source files
+    pattern: packages/**/src/*.ts
+    minMatches: 1
+  - id: taskpack-count
+    type: file-count
+    label: Repository includes at least two task pack examples
+    pattern: examples/taskpacks/*
+    min: 2
+  - id: package-name
+    type: json-value
+    label: Package name matches repository brand
+    path: package.json
+    pointer: /name
+    expected: repoarena

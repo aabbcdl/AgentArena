@@ -4,12 +4,15 @@ import {
   CommandExecutionSpec,
   CommandJudge,
   FileContainsJudge,
+  FileCountJudge,
   FileExistsJudge,
+  GlobJudge,
   JsonValueJudge,
   TASK_PACK_SCHEMA_V1,
   TaskJudge,
   TaskPack
 } from "@repoarena/core";
+import { parse as parseYaml } from "yaml";
 
 function assertString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.trim().length === 0) {
@@ -46,6 +49,18 @@ function assertOptionalBoolean(value: unknown, label: string): boolean | undefin
 
   if (typeof value !== "boolean") {
     throw new Error(`Task pack field "${label}" must be a boolean when provided.`);
+  }
+
+  return value;
+}
+
+function assertOptionalNonNegativeInteger(value: unknown, label: string): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+    throw new Error(`Task pack field "${label}" must be a non-negative integer when provided.`);
   }
 
   return value;
@@ -144,6 +159,38 @@ function normalizeJudge(
     return judge;
   }
 
+  if (type === "glob") {
+    const judge: GlobJudge = {
+      id,
+      label,
+      type: "glob",
+      pattern: assertString(value.pattern, `judges[${index}].pattern`),
+      minMatches: assertOptionalNonNegativeInteger(value.minMatches, `judges[${index}].minMatches`),
+      maxMatches: assertOptionalNonNegativeInteger(value.maxMatches, `judges[${index}].maxMatches`)
+    };
+    return judge;
+  }
+
+  if (type === "file-count") {
+    const judge: FileCountJudge = {
+      id,
+      label,
+      type: "file-count",
+      pattern: assertString(value.pattern, `judges[${index}].pattern`),
+      equals: assertOptionalNonNegativeInteger(value.equals, `judges[${index}].equals`),
+      min: assertOptionalNonNegativeInteger(value.min, `judges[${index}].min`),
+      max: assertOptionalNonNegativeInteger(value.max, `judges[${index}].max`)
+    };
+
+    if (judge.equals === undefined && judge.min === undefined && judge.max === undefined) {
+      throw new Error(
+        `Task pack field "judges[${index}]" for type "file-count" must define equals, min, or max.`
+      );
+    }
+
+    return judge;
+  }
+
   throw new Error(`Task pack judge at index ${index} has unsupported type "${String(type)}".`);
 }
 
@@ -170,12 +217,15 @@ export async function loadTaskPack(taskPath: string): Promise<TaskPack> {
   const resolvedPath = path.resolve(taskPath);
   const extension = path.extname(resolvedPath).toLowerCase();
 
-  if (extension !== ".json") {
-    throw new Error("This initial slice supports JSON task packs only.");
+  if (![".json", ".yaml", ".yml"].includes(extension)) {
+    throw new Error("RepoArena task packs must use .json, .yaml, or .yml extensions.");
   }
 
   const rawContent = await fs.readFile(resolvedPath, "utf8");
-  const parsed = JSON.parse(rawContent) as Record<string, unknown>;
+  const parsed =
+    extension === ".json"
+      ? (JSON.parse(rawContent) as Record<string, unknown>)
+      : (parseYaml(rawContent) as Record<string, unknown>);
   const taskId = assertString(parsed.id, "id");
   const schemaVersion =
     parsed.schemaVersion === undefined

@@ -7,7 +7,9 @@ import {
   CommandStepResult,
   CommandJudge,
   FileContainsJudge,
+  FileCountJudge,
   FileExistsJudge,
+  GlobJudge,
   JsonValueJudge,
   JudgeResult,
   TaskJudge,
@@ -54,6 +56,68 @@ function buildStepEnvironment(
 
 function stringifyExpectation(value: unknown): string {
   return typeof value === "string" ? value : JSON.stringify(value);
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[|\\{}()[\]^$+?.]/g, "\\$&");
+}
+
+function globToRegExp(pattern: string): RegExp {
+  let source = "^";
+
+  for (let index = 0; index < pattern.length; index += 1) {
+    const char = pattern[index];
+    const next = pattern[index + 1];
+    const nextNext = pattern[index + 2];
+
+    if (char === "*") {
+      if (next === "*" && nextNext === "/") {
+        source += "(?:.*/)?";
+        index += 2;
+      } else if (next === "*") {
+        source += ".*";
+        index += 1;
+      } else {
+        source += "[^/]*";
+      }
+      continue;
+    }
+
+    if (char === "?") {
+      source += "[^/]";
+      continue;
+    }
+
+    source += escapeRegExp(char);
+  }
+
+  source += "$";
+  return new RegExp(source);
+}
+
+async function listWorkspaceFiles(rootPath: string): Promise<string[]> {
+  const files: string[] = [];
+
+  async function walk(currentPath: string): Promise<void> {
+    const entries = await fs.readdir(currentPath, { withFileTypes: true });
+
+    for (const entry of entries) {
+      const absolutePath = path.join(currentPath, entry.name);
+      if (entry.isDirectory()) {
+        await walk(absolutePath);
+        continue;
+      }
+
+      if (!entry.isFile()) {
+        continue;
+      }
+
+      files.push(path.relative(rootPath, absolutePath).split(path.sep).join("/"));
+    }
+  }
+
+  await walk(rootPath);
+  return files.sort();
 }
 
 function resolveJsonPointer(root: unknown, pointer: string): unknown {
@@ -275,6 +339,102 @@ async function runJsonValueJudge(judge: JsonValueJudge, workspacePath: string): 
   }
 }
 
+async function runGlobJudge(judge: GlobJudge, workspacePath: string): Promise<JudgeResult> {
+  const startedAt = Date.now();
+  const matcher = globToRegExp(judge.pattern);
+
+  try {
+    const matches = (await listWorkspaceFiles(workspacePath)).filter((filePath) => matcher.test(filePath));
+    const minMatches = judge.minMatches ?? 1;
+    const maxMatches = judge.maxMatches;
+    const success = matches.length >= minMatches && (maxMatches === undefined || matches.length <= maxMatches);
+
+    return {
+      judgeId: judge.id,
+      label: judge.label,
+      type: "glob",
+      target: judge.pattern,
+      expectation:
+        maxMatches === undefined
+          ? `matches>=${minMatches}`
+          : `matches>=${minMatches} && matches<=${maxMatches}`,
+      exitCode: success ? 0 : 1,
+      success,
+      stdout: matches.length > 0 ? `Matched files: ${matches.join(", ")}` : "",
+      stderr: success
+        ? ""
+        : `Expected glob "${judge.pattern}" to match within configured bounds, actual matches=${matches.length}.`,
+      durationMs: Date.now() - startedAt
+    };
+  } catch (error) {
+    return {
+      judgeId: judge.id,
+      label: judge.label,
+      type: "glob",
+      target: judge.pattern,
+      expectation:
+        judge.maxMatches === undefined
+          ? `matches>=${judge.minMatches ?? 1}`
+          : `matches>=${judge.minMatches ?? 1} && matches<=${judge.maxMatches}`,
+      exitCode: 1,
+      success: false,
+      stdout: "",
+      stderr: error instanceof Error ? error.message : String(error),
+      durationMs: Date.now() - startedAt
+    };
+  }
+}
+
+async function runFileCountJudge(judge: FileCountJudge, workspacePath: string): Promise<JudgeResult> {
+  const startedAt = Date.now();
+  const matcher = globToRegExp(judge.pattern);
+
+  try {
+    const matches = (await listWorkspaceFiles(workspacePath)).filter((filePath) => matcher.test(filePath));
+    const actual = matches.length;
+    const success =
+      (judge.equals === undefined || actual === judge.equals) &&
+      (judge.min === undefined || actual >= judge.min) &&
+      (judge.max === undefined || actual <= judge.max);
+
+    const expectationParts = [
+      judge.equals !== undefined ? `equals=${judge.equals}` : "",
+      judge.min !== undefined ? `min=${judge.min}` : "",
+      judge.max !== undefined ? `max=${judge.max}` : ""
+    ].filter(Boolean);
+
+    return {
+      judgeId: judge.id,
+      label: judge.label,
+      type: "file-count",
+      target: judge.pattern,
+      expectation: expectationParts.join(", "),
+      exitCode: success ? 0 : 1,
+      success,
+      stdout: `Actual count=${actual}${matches.length > 0 ? `; matches: ${matches.join(", ")}` : ""}`,
+      stderr: success ? "" : `File count assertion failed for pattern "${judge.pattern}".`,
+      durationMs: Date.now() - startedAt
+    };
+  } catch (error) {
+    return {
+      judgeId: judge.id,
+      label: judge.label,
+      type: "file-count",
+      target: judge.pattern,
+      expectation: stringifyExpectation({
+        equals: judge.equals,
+        min: judge.min,
+        max: judge.max
+      }),
+      exitCode: 1,
+      success: false,
+      stdout: "",
+      stderr: error instanceof Error ? error.message : String(error),
+      durationMs: Date.now() - startedAt
+    };
+  }
+}
+
 export async function runJudge(
   judge: TaskJudge,
   workspacePath: string,
@@ -289,6 +449,10 @@ export async function runJudge(
       return await runFileContainsJudge(judge, workspacePath);
     case "json-value":
       return await runJsonValueJudge(judge, workspacePath);
+    case "glob":
+      return await runGlobJudge(judge, workspacePath);
+    case "file-count":
+      return await runFileCountJudge(judge, workspacePath);
   }
 }
 

@@ -211,7 +211,7 @@ test("runBenchmark executes setup and teardown commands in declaration order", a
   await rm(tempDir, { recursive: true, force: true });
 });
 
-test("runBenchmark supports built-in file and json judges", async () => {
+test("runBenchmark supports built-in file, glob, count, and json judges", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-runner-"));
   const repoPath = path.join(tempDir, "repo");
   const outputPath = path.join(tempDir, "output");
@@ -231,7 +231,7 @@ test("runBenchmark supports built-in file and json judges", async () => {
       {
         label: "Prepare fixture files",
         command:
-          "node -e \"const fs=require('node:fs');fs.mkdirSync('fixtures',{recursive:true});fs.writeFileSync('fixtures/note.txt','hello repoarena');fs.writeFileSync('fixtures/config.json',JSON.stringify({enabled:true,name:'repoarena'}));\""
+          "node -e \"const fs=require('node:fs');fs.mkdirSync('fixtures/nested',{recursive:true});fs.writeFileSync('fixtures/note.txt','hello repoarena');fs.writeFileSync('fixtures/nested/extra.txt','extra');fs.writeFileSync('fixtures/config.json',JSON.stringify({enabled:true,name:'repoarena'}));\""
       }
     ],
     judges: [
@@ -255,6 +255,20 @@ test("runBenchmark supports built-in file and json judges", async () => {
         path: "fixtures/config.json",
         pointer: "/enabled",
         expected: true
+      },
+      {
+        id: "fixture-glob",
+        type: "glob",
+        label: "Fixture txt files exist",
+        pattern: "fixtures/**/*.txt",
+        minMatches: 2
+      },
+      {
+        id: "fixture-count",
+        type: "file-count",
+        label: "Fixture txt file count matches",
+        pattern: "fixtures/**/*.txt",
+        equals: 2
       }
     ],
     teardownCommands: [
@@ -275,7 +289,7 @@ test("runBenchmark supports built-in file and json judges", async () => {
   assert.equal(benchmark.results[0].status, "success");
   assert.deepEqual(
     benchmark.results[0].judgeResults.map((judge) => judge.type),
-    ["file-exists", "file-contains", "json-value"]
+    ["file-exists", "file-contains", "json-value", "glob", "file-count"]
   );
   assert.equal(benchmark.results[0].judgeResults.every((judge) => judge.success), true);
 

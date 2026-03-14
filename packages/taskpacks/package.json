@@ -8,7 +8,8 @@
     "dist"
   ],
   "dependencies": {
-    "@repoarena/core": "workspace:*"
+    "@repoarena/core": "workspace:*",
+    "yaml": "^2.8.2"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

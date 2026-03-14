@@ -253,3 +253,42 @@ test("loadTaskPack parses file-contains judges with regex options", async () => 
 
   await rm(tempDir, { recursive: true, force: true });
 });
+
+test("loadTaskPack supports YAML task packs with glob and file-count judges", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-taskpack-"));
+  const taskPath = path.join(tempDir, "task.yaml");
+
+  await writeFile(
+    taskPath,
+    [
+      "schemaVersion: repoarena.taskpack/v1",
+      "id: yaml-demo",
+      "title: YAML Demo",
+      "prompt: Check YAML loading",
+      "judges:",
+      "  - id: glob-check",
+      "    type: glob",
+      "    label: Source files exist",
+      "    pattern: packages/**/src/*.ts",
+      "    minMatches: 1",
+      "  - id: count-check",
+      "    type: file-count",
+      "    label: Example count",
+      "    pattern: examples/taskpacks/*",
+      "    min: 1"
+    ].join("\n"),
+    "utf8"
+  );
+
+  const taskPack = await loadTaskPack(taskPath);
+
+  assert.equal(taskPack.id, "yaml-demo");
+  assert.equal(taskPack.judges[0].type, "glob");
+  assert.equal(taskPack.judges[0].pattern, "packages/**/src/*.ts");
+  assert.equal(taskPack.judges[0].minMatches, 1);
+  assert.equal(taskPack.judges[1].type, "file-count");
+  assert.equal(taskPack.judges[1].pattern, "examples/taskpacks/*");
+  assert.equal(taskPack.judges[1].min, 1);
+
+  await rm(tempDir, { recursive: true, force: true });
+});

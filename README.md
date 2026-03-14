@@ -6,7 +6,7 @@
 
 RepoArena lets you run Claude Code, Codex, Cursor, Devin, and open source agents against the same repository tasks, then compare success rate, duration, cost, diffs, and replay traces in one report.
 
-Task packs use a versioned schema. The current format is `repoarena.taskpack/v1`, with structured `judges` definitions for command, file, and JSON evaluation.
+Task packs use a versioned schema. The current format is `repoarena.taskpack/v1`, with structured `judges` definitions for command, file, glob, and JSON evaluation. Both JSON and YAML task packs are supported.
 
 ## What It Does
 
@@ -77,6 +77,11 @@ Then inspect the generated report in `.repoarena/runs/`.
 
 RepoArena currently supports `repoarena.taskpack/v1`.
 
+Supported task pack file formats:
+- `.json`
+- `.yaml`
+- `.yml`
+
 Each task pack defines:
 - repository task metadata
 - a single benchmark prompt
@@ -89,6 +94,8 @@ Built-in judge types:
 - `command`
 - `file-exists`
 - `file-contains`
+- `glob`
+- `file-count`
 - `json-value`
 
 Command judges can define:
@@ -104,6 +111,8 @@ Command judges can define:
 File judges can define:
 - `type: "file-exists"` with `path`
 - `type: "file-contains"` with `path`, `pattern`, optional `regex`, optional `flags`
+- `type: "glob"` with `pattern`, optional `minMatches`, optional `maxMatches`
+- `type: "file-count"` with `pattern` and one or more of `equals`, `min`, `max`
 
 JSON judges can define:
 - `type: "json-value"` with `path`, `pointer`, and `expected`
@@ -146,6 +155,7 @@ docs/
 
 - [Project overview](./docs/overview.md)
 - [Web report app](./apps/web-report/README.md)
+- [YAML task pack example](./examples/taskpacks/demo-repo-health.yaml)
 
 ## License
 
