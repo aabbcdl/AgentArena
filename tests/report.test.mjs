@@ -119,7 +119,10 @@ test("writeReport sanitizes shareable output paths", async () => {
   assert.equal(badge.label, "RepoArena");
   assert.equal(badge.message, "1/1 passing");
   assert.match(prComment, /## RepoArena Benchmark/);
+  assert.match(prComment, /Overview: `1\/1` passing \| Failed: `0` \| Tokens: `100` \| Known Cost: `\$0\.10`/);
   assert.match(prComment, /\| Agent \| Tier \| Preflight \| Run \| Duration \| Tokens \| Cost \| Judges \| Files \|/);
+  assert.match(prComment, /\*\*Artifacts\*\*/);
+  assert.match(prComment, /`report\.html`/);
 
   await rm(tempDir, { recursive: true, force: true });
 });
@@ -192,12 +195,95 @@ test("writeReport includes a failure summary section for failed agents", async (
     ]
   };
 
-  const { markdownPath } = await writeReport(benchmarkRun);
+  const { markdownPath, prCommentPath } = await writeReport(benchmarkRun);
   const markdown = await readFile(markdownPath, "utf8");
+  const prComment = await readFile(prCommentPath, "utf8");
 
   assert.match(markdown, /## Failures/);
   assert.match(markdown, /`demo-fail`: Judge failures detected/);
   assert.match(markdown, /judge `Snapshot Check` \(snapshot\) target=fixtures\/actual\.txt expect=matches fixtures\/expected\.txt/);
+  assert.match(prComment, /\*\*Failures\*\*/);
+  assert.match(prComment, /`demo-fail`: Judge failures detected/);
+  assert.match(prComment, /judge `Snapshot Check` \(snapshot\) target=fixtures\/actual\.txt expect=matches fixtures\/expected\.txt/);
+
+  await rm(tempDir, { recursive: true, force: true });
+});
+
+test("writeReport includes preflight warnings in PR comments", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-report-"));
+  const outputPath = path.join(tempDir, "run-output");
+
+  const benchmarkRun = {
+    runId: "run-3",
+    createdAt: "2026-03-13T00:00:00.000Z",
+    repoPath: "D:\\project\\AgentArena",
+    outputPath,
+    task: {
+      schemaVersion: "repoarena.taskpack/v1",
+      id: "demo-warning",
+      title: "Demo Warning",
+      prompt: "Prompt",
+      envAllowList: [],
+      setupCommands: [],
+      judges: [],
+      teardownCommands: []
+    },
+    preflights: [
+      {
+        agentId: "cursor",
+        agentTitle: "Cursor",
+        adapterKind: "cursor",
+        status: "unverified",
+        summary: "CLI found but auth not verified",
+        capability: {
+          ...demoCapability,
+          supportTier: "experimental"
+        }
+      }
+    ],
+    results: [
+      {
+        agentId: "cursor",
+        agentTitle: "Cursor",
+        adapterKind: "cursor",
+        preflight: {
+          agentId: "cursor",
+          agentTitle: "Cursor",
+          adapterKind: "cursor",
+          status: "unverified",
+          capability: {
+            ...demoCapability,
+            supportTier: "experimental"
+          },
+          summary: "CLI found but auth not verified"
+        },
+        status: "failed",
+        summary: "Skipped because auth was not verified",
+        durationMs: 0,
+        tokenUsage: 0,
+        estimatedCostUsd: 0,
+        costKnown: false,
+        changedFiles: [],
+        changedFilesHint: [],
+        setupResults: [],
+        judgeResults: [],
+        teardownResults: [],
+        tracePath: path.join(outputPath, "agents", "cursor", "trace.jsonl"),
+        workspacePath: "C:\\temp\\workspace\\cursor",
+        diff: {
+          added: [],
+          changed: [],
+          removed: []
+        }
+      }
+    ]
+  };
+
+  const { prCommentPath } = await writeReport(benchmarkRun);
+  const prComment = await readFile(prCommentPath, "utf8");
+
+  assert.match(prComment, /\*\*Preflight Warnings\*\*/);
+  assert.match(prComment, /`cursor` \(experimental\): unverified - CLI found but auth not verified/);
 
   await rm(tempDir, { recursive: true, force: true });
 });

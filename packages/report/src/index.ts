@@ -599,11 +599,15 @@ function renderMarkdown(run: BenchmarkRun): string {
 }
 
 function renderPrComment(run: BenchmarkRun): string {
+  const summary = summarizeRun(run);
   const failedResults = run.results.filter((result) => result.status !== "success");
+  const attentionPreflights = run.preflights.filter((preflight) => preflight.status !== "ready");
   const lines = [
     "## RepoArena Benchmark",
     "",
     `Task: \`${run.task.title}\``,
+    "",
+    `Overview: \`${summary.successCount}/${summary.totalAgents}\` passing | Failed: \`${summary.failedCount}\` | Tokens: \`${summary.totalTokens}\` | Known Cost: \`$${summary.knownCostUsd.toFixed(2)}\``,
     "",
     "| Agent | Tier | Preflight | Run | Duration | Tokens | Cost | Judges | Files |",
     "| --- | --- | --- | --- | --- | ---: | --- | --- | ---: |"
@@ -618,10 +622,27 @@ function renderPrComment(run: BenchmarkRun): string {
     );
   }
 
+  if (attentionPreflights.length > 0) {
+    lines.push("", "**Preflight Warnings**");
+    for (const preflight of attentionPreflights) {
+      lines.push(
+        `- \`${preflight.agentId}\` (${formatSupportTier(preflight.capability.supportTier)}): ${preflight.status} - ${preflight.summary}`
+      );
+    }
+  }
+
   if (failedResults.length > 0) {
     lines.push("", "**Failures**");
     for (const result of failedResults) {
       lines.push(`- \`${result.agentId}\`: ${result.summary}`);
+      const failedJudges = result.judgeResults.filter((judge) => !judge.success);
+      for (const judge of failedJudges) {
+        lines.push(
+          `  - judge \`${judge.label}\` (${judge.type})${judge.target ? ` target=${judge.target}` : ""}${
+            judge.expectation ? ` expect=${judge.expectation}` : ""
+          }`
+        );
+      }
     }
   }
 
@@ -631,6 +652,8 @@ function renderPrComment(run: BenchmarkRun): string {
   lines.push("- `pr-comment.md`");
   lines.push("- `report.html`");
   lines.push("- `badge.json`");
+  lines.push("");
+  lines.push("_Use `report.html` for drill-down, `summary.md` for share text, and `badge.json` for Shields endpoint output._");
 
   return lines.join("\n");
 }

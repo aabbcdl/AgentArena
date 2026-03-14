@@ -290,6 +290,20 @@ input {
   font-size: 0.86rem;
 }
 
+.delta-positive {
+  color: var(--success);
+  font-weight: 700;
+}
+
+.delta-negative {
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.delta-neutral {
+  color: var(--muted);
+}
+
 .verdict-card {
   border-color: rgba(159, 69, 37, 0.24);
   background:

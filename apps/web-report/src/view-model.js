@@ -176,3 +176,58 @@ export function buildPrTable(run) {
 
   return [...header, ...rows].join("\n");
 }
+
+export function findPreviousComparableRun(runs, currentRun) {
+  const sameTaskRuns = [...runs]
+    .filter((run) => run.task.title === currentRun.task.title)
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  const currentIndex = sameTaskRuns.findIndex((run) => run.runId === currentRun.runId);
+
+  if (currentIndex === -1 || currentIndex === sameTaskRuns.length - 1) {
+    return null;
+  }
+
+  return sameTaskRuns[currentIndex + 1];
+}
+
+function passedJudgeCount(result) {
+  return result?.judgeResults?.filter((judge) => judge.success).length ?? 0;
+}
+
+export function getRunToRunAgentDiff(runs, currentRun) {
+  const previousRun = findPreviousComparableRun(runs, currentRun);
+  if (!previousRun) {
+    return {
+      previousRun: null,
+      rows: []
+    };
+  }
+
+  const currentByAgent = new Map(currentRun.results.map((result) => [result.agentId, result]));
+  const previousByAgent = new Map(previousRun.results.map((result) => [result.agentId, result]));
+  const agentIds = Array.from(new Set([...currentByAgent.keys(), ...previousByAgent.keys()])).sort();
+
+  return {
+    previousRun,
+    rows: agentIds.map((agentId) => {
+      const currentResult = currentByAgent.get(agentId) ?? null;
+      const previousResult = previousByAgent.get(agentId) ?? null;
+      return {
+        agentId,
+        currentResult,
+        previousResult,
+        statusChange: `${previousResult?.status ?? "missing"} -> ${currentResult?.status ?? "missing"}`,
+        durationDeltaMs:
+          currentResult && previousResult ? currentResult.durationMs - previousResult.durationMs : null,
+        tokenDelta:
+          currentResult && previousResult ? currentResult.tokenUsage - previousResult.tokenUsage : null,
+        costDelta:
+          currentResult?.costKnown && previousResult?.costKnown
+            ? currentResult.estimatedCostUsd - previousResult.estimatedCostUsd
+            : null,
+        judgeDelta:
+          currentResult && previousResult ? passedJudgeCount(currentResult) - passedJudgeCount(previousResult) : null
+      };
+    })
+  };
+}

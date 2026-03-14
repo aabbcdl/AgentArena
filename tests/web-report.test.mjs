@@ -3,8 +3,10 @@ import assert from "node:assert/strict";
 import {
   buildPrTable,
   buildShareCard,
+  findPreviousComparableRun,
   getCompareResults,
   getRunCompareRows,
+  getRunToRunAgentDiff,
   getRunVerdict
 } from "../apps/web-report/src/view-model.js";
 
@@ -120,4 +122,65 @@ test("share helpers produce shareable summary text and PR tables", () => {
   assert.match(shareCard, /Best agent: demo-fast/);
   assert.match(prTable, /\| Agent \| Status \| Duration \| Tokens \| Cost \| Judges \| Files \|/);
   assert.match(prTable, /\| demo-fast \| success \| 1000ms \| 100 \| \$0\.10 \| 2\/2 \| 1 \|/);
+});
+
+test("findPreviousComparableRun returns the previous run with the same task title", () => {
+  const runs = [
+    createRun("run-old", "Task A", { createdAt: "2026-03-14T09:00:00.000Z" }),
+    createRun("run-current", "Task A", { createdAt: "2026-03-14T10:00:00.000Z" }),
+    createRun("run-other", "Task B", { createdAt: "2026-03-14T11:00:00.000Z" })
+  ];
+
+  const previousRun = findPreviousComparableRun(runs, runs[1]);
+  assert.equal(previousRun.runId, "run-old");
+});
+
+test("getRunToRunAgentDiff computes deltas against the previous comparable run", () => {
+  const previousRun = createRun("run-old", "Task A", {
+    createdAt: "2026-03-14T09:00:00.000Z",
+    results: [
+      createResult("demo-fast", {
+        durationMs: 2000,
+        tokenUsage: 120,
+        costKnown: true,
+        estimatedCostUsd: 0.3,
+        judgeResults: [{ success: true }]
+      }),
+      createResult("codex", {
+        status: "failed",
+        durationMs: 3000,
+        judgeResults: [{ success: false }]
+      })
+    ]
+  });
+  const currentRun = createRun("run-current", "Task A", {
+    createdAt: "2026-03-14T10:00:00.000Z",
+    results: [
+      createResult("demo-fast", {
+        durationMs: 1500,
+        tokenUsage: 140,
+        costKnown: true,
+        estimatedCostUsd: 0.25,
+        judgeResults: [{ success: true }, { success: true }]
+      }),
+      createResult("codex", {
+        status: "success",
+        durationMs: 2800,
+        judgeResults: [{ success: true }]
+      })
+    ]
+  });
+
+  const diff = getRunToRunAgentDiff([currentRun, previousRun], currentRun);
+  assert.equal(diff.previousRun.runId, "run-old");
+  assert.equal(diff.rows.length, 2);
+  const demoFastRow = diff.rows.find((row) => row.agentId === "demo-fast");
+  assert.equal(demoFastRow.statusChange, "success -> success");
+  assert.equal(demoFastRow.durationDeltaMs, -500);
+  assert.equal(demoFastRow.tokenDelta, 20);
+  assert.ok(Math.abs(demoFastRow.costDelta + 0.05) < 1e-9);
+  assert.equal(demoFastRow.judgeDelta, 1);
+
+  const codexRow = diff.rows.find((row) => row.agentId === "codex");
+  assert.equal(codexRow.statusChange, "failed -> success");
 });

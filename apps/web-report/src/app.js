@@ -3,6 +3,7 @@ import {
   buildShareCard,
   getCompareResults,
   getRunCompareRows,
+  getRunToRunAgentDiff,
   getRunVerdict,
   summarizeRun
 } from "./view-model.js";
@@ -34,6 +35,7 @@ const elements = {
   runCompareScope: document.querySelector("#run-compare-scope"),
   runCompareSort: document.querySelector("#run-compare-sort"),
   runCompareTable: document.querySelector("#run-compare-table"),
+  runDiffTable: document.querySelector("#run-diff-table"),
   preflights: document.querySelector("#preflights"),
   compareStatusFilter: document.querySelector("#compare-status-filter"),
   compareSort: document.querySelector("#compare-sort"),
@@ -90,6 +92,27 @@ function formatDuration(durationMs) {
 
 function formatCost(result) {
   return result.costKnown ? `$${result.estimatedCostUsd.toFixed(2)}` : "n/a";
+}
+
+function deltaClass(value, preferred = "lower") {
+  if (value === null || value === 0) {
+    return "delta-neutral";
+  }
+
+  const improved = preferred === "lower" ? value < 0 : value > 0;
+  return improved ? "delta-positive" : "delta-negative";
+}
+
+function formatSignedNumber(value, formatter, preferred = "lower") {
+  if (value === null) {
+    return `<span class="muted">n/a</span>`;
+  }
+
+  if (value === 0) {
+    return `<span class="delta-neutral">0</span>`;
+  }
+
+  return `<span class="${deltaClass(value, preferred)}">${formatter(value)}</span>`;
 }
 
 function formatJudgeType(type) {
@@ -261,6 +284,71 @@ function renderRunCompareTable() {
                 <td>${summary.totalTokens}</td>
                 <td>$${summary.knownCost.toFixed(2)}</td>
                 <td>${state.markdownByRunId.has(run.runId) ? "linked" : "none"}</td>
+              </tr>
+            `;
+          })
+          .join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+function renderRunDiffTable() {
+  if (!state.run) {
+    elements.runDiffTable.innerHTML = `<p class="empty-state">No run selected.</p>`;
+    return;
+  }
+
+  const diff = getRunToRunAgentDiff(state.runs, state.run);
+  if (!diff.previousRun) {
+    elements.runDiffTable.innerHTML =
+      `<p class="empty-state">No earlier run with the same task title is available for comparison.</p>`;
+    return;
+  }
+
+  if (diff.rows.length === 0) {
+    elements.runDiffTable.innerHTML = `<p class="empty-state">No comparable agent results found.</p>`;
+    return;
+  }
+
+  elements.runDiffTable.innerHTML = `
+    <p class="muted">Comparing current run <code>${escapeHtml(state.run.runId)}</code> against previous same-task run <code>${escapeHtml(
+      diff.previousRun.runId
+    )}</code> from ${escapeHtml(diff.previousRun.createdAt)}.</p>
+    <table class="compare-table">
+      <thead>
+        <tr>
+          <th>Agent</th>
+          <th>Status</th>
+          <th>Duration Delta</th>
+          <th>Token Delta</th>
+          <th>Cost Delta</th>
+          <th>Judge Delta</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${diff.rows
+          .map((row) => {
+            const isActive = row.agentId === state.selectedAgentId ? "active" : "";
+            return `
+              <tr class="${isActive}" data-run-diff-agent-id="${escapeHtml(row.agentId)}">
+                <td>
+                  <strong>${escapeHtml(row.currentResult?.agentTitle ?? row.previousResult?.agentTitle ?? row.agentId)}</strong><br />
+                  <code>${escapeHtml(row.agentId)}</code>
+                </td>
+                <td>${escapeHtml(row.statusChange)}</td>
+                <td>${formatSignedNumber(row.durationDeltaMs, (value) => `${value > 0 ? "+" : ""}${value}ms`)}</td>
+                <td>${formatSignedNumber(row.tokenDelta, (value) => `${value > 0 ? "+" : ""}${value}`)}</td>
+                <td>${formatSignedNumber(
+                  row.costDelta,
+                  (value) => `${value > 0 ? "+" : "-"}$${Math.abs(value).toFixed(2)}`,
+                  "lower"
+                )}</td>
+                <td>${formatSignedNumber(
+                  row.judgeDelta,
+                  (value) => `${value > 0 ? "+" : ""}${value}`,
+                  "higher"
+                )}</td>
               </tr>
             `;
           })
@@ -687,6 +775,7 @@ function renderDashboard(run) {
   renderMetrics(run);
   renderVerdicts(run);
   renderRunCompareTable();
+  renderRunDiffTable();
   renderPreflights(run);
   renderAgentList(run);
   renderCompareTable(run);
@@ -707,6 +796,7 @@ function render() {
     elements.agentList.textContent = "No report loaded.";
     elements.runVerdicts.innerHTML = "";
     elements.runCompareTable.innerHTML = "";
+    elements.runDiffTable.innerHTML = "";
     renderMarkdownPanel();
     return;
   }
@@ -829,6 +919,19 @@ elements.runCompareTable.addEventListener("click", (event) => {
   state.selectedRunId = row.getAttribute("data-compare-run-id");
   updateCurrentRun();
   render();
+});
+
+elements.runDiffTable.addEventListener("click", (event) => {
+  const row = event.target.closest("[data-run-diff-agent-id]");
+  if (!row || !state.run) {
+    return;
+  }
+
+  state.selectedAgentId = row.getAttribute("data-run-diff-agent-id");
+  renderAgentList(state.run);
+  renderCompareTable(state.run);
+  renderRunDiffTable();
+  renderSelectedAgent();
 });
 
 elements.expandAll.addEventListener("click", () => {
