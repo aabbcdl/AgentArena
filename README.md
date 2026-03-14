@@ -6,6 +6,8 @@
 
 RepoArena lets you run Claude Code, Codex, Cursor, Devin, and open source agents against the same repository tasks, then compare success rate, duration, cost, diffs, and replay traces in one report.
 
+The primary manual entry point is now `repoarena ui`: a local service mode that lets you choose a repository, task pack, and agents from the browser, run the benchmark, and inspect the result in the same UI.
+
 Task packs use a versioned schema. The current format is `repoarena.taskpack/v1`, with structured `judges` definitions for command, file, glob, snapshot, and JSON evaluation. Both JSON and YAML task packs are supported.
 
 ## What It Does
@@ -21,6 +23,7 @@ Task packs use a versioned schema. The current format is `repoarena.taskpack/v1`
 ## Current Status
 
 This repository already contains a runnable prototype with:
+- a local `repoarena ui` entry point for launching and viewing benchmarks
 - a local `repoarena run` CLI
 - a local `repoarena doctor` CLI
 - a local `repoarena init-taskpack` CLI
@@ -30,18 +33,47 @@ This repository already contains a runnable prototype with:
 - `claude-code` and `cursor` adapters with auth-aware failure reporting
 - static HTML and JSON report generation
 - Markdown summaries for CI, PR comments, and sharing
-- an interactive `apps/web-report` viewer for linked `summary.json` and `summary.md`
+- an interactive `apps/web-report` UI that can either run local benchmarks through `repoarena ui` or open existing reports
 - GitHub Actions smoke benchmarks that can comment results on pull requests
 - GitHub Actions CI with a smoke benchmark run
 
 ## Quick Start
 
+### Recommended: local UI mode
+
 ```bash
 pnpm install
-pnpm demo
+pnpm build
+node packages/cli/dist/index.js ui
 ```
 
-That command writes a timestamped run under `.repoarena/runs/` and generates a local `report.html`.
+Then open the local address printed in the terminal, usually:
+
+```text
+http://127.0.0.1:4317
+```
+
+From the page:
+- enter the repository path
+- choose an official task pack or provide your own task pack path
+- select one or more agents
+- run the benchmark
+- inspect results in the same page when the run completes
+
+### CLI-first workflow
+
+If you want to script runs directly:
+
+```bash
+node packages/cli/dist/index.js run --repo . --task examples/taskpacks/demo-repo-health.yaml --agents demo-fast --output .repoarena/manual-run
+```
+
+That command writes a run directory and generates:
+- `summary.json`
+- `summary.md`
+- `pr-comment.md`
+- `report.html`
+- `badge.json`
 
 Check adapter readiness:
 
@@ -99,16 +131,25 @@ pnpm demo:arena
 
 ## Example Workflow
 
+Recommended for manual use:
+
 ```bash
-repoarena run \
-  --repo . \
-  --task examples/taskpacks/demo-repo-health.json \
-  --agents codex,claude-code,cursor
+node packages/cli/dist/index.js ui
 ```
 
-Then inspect the generated report in `.repoarena/runs/`.
+Or, from the CLI:
 
-Each run now also writes:
+```bash
+node packages/cli/dist/index.js run \
+  --repo . \
+  --task examples/taskpacks/demo-repo-health.yaml \
+  --agents codex,claude-code,cursor \
+  --output .repoarena/runs/manual-arena
+```
+
+The UI is the recommended path for manual use. The direct `run` command remains useful for CI, scripts, and automation.
+
+Each run writes:
 - `summary.json`
 - `summary.md`
 - `pr-comment.md`
@@ -122,6 +163,12 @@ Example badge payload path:
 ```
 
 If you publish that file through any static host, you can point a Shields endpoint badge at it.
+
+Example:
+
+```markdown
+![RepoArena](https://img.shields.io/endpoint?url=https://your-host.example/repoarena/badge.json)
+```
 
 ## Task Pack Schema
 
@@ -224,8 +271,8 @@ docs/
 - [Benchmark fairness](./docs/fairness.md)
 - [Adapter capabilities](./docs/adapter-capabilities.md)
 - [Web report app](./apps/web-report/README.md)
-- [YAML task pack example](./examples/taskpacks/demo-repo-health.yaml)
 - [Official task packs](./examples/taskpacks/official/README.md)
+- [YAML task pack example](./examples/taskpacks/demo-repo-health.yaml)
 
 ## License
 

@@ -5,6 +5,8 @@ RepoArena is a local-first evaluation and replay tool for AI coding agents.
 
 It lets you run multiple agents against the same repository task, inspect what they changed, compare outcomes, and export a shareable report.
 
+The intended manual entry point is `repoarena ui`, which starts a local service and gives you a browser-based launcher plus report view in one place.
+
 ## Core Use Case
 Most teams evaluating coding agents still rely on anecdotes, screenshots, or one-off experiments.
 
@@ -14,6 +16,7 @@ Which agent performs best on real tasks inside my repository, under the same con
 
 ## Current Scope
 The current version focuses on a runnable local benchmark loop:
+- a browser-based local launcher through `repoarena ui`
 - adapter preflight checks
 - adapter capability matrix with support tiers
 - isolated workspaces per run
@@ -26,6 +29,21 @@ The current version focuses on a runnable local benchmark loop:
 - diff detection
 - JSON, Markdown, PR comment, badge, static HTML, and interactive web report generation
 - support for demo adapters plus external CLI-based adapters
+
+## Recommended Workflow
+
+For manual use:
+- run `repoarena ui`
+- choose a repository path
+- choose an official task pack or provide your own
+- select one or more agents
+- run the benchmark
+- inspect the result in the same page
+
+For CI or scripts:
+- use `repoarena doctor`
+- use `repoarena run`
+- publish `summary.md`, `pr-comment.md`, `badge.json`, or `report.html`
 
 ## Design Principles
 
@@ -44,5 +62,5 @@ If an agent is blocked by missing authentication or local setup, RepoArena shoul
 ## Near-term Priorities
 - expand stable real-agent support
 - improve capability transparency and fairness documentation
-- improve report UX and shareable outputs
+- improve the `repoarena ui` launch flow and progress feedback
 - add stronger CI bootstrap and task-pack onboarding paths
