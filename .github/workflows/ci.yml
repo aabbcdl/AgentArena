@@ -31,3 +31,40 @@ jobs:
 
       - name: Run tests
         run: pnpm test
+
+  smoke-benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.6.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build workspace
+        run: pnpm build
+
+      - name: Run smoke benchmark
+        run: node packages/cli/dist/index.js run --repo . --task examples/taskpacks/demo-repo-health.json --agents demo-fast --output .repoarena/ci-smoke
+
+      - name: Upload smoke report
+        uses: actions/upload-artifact@v4
+        with:
+          name: repoarena-smoke-report
+          path: |
+            .repoarena/ci-smoke/summary.json
+            .repoarena/ci-smoke/report.html

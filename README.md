@@ -26,6 +26,7 @@ This repository already contains a runnable prototype with:
 - `claude-code` and `cursor` adapters with auth-aware failure reporting
 - static HTML and JSON report generation
 - an interactive `apps/web-report` viewer for `summary.json`
+- GitHub Actions CI with a smoke benchmark run
 
 ## Quick Start
 
