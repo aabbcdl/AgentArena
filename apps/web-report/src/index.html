@@ -11,30 +11,56 @@
       <aside class="sidebar">
         <div class="brand">
           <p class="eyebrow">RepoArena</p>
-          <h1>Web Report</h1>
-          <p class="muted">Load linked `summary.json` and `summary.md` files to inspect benchmark results interactively.</p>
+          <div class="language-bar">
+            <h1 id="app-title">Web Report</h1>
+            <div class="language-control">
+              <label id="language-label" for="language-select">Language</label>
+              <select id="language-select">
+                <option value="en">English</option>
+                <option value="zh-CN">中文</option>
+              </select>
+            </div>
+          </div>
+          <p id="app-description" class="muted">Load linked `summary.json` and `summary.md` files to inspect benchmark results interactively.</p>
         </div>
 
+        <label class="file-picker recommended-picker">
+          <strong id="runs-folder-title">Recommended: Load Run Folder</strong>
+          <p id="runs-folder-hint" class="muted picker-help">Select one RepoArena run folder or the whole `.repoarena` results folder.</p>
+          <input id="runs-folder" type="file" webkitdirectory directory multiple />
+        </label>
+
         <label class="file-picker">
-          <span>Load Summary</span>
+          <strong id="summary-file-title">Load Summary JSON</strong>
+          <p id="summary-file-hint" class="muted picker-help">Use this only if you want to open a single `summary.json` file.</p>
           <input id="summary-file" type="file" accept=".json,application/json" />
         </label>
 
         <label class="file-picker">
-          <span>Load Markdown Summary</span>
+          <strong id="markdown-file-title">Optional: Load Markdown Summary</strong>
+          <p id="markdown-file-hint" class="muted picker-help">Adds share text, PR table, and markdown panel for the selected run.</p>
           <input id="markdown-file" type="file" accept=".md,text/markdown,text/plain" />
-        </label>
-
-        <label class="file-picker">
-          <span>Load Runs Folder</span>
-          <input id="runs-folder" type="file" webkitdirectory directory multiple />
         </label>
 
         <div id="run-info" class="panel hidden"></div>
 
         <section class="panel">
           <div class="panel-header">
-            <h2>Runs</h2>
+            <h2 id="workflow-title">Recommended Flow</h2>
+          </div>
+          <ol id="workflow-list" class="workflow-list"></ol>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <h2 id="next-steps-title">Next Step</h2>
+          </div>
+          <div id="next-steps-content" class="muted"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <h2 id="runs-heading">Runs</h2>
             <span id="run-count" class="muted">0</span>
           </div>
           <div id="run-list" class="run-list empty-state">No runs loaded.</div>
@@ -42,7 +68,7 @@
 
         <section class="panel">
           <div class="panel-header">
-            <h2>Agents</h2>
+            <h2 id="agents-heading">Agents</h2>
             <span id="agent-count" class="muted">0</span>
           </div>
           <div id="agent-list" class="agent-list empty-state">No report loaded.</div>
@@ -51,17 +77,27 @@
 
       <main class="content">
         <section id="empty-state" class="hero">
-          <p class="eyebrow">Interactive Viewer</p>
-          <h2>Inspect one run without scrolling through a giant static page.</h2>
-          <p class="muted">
-            Load RepoArena outputs from `.repoarena/runs/&lt;run-id&gt;/summary.json` and `summary.md`.
+          <p id="hero-eyebrow" class="eyebrow">Interactive Viewer</p>
+          <h2 id="hero-title">Inspect one run without scrolling through a giant static page.</h2>
+          <p id="hero-description" class="muted">
+            RepoArena compares AI coding agents on the same repository task, then turns the result into a reviewable, shareable report.
           </p>
+          <div class="hero-grid">
+            <article class="detail-card">
+              <h3 id="hero-what-title">What this page is for</h3>
+              <p id="hero-what-body" class="muted"></p>
+            </article>
+            <article class="detail-card">
+              <h3 id="hero-how-title">How to start</h3>
+              <ol id="hero-how-list" class="workflow-list"></ol>
+            </article>
+          </div>
         </section>
 
         <section id="dashboard" class="hidden">
           <div class="topbar">
             <div>
-              <p class="eyebrow">Run Overview</p>
+              <p id="topbar-eyebrow" class="eyebrow">Run Overview</p>
               <h2 id="task-title">Task</h2>
               <p id="task-meta" class="muted"></p>
             </div>
@@ -77,7 +113,7 @@
 
           <section class="detail-card">
             <div class="panel-header">
-              <h3>Run Compare</h3>
+              <h3 id="run-compare-title">Run Compare</h3>
             </div>
             <div class="filter-bar">
               <select id="run-compare-scope">
@@ -96,9 +132,9 @@
 
           <section class="detail-card">
             <div class="panel-header">
-              <h3>Run-to-Run Agent Diff</h3>
+              <h3 id="run-diff-title">Run-to-Run Agent Diff</h3>
             </div>
-            <p class="muted">Compare the selected run against the previous run with the same task title.</p>
+            <p id="run-diff-description" class="muted">Compare the selected run against the previous run with the same task title.</p>
             <div id="run-diff-table" class="compare-table-wrap"></div>
           </section>
 
@@ -106,7 +142,7 @@
 
           <section class="detail-card">
             <div class="panel-header">
-              <h3>Agent Compare</h3>
+              <h3 id="agent-compare-title">Agent Compare</h3>
             </div>
             <div class="filter-bar">
               <select id="compare-status-filter">
@@ -131,7 +167,7 @@
             <div class="panel-header">
               <h3 id="agent-trend-title">Agent Trend</h3>
             </div>
-            <p class="muted">Track the selected agent across runs for the current task title.</p>
+            <p id="agent-trend-description" class="muted">Track the selected agent across runs for the current task title.</p>
             <div id="agent-trend-table" class="compare-table-wrap"></div>
           </section>
 
@@ -142,7 +178,7 @@
 
           <section class="detail-card">
             <div class="panel-header">
-              <h3>Judge Filters</h3>
+              <h3 id="judge-filters-title">Judge Filters</h3>
             </div>
             <div class="filter-bar">
               <input id="judge-search" type="search" placeholder="Search label, target, expectation" />
@@ -159,7 +195,7 @@
 
           <section id="markdown-panel" class="detail-card hidden">
             <div class="panel-header">
-              <h3>Markdown Summary</h3>
+              <h3 id="markdown-summary-title">Markdown Summary</h3>
               <span id="markdown-status" class="muted">Not loaded</span>
             </div>
             <div class="actions">

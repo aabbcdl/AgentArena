@@ -54,6 +54,34 @@ input {
   line-height: 0.95;
 }
 
+.language-bar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.language-control {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 110px;
+}
+
+.language-control label {
+  font-size: 0.78rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.language-control select {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--paper);
+  padding: 8px 10px;
+}
+
 .eyebrow {
   margin: 0 0 8px;
   text-transform: uppercase;
@@ -102,10 +130,29 @@ input {
   cursor: pointer;
 }
 
+.recommended-picker {
+  border-style: solid;
+  border-color: rgba(159, 69, 37, 0.28);
+  background: linear-gradient(180deg, rgba(159, 69, 37, 0.06), rgba(159, 69, 37, 0.02)), var(--paper-2);
+}
+
+.picker-help {
+  margin: 8px 0 0;
+  line-height: 1.4;
+}
+
 .file-picker input {
   display: block;
   width: 100%;
   margin-top: 12px;
+}
+
+.workflow-list {
+  margin: 0;
+  padding-left: 20px;
+  display: grid;
+  gap: 10px;
+  color: var(--muted);
 }
 
 .agent-list {
@@ -206,6 +253,13 @@ input {
 .hero {
   max-width: 720px;
   padding-top: 48px;
+}
+
+.hero-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+  margin-top: 24px;
 }
 
 .topbar {
@@ -530,5 +584,10 @@ input {
 
   .markdown-grid {
     grid-template-columns: 1fr;
+  }
+
+  .language-bar,
+  .topbar {
+    flex-direction: column;
   }
 }

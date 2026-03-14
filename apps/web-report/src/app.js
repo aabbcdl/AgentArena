@@ -16,14 +16,19 @@ const state = {
   selectedRunId: null,
   selectedAgentId: null,
   markdownByRunId: new Map(),
-  standaloneMarkdown: null
+  standaloneMarkdown: null,
+  language: "zh-CN",
+  notice: null
 };
 
 const elements = {
   fileInput: document.querySelector("#summary-file"),
   markdownInput: document.querySelector("#markdown-file"),
   folderInput: document.querySelector("#runs-folder"),
+  languageSelect: document.querySelector("#language-select"),
   runInfo: document.querySelector("#run-info"),
+  workflowList: document.querySelector("#workflow-list"),
+  nextStepsContent: document.querySelector("#next-steps-content"),
   runList: document.querySelector("#run-list"),
   runCount: document.querySelector("#run-count"),
   agentList: document.querySelector("#agent-list"),
@@ -63,6 +68,199 @@ const elements = {
   collapseAll: document.querySelector("#collapse-all")
 };
 
+const MESSAGES = {
+  en: {
+    appTitle: "Web Report",
+    appDescription:
+      "Open one RepoArena result and inspect who passed, what changed, and where the benchmark failed.",
+    languageLabel: "Language",
+    runsFolderTitle: "Recommended: Load Run Folder",
+    runsFolderHint:
+      "Select one RepoArena run folder or the whole `.repoarena` results folder. This is the easiest path.",
+    summaryFileTitle: "Load Summary JSON",
+    summaryFileHint: "Use this when you only want to open a single `summary.json` file.",
+    markdownFileTitle: "Optional: Load Markdown Summary",
+    markdownFileHint: "Adds share text, PR table, and markdown notes for the selected run.",
+    workflowTitle: "Recommended Flow",
+    workflowSteps: [
+      "Click “Recommended: Load Run Folder”.",
+      "Select one run folder such as `.repoarena/manual-run`, or the parent results folder.",
+      "After the report loads, review the verdict cards and click an agent to inspect details."
+    ],
+    nextStepsTitle: "Next Step",
+    nextStepsEmpty:
+      "Start with “Recommended: Load Run Folder”. If you only have one file, load `summary.json`. `summary.md` is optional.",
+    nextStepsLoaded: (run, runCount) =>
+      `Loaded ${runCount} run(s). Current run is “${run.task.title}”. Next: review the top verdict cards, then click an agent on the left or in Agent Compare.`,
+    runsHeading: "Runs",
+    agentsHeading: "Agents",
+    heroEyebrow: "Interactive Viewer",
+    heroTitle: "Inspect one benchmark run without digging through raw files.",
+    heroDescription:
+      "RepoArena compares AI coding agents on the same repository task, then turns the result into a reviewable, shareable report.",
+    heroWhatTitle: "What RepoArena does",
+    heroWhatBody:
+      "It runs multiple coding agents against the same repository task, records success, time, tokens, cost, file changes, and judge results, then shows where one agent performed better or failed.",
+    heroHowTitle: "How to start",
+    heroHowSteps: [
+      "Run a benchmark with the CLI so you get a folder containing `summary.json`.",
+      "Open that folder here with “Recommended: Load Run Folder”.",
+      "Once loaded, compare agents, inspect judge failures, and export summary text or a share card."
+    ],
+    topbarEyebrow: "Run Overview",
+    expandLogs: "Expand Logs",
+    collapseLogs: "Collapse Logs",
+    runCompareTitle: "Run Compare",
+    runDiffTitle: "Run-to-Run Agent Diff",
+    runDiffDescription: "Compare the selected run against the previous run with the same task title.",
+    agentCompareTitle: "Agent Compare",
+    agentTrendTitle: "Agent Trend",
+    agentTrendDescription: "Track the selected agent across runs for the current task title.",
+    judgeFiltersTitle: "Judge Filters",
+    markdownSummaryTitle: "Markdown Summary",
+    copySummary: "Copy Summary",
+    copyPrTable: "Copy PR Table",
+    copyShareSvg: "Copy Share SVG",
+    downloadShareSvg: "Download Share SVG",
+    judgeSearchPlaceholder: "Search label, target, expectation",
+    noRunsLoaded: "No runs loaded.",
+    noReportLoaded: "No report loaded.",
+    runInfoTitle: "Run",
+    createdAt: "Created at",
+    taskSchema: "Task schema",
+    linkedMarkdown: "markdown linked",
+    jsonOnly: "json only",
+    metrics: {
+      agents: "Agents",
+      success: "Success",
+      failed: "Failed",
+      tokens: "Tokens",
+      knownCost: "Known Cost"
+    },
+    verdicts: {
+      bestAgent: "Best Agent",
+      fastest: "Fastest",
+      lowestKnownCost: "Lowest Known Cost",
+      highestJudgePassRate: "Highest Judge Pass Rate",
+      noResult: "No result",
+      noKnownCost: "No known cost"
+    },
+    runCompareScopeCurrent: "Current Task Only",
+    runCompareScopeAll: "All Tasks",
+    runCompareSortCreated: "Created At (newest first)",
+    runCompareSortSuccess: "Success Rate (high to low)",
+    runCompareSortTokens: "Tokens (high to low)",
+    runCompareSortCost: "Known Cost (low to high)",
+    compareStatusAll: "All Statuses",
+    compareStatusSuccess: "Success",
+    compareStatusFailed: "Failed",
+    compareSortStatus: "Status",
+    compareSortDuration: "Duration (fastest first)",
+    compareSortTokens: "Tokens (high to low)",
+    compareSortCost: "Cost (low to high)",
+    compareSortChanged: "Changed Files (high to low)",
+    compareSortJudges: "Judge Pass Rate (high to low)",
+    judgeTypeAll: "All Types",
+    judgeStatusAll: "All Statuses",
+    judgeStatusPass: "Pass",
+    judgeStatusFail: "Fail"
+  },
+  "zh-CN": {
+    appTitle: "交互报告",
+    appDescription: "打开一次 RepoArena 跑分结果，直接看谁成功、改了什么、哪里失败了。",
+    languageLabel: "语言",
+    runsFolderTitle: "推荐：打开结果文件夹",
+    runsFolderHint: "选择一个 RepoArena 单次结果目录，或整个 `.repoarena` 结果目录。这是最省事的入口。",
+    summaryFileTitle: "打开 Summary JSON",
+    summaryFileHint: "只有单个 `summary.json` 文件时再用这个入口。",
+    markdownFileTitle: "可选：打开 Markdown Summary",
+    markdownFileHint: "加载后会补充分享文案、PR 表格和 Markdown 面板。",
+    workflowTitle: "推荐流程",
+    workflowSteps: [
+      "先点“推荐：打开结果文件夹”。",
+      "选择一个结果目录，例如 `.repoarena/manual-run`，或者更上层的结果目录。",
+      "报告加载后，先看顶部结论卡片，再点左侧 agent 查看细节。"
+    ],
+    nextStepsTitle: "下一步",
+    nextStepsEmpty:
+      "优先用“推荐：打开结果文件夹”。如果你手头只有一个文件，就加载 `summary.json`。`summary.md` 只是可选增强项。",
+    nextStepsLoaded: (run, runCount) =>
+      `已加载 ${runCount} 个 run。当前是“${run.task.title}”。下一步先看顶部结论卡片，再点左侧或 Agent Compare 里的 agent 进入详情。`,
+    runsHeading: "运行记录",
+    agentsHeading: "Agent",
+    heroEyebrow: "交互查看器",
+    heroTitle: "不用翻一整页静态报告，直接看一次 benchmark 的结论。",
+    heroDescription:
+      "RepoArena 会把多个 AI coding agent 放到同一个仓库任务里比较，然后把结果整理成可审查、可分享的报告。",
+    heroWhatTitle: "RepoArena 是干什么的",
+    heroWhatBody:
+      "它会在同一个仓库任务上运行多个 coding agent，统一记录成功率、耗时、token、成本、改动文件和 judge 结果，让你知道谁更稳、谁更快、谁失败在什么地方。",
+    heroHowTitle: "怎么开始",
+    heroHowSteps: [
+      "先用 CLI 跑一次 benchmark，生成包含 `summary.json` 的结果目录。",
+      "在这个页面里用“推荐：打开结果文件夹”加载它。",
+      "加载后比较 agent，查看 judge 失败原因，再导出摘要或分享卡片。"
+    ],
+    topbarEyebrow: "运行总览",
+    expandLogs: "展开日志",
+    collapseLogs: "收起日志",
+    runCompareTitle: "Run 对比",
+    runDiffTitle: "同任务 Run 差异",
+    runDiffDescription: "把当前 run 和上一次同名任务 run 直接对比。",
+    agentCompareTitle: "Agent 对比",
+    agentTrendTitle: "Agent 趋势",
+    agentTrendDescription: "查看当前选中 agent 在同一任务下的多次表现。",
+    judgeFiltersTitle: "Judge 筛选",
+    markdownSummaryTitle: "Markdown 摘要",
+    copySummary: "复制摘要",
+    copyPrTable: "复制 PR 表格",
+    copyShareSvg: "复制分享 SVG",
+    downloadShareSvg: "下载分享 SVG",
+    judgeSearchPlaceholder: "搜索 label、target、expectation",
+    noRunsLoaded: "还没有加载任何 run。",
+    noReportLoaded: "还没有加载报告。",
+    runInfoTitle: "当前 Run",
+    createdAt: "创建时间",
+    taskSchema: "任务 Schema",
+    linkedMarkdown: "已关联 markdown",
+    jsonOnly: "仅 JSON",
+    metrics: {
+      agents: "Agent 数",
+      success: "成功",
+      failed: "失败",
+      tokens: "Tokens",
+      knownCost: "已知成本"
+    },
+    verdicts: {
+      bestAgent: "最佳 Agent",
+      fastest: "最快",
+      lowestKnownCost: "最低已知成本",
+      highestJudgePassRate: "最高 Judge 通过率",
+      noResult: "暂无结果",
+      noKnownCost: "暂无已知成本"
+    },
+    runCompareScopeCurrent: "仅当前任务",
+    runCompareScopeAll: "所有任务",
+    runCompareSortCreated: "按创建时间（新到旧）",
+    runCompareSortSuccess: "按成功率（高到低）",
+    runCompareSortTokens: "按 Token（高到低）",
+    runCompareSortCost: "按已知成本（低到高）",
+    compareStatusAll: "全部状态",
+    compareStatusSuccess: "成功",
+    compareStatusFailed: "失败",
+    compareSortStatus: "状态",
+    compareSortDuration: "耗时（快到慢）",
+    compareSortTokens: "Token（高到低）",
+    compareSortCost: "成本（低到高）",
+    compareSortChanged: "改动文件数（高到低）",
+    compareSortJudges: "Judge 通过率（高到低）",
+    judgeTypeAll: "全部类型",
+    judgeStatusAll: "全部状态",
+    judgeStatusPass: "通过",
+    judgeStatusFail: "失败"
+  }
+};
+
 const judgeFilters = {
   search: "",
   type: "all",
@@ -78,6 +276,30 @@ const runCompareFilters = {
   sort: "created",
   scope: "current-task"
 };
+
+function t(key, ...args) {
+  const language = MESSAGES[state.language] ? state.language : "en";
+  const value = key
+    .split(".")
+    .reduce((current, segment) => (current && segment in current ? current[segment] : undefined), MESSAGES[language]);
+
+  if (typeof value === "function") {
+    return value(...args);
+  }
+
+  return value ?? key;
+}
+
+function setText(id, value) {
+  const element = document.querySelector(`#${id}`);
+  if (element) {
+    element.textContent = value;
+  }
+}
+
+function renderList(element, items) {
+  element.innerHTML = items.map((item) => `<li>${escapeHtml(item)}</li>`).join("");
+}
 
 function escapeHtml(value) {
   return String(value)
@@ -98,6 +320,79 @@ function formatDuration(durationMs) {
 
 function formatCost(result) {
   return result.costKnown ? `$${result.estimatedCostUsd.toFixed(2)}` : "n/a";
+}
+
+function renderStaticText() {
+  setText("app-title", t("appTitle"));
+  setText("app-description", t("appDescription"));
+  setText("language-label", t("languageLabel"));
+  setText("runs-folder-title", t("runsFolderTitle"));
+  setText("runs-folder-hint", t("runsFolderHint"));
+  setText("summary-file-title", t("summaryFileTitle"));
+  setText("summary-file-hint", t("summaryFileHint"));
+  setText("markdown-file-title", t("markdownFileTitle"));
+  setText("markdown-file-hint", t("markdownFileHint"));
+  setText("workflow-title", t("workflowTitle"));
+  setText("next-steps-title", t("nextStepsTitle"));
+  setText("runs-heading", t("runsHeading"));
+  setText("agents-heading", t("agentsHeading"));
+  setText("hero-eyebrow", t("heroEyebrow"));
+  setText("hero-title", t("heroTitle"));
+  setText("hero-description", t("heroDescription"));
+  setText("hero-what-title", t("heroWhatTitle"));
+  setText("hero-what-body", t("heroWhatBody"));
+  setText("hero-how-title", t("heroHowTitle"));
+  setText("topbar-eyebrow", t("topbarEyebrow"));
+  setText("run-compare-title", t("runCompareTitle"));
+  setText("run-diff-title", t("runDiffTitle"));
+  setText("run-diff-description", t("runDiffDescription"));
+  setText("agent-compare-title", t("agentCompareTitle"));
+  setText("agent-trend-description", t("agentTrendDescription"));
+  setText("judge-filters-title", t("judgeFiltersTitle"));
+  setText("markdown-summary-title", t("markdownSummaryTitle"));
+  setText("expand-all", t("expandLogs"));
+  setText("collapse-all", t("collapseLogs"));
+  setText("copy-share-card", t("copySummary"));
+  setText("copy-pr-table", t("copyPrTable"));
+  setText("copy-share-svg", t("copyShareSvg"));
+  setText("download-share-svg", t("downloadShareSvg"));
+  elements.judgeSearch.placeholder = t("judgeSearchPlaceholder");
+  elements.languageSelect.value = state.language;
+  elements.runCompareScope.options[0].text = t("runCompareScopeCurrent");
+  elements.runCompareScope.options[1].text = t("runCompareScopeAll");
+  elements.runCompareSort.options[0].text = t("runCompareSortCreated");
+  elements.runCompareSort.options[1].text = t("runCompareSortSuccess");
+  elements.runCompareSort.options[2].text = t("runCompareSortTokens");
+  elements.runCompareSort.options[3].text = t("runCompareSortCost");
+  elements.compareStatusFilter.options[0].text = t("compareStatusAll");
+  elements.compareStatusFilter.options[1].text = t("compareStatusSuccess");
+  elements.compareStatusFilter.options[2].text = t("compareStatusFailed");
+  elements.compareSort.options[0].text = t("compareSortStatus");
+  elements.compareSort.options[1].text = t("compareSortDuration");
+  elements.compareSort.options[2].text = t("compareSortTokens");
+  elements.compareSort.options[3].text = t("compareSortCost");
+  elements.compareSort.options[4].text = t("compareSortChanged");
+  elements.compareSort.options[5].text = t("compareSortJudges");
+  elements.judgeTypeFilter.options[0].text = t("judgeTypeAll");
+  elements.judgeStatusFilter.options[0].text = t("judgeStatusAll");
+  elements.judgeStatusFilter.options[1].text = t("judgeStatusPass");
+  elements.judgeStatusFilter.options[2].text = t("judgeStatusFail");
+  renderList(elements.workflowList, t("workflowSteps"));
+  renderList(document.querySelector("#hero-how-list"), t("heroHowSteps"));
+}
+
+function renderNextSteps() {
+  if (state.notice) {
+    elements.nextStepsContent.textContent = state.notice;
+    return;
+  }
+
+  if (!state.run) {
+    elements.nextStepsContent.textContent = t("nextStepsEmpty");
+    return;
+  }
+
+  elements.nextStepsContent.textContent = t("nextStepsLoaded", state.run, state.runs.length);
 }
 
 function deltaClass(value, preferred = "lower") {
@@ -124,21 +419,21 @@ function formatSignedNumber(value, formatter, preferred = "lower") {
 function formatJudgeType(type) {
   switch (type) {
     case "file-exists":
-      return "File Exists";
+      return state.language === "zh-CN" ? "文件存在" : "File Exists";
     case "file-contains":
-      return "File Contains";
+      return state.language === "zh-CN" ? "文件包含内容" : "File Contains";
     case "json-value":
-      return "JSON Value";
+      return state.language === "zh-CN" ? "JSON 值断言" : "JSON Value";
     case "glob":
-      return "Glob";
+      return state.language === "zh-CN" ? "Glob 匹配" : "Glob";
     case "file-count":
-      return "File Count";
+      return state.language === "zh-CN" ? "文件数量" : "File Count";
     case "snapshot":
-      return "Snapshot";
+      return state.language === "zh-CN" ? "快照" : "Snapshot";
     case "json-schema":
-      return "JSON Schema";
+      return state.language === "zh-CN" ? "JSON Schema" : "JSON Schema";
     default:
-      return "Command";
+      return state.language === "zh-CN" ? "命令" : "Command";
   }
 }
 
@@ -186,11 +481,11 @@ function applySingleRun(run, markdown = null) {
 function renderRunInfo(run) {
   elements.runInfo.innerHTML = `
     <div class="panel-header">
-      <h2>Run</h2>
+      <h2>${escapeHtml(t("runInfoTitle"))}</h2>
       <span class="muted">${escapeHtml(run.runId)}</span>
     </div>
-    <p class="muted">Created at ${escapeHtml(run.createdAt)}</p>
-    <p class="muted">Task schema ${escapeHtml(run.task.schemaVersion)}</p>
+    <p class="muted">${escapeHtml(t("createdAt"))} ${escapeHtml(run.createdAt)}</p>
+    <p class="muted">${escapeHtml(t("taskSchema"))} ${escapeHtml(run.task.schemaVersion)}</p>
   `;
   setHidden(elements.runInfo, false);
 }
@@ -200,7 +495,7 @@ function renderRunList() {
 
   if (state.runs.length === 0) {
     elements.runList.className = "run-list empty-state";
-    elements.runList.textContent = "No runs loaded.";
+    elements.runList.textContent = t("noRunsLoaded");
     return;
   }
 
@@ -216,7 +511,7 @@ function renderRunList() {
           <strong>${escapeHtml(run.task.title)}</strong>
           <div class="meta">${escapeHtml(run.createdAt)}</div>
           <div class="meta">${successCount}/${run.results.length} success | ${escapeHtml(run.runId)}</div>
-          <div class="meta">${hasMarkdown ? "markdown linked" : "json only"}</div>
+          <div class="meta">${hasMarkdown ? escapeHtml(t("linkedMarkdown")) : escapeHtml(t("jsonOnly"))}</div>
         </button>
       `;
     })
@@ -228,23 +523,23 @@ function renderMetrics(run) {
 
   elements.metrics.innerHTML = `
     <article class="metric">
-      <p class="metric-label">Agents</p>
+      <p class="metric-label">${escapeHtml(t("metrics.agents"))}</p>
       <p class="metric-value">${summary.totalAgents}</p>
     </article>
     <article class="metric">
-      <p class="metric-label">Success</p>
+      <p class="metric-label">${escapeHtml(t("metrics.success"))}</p>
       <p class="metric-value">${summary.successCount}</p>
     </article>
     <article class="metric">
-      <p class="metric-label">Failed</p>
+      <p class="metric-label">${escapeHtml(t("metrics.failed"))}</p>
       <p class="metric-value">${summary.failedCount}</p>
     </article>
     <article class="metric">
-      <p class="metric-label">Tokens</p>
+      <p class="metric-label">${escapeHtml(t("metrics.tokens"))}</p>
       <p class="metric-value">${summary.totalTokens}</p>
     </article>
     <article class="metric">
-      <p class="metric-label">Known Cost</p>
+      <p class="metric-label">${escapeHtml(t("metrics.knownCost"))}</p>
       <p class="metric-value">$${summary.knownCost.toFixed(2)}</p>
     </article>
   `;
@@ -252,7 +547,7 @@ function renderMetrics(run) {
 
 function renderRunCompareTable() {
   if (state.runs.length === 0) {
-    elements.runCompareTable.innerHTML = `<p class="empty-state">No runs loaded.</p>`;
+    elements.runCompareTable.innerHTML = `<p class="empty-state">${escapeHtml(t("noRunsLoaded"))}</p>`;
     return;
   }
 
@@ -266,14 +561,14 @@ function renderRunCompareTable() {
     <table class="compare-table">
       <thead>
         <tr>
-          <th>Run</th>
-          <th>Task</th>
-          <th>Created</th>
-          <th>Success</th>
-          <th>Agents</th>
-          <th>Tokens</th>
-          <th>Known Cost</th>
-          <th>Markdown</th>
+          <th>${escapeHtml(state.language === "zh-CN" ? "Run" : "Run")}</th>
+          <th>${escapeHtml(state.language === "zh-CN" ? "任务" : "Task")}</th>
+          <th>${escapeHtml(state.language === "zh-CN" ? "创建时间" : "Created")}</th>
+          <th>${escapeHtml(t("metrics.success"))}</th>
+          <th>${escapeHtml(t("metrics.agents"))}</th>
+          <th>${escapeHtml(t("metrics.tokens"))}</th>
+          <th>${escapeHtml(t("metrics.knownCost"))}</th>
+          <th>${escapeHtml(state.language === "zh-CN" ? "Markdown" : "Markdown")}</th>
         </tr>
       </thead>
       <tbody>
@@ -289,7 +584,7 @@ function renderRunCompareTable() {
                 <td>${summary.totalAgents}</td>
                 <td>${summary.totalTokens}</td>
                 <td>$${summary.knownCost.toFixed(2)}</td>
-                <td>${state.markdownByRunId.has(run.runId) ? "linked" : "none"}</td>
+                <td>${state.markdownByRunId.has(run.runId) ? escapeHtml(t("linkedMarkdown")) : escapeHtml(state.language === "zh-CN" ? "无" : "none")}</td>
               </tr>
             `;
           })
@@ -301,35 +596,41 @@ function renderRunCompareTable() {
 
 function renderRunDiffTable() {
   if (!state.run) {
-    elements.runDiffTable.innerHTML = `<p class="empty-state">No run selected.</p>`;
+    elements.runDiffTable.innerHTML = `<p class="empty-state">${escapeHtml(state.language === "zh-CN" ? "还没有选中 run。" : "No run selected.")}</p>`;
     return;
   }
 
   const diff = getRunToRunAgentDiff(state.runs, state.run);
   if (!diff.previousRun) {
     elements.runDiffTable.innerHTML =
-      `<p class="empty-state">No earlier run with the same task title is available for comparison.</p>`;
+      `<p class="empty-state">${escapeHtml(state.language === "zh-CN" ? "当前任务还没有更早的 run 可用于比较。" : "No earlier run with the same task title is available for comparison.")}</p>`;
     return;
   }
 
   if (diff.rows.length === 0) {
-    elements.runDiffTable.innerHTML = `<p class="empty-state">No comparable agent results found.</p>`;
+    elements.runDiffTable.innerHTML = `<p class="empty-state">${escapeHtml(state.language === "zh-CN" ? "没有可比较的 agent 结果。" : "No comparable agent results found.")}</p>`;
     return;
   }
 
   elements.runDiffTable.innerHTML = `
-    <p class="muted">Comparing current run <code>${escapeHtml(state.run.runId)}</code> against previous same-task run <code>${escapeHtml(
-      diff.previousRun.runId
-    )}</code> from ${escapeHtml(diff.previousRun.createdAt)}.</p>
+    <p class="muted">${
+      state.language === "zh-CN"
+        ? `正在比较当前 run <code>${escapeHtml(state.run.runId)}</code> 与上一个同任务 run <code>${escapeHtml(
+            diff.previousRun.runId
+          )}</code>（${escapeHtml(diff.previousRun.createdAt)}）。`
+        : `Comparing current run <code>${escapeHtml(state.run.runId)}</code> against previous same-task run <code>${escapeHtml(
+            diff.previousRun.runId
+          )}</code> from ${escapeHtml(diff.previousRun.createdAt)}.`
+    }</p>
     <table class="compare-table">
       <thead>
         <tr>
-          <th>Agent</th>
-          <th>Status</th>
-          <th>Duration Delta</th>
-          <th>Token Delta</th>
-          <th>Cost Delta</th>
-          <th>Judge Delta</th>
+          <th>${escapeHtml(state.language === "zh-CN" ? "Agent" : "Agent")}</th>
+          <th>${escapeHtml(state.language === "zh-CN" ? "状态变化" : "Status")}</th>
+          <th>${escapeHtml(state.language === "zh-CN" ? "耗时变化" : "Duration Delta")}</th>
+          <th>${escapeHtml(state.language === "zh-CN" ? "Token 变化" : "Token Delta")}</th>
+          <th>${escapeHtml(state.language === "zh-CN" ? "成本变化" : "Cost Delta")}</th>
+          <th>${escapeHtml(state.language === "zh-CN" ? "Judge 变化" : "Judge Delta")}</th>
         </tr>
       </thead>
       <tbody>
@@ -366,36 +667,40 @@ function renderRunDiffTable() {
 
 function renderAgentTrendTable(run) {
   if (!state.selectedAgentId) {
-    elements.agentTrendTitle.textContent = "Agent Trend";
-    elements.agentTrendTable.innerHTML = `<p class="empty-state">Select an agent to view its run history.</p>`;
+    elements.agentTrendTitle.textContent = t("agentTrendTitle");
+    elements.agentTrendTable.innerHTML = `<p class="empty-state">${escapeHtml(state.language === "zh-CN" ? "先选一个 agent，再看它的历史趋势。" : "Select an agent to view its run history.")}</p>`;
     return;
   }
 
   const activeResult = run.results.find((result) => result.agentId === state.selectedAgentId) ?? null;
   elements.agentTrendTitle.textContent = activeResult
-    ? `Agent Trend: ${activeResult.agentTitle}`
-    : `Agent Trend: ${state.selectedAgentId}`;
+    ? `${t("agentTrendTitle")}: ${activeResult.agentTitle}`
+    : `${t("agentTrendTitle")}: ${state.selectedAgentId}`;
 
   const rows = getAgentTrendRows(state.runs, run, state.selectedAgentId);
   if (rows.length === 0) {
     elements.agentTrendTable.innerHTML =
-      `<p class="empty-state">No same-task history found for the selected agent.</p>`;
+      `<p class="empty-state">${escapeHtml(state.language === "zh-CN" ? "当前 agent 在这个任务下还没有历史记录。" : "No same-task history found for the selected agent.")}</p>`;
     return;
   }
 
   elements.agentTrendTable.innerHTML = `
-    <p class="muted">Same-task history for <code>${escapeHtml(state.selectedAgentId)}</code>, oldest to newest.</p>
+    <p class="muted">${
+      state.language === "zh-CN"
+        ? `这是 <code>${escapeHtml(state.selectedAgentId)}</code> 在同一任务下的历史表现，按时间从早到晚排列。`
+        : `Same-task history for <code>${escapeHtml(state.selectedAgentId)}</code>, oldest to newest.`
+    }</p>
     <table class="compare-table">
       <thead>
         <tr>
-          <th>Run</th>
-          <th>Created</th>
-          <th>Status</th>
-          <th>Duration</th>
-          <th>Tokens</th>
-          <th>Cost</th>
-          <th>Judge Pass</th>
-          <th>Delta vs Previous</th>
+          <th>${escapeHtml(state.language === "zh-CN" ? "Run" : "Run")}</th>
+          <th>${escapeHtml(state.language === "zh-CN" ? "创建时间" : "Created")}</th>
+          <th>${escapeHtml(state.language === "zh-CN" ? "状态" : "Status")}</th>
+          <th>${escapeHtml(state.language === "zh-CN" ? "耗时" : "Duration")}</th>
+          <th>${escapeHtml(t("metrics.tokens"))}</th>
+          <th>${escapeHtml(state.language === "zh-CN" ? "成本" : "Cost")}</th>
+          <th>${escapeHtml(state.language === "zh-CN" ? "Judge 通过" : "Judge Pass")}</th>
+          <th>${escapeHtml(state.language === "zh-CN" ? "相对上一轮变化" : "Delta vs Previous")}</th>
         </tr>
       </thead>
       <tbody>
@@ -404,15 +709,19 @@ function renderAgentTrendTable(run) {
             const isActive = row.run.runId === state.selectedRunId ? "active" : "";
             const passedJudges = row.result.judgeResults.filter((judge) => judge.success).length;
             const deltaParts = [
-              `status ${row.statusChange}`,
+              `${state.language === "zh-CN" ? "状态" : "status"} ${row.statusChange}`,
               row.durationDeltaMs === null
-                ? "duration n/a"
-                : `duration ${row.durationDeltaMs > 0 ? "+" : ""}${row.durationDeltaMs}ms`,
-              row.tokenDelta === null ? "tokens n/a" : `tokens ${row.tokenDelta > 0 ? "+" : ""}${row.tokenDelta}`,
+                ? `${state.language === "zh-CN" ? "耗时" : "duration"} n/a`
+                : `${state.language === "zh-CN" ? "耗时" : "duration"} ${row.durationDeltaMs > 0 ? "+" : ""}${row.durationDeltaMs}ms`,
+              row.tokenDelta === null
+                ? `${state.language === "zh-CN" ? "tokens" : "tokens"} n/a`
+                : `${state.language === "zh-CN" ? "tokens" : "tokens"} ${row.tokenDelta > 0 ? "+" : ""}${row.tokenDelta}`,
               row.costDelta === null
-                ? "cost n/a"
-                : `cost ${row.costDelta > 0 ? "+" : "-"}$${Math.abs(row.costDelta).toFixed(2)}`,
-              row.judgeDelta === null ? "judges n/a" : `judges ${row.judgeDelta > 0 ? "+" : ""}${row.judgeDelta}`
+                ? `${state.language === "zh-CN" ? "成本" : "cost"} n/a`
+                : `${state.language === "zh-CN" ? "成本" : "cost"} ${row.costDelta > 0 ? "+" : "-"}$${Math.abs(row.costDelta).toFixed(2)}`,
+              row.judgeDelta === null
+                ? `${state.language === "zh-CN" ? "judges" : "judges"} n/a`
+                : `${state.language === "zh-CN" ? "judges" : "judges"} ${row.judgeDelta > 0 ? "+" : ""}${row.judgeDelta}`
             ];
 
             return `
@@ -444,21 +753,21 @@ function renderPreflights(run) {
             <span class="status-badge ${statusClass(preflight.status)}">${escapeHtml(preflight.status)}</span>
           </div>
           <p>${escapeHtml(preflight.summary)}</p>
-          <p class="muted">Tier: ${escapeHtml(preflight.capability.supportTier)} | Trace: ${escapeHtml(
+          <p class="muted">${escapeHtml(state.language === "zh-CN" ? "支持层级" : "Tier")}: ${escapeHtml(preflight.capability.supportTier)} | ${escapeHtml(state.language === "zh-CN" ? "Trace" : "Trace")}: ${escapeHtml(
             preflight.capability.traceRichness
           )}</p>
-          <p class="muted">Invocation: ${escapeHtml(preflight.capability.invocationMethod)}</p>
-          <p class="muted">Tokens: ${escapeHtml(preflight.capability.tokenAvailability)} | Cost: ${escapeHtml(
+          <p class="muted">${escapeHtml(state.language === "zh-CN" ? "调用方式" : "Invocation")}: ${escapeHtml(preflight.capability.invocationMethod)}</p>
+          <p class="muted">${escapeHtml(t("metrics.tokens"))}: ${escapeHtml(preflight.capability.tokenAvailability)} | ${escapeHtml(state.language === "zh-CN" ? "成本" : "Cost")}: ${escapeHtml(
             preflight.capability.costAvailability
           )}</p>
           ${
             preflight.capability.authPrerequisites.length > 0
-              ? `<p class="muted">Auth: ${escapeHtml(preflight.capability.authPrerequisites.join("; "))}</p>`
+              ? `<p class="muted">${escapeHtml(state.language === "zh-CN" ? "鉴权要求" : "Auth")}: ${escapeHtml(preflight.capability.authPrerequisites.join("; "))}</p>`
               : ""
           }
           ${
             preflight.capability.knownLimitations.length > 0
-              ? `<p class="muted">Limitations: ${escapeHtml(preflight.capability.knownLimitations.join("; "))}</p>`
+              ? `<p class="muted">${escapeHtml(state.language === "zh-CN" ? "限制" : "Limitations")}: ${escapeHtml(preflight.capability.knownLimitations.join("; "))}</p>`
               : ""
           }
           ${
@@ -476,26 +785,26 @@ function renderVerdicts(run) {
   const verdict = getRunVerdict(run);
   const cards = [
     {
-      label: "Best Agent",
+      label: t("verdicts.bestAgent"),
       value: verdict.bestAgent ? verdict.bestAgent.agentTitle : "n/a",
-      meta: verdict.bestAgent ? `${verdict.bestAgent.agentId} | ${verdict.bestAgent.status}` : "No result"
+      meta: verdict.bestAgent ? `${verdict.bestAgent.agentId} | ${verdict.bestAgent.status}` : t("verdicts.noResult")
     },
     {
-      label: "Fastest",
+      label: t("verdicts.fastest"),
       value: verdict.fastest ? verdict.fastest.agentTitle : "n/a",
-      meta: verdict.fastest ? formatDuration(verdict.fastest.durationMs) : "No result"
+      meta: verdict.fastest ? formatDuration(verdict.fastest.durationMs) : t("verdicts.noResult")
     },
     {
-      label: "Lowest Known Cost",
+      label: t("verdicts.lowestKnownCost"),
       value: verdict.lowestKnownCost ? verdict.lowestKnownCost.agentTitle : "n/a",
-      meta: verdict.lowestKnownCost ? formatCost(verdict.lowestKnownCost) : "No known cost"
+      meta: verdict.lowestKnownCost ? formatCost(verdict.lowestKnownCost) : t("verdicts.noKnownCost")
     },
     {
-      label: "Highest Judge Pass Rate",
+      label: t("verdicts.highestJudgePassRate"),
       value: verdict.highestJudgePassRate ? verdict.highestJudgePassRate.agentTitle : "n/a",
       meta: verdict.highestJudgePassRate
         ? `${verdict.highestJudgePassRate.judgeResults.filter((judge) => judge.success).length}/${verdict.highestJudgePassRate.judgeResults.length}`
-        : "No result"
+        : t("verdicts.noResult")
     }
   ];
 
@@ -538,17 +847,17 @@ function renderAgentList(run) {
 function renderCompareTable(run) {
   const results = getCompareResults(run, compareFilters);
   const sortHintMap = {
-    status: "Sorted by status, then fastest first.",
-    duration: "Sorted by fastest agents first.",
-    tokens: "Sorted by highest token usage first.",
-    cost: "Sorted by lowest known cost first.",
-    changed: "Sorted by most changed files first.",
-    judges: "Sorted by highest judge pass rate first."
+    status: state.language === "zh-CN" ? "按状态排序，同状态下更快的排前面。" : "Sorted by status, then fastest first.",
+    duration: state.language === "zh-CN" ? "按耗时排序，越快越靠前。" : "Sorted by fastest agents first.",
+    tokens: state.language === "zh-CN" ? "按 token 用量排序，越高越靠前。" : "Sorted by highest token usage first.",
+    cost: state.language === "zh-CN" ? "按已知成本排序，越低越靠前。" : "Sorted by lowest known cost first.",
+    changed: state.language === "zh-CN" ? "按改动文件数排序，越多越靠前。" : "Sorted by most changed files first.",
+    judges: state.language === "zh-CN" ? "按 judge 通过率排序，越高越靠前。" : "Sorted by highest judge pass rate first."
   };
   elements.compareSortHint.textContent = sortHintMap[compareFilters.sort] ?? sortHintMap.status;
 
   if (results.length === 0) {
-    elements.compareTable.innerHTML = `<p class="empty-state">No agents match the current compare filters.</p>`;
+    elements.compareTable.innerHTML = `<p class="empty-state">${escapeHtml(state.language === "zh-CN" ? "没有 agent 符合当前筛选条件。" : "No agents match the current compare filters.")}</p>`;
     return;
   }
 
@@ -556,13 +865,13 @@ function renderCompareTable(run) {
     <table class="compare-table">
       <thead>
         <tr>
-          <th>Agent</th>
-          <th>Status</th>
-          <th>Duration</th>
-          <th>Tokens</th>
-          <th>Cost</th>
-          <th>Changed</th>
-          <th>Judges</th>
+          <th>${escapeHtml(state.language === "zh-CN" ? "Agent" : "Agent")}</th>
+          <th>${escapeHtml(state.language === "zh-CN" ? "状态" : "Status")}</th>
+          <th>${escapeHtml(state.language === "zh-CN" ? "耗时" : "Duration")}</th>
+          <th>${escapeHtml(t("metrics.tokens"))}</th>
+          <th>${escapeHtml(state.language === "zh-CN" ? "成本" : "Cost")}</th>
+          <th>${escapeHtml(state.language === "zh-CN" ? "改动文件" : "Changed")}</th>
+          <th>${escapeHtml(state.language === "zh-CN" ? "Judges" : "Judges")}</th>
         </tr>
       </thead>
       <tbody>
@@ -592,7 +901,7 @@ function renderCompareTable(run) {
 function renderStepCards(title, steps) {
   const content =
     steps.length === 0
-      ? `<p class="empty-state">No commands executed.</p>`
+      ? `<p class="empty-state">${escapeHtml(state.language === "zh-CN" ? "没有执行任何命令。" : "No commands executed.")}</p>`
       : `<div class="step-list">${steps
           .map(
             (step) => `
@@ -600,11 +909,11 @@ function renderStepCards(title, steps) {
                 <summary>
                   <strong>${escapeHtml(step.label)}</strong>
                   <span class="status-badge ${statusClass(step.success ? "success" : "failed")}">${
-                    step.success ? "pass" : "fail"
+                    step.success ? (state.language === "zh-CN" ? "通过" : "pass") : (state.language === "zh-CN" ? "失败" : "fail")
                   }</span>
                   <span class="muted">${escapeHtml(formatDuration(step.durationMs))}</span>
                 </summary>
-                <div class="detail-row"><span>Command</span><code>${escapeHtml(step.command)}</code></div>
+                <div class="detail-row"><span>${escapeHtml(state.language === "zh-CN" ? "命令" : "Command")}</span><code>${escapeHtml(step.command)}</code></div>
                 <div class="detail-row"><span>CWD</span><code>${escapeHtml(step.cwd)}</code></div>
                 ${
                   step.stdout
@@ -646,7 +955,7 @@ function renderJudgeCards(result) {
 
   const overview =
     judges.length === 0
-      ? `<p class="empty-state">No judges executed.</p>`
+      ? `<p class="empty-state">${escapeHtml(state.language === "zh-CN" ? "没有执行任何 judge。" : "No judges executed.")}</p>`
       : `
         <div class="judge-overview">
           ${Array.from(byType.entries())
@@ -673,23 +982,23 @@ function renderJudgeCards(result) {
                   <strong>${escapeHtml(judge.label)}</strong>
                   <span class="judge-kind">${escapeHtml(formatJudgeType(judge.type))}</span>
                   <span class="status-badge ${statusClass(judge.success ? "success" : "failed")}">${
-                    judge.success ? "pass" : "fail"
+                    judge.success ? (state.language === "zh-CN" ? "通过" : "pass") : (state.language === "zh-CN" ? "失败" : "fail")
                   }</span>
                   <span class="muted">${escapeHtml(formatDuration(judge.durationMs))}</span>
                 </summary>
                 ${
                   judge.target
-                    ? `<div class="detail-row"><span>Target</span><code>${escapeHtml(judge.target)}</code></div>`
+                    ? `<div class="detail-row"><span>${escapeHtml(state.language === "zh-CN" ? "目标" : "Target")}</span><code>${escapeHtml(judge.target)}</code></div>`
                     : ""
                 }
                 ${
                   judge.expectation
-                    ? `<div class="detail-row"><span>Expectation</span><code>${escapeHtml(judge.expectation)}</code></div>`
+                    ? `<div class="detail-row"><span>${escapeHtml(state.language === "zh-CN" ? "期望" : "Expectation")}</span><code>${escapeHtml(judge.expectation)}</code></div>`
                     : ""
                 }
                 ${
                   judge.command
-                    ? `<div class="detail-row"><span>Command</span><code>${escapeHtml(judge.command)}</code></div>`
+                    ? `<div class="detail-row"><span>${escapeHtml(state.language === "zh-CN" ? "命令" : "Command")}</span><code>${escapeHtml(judge.command)}</code></div>`
                     : ""
                 }
                 ${
@@ -712,9 +1021,9 @@ function renderJudgeCards(result) {
           )
           .join("")}</div>`;
 
-  return `<section class="detail-card"><h3>Judges</h3>${overview}${
+  return `<section class="detail-card"><h3>${escapeHtml(state.language === "zh-CN" ? "Judges" : "Judges")}</h3>${overview}${
     filteredJudges.length === 0 && judges.length > 0
-      ? `<p class="empty-state">No judges match the current filters.</p>`
+      ? `<p class="empty-state">${escapeHtml(state.language === "zh-CN" ? "当前筛选下没有匹配的 judge。" : "No judges match the current filters.")}</p>`
       : content
   }</section>`;
 }
@@ -726,7 +1035,7 @@ function populateJudgeFilters(run) {
 
   const currentType = judgeFilters.type;
   elements.judgeTypeFilter.innerHTML = [
-    `<option value="all">All Types</option>`,
+    `<option value="all">${escapeHtml(t("judgeTypeAll"))}</option>`,
     ...judgeTypes.map((type) => `<option value="${escapeHtml(type)}">${escapeHtml(formatJudgeType(type))}</option>`)
   ].join("");
   elements.judgeTypeFilter.value = judgeTypes.includes(currentType) ? currentType : "all";
@@ -734,14 +1043,14 @@ function populateJudgeFilters(run) {
 
 function renderDiff(result) {
   const sections = [
-    ["Added", result.diff.added],
-    ["Changed", result.diff.changed],
-    ["Removed", result.diff.removed]
+    [state.language === "zh-CN" ? "新增" : "Added", result.diff.added],
+    [state.language === "zh-CN" ? "修改" : "Changed", result.diff.changed],
+    [state.language === "zh-CN" ? "删除" : "Removed", result.diff.removed]
   ];
 
   return `
     <section class="detail-card">
-      <h3>Diff Breakdown</h3>
+      <h3>${escapeHtml(state.language === "zh-CN" ? "Diff 细分" : "Diff Breakdown")}</h3>
       <div class="diff-grid">
         ${sections
           .map(
@@ -750,7 +1059,7 @@ function renderDiff(result) {
                 <h4>${escapeHtml(label)}</h4>
                 ${
                   files.length === 0
-                    ? `<p class="empty-state">None</p>`
+                    ? `<p class="empty-state">${escapeHtml(state.language === "zh-CN" ? "无" : "None")}</p>`
                     : `<ul>${files.map((file) => `<li>${escapeHtml(file)}</li>`).join("")}</ul>`
                 }
               </div>
@@ -775,23 +1084,23 @@ function renderMarkdownPanel() {
 
   if (!markdown) {
     setHidden(elements.markdownPanel, true);
-    elements.markdownStatus.textContent = "Not loaded";
+    elements.markdownStatus.textContent = state.language === "zh-CN" ? "未加载" : "Not loaded";
     elements.markdownContent.innerHTML = "";
     return;
   }
 
   setHidden(elements.markdownPanel, false);
   elements.markdownStatus.textContent = state.run && state.markdownByRunId.has(state.run.runId)
-    ? "Linked to selected run"
-    : "Standalone markdown";
+    ? (state.language === "zh-CN" ? "已关联当前 run" : "Linked to selected run")
+    : (state.language === "zh-CN" ? "独立 markdown" : "Standalone markdown");
   elements.markdownHighlights.innerHTML = state.run
     ? `
         <section class="detail-card">
-          <h4>Highlights</h4>
+          <h4>${escapeHtml(state.language === "zh-CN" ? "重点摘要" : "Highlights")}</h4>
           <pre>${escapeHtml(buildShareCard(state.run))}</pre>
         </section>
       `
-    : `<p class="empty-state">Load a run to see summary highlights.</p>`;
+    : `<p class="empty-state">${escapeHtml(state.language === "zh-CN" ? "先加载一个 run，才能看到摘要亮点。" : "Load a run to see summary highlights.")}</p>`;
   elements.markdownContent.innerHTML = renderMarkdownBlock(markdown);
 }
 
@@ -808,13 +1117,14 @@ function renderSelectedAgent() {
   elements.resultSummary.innerHTML = `
     <h3>${escapeHtml(result.agentTitle)}</h3>
     <div class="summary-grid">
-      <div class="summary-row"><span>Status</span><strong>${escapeHtml(result.status)}</strong></div>
-      <div class="summary-row"><span>Duration</span><strong>${escapeHtml(formatDuration(result.durationMs))}</strong></div>
-      <div class="summary-row"><span>Tokens</span><strong>${result.tokenUsage}</strong></div>
-      <div class="summary-row"><span>Cost</span><strong>${escapeHtml(formatCost(result))}</strong></div>
-      <div class="summary-row"><span>Changed Files</span><strong>${result.changedFiles.length}</strong></div>
-      <div class="summary-row"><span>Judge Types</span><strong>${escapeHtml(
-        Array.from(new Set(result.judgeResults.map((judge) => formatJudgeType(judge.type)))).join(", ") || "None"
+      <div class="summary-row"><span>${escapeHtml(state.language === "zh-CN" ? "状态" : "Status")}</span><strong>${escapeHtml(result.status)}</strong></div>
+      <div class="summary-row"><span>${escapeHtml(state.language === "zh-CN" ? "耗时" : "Duration")}</span><strong>${escapeHtml(formatDuration(result.durationMs))}</strong></div>
+      <div class="summary-row"><span>${escapeHtml(t("metrics.tokens"))}</span><strong>${result.tokenUsage}</strong></div>
+      <div class="summary-row"><span>${escapeHtml(state.language === "zh-CN" ? "成本" : "Cost")}</span><strong>${escapeHtml(formatCost(result))}</strong></div>
+      <div class="summary-row"><span>${escapeHtml(state.language === "zh-CN" ? "改动文件" : "Changed Files")}</span><strong>${result.changedFiles.length}</strong></div>
+      <div class="summary-row"><span>${escapeHtml(state.language === "zh-CN" ? "Judge 类型" : "Judge Types")}</span><strong>${escapeHtml(
+        Array.from(new Set(result.judgeResults.map((judge) => formatJudgeType(judge.type)))).join(", ") ||
+          (state.language === "zh-CN" ? "无" : "None")
       )}</strong></div>
       <div class="summary-row"><span>Trace</span><code>${escapeHtml(result.tracePath)}</code></div>
       <div class="summary-row"><span>Workspace</span><code>${escapeHtml(result.workspacePath)}</code></div>
@@ -823,15 +1133,15 @@ function renderSelectedAgent() {
   `;
 
   elements.resultDetails.innerHTML = [
-    renderStepCards("Setup", result.setupResults),
+    renderStepCards(state.language === "zh-CN" ? "准备步骤" : "Setup", result.setupResults),
     renderJudgeCards(result),
-    renderStepCards("Teardown", result.teardownResults),
+    renderStepCards(state.language === "zh-CN" ? "收尾步骤" : "Teardown", result.teardownResults),
     `
       <section class="detail-card">
-        <h3>Changed Files</h3>
+        <h3>${escapeHtml(state.language === "zh-CN" ? "改动文件" : "Changed Files")}</h3>
         ${
           result.changedFiles.length === 0
-            ? `<p class="empty-state">No diff detected.</p>`
+            ? `<p class="empty-state">${escapeHtml(state.language === "zh-CN" ? "没有检测到 diff。" : "No diff detected.")}</p>`
             : `<ul>${result.changedFiles.map((file) => `<li>${escapeHtml(file)}</li>`).join("")}</ul>`
         }
       </section>
@@ -859,9 +1169,11 @@ function renderDashboard(run) {
   populateJudgeFilters(run);
   renderSelectedAgent();
   renderMarkdownPanel();
+  renderNextSteps();
 }
 
 function render() {
+  renderStaticText();
   renderRunList();
 
   if (!state.run) {
@@ -870,12 +1182,13 @@ function render() {
     setHidden(elements.dashboard, true);
     elements.agentCount.textContent = "0";
     elements.agentList.className = "agent-list empty-state";
-    elements.agentList.textContent = "No report loaded.";
+    elements.agentList.textContent = t("noReportLoaded");
     elements.runVerdicts.innerHTML = "";
     elements.runCompareTable.innerHTML = "";
     elements.runDiffTable.innerHTML = "";
-    elements.agentTrendTitle.textContent = "Agent Trend";
+    elements.agentTrendTitle.textContent = t("agentTrendTitle");
     elements.agentTrendTable.innerHTML = "";
+    renderNextSteps();
     renderMarkdownPanel();
     return;
   }
@@ -894,6 +1207,10 @@ async function handleFileSelection(event) {
   }
 
   const run = await readRunFromFile(file);
+  state.notice =
+    state.language === "zh-CN"
+      ? "已加载单个 summary.json。现在可以直接查看结果，或者继续加载 summary.md。"
+      : "Loaded one summary.json file. You can inspect the run now or optionally load summary.md.";
   applySingleRun(run);
 }
 
@@ -904,15 +1221,22 @@ async function handleMarkdownSelection(event) {
   }
 
   state.standaloneMarkdown = await file.text();
+  state.notice =
+    state.language === "zh-CN"
+      ? "Markdown 已加载。如果当前也有 run，分享摘要会自动出现。"
+      : "Markdown loaded. If a run is also loaded, the share summary will appear automatically.";
+  renderNextSteps();
   renderMarkdownPanel();
 }
 
 async function copyToClipboard(value, label) {
   try {
     await navigator.clipboard.writeText(value);
-    elements.clipboardStatus.textContent = `${label} copied.`;
+    elements.clipboardStatus.textContent =
+      state.language === "zh-CN" ? `${label} 已复制。` : `${label} copied.`;
   } catch (error) {
-    elements.clipboardStatus.textContent = `Failed to copy ${label.toLowerCase()}.`;
+    elements.clipboardStatus.textContent =
+      state.language === "zh-CN" ? `${label} 复制失败。` : `Failed to copy ${label.toLowerCase()}.`;
     console.error(error);
   }
 }
@@ -940,6 +1264,11 @@ async function handleFolderSelection(event) {
   const files = Array.from(event.target.files ?? []);
   const summaryFiles = files.filter((file) => file.name.toLowerCase() === "summary.json");
   if (summaryFiles.length === 0) {
+    state.notice =
+      state.language === "zh-CN"
+        ? "选中的目录里没有 summary.json。请改选一个 RepoArena 结果目录。"
+        : "No summary.json file was found in the selected folder. Choose a RepoArena results folder.";
+    renderNextSteps();
     return;
   }
 
@@ -959,12 +1288,25 @@ async function handleFolderSelection(event) {
     }
   }
 
+  state.notice =
+    state.language === "zh-CN"
+      ? `已从目录中识别到 ${runs.length} 个 run。`
+      : `Loaded ${runs.length} run(s) from the selected folder.`;
   applyRuns(runs, markdownByRunId);
 }
 
 elements.fileInput.addEventListener("change", handleFileSelection);
 elements.markdownInput.addEventListener("change", handleMarkdownSelection);
 elements.folderInput.addEventListener("change", handleFolderSelection);
+elements.languageSelect.addEventListener("change", (event) => {
+  state.language = String(event.target.value ?? "en");
+  try {
+    localStorage.setItem("repoarena.webReport.language", state.language);
+  } catch {
+    // ignore localStorage failures
+  }
+  render();
+});
 
 elements.runList.addEventListener("click", (event) => {
   const button = event.target.closest("[data-run-id]");
@@ -1120,5 +1462,14 @@ elements.downloadShareSvg.addEventListener("click", () => {
   }
 
   downloadTextFile(`repoarena-${state.run.runId}.svg`, buildShareCardSvg(state.run), "image/svg+xml");
-  elements.clipboardStatus.textContent = "Share SVG downloaded.";
+  elements.clipboardStatus.textContent =
+    state.language === "zh-CN" ? "分享 SVG 已下载。" : "Share SVG downloaded.";
 });
+
+try {
+  state.language = localStorage.getItem("repoarena.webReport.language") || "zh-CN";
+} catch {
+  state.language = "zh-CN";
+}
+
+render();
