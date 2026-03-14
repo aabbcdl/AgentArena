@@ -64,6 +64,12 @@ Update snapshot fixtures during a benchmark run:
 node packages/cli/dist/index.js run --repo . --task examples/taskpacks/demo-repo-health.yaml --agents demo-fast --update-snapshots
 ```
 
+Return a machine-readable run summary:
+
+```bash
+node packages/cli/dist/index.js run --repo . --task examples/taskpacks/demo-repo-health.yaml --agents demo-fast --json
+```
+
 Generate a starter YAML task pack:
 
 ```bash

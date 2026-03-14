@@ -227,3 +227,53 @@ test("repoarena init-taskpack writes a starter YAML file", async () => {
 
   await rm(tempDir, { recursive: true, force: true });
 });
+
+test("repoarena run supports JSON output", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-cli-"));
+  const repoPath = path.join(tempDir, "repo");
+  const outputPath = path.join(tempDir, "output-json");
+  const taskPath = path.join(tempDir, "task-json.json");
+
+  await mkdir(repoPath, { recursive: true });
+  await writeFile(path.join(repoPath, "README.md"), "# Temp Repo\n", "utf8");
+
+  await writeJson(taskPath, {
+    schemaVersion: "repoarena.taskpack/v1",
+    id: "cli-json",
+    title: "CLI JSON",
+    prompt: "Return JSON output",
+    judges: [
+      {
+        id: "pass",
+        type: "command",
+        label: "Always pass",
+        command: "node -e \"process.exit(0)\""
+      }
+    ]
+  });
+
+  const result = await runCli(
+    [
+      "run",
+      "--repo",
+      repoPath,
+      "--task",
+      taskPath,
+      "--agents",
+      "demo-fast",
+      "--output",
+      outputPath,
+      "--json"
+    ],
+    path.resolve(".")
+  );
+
+  assert.equal(result.code, 0);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.task.id, "cli-json");
+  assert.equal(payload.results[0].agentId, "demo-fast");
+  assert.equal(payload.results[0].judges.passed, 1);
+  assert.match(payload.report.jsonPath, /summary\.json$/);
+
+  await rm(tempDir, { recursive: true, force: true });
+});

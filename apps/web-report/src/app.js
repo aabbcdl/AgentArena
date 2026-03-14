@@ -22,6 +22,9 @@ const elements = {
   taskMeta: document.querySelector("#task-meta"),
   metrics: document.querySelector("#metrics"),
   preflights: document.querySelector("#preflights"),
+  compareStatusFilter: document.querySelector("#compare-status-filter"),
+  compareSort: document.querySelector("#compare-sort"),
+  compareTable: document.querySelector("#compare-table"),
   resultSummary: document.querySelector("#result-summary"),
   resultDetails: document.querySelector("#result-details"),
   judgeSearch: document.querySelector("#judge-search"),
@@ -38,6 +41,11 @@ const judgeFilters = {
   search: "",
   type: "all",
   status: "all"
+};
+
+const compareFilters = {
+  status: "all",
+  sort: "status"
 };
 
 function escapeHtml(value) {
@@ -237,6 +245,105 @@ function renderAgentList(run) {
       `;
     })
     .join("");
+}
+
+function compareStatusRank(status) {
+  switch (status) {
+    case "success":
+      return 0;
+    case "failed":
+      return 1;
+    case "skipped":
+      return 2;
+    default:
+      return 3;
+  }
+}
+
+function compareJudgeRatio(result) {
+  if (result.judgeResults.length === 0) {
+    return 0;
+  }
+
+  return result.judgeResults.filter((judge) => judge.success).length / result.judgeResults.length;
+}
+
+function getCompareResults(run) {
+  const filteredResults = run.results.filter((result) => {
+    return compareFilters.status === "all" || result.status === compareFilters.status;
+  });
+
+  const sortedResults = [...filteredResults].sort((left, right) => {
+    switch (compareFilters.sort) {
+      case "duration":
+        return left.durationMs - right.durationMs;
+      case "tokens":
+        return right.tokenUsage - left.tokenUsage;
+      case "cost":
+        return (left.costKnown ? left.estimatedCostUsd : Number.POSITIVE_INFINITY) -
+          (right.costKnown ? right.estimatedCostUsd : Number.POSITIVE_INFINITY);
+      case "changed":
+        return right.changedFiles.length - left.changedFiles.length;
+      case "judges":
+        return compareJudgeRatio(right) - compareJudgeRatio(left);
+      case "status":
+      default: {
+        const statusDelta = compareStatusRank(left.status) - compareStatusRank(right.status);
+        if (statusDelta !== 0) {
+          return statusDelta;
+        }
+
+        return left.durationMs - right.durationMs;
+      }
+    }
+  });
+
+  return sortedResults;
+}
+
+function renderCompareTable(run) {
+  const results = getCompareResults(run);
+
+  if (results.length === 0) {
+    elements.compareTable.innerHTML = `<p class="empty-state">No agents match the current compare filters.</p>`;
+    return;
+  }
+
+  elements.compareTable.innerHTML = `
+    <table class="compare-table">
+      <thead>
+        <tr>
+          <th>Agent</th>
+          <th>Status</th>
+          <th>Duration</th>
+          <th>Tokens</th>
+          <th>Cost</th>
+          <th>Changed</th>
+          <th>Judges</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${results
+          .map((result) => {
+            const passedJudges = result.judgeResults.filter((judge) => judge.success).length;
+            const isActive = result.agentId === state.selectedAgentId ? "active" : "";
+
+            return `
+              <tr class="${isActive}" data-compare-agent-id="${escapeHtml(result.agentId)}">
+                <td><strong>${escapeHtml(result.agentTitle)}</strong><br /><code>${escapeHtml(result.agentId)}</code></td>
+                <td><span class="status-badge ${statusClass(result.status)}">${escapeHtml(result.status)}</span></td>
+                <td>${escapeHtml(formatDuration(result.durationMs))}</td>
+                <td>${result.tokenUsage}</td>
+                <td>${escapeHtml(formatCost(result))}</td>
+                <td>${result.changedFiles.length}</td>
+                <td>${passedJudges}/${result.judgeResults.length}</td>
+              </tr>
+            `;
+          })
+          .join("")}
+      </tbody>
+    </table>
+  `;
 }
 
 function renderStepCards(title, steps) {
@@ -493,6 +600,7 @@ function renderDashboard(run) {
   renderMetrics(run);
   renderPreflights(run);
   renderAgentList(run);
+  renderCompareTable(run);
   populateJudgeFilters(run);
   renderSelectedAgent();
   renderMarkdownPanel();
@@ -595,6 +703,19 @@ elements.agentList.addEventListener("click", (event) => {
 
   state.selectedAgentId = button.getAttribute("data-agent-id");
   renderAgentList(state.run);
+  renderCompareTable(state.run);
+  renderSelectedAgent();
+});
+
+elements.compareTable.addEventListener("click", (event) => {
+  const row = event.target.closest("[data-compare-agent-id]");
+  if (!row || !state.run) {
+    return;
+  }
+
+  state.selectedAgentId = row.getAttribute("data-compare-agent-id");
+  renderAgentList(state.run);
+  renderCompareTable(state.run);
   renderSelectedAgent();
 });
 
@@ -623,4 +744,18 @@ elements.judgeTypeFilter.addEventListener("change", (event) => {
 elements.judgeStatusFilter.addEventListener("change", (event) => {
   judgeFilters.status = String(event.target.value ?? "all");
   renderSelectedAgent();
+});
+
+elements.compareStatusFilter.addEventListener("change", (event) => {
+  compareFilters.status = String(event.target.value ?? "all");
+  if (state.run) {
+    renderCompareTable(state.run);
+  }
+});
+
+elements.compareSort.addEventListener("change", (event) => {
+  compareFilters.sort = String(event.target.value ?? "status");
+  if (state.run) {
+    renderCompareTable(state.run);
+  }
 });

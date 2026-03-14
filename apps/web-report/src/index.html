@@ -74,6 +74,29 @@
           <section id="metrics" class="metrics"></section>
           <section id="preflights" class="preflights"></section>
 
+          <section class="detail-card">
+            <div class="panel-header">
+              <h3>Agent Compare</h3>
+            </div>
+            <div class="filter-bar">
+              <select id="compare-status-filter">
+                <option value="all">All Statuses</option>
+                <option value="success">Success</option>
+                <option value="failed">Failed</option>
+                <option value="skipped">Skipped</option>
+              </select>
+              <select id="compare-sort">
+                <option value="status">Status</option>
+                <option value="duration">Duration (fastest first)</option>
+                <option value="tokens">Tokens (high to low)</option>
+                <option value="cost">Cost (low to high)</option>
+                <option value="changed">Changed Files (high to low)</option>
+                <option value="judges">Judge Pass Rate (high to low)</option>
+              </select>
+            </div>
+            <div id="compare-table" class="compare-table-wrap"></div>
+          </section>
+
           <section class="result-layout">
             <div id="result-summary" class="card result-summary"></div>
             <div id="result-details" class="result-details"></div>

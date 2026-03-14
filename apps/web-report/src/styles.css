@@ -250,6 +250,46 @@ input {
   padding: 10px 12px;
 }
 
+.compare-table-wrap {
+  overflow-x: auto;
+}
+
+.compare-table {
+  width: 100%;
+  min-width: 720px;
+  border-collapse: collapse;
+}
+
+.compare-table th,
+.compare-table td {
+  padding: 12px 10px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+
+.compare-table th {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.compare-table tbody tr {
+  cursor: pointer;
+}
+
+.compare-table tbody tr:hover {
+  background: var(--accent-soft);
+}
+
+.compare-table tbody tr.active {
+  background: rgba(159, 69, 37, 0.16);
+}
+
+.compare-table code {
+  font-size: 0.86rem;
+}
+
 .metric {
   padding: 18px;
 }

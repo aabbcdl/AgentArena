@@ -2,7 +2,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { listAvailableAdapters, preflightAdapters } from "@repoarena/adapters";
-import { formatDuration } from "@repoarena/core";
+import { BenchmarkRun, formatDuration } from "@repoarena/core";
 import { writeReport } from "@repoarena/report";
 import { runBenchmark } from "@repoarena/runner";
 
@@ -81,7 +81,7 @@ function printHelp(): void {
   console.log(`RepoArena CLI
 
 Usage:
-  repoarena run --repo <path> --task <task.json> --agents <comma,separated> [--probe-auth] [--update-snapshots] [--max-concurrency <n>]
+  repoarena run --repo <path> --task <task.json> --agents <comma,separated> [--probe-auth] [--update-snapshots] [--max-concurrency <n>] [--json]
   repoarena doctor [--agents <comma,separated>] [--probe-auth] [--strict] [--json]
   repoarena list-adapters [--json]
   repoarena init-taskpack [--template <name>] [--output <path>] [--force]
@@ -90,6 +90,7 @@ Examples:
   repoarena run --repo . --task examples/taskpacks/demo-repo-health.json --agents demo-fast,demo-thorough
   repoarena run --repo . --task examples/taskpacks/demo-repo-health.json --agents codex,claude-code --probe-auth
   repoarena run --repo . --task examples/taskpacks/demo-repo-health.yaml --agents demo-fast --update-snapshots
+  repoarena run --repo . --task examples/taskpacks/demo-repo-health.yaml --agents demo-fast --json
   repoarena doctor --agents codex,claude-code,cursor --probe-auth
   repoarena doctor --agents codex,claude-code,cursor --probe-auth --strict
   repoarena doctor --agents codex,demo-fast --json
@@ -277,36 +278,78 @@ async function runBenchmarkCommand(parsed: ParsedArgs): Promise<void> {
 
   const report = await writeReport(benchmark);
 
-  console.log(`\nRepoArena run complete: ${benchmark.runId}`);
-  for (const preflight of benchmark.preflights) {
-    console.log(
-      [`preflight ${preflight.agentId}`, `status=${preflight.status}`, `summary=${preflight.summary}`].join(
-        " | "
-      )
-    );
-  }
+  if (parsed.json) {
+    console.log(JSON.stringify(buildBenchmarkOutputSummary(benchmark, report), null, 2));
+  } else {
+    console.log(`\nRepoArena run complete: ${benchmark.runId}`);
+    for (const preflight of benchmark.preflights) {
+      console.log(
+        [`preflight ${preflight.agentId}`, `status=${preflight.status}`, `summary=${preflight.summary}`].join(
+          " | "
+        )
+      );
+    }
 
-  console.log("");
-  for (const result of benchmark.results) {
-    console.log(
-      [
-        `- ${result.agentId}`,
-        `status=${result.status}`,
-        `duration=${formatDuration(result.durationMs)}`,
-        `tokens=${result.tokenUsage}`,
-        `cost=${result.costKnown ? `$${result.estimatedCostUsd.toFixed(2)}` : "n/a"}`,
-        `changed=${result.changedFiles.length}`
-      ].join(" | ")
-    );
-  }
+    console.log("");
+    for (const result of benchmark.results) {
+      console.log(
+        [
+          `- ${result.agentId}`,
+          `status=${result.status}`,
+          `duration=${formatDuration(result.durationMs)}`,
+          `tokens=${result.tokenUsage}`,
+          `cost=${result.costKnown ? `$${result.estimatedCostUsd.toFixed(2)}` : "n/a"}`,
+          `changed=${result.changedFiles.length}`
+        ].join(" | ")
+      );
+    }
 
-  console.log(`\nJSON summary: ${report.jsonPath}`);
-  console.log(`Markdown:      ${report.markdownPath}`);
-  console.log(`HTML report:  ${report.htmlPath}`);
+    console.log(`\nJSON summary: ${report.jsonPath}`);
+    console.log(`Markdown:      ${report.markdownPath}`);
+    console.log(`HTML report:  ${report.htmlPath}`);
+  }
 
   if (benchmark.results.some((result) => result.status !== "success")) {
     process.exitCode = 1;
   }
+}
+
+function buildBenchmarkOutputSummary(
+  benchmark: BenchmarkRun,
+  report: { jsonPath: string; markdownPath: string; htmlPath: string }
+) {
+  return {
+    runId: benchmark.runId,
+    createdAt: benchmark.createdAt,
+    repoPath: benchmark.repoPath,
+    outputPath: benchmark.outputPath,
+    task: {
+      id: benchmark.task.id,
+      title: benchmark.task.title,
+      schemaVersion: benchmark.task.schemaVersion
+    },
+    preflights: benchmark.preflights,
+    results: benchmark.results.map((result) => ({
+      agentId: result.agentId,
+      agentTitle: result.agentTitle,
+      adapterKind: result.adapterKind,
+      status: result.status,
+      summary: result.summary,
+      durationMs: result.durationMs,
+      tokenUsage: result.tokenUsage,
+      estimatedCostUsd: result.estimatedCostUsd,
+      costKnown: result.costKnown,
+      changedFiles: result.changedFiles,
+      changedFilesCount: result.changedFiles.length,
+      tracePath: result.tracePath,
+      workspacePath: result.workspacePath,
+      judges: {
+        passed: result.judgeResults.filter((judge) => judge.success).length,
+        total: result.judgeResults.length
+      }
+    })),
+    report
+  };
 }
 
 async function main(): Promise<void> {
