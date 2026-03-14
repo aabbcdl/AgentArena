@@ -18,6 +18,34 @@ export interface CommandJudge extends CommandExecutionSpec {
   type: "command";
 }
 
+export interface FileExistsJudge {
+  id: string;
+  label: string;
+  type: "file-exists";
+  path: string;
+}
+
+export interface FileContainsJudge {
+  id: string;
+  label: string;
+  type: "file-contains";
+  path: string;
+  pattern: string;
+  regex?: boolean;
+  flags?: string;
+}
+
+export interface JsonValueJudge {
+  id: string;
+  label: string;
+  type: "json-value";
+  path: string;
+  pointer: string;
+  expected: unknown;
+}
+
+export type TaskJudge = CommandJudge | FileExistsJudge | FileContainsJudge | JsonValueJudge;
+
 export interface TaskPack {
   schemaVersion: typeof TASK_PACK_SCHEMA_V1;
   id: string;
@@ -26,7 +54,7 @@ export interface TaskPack {
   prompt: string;
   envAllowList: string[];
   setupCommands: CommandExecutionSpec[];
-  judges: CommandJudge[];
+  judges: TaskJudge[];
   teardownCommands: CommandExecutionSpec[];
 }
 
@@ -83,14 +111,16 @@ export interface AgentAdapter {
 export interface JudgeResult {
   judgeId: string;
   label: string;
-  type: "command";
-  command: string;
+  type: TaskJudge["type"];
+  command?: string;
+  target?: string;
+  expectation?: string;
   exitCode: number | null;
   success: boolean;
   stdout: string;
   stderr: string;
   durationMs: number;
-  cwd: string;
+  cwd?: string;
 }
 
 export interface CommandStepResult {

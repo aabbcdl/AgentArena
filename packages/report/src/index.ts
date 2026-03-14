@@ -71,7 +71,9 @@ function sanitizeRun(run: BenchmarkRun): BenchmarkRun {
       })),
       judgeResults: result.judgeResults.map((judge) => ({
         ...judge,
-        cwd: sanitizeWorkspaceScopedPath(judge.cwd, result.workspacePath, result.agentId)
+        cwd: judge.cwd
+          ? sanitizeWorkspaceScopedPath(judge.cwd, result.workspacePath, result.agentId)
+          : undefined
       })),
       teardownResults: result.teardownResults.map((step) => ({
         ...step,
@@ -119,6 +121,45 @@ function renderCommandStepList(
           .join("");
 
   return `<h3>${escapeHtml(title)}</h3><ul>${items}</ul>`;
+}
+
+function renderJudgeList(run: BenchmarkRun["results"][number]): string {
+  const items =
+    run.judgeResults.length === 0
+      ? "<li>No judges executed.</li>"
+      : run.judgeResults
+          .map((judge) => {
+            const meta = [
+              `type=${judge.type}`,
+              judge.target ? `target=${judge.target}` : "",
+              judge.expectation ? `expect=${judge.expectation}` : "",
+              judge.cwd ? `cwd=${judge.cwd}` : "",
+              judge.command ? `command=${judge.command}` : ""
+            ]
+              .filter(Boolean)
+              .join(" | ");
+
+            return `<li><strong>${escapeHtml(judge.label)}</strong>: ${
+              judge.success ? "pass" : "fail"
+            } (${escapeHtml(formatDuration(judge.durationMs))})${
+              meta ? `<p class="meta">${escapeHtml(meta)}</p>` : ""
+            }${
+              judge.stdout || judge.stderr
+                ? `<details><summary>Debug output</summary>${
+                    judge.stdout
+                      ? `<p class="meta"><strong>stdout</strong></p><pre>${escapeHtml(judge.stdout)}</pre>`
+                      : ""
+                  }${
+                    judge.stderr
+                      ? `<p class="meta"><strong>stderr</strong></p><pre>${escapeHtml(judge.stderr)}</pre>`
+                      : ""
+                  }</details>`
+                : ""
+            }</li>`;
+          })
+          .join("");
+
+  return `<h3>Judges</h3><ul>${items}</ul>`;
 }
 
 function renderPreflights(run: BenchmarkRun): string {
@@ -177,7 +218,7 @@ function renderAgentCards(run: BenchmarkRun): string {
             }</span></div>
           </div>
           ${renderCommandStepList("Setup", result.setupResults)}
-          ${renderCommandStepList("Judges", result.judgeResults)}
+          ${renderJudgeList(result)}
           ${renderCommandStepList("Teardown", result.teardownResults)}
           <h3>Changed Files</h3>
           <ul>${
@@ -393,10 +434,12 @@ function renderMarkdown(run: BenchmarkRun): string {
     }
 
     if (result.judgeResults.length > 0) {
-      lines.push("- Judges:");
+        lines.push("- Judges:");
       for (const judge of result.judgeResults) {
         lines.push(
-          `  - ${judge.label}: ${judge.success ? "pass" : "fail"} (${formatDuration(judge.durationMs)})`
+          `  - ${judge.label}: ${judge.success ? "pass" : "fail"} (${formatDuration(judge.durationMs)})${
+            judge.target ? ` target=${judge.target}` : ""
+          }${judge.expectation ? ` expect=${judge.expectation}` : ""}`
         );
       }
     }

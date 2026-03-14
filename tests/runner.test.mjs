@@ -210,3 +210,74 @@ test("runBenchmark executes setup and teardown commands in declaration order", a
 
   await rm(tempDir, { recursive: true, force: true });
 });
+
+test("runBenchmark supports built-in file and json judges", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-runner-"));
+  const repoPath = path.join(tempDir, "repo");
+  const outputPath = path.join(tempDir, "output");
+  const taskPath = path.join(tempDir, "task.json");
+
+  await mkdir(repoPath, { recursive: true });
+
+  await writeFile(path.join(repoPath, "README.md"), "# Temp Repo\n", "utf8");
+  await writeJson(path.join(repoPath, "package.json"), { name: "temp-repo", version: "0.0.0" });
+
+  await writeJson(taskPath, {
+    schemaVersion: "repoarena.taskpack/v1",
+    id: "builtin-judges",
+    title: "Built-in Judges",
+    prompt: "Run file and JSON assertions.",
+    setupCommands: [
+      {
+        label: "Prepare fixture files",
+        command:
+          "node -e \"const fs=require('node:fs');fs.mkdirSync('fixtures',{recursive:true});fs.writeFileSync('fixtures/note.txt','hello repoarena');fs.writeFileSync('fixtures/config.json',JSON.stringify({enabled:true,name:'repoarena'}));\""
+      }
+    ],
+    judges: [
+      {
+        id: "note-exists",
+        type: "file-exists",
+        label: "Fixture note exists",
+        path: "fixtures/note.txt"
+      },
+      {
+        id: "note-contains",
+        type: "file-contains",
+        label: "Fixture note mentions repoarena",
+        path: "fixtures/note.txt",
+        pattern: "repoarena"
+      },
+      {
+        id: "config-enabled",
+        type: "json-value",
+        label: "Fixture config is enabled",
+        path: "fixtures/config.json",
+        pointer: "/enabled",
+        expected: true
+      }
+    ],
+    teardownCommands: [
+      {
+        label: "Cleanup fixtures",
+        command: "node -e \"require('node:fs').rmSync('fixtures',{recursive:true,force:true})\""
+      }
+    ]
+  });
+
+  const benchmark = await runBenchmark({
+    repoPath,
+    taskPath,
+    agentIds: ["demo-fast"],
+    outputPath
+  });
+
+  assert.equal(benchmark.results[0].status, "success");
+  assert.deepEqual(
+    benchmark.results[0].judgeResults.map((judge) => judge.type),
+    ["file-exists", "file-contains", "json-value"]
+  );
+  assert.equal(benchmark.results[0].judgeResults.every((judge) => judge.success), true);
+
+  await rm(tempDir, { recursive: true, force: true });
+});

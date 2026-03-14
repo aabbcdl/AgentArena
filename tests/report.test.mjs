@@ -60,11 +60,12 @@ test("writeReport sanitizes shareable output paths", async () => {
           {
             judgeId: "lint",
             label: "Lint",
-            type: "command",
-            command: "npm run lint",
+            type: "file-contains",
+            target: "README.md",
+            expectation: "RepoArena",
             exitCode: 0,
             success: true,
-            stdout: "",
+            stdout: "Matched content in README.md.",
             stderr: "",
             durationMs: 100,
             cwd: "C:\\temp\\workspace\\demo-fast"
@@ -92,8 +93,10 @@ test("writeReport sanitizes shareable output paths", async () => {
   assert.equal(summary.results[0].tracePath, "run/agents/demo-fast/trace.jsonl");
   assert.equal(summary.results[0].workspacePath, "workspace/demo-fast");
   assert.equal(summary.results[0].judgeResults[0].cwd, "workspace/demo-fast");
+  assert.equal(summary.results[0].judgeResults[0].target, "README.md");
   assert.match(markdown, /# RepoArena Summary/);
   assert.match(markdown, /`run\/agents\/demo-fast\/trace\.jsonl`/);
+  assert.match(markdown, /target=README\.md/);
   assert.doesNotMatch(markdown, /C:\\temp\\workspace/);
 
   await rm(tempDir, { recursive: true, force: true });

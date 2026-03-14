@@ -7,15 +7,30 @@
   "judges": [
     {
       "id": "readme-exists",
-      "type": "command",
+      "type": "file-exists",
       "label": "Repository contains README",
-      "command": "node -e \"const fs = require('node:fs'); process.exit(fs.existsSync('README.md') ? 0 : 1)\""
+      "path": "README.md"
     },
     {
       "id": "package-manifest-exists",
-      "type": "command",
+      "type": "file-exists",
       "label": "Repository contains package manifest",
-      "command": "node -e \"const fs = require('node:fs'); process.exit(fs.existsSync('package.json') ? 0 : 1)\""
+      "path": "package.json"
+    },
+    {
+      "id": "readme-mentions-brand",
+      "type": "file-contains",
+      "label": "README mentions RepoArena",
+      "path": "README.md",
+      "pattern": "RepoArena"
+    },
+    {
+      "id": "package-name",
+      "type": "json-value",
+      "label": "Package name matches repository brand",
+      "path": "package.json",
+      "pointer": "/name",
+      "expected": "repoarena"
     }
   ]
 }

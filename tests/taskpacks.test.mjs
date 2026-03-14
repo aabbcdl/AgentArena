@@ -26,6 +26,20 @@ test("loadTaskPack parses schema v1 judges", async () => {
             command: "npm run lint",
             cwd: "app",
             timeoutMs: 15000
+          },
+          {
+            id: "readme-exists",
+            type: "file-exists",
+            label: "README exists",
+            path: "README.md"
+          },
+          {
+            id: "package-name",
+            type: "json-value",
+            label: "Package name is repoarena",
+            path: "package.json",
+            pointer: "/name",
+            expected: "repoarena"
           }
         ]
       },
@@ -42,6 +56,11 @@ test("loadTaskPack parses schema v1 judges", async () => {
   assert.equal(taskPack.judges[0].id, "lint");
   assert.equal(taskPack.judges[0].cwd, "app");
   assert.equal(taskPack.judges[0].timeoutMs, 15000);
+  assert.equal(taskPack.judges[1].type, "file-exists");
+  assert.equal(taskPack.judges[1].path, "README.md");
+  assert.equal(taskPack.judges[2].type, "json-value");
+  assert.equal(taskPack.judges[2].pointer, "/name");
+  assert.equal(taskPack.judges[2].expected, "repoarena");
   assert.deepEqual(taskPack.setupCommands, []);
   assert.deepEqual(taskPack.teardownCommands, []);
 
@@ -190,6 +209,47 @@ test("loadTaskPack parses step-level env allowlists and overrides", async () => 
   assert.deepEqual(taskPack.judges[0].env, { REPOARENA_INLINE_JUDGE: "enabled" });
   assert.deepEqual(taskPack.teardownCommands[0].envAllowList, ["REPOARENA_TEARDOWN_TOKEN"]);
   assert.deepEqual(taskPack.teardownCommands[0].env, { REPOARENA_INLINE_TEARDOWN: "enabled" });
+
+  await rm(tempDir, { recursive: true, force: true });
+});
+
+test("loadTaskPack parses file-contains judges with regex options", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-taskpack-"));
+  const taskPath = path.join(tempDir, "task.json");
+
+  await writeFile(
+    taskPath,
+    JSON.stringify(
+      {
+        schemaVersion: "repoarena.taskpack/v1",
+        id: "file-contains-demo",
+        title: "File Contains Demo",
+        prompt: "Check file content",
+        judges: [
+          {
+            id: "brand-check",
+            type: "file-contains",
+            label: "README contains brand",
+            path: "README.md",
+            pattern: "^# RepoArena$",
+            regex: true,
+            flags: "m"
+          }
+        ]
+      },
+      null,
+      2
+    ),
+    "utf8"
+  );
+
+  const taskPack = await loadTaskPack(taskPath);
+
+  assert.equal(taskPack.judges[0].type, "file-contains");
+  assert.equal(taskPack.judges[0].path, "README.md");
+  assert.equal(taskPack.judges[0].pattern, "^# RepoArena$");
+  assert.equal(taskPack.judges[0].regex, true);
+  assert.equal(taskPack.judges[0].flags, "m");
 
   await rm(tempDir, { recursive: true, force: true });
 });

@@ -6,7 +6,7 @@
 
 RepoArena lets you run Claude Code, Codex, Cursor, Devin, and open source agents against the same repository tasks, then compare success rate, duration, cost, diffs, and replay traces in one report.
 
-Task packs use a versioned schema. The current format is `repoarena.taskpack/v1`, with structured `judges` definitions for command-based evaluation.
+Task packs use a versioned schema. The current format is `repoarena.taskpack/v1`, with structured `judges` definitions for command, file, and JSON evaluation.
 
 ## What It Does
 
@@ -85,7 +85,13 @@ Each task pack defines:
 - a list of structured `judges`
 - optional `teardownCommands`
 
-Each command judge can define:
+Built-in judge types:
+- `command`
+- `file-exists`
+- `file-contains`
+- `json-value`
+
+Command judges can define:
 - `id`
 - `label`
 - `type: "command"`
@@ -94,6 +100,13 @@ Each command judge can define:
 - optional `timeoutMs`
 - optional step-level `envAllowList`
 - optional inline `env`
+
+File judges can define:
+- `type: "file-exists"` with `path`
+- `type: "file-contains"` with `path`, `pattern`, optional `regex`, optional `flags`
+
+JSON judges can define:
+- `type: "json-value"` with `path`, `pointer`, and `expected`
 
 Environment handling is allowlist-based. Task packs can expose specific host variables through `envAllowList`, and each setup/judge/teardown step can further extend that allowlist or inject inline `env` overrides. Agent execution still receives the task-level filtered environment.
 

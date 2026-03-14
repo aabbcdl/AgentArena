@@ -1,6 +1,15 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { CommandExecutionSpec, CommandJudge, TASK_PACK_SCHEMA_V1, TaskPack } from "@repoarena/core";
+import {
+  CommandExecutionSpec,
+  CommandJudge,
+  FileContainsJudge,
+  FileExistsJudge,
+  JsonValueJudge,
+  TASK_PACK_SCHEMA_V1,
+  TaskJudge,
+  TaskPack
+} from "@repoarena/core";
 
 function assertString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.trim().length === 0) {
@@ -25,6 +34,18 @@ function assertOptionalPositiveInteger(value: unknown, label: string): number | 
 
   if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
     throw new Error(`Task pack field "${label}" must be a positive integer when provided.`);
+  }
+
+  return value;
+}
+
+function assertOptionalBoolean(value: unknown, label: string): boolean | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (typeof value !== "boolean") {
+    throw new Error(`Task pack field "${label}" must be a boolean when provided.`);
   }
 
   return value;
@@ -63,24 +84,67 @@ function normalizeJudge(
   value: Record<string, unknown>,
   index: number,
   defaultIdPrefix: string
-): CommandJudge {
+): TaskJudge {
   const type = value.type === undefined ? "command" : value.type;
-  if (type !== "command") {
-    throw new Error(`Task pack judge at index ${index} has unsupported type "${String(type)}".`);
+  const id =
+    assertOptionalString(value.id, `judges[${index}].id`) ??
+    `${defaultIdPrefix}-${index + 1}`;
+  const label = assertString(value.label, `judges[${index}].label`);
+
+  if (type === "command") {
+    const judge: CommandJudge = {
+      id,
+      label,
+      type: "command",
+      command: assertString(value.command, `judges[${index}].command`),
+      cwd: assertOptionalString(value.cwd, `judges[${index}].cwd`),
+      timeoutMs: assertOptionalPositiveInteger(value.timeoutMs, `judges[${index}].timeoutMs`),
+      envAllowList: assertStringArray(value.envAllowList, `judges[${index}].envAllowList`),
+      env: assertStringRecord(value.env, `judges[${index}].env`)
+    };
+    return judge;
   }
 
-  return {
-    id:
-      assertOptionalString(value.id, `judges[${index}].id`) ??
-      `${defaultIdPrefix}-${index + 1}`,
-    label: assertString(value.label, `judges[${index}].label`),
-    type: "command",
-    command: assertString(value.command, `judges[${index}].command`),
-    cwd: assertOptionalString(value.cwd, `judges[${index}].cwd`),
-    timeoutMs: assertOptionalPositiveInteger(value.timeoutMs, `judges[${index}].timeoutMs`),
-    envAllowList: assertStringArray(value.envAllowList, `judges[${index}].envAllowList`),
-    env: assertStringRecord(value.env, `judges[${index}].env`)
-  };
+  if (type === "file-exists") {
+    const judge: FileExistsJudge = {
+      id,
+      label,
+      type: "file-exists",
+      path: assertString(value.path, `judges[${index}].path`)
+    };
+    return judge;
+  }
+
+  if (type === "file-contains") {
+    const judge: FileContainsJudge = {
+      id,
+      label,
+      type: "file-contains",
+      path: assertString(value.path, `judges[${index}].path`),
+      pattern: assertString(value.pattern, `judges[${index}].pattern`),
+      regex: assertOptionalBoolean(value.regex, `judges[${index}].regex`),
+      flags: assertOptionalString(value.flags, `judges[${index}].flags`)
+    };
+    return judge;
+  }
+
+  if (type === "json-value") {
+    if (!Object.prototype.hasOwnProperty.call(value, "expected")) {
+      throw new Error(`Task pack field "judges[${index}].expected" is required.`);
+    }
+
+    const judge: JsonValueJudge = {
+      id,
+      label,
+      type: "json-value",
+      path: assertString(value.path, `judges[${index}].path`),
+      pointer: assertString(value.pointer, `judges[${index}].pointer`),
+      expected: value.expected
+    };
+    return judge;
+  }
+
+  throw new Error(`Task pack judge at index ${index} has unsupported type "${String(type)}".`);
 }
 
 function normalizeCommandSpec(
