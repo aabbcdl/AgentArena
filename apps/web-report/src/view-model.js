@@ -15,6 +15,26 @@ export function summarizeRun(run) {
   };
 }
 
+function runtimeIdentity(result) {
+  return {
+    model: result.resolvedRuntime?.effectiveModel ?? result.requestedConfig?.model ?? "unknown",
+    reasoning:
+      result.resolvedRuntime?.effectiveReasoningEffort ??
+      result.requestedConfig?.reasoningEffort ??
+      "default",
+    source: result.resolvedRuntime?.source ?? "unknown",
+    verification: result.resolvedRuntime?.verification ?? "unknown"
+  };
+}
+
+function resultLabel(result) {
+  return result.displayLabel ?? result.agentTitle ?? result.variantId ?? result.agentId;
+}
+
+function baseAgentLabel(result) {
+  return result.baseAgentId ?? result.agentId;
+}
+
 export function judgePassRatio(result) {
   if (result.judgeResults.length === 0) {
     return 0;
@@ -152,11 +172,14 @@ export function buildShareCard(run) {
   ];
 
   if (verdict.bestAgent) {
-    lines.push(`Best agent: ${verdict.bestAgent.agentTitle} (${verdict.bestAgent.agentId})`);
+    const runtime = runtimeIdentity(verdict.bestAgent);
+    lines.push(
+      `Best variant: ${resultLabel(verdict.bestAgent)} (${baseAgentLabel(verdict.bestAgent)} | ${runtime.model} | ${runtime.reasoning})`
+    );
   }
 
   if (verdict.fastest) {
-    lines.push(`Fastest: ${verdict.fastest.agentTitle} (${verdict.fastest.durationMs}ms)`);
+    lines.push(`Fastest: ${resultLabel(verdict.fastest)} (${verdict.fastest.durationMs}ms)`);
   }
 
   return lines.join("\n");
@@ -166,10 +189,10 @@ export function buildShareCardSvg(run) {
   const summary = summarizeRun(run);
   const verdict = getRunVerdict(run);
   const bestAgent = verdict.bestAgent
-    ? `${verdict.bestAgent.agentTitle} (${verdict.bestAgent.agentId})`
+    ? `${resultLabel(verdict.bestAgent)} (${runtimeIdentity(verdict.bestAgent).model})`
     : "n/a";
   const fastest = verdict.fastest
-    ? `${verdict.fastest.agentTitle} (${verdict.fastest.durationMs}ms)`
+    ? `${resultLabel(verdict.fastest)} (${verdict.fastest.durationMs}ms)`
     : "n/a";
   const text = (value) =>
     String(value)
@@ -211,12 +234,13 @@ export function buildShareCardSvg(run) {
 
 export function buildPrTable(run) {
   const header = [
-    "| Agent | Status | Duration | Tokens | Cost | Judges | Files |",
-    "| --- | --- | --- | ---: | --- | --- | ---: |"
+    "| Variant | Base Agent | Model | Reasoning | Verification | Status | Duration | Tokens | Cost | Judges | Files |",
+    "| --- | --- | --- | --- | --- | --- | --- | ---: | --- | --- | ---: |"
   ];
   const rows = run.results.map((result) => {
+    const runtime = runtimeIdentity(result);
     const passedJudges = result.judgeResults.filter((judge) => judge.success).length;
-    return `| ${result.agentId} | ${result.status} | ${result.durationMs}ms | ${result.tokenUsage} | ${
+    return `| ${resultLabel(result)} | ${baseAgentLabel(result)} | ${runtime.model} | ${runtime.reasoning} | ${runtime.verification}/${runtime.source} | ${result.status} | ${result.durationMs}ms | ${result.tokenUsage} | ${
       result.costKnown ? `$${result.estimatedCostUsd.toFixed(2)}` : "n/a"
     } | ${passedJudges}/${result.judgeResults.length} | ${result.changedFiles.length} |`;
   });

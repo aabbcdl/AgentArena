@@ -4,8 +4,8 @@ import { exec } from "node:child_process";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { listAvailableAdapters, preflightAdapters } from "@repoarena/adapters";
-import { AdapterPreflightResult, BenchmarkRun, formatDuration } from "@repoarena/core";
+import { getCodexDefaultResolvedRuntime, listAvailableAdapters, preflightAdapters } from "@repoarena/adapters";
+import { AdapterPreflightResult, AgentSelection, BenchmarkRun, createAgentSelection, formatDuration } from "@repoarena/core";
 import { writeReport } from "@repoarena/report";
 import { runBenchmark } from "@repoarena/runner";
 import { loadTaskPack } from "@repoarena/taskpacks";
@@ -15,6 +15,8 @@ interface ParsedArgs {
   repoPath?: string;
   taskPath?: string;
   agentIds: string[];
+  codexModel?: string;
+  codexReasoning?: string;
   outputPath?: string;
   probeAuth: boolean;
   strict: boolean;
@@ -34,11 +36,33 @@ interface ParsedArgs {
 interface UiRunPayload {
   repoPath: string;
   taskPath: string;
-  agentIds: string[];
+  agents?: Array<{
+    baseAgentId: string;
+    variantId?: string;
+    displayLabel?: string;
+    config?: {
+      model?: string;
+      reasoningEffort?: string;
+    };
+    configSource?: "ui" | "cli";
+  }>;
+  agentIds?: string[];
   outputPath?: string;
   probeAuth?: boolean;
   updateSnapshots?: boolean;
   maxConcurrency?: number;
+}
+
+type UiRunPhase = "idle" | "starting" | "preflight" | "benchmark" | "report";
+
+interface UiRunStatus {
+  state: "idle" | "running";
+  phase: UiRunPhase;
+  startedAt?: string;
+  repoPath?: string;
+  taskPath?: string;
+  outputPath?: string;
+  updatedAt: string;
 }
 
 const CLI_PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -146,11 +170,51 @@ judges:
 `
 };
 
+function normalizeCliSelections(parsed: ParsedArgs): AgentSelection[] {
+  return parsed.agentIds.map((agentId) => {
+    const adapter = listAvailableAdapters().find((entry) => entry.id === agentId);
+    const config =
+      agentId === "codex"
+        ? {
+            model: parsed.codexModel?.trim() || undefined,
+            reasoningEffort: parsed.codexReasoning?.trim() || undefined
+          }
+        : {};
+
+    return createAgentSelection({
+      baseAgentId: agentId,
+      displayLabel: adapter?.title ?? agentId,
+      config,
+      configSource: agentId === "codex" && (config.model || config.reasoningEffort) ? "cli" : undefined
+    });
+  });
+}
+
+function normalizeUiSelections(payload: UiRunPayload): AgentSelection[] {
+  if (payload.agents && payload.agents.length > 0) {
+    return payload.agents.map((agent) =>
+      createAgentSelection({
+        baseAgentId: agent.baseAgentId,
+        displayLabel: agent.displayLabel,
+        config: agent.config,
+        configSource: agent.configSource ?? "ui"
+      })
+    );
+  }
+
+  return (payload.agentIds ?? []).map((agentId) =>
+    createAgentSelection({
+      baseAgentId: agentId,
+      displayLabel: listAvailableAdapters().find((entry) => entry.id === agentId)?.title ?? agentId
+    })
+  );
+}
+
 function printHelp(): void {
   console.log(`RepoArena CLI
 
 Usage:
-  repoarena run --repo <path> --task <task.json> --agents <comma,separated> [--probe-auth] [--update-snapshots] [--max-concurrency <n>] [--json]
+  repoarena run --repo <path> --task <task.json> --agents <comma,separated> [--codex-model <model>] [--codex-reasoning <value>] [--probe-auth] [--update-snapshots] [--max-concurrency <n>] [--json]
   repoarena doctor [--agents <comma,separated>] [--probe-auth] [--strict] [--json]
   repoarena list-adapters [--json]
   repoarena init-taskpack [--template <name>] [--output <path>] [--force]
@@ -160,6 +224,7 @@ Usage:
 Examples:
   repoarena run --repo . --task examples/taskpacks/demo-repo-health.json --agents demo-fast,demo-thorough
   repoarena run --repo . --task examples/taskpacks/demo-repo-health.json --agents codex,claude-code --probe-auth
+  repoarena run --repo . --task examples/taskpacks/demo-repo-health.yaml --agents codex --codex-model gpt-5.4 --codex-reasoning high
   repoarena run --repo . --task examples/taskpacks/demo-repo-health.yaml --agents demo-fast --update-snapshots
   repoarena run --repo . --task examples/taskpacks/demo-repo-health.yaml --agents demo-fast --json
   repoarena doctor --agents codex,claude-code,cursor --probe-auth
@@ -208,6 +273,12 @@ function parseArgs(argv: string[]): ParsedArgs {
         break;
       case "--output":
         parsed.outputPath = args.shift();
+        break;
+      case "--codex-model":
+        parsed.codexModel = args.shift();
+        break;
+      case "--codex-reasoning":
+        parsed.codexReasoning = args.shift();
         break;
       case "--probe-auth":
         parsed.probeAuth = true;
@@ -282,14 +353,19 @@ function formatCapabilitySummary(capability: AdapterPreflightResult["capability"
 }
 
 async function runDoctor(parsed: ParsedArgs): Promise<void> {
-  const agentIds =
+  const selections =
     parsed.agentIds.length > 0
-      ? parsed.agentIds
+      ? normalizeCliSelections(parsed)
       : listAvailableAdapters()
-          .map((adapter) => adapter.id)
-          .sort();
+          .map((adapter) =>
+            createAgentSelection({
+              baseAgentId: adapter.id,
+              displayLabel: adapter.title
+            })
+          )
+          .sort((left, right) => left.baseAgentId.localeCompare(right.baseAgentId));
 
-  const preflights = await preflightAdapters(agentIds, { probeAuth: parsed.probeAuth });
+  const preflights = await preflightAdapters(selections, { probeAuth: parsed.probeAuth });
   if (parsed.json) {
     console.log(JSON.stringify(preflights, null, 2));
   } else {
@@ -608,7 +684,18 @@ async function readRequestBody(request: http.IncomingMessage): Promise<string> {
 }
 
 async function listOfficialTaskPacks(): Promise<
-  Array<{ id: string; title: string; description?: string; path: string; source: string }>
+  Array<{
+    id: string;
+    title: string;
+    description?: string;
+    path: string;
+    source: string;
+    objective?: string;
+    judgeRationale?: string;
+    repoTypes: string[];
+    tags: string[];
+    prompt: string;
+  }>
 > {
   try {
     const entries = await fs.readdir(OFFICIAL_TASKPACK_ROOT, { withFileTypes: true });
@@ -625,7 +712,12 @@ async function listOfficialTaskPacks(): Promise<
           title: taskPack.title,
           description: taskPack.description,
           path: filePath,
-          source: taskPack.metadata?.source ?? "official"
+          source: taskPack.metadata?.source ?? "official",
+          objective: taskPack.metadata?.objective,
+          judgeRationale: taskPack.metadata?.judgeRationale,
+          repoTypes: taskPack.metadata?.repoTypes ?? [],
+          tags: taskPack.metadata?.tags ?? [],
+          prompt: taskPack.prompt
         };
       })
     );
@@ -674,6 +766,28 @@ async function runUi(parsed: ParsedArgs): Promise<void> {
   const host = parsed.host ?? "127.0.0.1";
   const port = parsed.port ?? DEFAULT_UI_PORT;
   let activeRun: Promise<unknown> | null = null;
+  const codexDefaults = await getCodexDefaultResolvedRuntime();
+  let activeRunStatus: UiRunStatus = {
+    state: "idle",
+    phase: "idle",
+    updatedAt: new Date().toISOString()
+  };
+
+  const setRunStatus = (status: Partial<UiRunStatus>): void => {
+    activeRunStatus = {
+      ...activeRunStatus,
+      ...status,
+      updatedAt: new Date().toISOString()
+    };
+  };
+
+  const resetRunStatus = (): void => {
+    activeRunStatus = {
+      state: "idle",
+      phase: "idle",
+      updatedAt: new Date().toISOString()
+    };
+  };
 
   const server = http.createServer(async (request, response) => {
     try {
@@ -688,6 +802,7 @@ async function runUi(parsed: ParsedArgs): Promise<void> {
               repoPath: process.cwd(),
               defaultTaskPath: path.join(OFFICIAL_TASKPACK_ROOT, "repo-health.yaml"),
               defaultOutputPath: path.join(process.cwd(), ".repoarena", "ui-runs"),
+              codexDefaults,
               host,
               port
             },
@@ -719,6 +834,13 @@ async function runUi(parsed: ParsedArgs): Promise<void> {
         return;
       }
 
+      if (request.method === "GET" && requestUrl.pathname === "/api/run-status") {
+        const payload = jsonResponse(activeRunStatus);
+        response.writeHead(payload.statusCode, payload.headers);
+        response.end(payload.body);
+        return;
+      }
+
       if (request.method === "POST" && requestUrl.pathname === "/api/run") {
         if (activeRun) {
           const payload = jsonResponse({ error: "A benchmark run is already in progress." }, 409);
@@ -729,9 +851,10 @@ async function runUi(parsed: ParsedArgs): Promise<void> {
 
         const rawBody = await readRequestBody(request);
         const payload = JSON.parse(rawBody) as UiRunPayload;
-        if (!payload.repoPath || !payload.taskPath || !Array.isArray(payload.agentIds) || payload.agentIds.length === 0) {
+        const selections = normalizeUiSelections(payload);
+        if (!payload.repoPath || !payload.taskPath || selections.length === 0) {
           const invalid = jsonResponse(
-            { error: "repoPath, taskPath, and at least one agentId are required." },
+            { error: "repoPath, taskPath, and at least one agent selection are required." },
             400
           );
           response.writeHead(invalid.statusCode, invalid.headers);
@@ -740,15 +863,32 @@ async function runUi(parsed: ParsedArgs): Promise<void> {
         }
 
         activeRun = (async () => {
+          setRunStatus({
+            state: "running",
+            phase: "starting",
+            startedAt: new Date().toISOString(),
+            repoPath: payload.repoPath,
+            taskPath: payload.taskPath,
+            outputPath: payload.outputPath
+          });
+          setRunStatus({ phase: "preflight" });
+          const progressTimer = setTimeout(() => {
+            if (activeRunStatus.state === "running" && activeRunStatus.phase === "preflight") {
+              setRunStatus({ phase: "benchmark" });
+            }
+          }, 1200);
           const benchmark = await runBenchmark({
             repoPath: payload.repoPath,
             taskPath: payload.taskPath,
-            agentIds: payload.agentIds,
+            agentIds: selections.map((selection) => selection.baseAgentId),
+            agents: selections,
             outputPath: payload.outputPath,
             probeAuth: payload.probeAuth,
             updateSnapshots: payload.updateSnapshots,
             maxConcurrency: payload.maxConcurrency
           });
+          clearTimeout(progressTimer);
+          setRunStatus({ phase: "report" });
           const report = await writeReport(benchmark);
           const run = JSON.parse(await fs.readFile(report.jsonPath, "utf8"));
           const markdown = await fs.readFile(report.markdownPath, "utf8");
@@ -766,6 +906,7 @@ async function runUi(parsed: ParsedArgs): Promise<void> {
           response.end(successPayload.body);
         } finally {
           activeRun = null;
+          resetRunStatus();
         }
 
         return;
@@ -839,10 +980,13 @@ async function runBenchmarkCommand(parsed: ParsedArgs): Promise<void> {
     throw new Error("Missing required arguments. Use --repo, --task, and --agents.");
   }
 
+  const selections = normalizeCliSelections(parsed);
+
   const benchmark = await runBenchmark({
     repoPath: parsed.repoPath,
     taskPath: parsed.taskPath,
-    agentIds: parsed.agentIds,
+    agentIds: selections.map((selection) => selection.baseAgentId),
+    agents: selections,
     outputPath: parsed.outputPath ? path.resolve(parsed.outputPath) : undefined,
     probeAuth: parsed.probeAuth,
     updateSnapshots: parsed.updateSnapshots,
@@ -857,9 +1001,14 @@ async function runBenchmarkCommand(parsed: ParsedArgs): Promise<void> {
     console.log(`\nRepoArena run complete: ${benchmark.runId}`);
     for (const preflight of benchmark.preflights) {
       console.log(
-        [`preflight ${preflight.agentId}`, `status=${preflight.status}`, `summary=${preflight.summary}`].join(
-          " | "
-        )
+        [
+          `preflight ${preflight.displayLabel}`,
+          `status=${preflight.status}`,
+          `model=${preflight.resolvedRuntime?.effectiveModel ?? "unknown"}`,
+          `reasoning=${preflight.resolvedRuntime?.effectiveReasoningEffort ?? "unknown"}`,
+          `verification=${preflight.resolvedRuntime?.verification ?? "unknown"}`,
+          `summary=${preflight.summary}`
+        ].join(" | ")
       );
     }
 
@@ -867,8 +1016,11 @@ async function runBenchmarkCommand(parsed: ParsedArgs): Promise<void> {
     for (const result of benchmark.results) {
       console.log(
         [
-          `- ${result.agentId}`,
+          `- ${result.displayLabel}`,
           `status=${result.status}`,
+          `model=${result.resolvedRuntime?.effectiveModel ?? "unknown"}`,
+          `reasoning=${result.resolvedRuntime?.effectiveReasoningEffort ?? "unknown"}`,
+          `verification=${result.resolvedRuntime?.verification ?? "unknown"}`,
           `duration=${formatDuration(result.durationMs)}`,
           `tokens=${result.tokenUsage}`,
           `cost=${result.costKnown ? `$${result.estimatedCostUsd.toFixed(2)}` : "n/a"}`,
@@ -911,6 +1063,11 @@ function buildBenchmarkOutputSummary(
     preflights: benchmark.preflights,
     results: benchmark.results.map((result) => ({
       agentId: result.agentId,
+      baseAgentId: result.baseAgentId,
+      variantId: result.variantId,
+      displayLabel: result.displayLabel,
+      requestedConfig: result.requestedConfig,
+      resolvedRuntime: result.resolvedRuntime,
       agentTitle: result.agentTitle,
       adapterKind: result.adapterKind,
       status: result.status,

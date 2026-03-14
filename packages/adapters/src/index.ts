@@ -7,6 +7,7 @@ import {
   AdapterExecutionResult,
   AdapterPreflightOptions,
   AdapterPreflightResult,
+  AgentResolvedRuntime,
   AgentAdapter,
   ensureDirectory,
   normalizePath,
@@ -52,6 +53,11 @@ interface CodexJsonEvent {
   };
   usage?: CodexUsageEvent;
   thread_id?: string;
+}
+
+interface CodexConfigDefaults {
+  model?: string;
+  reasoningEffort?: string;
 }
 
 interface ClaudeUsageEvent {
@@ -113,6 +119,10 @@ const DEMO_CAPABILITY: AdapterCapability = {
   tokenAvailability: "estimated",
   costAvailability: "estimated",
   traceRichness: "partial",
+  configurableRuntime: {
+    model: false,
+    reasoningEffort: false
+  },
   knownLimitations: [
     "Does not execute a real coding agent.",
     "Token usage and cost are synthetic."
@@ -125,6 +135,10 @@ const CODEX_CAPABILITY: AdapterCapability = {
   tokenAvailability: "available",
   costAvailability: "unavailable",
   traceRichness: "full",
+  configurableRuntime: {
+    model: true,
+    reasoningEffort: true
+  },
   knownLimitations: [
     "Cost is not reported by the CLI and remains unknown.",
     "Output parsing depends on Codex CLI JSON event compatibility."
@@ -137,6 +151,10 @@ const CLAUDE_CODE_CAPABILITY: AdapterCapability = {
   tokenAvailability: "available",
   costAvailability: "available",
   traceRichness: "partial",
+  configurableRuntime: {
+    model: false,
+    reasoningEffort: false
+  },
   knownLimitations: [
     "Changed files are inferred from workspace diff, not emitted directly by the adapter.",
     "Authentication and CLI flags may vary by local install."
@@ -149,6 +167,10 @@ const CURSOR_CAPABILITY: AdapterCapability = {
   tokenAvailability: "available",
   costAvailability: "available",
   traceRichness: "partial",
+  configurableRuntime: {
+    model: false,
+    reasoningEffort: false
+  },
   knownLimitations: [
     "Uses an internal Cursor CLI bridge that may change across releases.",
     "Portable detection depends on local installation layout."
@@ -169,7 +191,7 @@ function buildDemoSummary(context: AdapterExecutionContext, profile: DemoProfile
 
 function buildAgentPrompt(context: AdapterExecutionContext): string {
   return [
-    `You are running inside RepoArena as adapter "${context.agentId}".`,
+    `You are running inside RepoArena as adapter "${context.selection.baseAgentId}" and variant "${context.selection.variantId}".`,
     "Work only inside the current workspace.",
     "Complete the task using the existing repository files.",
     "Keep changes minimal and directly relevant.",
@@ -178,10 +200,75 @@ function buildAgentPrompt(context: AdapterExecutionContext): string {
     "",
     `Task ID: ${context.task.id}`,
     `Task Title: ${context.task.title}`,
+    `Variant Label: ${context.selection.displayLabel}`,
+    ...(context.selection.config.model ? [`Requested Model: ${context.selection.config.model}`] : []),
+    ...(context.selection.config.reasoningEffort
+      ? [`Requested Reasoning Effort: ${context.selection.config.reasoningEffort}`]
+      : []),
     "",
     "Task Prompt:",
     context.task.prompt
   ].join("\n");
+}
+
+async function readCodexConfigDefaults(): Promise<CodexConfigDefaults> {
+  const configPath = path.join(process.env.USERPROFILE ?? "", ".codex", "config.toml");
+  try {
+    const contents = await fs.readFile(configPath, "utf8");
+    const model = contents.match(/^\s*model\s*=\s*"([^"]+)"/m)?.[1]?.trim();
+    const reasoningEffort = contents
+      .match(/^\s*model_reasoning_effort\s*=\s*"([^"]+)"/m)?.[1]
+      ?.trim();
+    return {
+      model: model || undefined,
+      reasoningEffort: reasoningEffort || undefined
+    };
+  } catch {
+    return {};
+  }
+}
+
+async function resolveCodexRuntime(context: {
+  requestedConfig?: AdapterExecutionContext["selection"]["config"];
+  configSource?: AdapterExecutionContext["selection"]["configSource"];
+}): Promise<AgentResolvedRuntime> {
+  const requestedConfig = context.requestedConfig ?? {};
+  if (requestedConfig.model || requestedConfig.reasoningEffort) {
+    return {
+      effectiveModel: requestedConfig.model,
+      effectiveReasoningEffort: requestedConfig.reasoningEffort,
+      source: context.configSource ?? "ui",
+      verification: "inferred",
+      notes: ["Using explicit RepoArena Codex configuration."]
+    };
+  }
+
+  if (process.env.REPOARENA_CODEX_MODEL?.trim() || process.env.REPOARENA_CODEX_REASONING_EFFORT?.trim()) {
+    return {
+      effectiveModel: process.env.REPOARENA_CODEX_MODEL?.trim() || undefined,
+      effectiveReasoningEffort: process.env.REPOARENA_CODEX_REASONING_EFFORT?.trim() || undefined,
+      source: "env",
+      verification: "inferred",
+      notes: ["Using REPOARENA_CODEX_* environment overrides."]
+    };
+  }
+
+  const configDefaults = await readCodexConfigDefaults();
+  if (configDefaults.model || configDefaults.reasoningEffort) {
+    return {
+      effectiveModel: configDefaults.model,
+      effectiveReasoningEffort: configDefaults.reasoningEffort,
+      source: "codex-config",
+      verification: "inferred",
+      notes: ["Using defaults from ~/.codex/config.toml."]
+    };
+  }
+
+  return {
+    source: "cli-default",
+    verification: "unknown",
+    notes: ["Codex CLI default runtime could not be resolved from RepoArena, environment, or ~/.codex/config.toml."]
+  };
 }
 
 function safeNumber(value: number | undefined): number {
@@ -377,17 +464,24 @@ async function runProcess(
 }
 
 function createPreflightResult(
+  selection: AdapterPreflightOptions["selection"] | undefined,
   agentId: string,
   agentTitle: string,
   adapterKind: "demo" | "external",
   capability: AdapterCapability,
   status: AdapterPreflightResult["status"],
   summary: string,
+  resolvedRuntime?: AgentResolvedRuntime,
   command?: string,
   details?: string[]
 ): AdapterPreflightResult {
   return {
-    agentId,
+    agentId: selection?.variantId ?? agentId,
+    baseAgentId: agentId,
+    variantId: selection?.variantId ?? agentId,
+    displayLabel: selection?.displayLabel ?? agentTitle,
+    requestedConfig: selection?.config ?? {},
+    resolvedRuntime,
     agentTitle,
     adapterKind,
     capability,
@@ -398,16 +492,40 @@ function createPreflightResult(
   };
 }
 
+function extractNestedStringValues(value: unknown, collector: Map<string, string>): void {
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      extractNestedStringValues(entry, collector);
+    }
+    return;
+  }
+
+  if (!value || typeof value !== "object") {
+    return;
+  }
+
+  for (const [key, childValue] of Object.entries(value)) {
+    const normalizedKey = key.replace(/[^a-z0-9]/gi, "").toLowerCase();
+    if (typeof childValue === "string" && childValue.trim()) {
+      collector.set(normalizedKey, childValue.trim());
+    }
+    extractNestedStringValues(childValue, collector);
+  }
+}
+
 function parseCodexEvents(stdout: string, workspacePath: string): {
   changedFilesHint: string[];
   tokenUsage: number;
   summaryFromEvents?: string;
   threadId?: string;
+  resolvedRuntime?: AgentResolvedRuntime;
 } {
   const changedFiles = new Set<string>();
   let tokenUsage = 0;
   let summaryFromEvents: string | undefined;
   let threadId: string | undefined;
+  let eventModel: string | undefined;
+  let eventReasoningEffort: string | undefined;
 
   for (const line of stdout.split(/\r?\n/)) {
     const trimmed = line.trim();
@@ -449,13 +567,35 @@ function parseCodexEvents(stdout: string, workspacePath: string): {
         safeNumber(parsed.usage.cached_input_tokens) +
         safeNumber(parsed.usage.output_tokens);
     }
+
+    const stringValues = new Map<string, string>();
+    extractNestedStringValues(parsed, stringValues);
+    eventModel =
+      stringValues.get("modelname") ??
+      stringValues.get("modelslug") ??
+      stringValues.get("model") ??
+      eventModel;
+    eventReasoningEffort =
+      stringValues.get("modelreasoningeffort") ??
+      stringValues.get("reasoningeffort") ??
+      stringValues.get("reasoninglevel") ??
+      eventReasoningEffort;
   }
 
   return {
     changedFilesHint: uniqueSorted(Array.from(changedFiles)),
     tokenUsage,
     summaryFromEvents,
-    threadId
+    threadId,
+    resolvedRuntime:
+      eventModel || eventReasoningEffort
+        ? {
+            effectiveModel: eventModel,
+            effectiveReasoningEffort: eventReasoningEffort,
+            source: "event-stream",
+            verification: "confirmed"
+          }
+        : undefined
   };
 }
 
@@ -678,8 +818,9 @@ class DemoAdapter implements AgentAdapter {
 
   constructor(readonly id: string, readonly title: string, private readonly profile: DemoProfile) {}
 
-  async preflight(): Promise<AdapterPreflightResult> {
+  async preflight(options?: AdapterPreflightOptions): Promise<AdapterPreflightResult> {
     return createPreflightResult(
+      options?.selection,
       this.id,
       this.title,
       this.kind,
@@ -728,7 +869,12 @@ class DemoAdapter implements AgentAdapter {
       tokenUsage,
       estimatedCostUsd: this.profile.estimatedCostUsd,
       costKnown: true,
-      changedFilesHint
+      changedFilesHint,
+      resolvedRuntime: {
+        source: "ui",
+        verification: "inferred",
+        notes: ["Built-in demo adapter does not execute a real model."]
+      }
     };
   }
 }
@@ -739,42 +885,52 @@ class CodexCliAdapter implements AgentAdapter {
   readonly title = "Codex CLI";
   readonly capability = CODEX_CAPABILITY;
 
-  async preflight(): Promise<AdapterPreflightResult> {
+  async preflight(options?: AdapterPreflightOptions): Promise<AdapterPreflightResult> {
     const invocation = await resolveCodexInvocation();
+    const resolvedRuntime = await resolveCodexRuntime({
+      requestedConfig: options?.selection?.config,
+      configSource: options?.selection?.configSource
+    });
     try {
       const result = await probeHelp(invocation, process.cwd());
       if (result.exitCode === 0) {
         return createPreflightResult(
+          options?.selection,
           this.id,
           this.title,
           this.kind,
           this.capability,
           "ready",
           "CLI is installed and responds to --help.",
+          resolvedRuntime,
           invocation.displayCommand
         );
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       return createPreflightResult(
+        options?.selection,
         this.id,
         this.title,
         this.kind,
         this.capability,
         "missing",
         "CLI could not be launched.",
+        resolvedRuntime,
         invocation.displayCommand,
         [message]
       );
     }
 
     return createPreflightResult(
+      options?.selection,
       this.id,
       this.title,
       this.kind,
       this.capability,
       "unverified",
       "CLI was found, but readiness could not be fully confirmed.",
+      resolvedRuntime,
       invocation.displayCommand
     );
   }
@@ -800,10 +956,20 @@ class CodexCliAdapter implements AgentAdapter {
       "--json",
       prompt
     ];
-
-    const model = process.env.REPOARENA_CODEX_MODEL?.trim();
-    if (model) {
-      args.splice(invocation.argsPrefix.length + 1, 0, "--model", model);
+    const resolvedRuntime = await resolveCodexRuntime({
+      requestedConfig: context.selection.config,
+      configSource: context.selection.configSource
+    });
+    if (resolvedRuntime.effectiveReasoningEffort) {
+      args.splice(
+        invocation.argsPrefix.length + 1,
+        0,
+        "-c",
+        `model_reasoning_effort="${resolvedRuntime.effectiveReasoningEffort}"`
+      );
+    }
+    if (resolvedRuntime.effectiveModel) {
+      args.splice(invocation.argsPrefix.length + 1, 0, "--model", resolvedRuntime.effectiveModel);
     }
 
     await context.trace({
@@ -811,7 +977,9 @@ class CodexCliAdapter implements AgentAdapter {
       message: "Starting Codex CLI adapter",
       metadata: {
         command: invocation.displayCommand,
-        args
+        args,
+        requestedConfig: context.selection.config,
+        resolvedRuntime
       }
     });
 
@@ -842,6 +1010,7 @@ class CodexCliAdapter implements AgentAdapter {
         threadId: parsed.threadId,
         tokenUsage: parsed.tokenUsage,
         changedFilesHint: parsed.changedFilesHint,
+        resolvedRuntime: parsed.resolvedRuntime ?? resolvedRuntime,
         stderr: execution.stderr.trim()
       }
     });
@@ -852,7 +1021,17 @@ class CodexCliAdapter implements AgentAdapter {
       tokenUsage: parsed.tokenUsage,
       estimatedCostUsd: 0,
       costKnown: false,
-      changedFilesHint: parsed.changedFilesHint
+      changedFilesHint: parsed.changedFilesHint,
+      resolvedRuntime: parsed.resolvedRuntime
+        ? {
+            effectiveModel: parsed.resolvedRuntime.effectiveModel ?? resolvedRuntime.effectiveModel,
+            effectiveReasoningEffort:
+              parsed.resolvedRuntime.effectiveReasoningEffort ?? resolvedRuntime.effectiveReasoningEffort,
+            source: "event-stream",
+            verification: "confirmed",
+            notes: resolvedRuntime.notes
+          }
+        : resolvedRuntime
     };
   }
 }
@@ -872,12 +1051,14 @@ abstract class ClaudeLikeAdapter implements AgentAdapter {
       const help = await probeHelp(invocation, process.cwd());
       if (help.exitCode !== 0) {
         return createPreflightResult(
+          options?.selection,
           this.id,
           this.title,
           this.kind,
           this.capability,
           "missing",
           "CLI did not respond successfully to --help.",
+          undefined,
           invocation.displayCommand,
           [help.stderr.trim()].filter(Boolean)
         );
@@ -885,12 +1066,14 @@ abstract class ClaudeLikeAdapter implements AgentAdapter {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       return createPreflightResult(
+        options?.selection,
         this.id,
         this.title,
         this.kind,
         this.capability,
         "missing",
         "CLI could not be launched.",
+        undefined,
         invocation.displayCommand,
         [message]
       );
@@ -899,24 +1082,28 @@ abstract class ClaudeLikeAdapter implements AgentAdapter {
     if (options?.probeAuth) {
       const authProbe = await probeClaudeLikeAuth(invocation, process.cwd());
       return createPreflightResult(
+        options?.selection,
         this.id,
         this.title,
         this.kind,
         this.capability,
         authProbe.status,
         authProbe.summary,
+        undefined,
         invocation.displayCommand,
         authProbe.details
       );
     }
 
     return createPreflightResult(
+      options?.selection,
       this.id,
       this.title,
       this.kind,
       this.capability,
       "unverified",
       "CLI is installed. Authentication was not probed in this run.",
+      undefined,
       invocation.displayCommand
     );
   }
@@ -1051,18 +1238,31 @@ export function getAdapter(agentId: string): AgentAdapter {
 }
 
 export async function preflightAdapters(
-  agentIds: string[],
+  selections: AdapterPreflightOptions["selection"][],
   options?: AdapterPreflightOptions
 ): Promise<AdapterPreflightResult[]> {
   return await Promise.all(
-    agentIds.map(async (agentId) => {
-      const adapter = getAdapter(agentId);
-      return await adapter.preflight(options);
+    selections.map(async (selection) => {
+      if (!selection) {
+        throw new Error("Missing agent selection.");
+      }
+
+      const adapter = getAdapter(selection.baseAgentId);
+      return await adapter.preflight({
+        ...options,
+        selection
+      });
     })
   );
 }
 
+export async function getCodexDefaultResolvedRuntime(): Promise<AgentResolvedRuntime> {
+  return await resolveCodexRuntime({});
+}
+
 export const __testUtils = {
   parseCodexEvents,
-  parseClaudeEvents
+  parseClaudeEvents,
+  resolveCodexRuntime,
+  readCodexConfigDefaults
 };

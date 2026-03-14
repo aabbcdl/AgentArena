@@ -2,6 +2,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { getAdapter, preflightAdapters } from "@repoarena/adapters";
 import {
+  AgentSelection,
   AdapterPreflightResult,
   AgentRunResult,
   BenchmarkRun,
@@ -9,6 +10,7 @@ import {
   DiffSummary,
   buildExecutionEnvironment,
   copyRepository,
+  createAgentSelection,
   createRunId,
   diffSnapshots,
   ensureDirectory,
@@ -23,6 +25,7 @@ export interface BenchmarkOptions {
   repoPath: string;
   taskPath: string;
   agentIds: string[];
+  agents?: AgentSelection[];
   outputPath?: string;
   probeAuth?: boolean;
   maxConcurrency?: number;
@@ -78,6 +81,33 @@ function summarizeCommandStepFailure(stage: "setup" | "teardown", result: Comman
   return `${stage} command "${result.label}" failed with exit code ${result.exitCode}.`;
 }
 
+function normalizeSelections(options: BenchmarkOptions): AgentSelection[] {
+  const rawSelections =
+    options.agents && options.agents.length > 0
+      ? options.agents
+      : options.agentIds.map((agentId) =>
+          createAgentSelection({
+            baseAgentId: agentId,
+            displayLabel: getAdapter(agentId).title
+          })
+        );
+
+  const seenVariantIds = new Map<string, number>();
+  return rawSelections.map((selection) => {
+    const occurrence = (seenVariantIds.get(selection.variantId) ?? 0) + 1;
+    seenVariantIds.set(selection.variantId, occurrence);
+    if (occurrence === 1) {
+      return selection;
+    }
+
+    return {
+      ...selection,
+      variantId: `${selection.variantId}-${occurrence}`,
+      displayLabel: `${selection.displayLabel} #${occurrence}`
+    };
+  });
+}
+
 function createSkippedRunResult(
   preflight: AdapterPreflightResult,
   tracePath: string,
@@ -85,6 +115,11 @@ function createSkippedRunResult(
 ): AgentRunResult {
   return {
     agentId: preflight.agentId,
+    baseAgentId: preflight.baseAgentId,
+    variantId: preflight.variantId,
+    displayLabel: preflight.displayLabel,
+    requestedConfig: preflight.requestedConfig,
+    resolvedRuntime: preflight.resolvedRuntime,
     agentTitle: preflight.agentTitle,
     adapterKind: preflight.adapterKind,
     preflight,
@@ -118,9 +153,9 @@ async function runAgent(
   options: Pick<BenchmarkOptions, "updateSnapshots">
 ): Promise<AgentRunResult> {
   const task = await loadTaskPack(taskPath);
-  const adapter = getAdapter(preflight.agentId);
-  const agentOutputPath = path.join(outputPath, "agents", preflight.agentId);
-  const workspacePath = path.join(workspaceRootPath, preflight.agentId);
+  const adapter = getAdapter(preflight.baseAgentId);
+  const agentOutputPath = path.join(outputPath, "agents", preflight.variantId);
+  const workspacePath = path.join(workspaceRootPath, preflight.variantId);
   const tracePath = path.join(agentOutputPath, "trace.jsonl");
   const traceRecorder = new JsonlTraceRecorder(tracePath);
   const executionEnvironment = buildExecutionEnvironment(task.envAllowList);
@@ -189,6 +224,11 @@ async function runAgent(
   if (setupResults.some((value) => !value.success)) {
     return {
       agentId: preflight.agentId,
+      baseAgentId: preflight.baseAgentId,
+      variantId: preflight.variantId,
+      displayLabel: preflight.displayLabel,
+      requestedConfig: preflight.requestedConfig,
+      resolvedRuntime: preflight.resolvedRuntime,
       agentTitle: adapter.title,
       adapterKind: adapter.kind,
       preflight,
@@ -222,6 +262,12 @@ async function runAgent(
   try {
     const adapterResult = await adapter.execute({
       agentId: preflight.agentId,
+      selection: {
+        baseAgentId: preflight.baseAgentId,
+        variantId: preflight.variantId,
+        displayLabel: preflight.displayLabel,
+        config: preflight.requestedConfig
+      },
       repoPath,
       workspacePath,
       environment: executionEnvironment,
@@ -287,6 +333,11 @@ async function runAgent(
 
     return {
       agentId: preflight.agentId,
+      baseAgentId: preflight.baseAgentId,
+      variantId: preflight.variantId,
+      displayLabel: preflight.displayLabel,
+      requestedConfig: preflight.requestedConfig,
+      resolvedRuntime: adapterResult.resolvedRuntime ?? preflight.resolvedRuntime,
       agentTitle: adapter.title,
       adapterKind: adapter.kind,
       preflight,
@@ -341,6 +392,11 @@ async function runAgent(
 
     return {
       agentId: preflight.agentId,
+      baseAgentId: preflight.baseAgentId,
+      variantId: preflight.variantId,
+      displayLabel: preflight.displayLabel,
+      requestedConfig: preflight.requestedConfig,
+      resolvedRuntime: preflight.resolvedRuntime,
       agentTitle: adapter.title,
       adapterKind: adapter.kind,
       preflight,
@@ -368,11 +424,12 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
   const runId = createRunId();
   const outputPath = options.outputPath ?? path.join(repoPath, ".repoarena", "runs", runId);
   const workspaceRootPath = path.join(tmpdir(), "repoarena-workspaces", runId);
+  const selections = normalizeSelections(options);
 
   await ensureDirectory(outputPath);
   await ensureDirectory(workspaceRootPath);
 
-  const preflights = await preflightAdapters(options.agentIds, { probeAuth: options.probeAuth });
+  const preflights = await preflightAdapters(selections, { probeAuth: options.probeAuth });
   const results = await mapWithConcurrency(
     preflights,
     agentConcurrency(options),

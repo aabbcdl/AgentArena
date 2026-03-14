@@ -32,6 +32,8 @@ Then open the local address shown in the terminal. In this mode the page can:
 - run a benchmark directly from the browser
 - switch straight into the report view when the run finishes
 
+This is the main manual workflow. The page is intended to be used as a launcher plus result viewer in one place.
+
 ### Fallback: open a built report viewer directly
 
 ```bash

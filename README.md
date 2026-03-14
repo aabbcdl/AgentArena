@@ -6,7 +6,7 @@
 
 RepoArena lets you run Claude Code, Codex, Cursor, Devin, and open source agents against the same repository tasks, then compare success rate, duration, cost, diffs, and replay traces in one report.
 
-The primary manual entry point is now `repoarena ui`: a local service mode that lets you choose a repository, task pack, and agents from the browser, run the benchmark, and inspect the result in the same UI.
+The primary manual entry point is `repoarena ui`: a local service mode that lets you choose a repository, task pack, and agents from the browser, run the benchmark, and inspect the result in the same UI. Opening `summary.json` files directly is now a fallback path for existing results, not the main workflow.
 
 Task packs use a versioned schema. The current format is `repoarena.taskpack/v1`, with structured `judges` definitions for command, file, glob, snapshot, and JSON evaluation. Both JSON and YAML task packs are supported.
 
@@ -53,14 +53,12 @@ Then open the local address printed in the terminal, usually:
 http://127.0.0.1:4317
 ```
 
-From the page:
-- enter the repository path
-- choose an official task pack or provide your own task pack path
-- select one or more agents
-- run the benchmark
-- inspect results in the same page when the run completes
+First run:
+1. start `repoarena ui`
+2. choose the repository, task pack, and one or more real agents or Codex variants
+3. run the benchmark and inspect the result in the same page
 
-### CLI-first workflow
+### Fallback: CLI-first workflow
 
 If you want to script runs directly:
 

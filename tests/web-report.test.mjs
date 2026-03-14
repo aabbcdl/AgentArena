@@ -26,6 +26,11 @@ function createRun(runId, taskTitle, overrides = {}) {
 function createResult(agentId, overrides = {}) {
   return {
     agentId,
+    baseAgentId: overrides.baseAgentId ?? agentId,
+    variantId: overrides.variantId ?? agentId,
+    displayLabel: overrides.displayLabel ?? overrides.agentTitle ?? agentId,
+    requestedConfig: overrides.requestedConfig ?? {},
+    resolvedRuntime: overrides.resolvedRuntime,
     agentTitle: overrides.agentTitle ?? agentId,
     status: overrides.status ?? "success",
     durationMs: overrides.durationMs ?? 1000,
@@ -121,9 +126,9 @@ test("share helpers produce shareable summary text and PR tables", () => {
   const prTable = buildPrTable(run);
 
   assert.match(shareCard, /RepoArena \| Task A/);
-  assert.match(shareCard, /Best agent: demo-fast/);
-  assert.match(prTable, /\| Agent \| Status \| Duration \| Tokens \| Cost \| Judges \| Files \|/);
-  assert.match(prTable, /\| demo-fast \| success \| 1000ms \| 100 \| \$0\.10 \| 2\/2 \| 1 \|/);
+  assert.match(shareCard, /Best variant: demo-fast/);
+  assert.match(prTable, /\| Variant \| Base Agent \| Model \| Reasoning \| Verification \| Status \| Duration \| Tokens \| Cost \| Judges \| Files \|/);
+  assert.match(prTable, /\| demo-fast \| demo-fast \| unknown \| default \| unknown\/unknown \| success \| 1000ms \| 100 \| \$0\.10 \| 2\/2 \| 1 \|/);
 });
 
 test("buildShareCardSvg returns a shareable SVG card", () => {

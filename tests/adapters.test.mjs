@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { __testUtils, getAdapter, listAvailableAdapters } from "../packages/adapters/dist/index.js";
@@ -69,6 +69,11 @@ test("parseCodexEvents extracts file changes, tokens, and thread ids", () => {
     JSON.stringify({
       type: "item.completed",
       item: { type: "agent_message", text: "Codex finished." }
+    }),
+    JSON.stringify({
+      type: "turn.completed",
+      model: "gpt-5.4",
+      model_reasoning_effort: "high"
     })
   ].join("\n");
 
@@ -77,6 +82,102 @@ test("parseCodexEvents extracts file changes, tokens, and thread ids", () => {
   assert.equal(parsed.tokenUsage, 18);
   assert.equal(parsed.threadId, "thread-123");
   assert.equal(parsed.summaryFromEvents, "Codex finished.");
+  assert.equal(parsed.resolvedRuntime?.effectiveModel, "gpt-5.4");
+  assert.equal(parsed.resolvedRuntime?.effectiveReasoningEffort, "high");
+  assert.equal(parsed.resolvedRuntime?.verification, "confirmed");
+});
+
+test("resolveCodexRuntime uses requested config before env and config defaults", async () => {
+  const originalModel = process.env.REPOARENA_CODEX_MODEL;
+  const originalReasoning = process.env.REPOARENA_CODEX_REASONING_EFFORT;
+  const originalUserProfile = process.env.USERPROFILE;
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-codex-home-"));
+  const codexDir = path.join(homeDir, ".codex");
+  await mkdir(codexDir, { recursive: true });
+  process.env.USERPROFILE = homeDir;
+  process.env.REPOARENA_CODEX_MODEL = "env-model";
+  process.env.REPOARENA_CODEX_REASONING_EFFORT = "medium";
+
+  try {
+    const resolved = await __testUtils.resolveCodexRuntime({
+      requestedConfig: {
+        model: "ui-model",
+        reasoningEffort: "high"
+      },
+      configSource: "ui"
+    });
+    assert.equal(resolved.effectiveModel, "ui-model");
+    assert.equal(resolved.effectiveReasoningEffort, "high");
+    assert.equal(resolved.source, "ui");
+    assert.equal(resolved.verification, "inferred");
+  } finally {
+    if (originalModel === undefined) {
+      delete process.env.REPOARENA_CODEX_MODEL;
+    } else {
+      process.env.REPOARENA_CODEX_MODEL = originalModel;
+    }
+    if (originalReasoning === undefined) {
+      delete process.env.REPOARENA_CODEX_REASONING_EFFORT;
+    } else {
+      process.env.REPOARENA_CODEX_REASONING_EFFORT = originalReasoning;
+    }
+    if (originalUserProfile === undefined) {
+      delete process.env.USERPROFILE;
+    } else {
+      process.env.USERPROFILE = originalUserProfile;
+    }
+    await rm(homeDir, { recursive: true, force: true });
+  }
+});
+
+test("resolveCodexRuntime falls back from env to ~/.codex/config.toml", async () => {
+  const originalModel = process.env.REPOARENA_CODEX_MODEL;
+  const originalReasoning = process.env.REPOARENA_CODEX_REASONING_EFFORT;
+  const originalUserProfile = process.env.USERPROFILE;
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-codex-home-"));
+  const codexDir = path.join(homeDir, ".codex");
+  await mkdir(codexDir, { recursive: true });
+  process.env.USERPROFILE = homeDir;
+
+  try {
+    process.env.REPOARENA_CODEX_MODEL = "env-model";
+    process.env.REPOARENA_CODEX_REASONING_EFFORT = "low";
+    let resolved = await __testUtils.resolveCodexRuntime({});
+    assert.equal(resolved.effectiveModel, "env-model");
+    assert.equal(resolved.effectiveReasoningEffort, "low");
+    assert.equal(resolved.source, "env");
+
+    delete process.env.REPOARENA_CODEX_MODEL;
+    delete process.env.REPOARENA_CODEX_REASONING_EFFORT;
+    await writeFile(
+      path.join(codexDir, "config.toml"),
+      'model = "config-model"\nmodel_reasoning_effort = "high"\n',
+      "utf8"
+    );
+
+    resolved = await __testUtils.resolveCodexRuntime({});
+    assert.equal(resolved.effectiveModel, "config-model");
+    assert.equal(resolved.effectiveReasoningEffort, "high");
+    assert.equal(resolved.source, "codex-config");
+    assert.equal(resolved.verification, "inferred");
+  } finally {
+    if (originalModel === undefined) {
+      delete process.env.REPOARENA_CODEX_MODEL;
+    } else {
+      process.env.REPOARENA_CODEX_MODEL = originalModel;
+    }
+    if (originalReasoning === undefined) {
+      delete process.env.REPOARENA_CODEX_REASONING_EFFORT;
+    } else {
+      process.env.REPOARENA_CODEX_REASONING_EFFORT = originalReasoning;
+    }
+    if (originalUserProfile === undefined) {
+      delete process.env.USERPROFILE;
+    } else {
+      process.env.USERPROFILE = originalUserProfile;
+    }
+    await rm(homeDir, { recursive: true, force: true });
+  }
 });
 
 test("parseClaudeEvents normalizes token, cost, and error data", () => {

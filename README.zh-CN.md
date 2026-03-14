@@ -6,15 +6,16 @@
 
 RepoArena 用来在同一个仓库、同一个任务、同一套 judge 规则下运行多个 coding agent，然后统一比较它们的成功率、耗时、token、成本、改动文件和回放结果。
 
-现在的主入口是 `repoarena ui`。它会启动一个本地服务，让你直接在浏览器里填写仓库路径、选择任务包、勾选 agents、发起 benchmark，并在同一个页面里查看结果。
+现在的主入口是 `repoarena ui`。它会启动一个本地服务，让你直接在浏览器里填写仓库路径、选择任务包、勾选 agents 或 Codex 变体、发起 benchmark，并在同一个页面里查看结果。直接打开 `summary.json` 只是浏览已有结果的备用路径，不是主流程。
 
 ## 当前能力
 
-- 本地 `repoarena ui`、`repoarena run`、`repoarena doctor`、`repoarena list-adapters`、`repoarena init-taskpack`、`repoarena init-ci`
-- demo adapters，以及 `codex`、`claude-code`、`cursor` 真实 CLI adapter
+- 本地 `repoarena ui`、`repoarena run`、`repoarena doctor`、`repoarena list-adapters`
+- `repoarena init-taskpack`、`repoarena init-ci`
+- demo adapters，以及 `codex`、`claude-code`、`cursor` CLI adapters
 - adapter capability matrix 和 preflight
 - JSON / YAML task pack
-- command、file、glob、snapshot、json judge
+- command、file、glob、snapshot、json judges
 - `summary.json`、`summary.md`、`pr-comment.md`、`report.html`、`badge.json`
 - 可交互的 `apps/web-report`
 - GitHub Actions smoke benchmark 和 PR comment
@@ -35,14 +36,15 @@ node packages/cli/dist/index.js ui
 http://127.0.0.1:4317
 ```
 
-打开页面后，按这个顺序操作：
-- 输入仓库路径
-- 选择官方 task pack，或者手动填写 task pack 路径
-- 勾选要比较的 agents
-- 点击运行
-- 运行结束后直接在页面里看结论、对比、judge 和 diff
+推荐流程：
 
-### CLI 方式
+1. 输入仓库路径
+2. 选择官方 task pack，或者手动填写 task pack 路径
+3. 选择一个或多个真实 agent，或配置多个 Codex 变体
+4. 发起 benchmark
+5. 在同一个页面里查看结果、对比和细节
+
+### 备用：CLI 方式
 
 如果你要脚本化运行，可以直接：
 
@@ -51,6 +53,7 @@ node packages/cli/dist/index.js run --repo . --task examples/taskpacks/demo-repo
 ```
 
 每次 run 会产出：
+
 - `summary.json`
 - `summary.md`
 - `pr-comment.md`
@@ -91,7 +94,7 @@ node packages/cli/dist/index.js run --repo . --task repoarena.taskpack.yaml --ag
 
 ## 官方任务库
 
-位于 [examples/taskpacks/official](./examples/taskpacks/official/README.md)，当前包括：
+位于 [examples/taskpacks/official/README.md](./examples/taskpacks/official/README.md)，当前包括：
 
 - `repo-health.yaml`
 - `failing-test-fix.yaml`
@@ -120,7 +123,6 @@ node packages/cli/dist/index.js run --repo . --task repoarena.taskpack.yaml --ag
 - [评测公平性](./docs/fairness.md)
 - [Adapter 能力矩阵](./docs/adapter-capabilities.md)
 - [Web Report 说明](./apps/web-report/README.md)
-- [官方任务库](./examples/taskpacks/official/README.md)
 
 ## 许可证
 

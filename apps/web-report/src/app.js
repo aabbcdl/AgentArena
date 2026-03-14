@@ -2,6 +2,7 @@ import {
   buildPrTable,
   buildShareCard,
   buildShareCardSvg,
+  findPreviousComparableRun,
   getAgentTrendRows,
   getCompareResults,
   getRunCompareRows,
@@ -23,7 +24,11 @@ const state = {
   availableAdapters: [],
   availableTaskPacks: [],
   runInProgress: false,
-  launcherSelectedAgentIds: ["demo-fast", "codex"]
+  runStatus: null,
+  runStatusPollTimer: null,
+  launcherSelectedAgentIds: [],
+  launcherCodexVariants: [],
+  launcherExpanded: true
 };
 
 const elements = {
@@ -31,7 +36,12 @@ const elements = {
   markdownInput: document.querySelector("#markdown-file"),
   folderInput: document.querySelector("#runs-folder"),
   languageSelect: document.querySelector("#language-select"),
+  resultLoaderPanel: document.querySelector("#result-loader-panel"),
+  resultLoaderSummary: document.querySelector("#result-loader-summary"),
   launcherPanel: document.querySelector("#launcher-panel"),
+  launcherBody: document.querySelector("#launcher-body"),
+  launcherToggle: document.querySelector("#launcher-toggle"),
+  launcherCompactSummary: document.querySelector("#launcher-compact-summary"),
   launcherRepoPath: document.querySelector("#launcher-repo-path"),
   launcherTaskSelect: document.querySelector("#launcher-task-select"),
   launcherTaskPath: document.querySelector("#launcher-task-path"),
@@ -40,6 +50,7 @@ const elements = {
   launcherProbeAuth: document.querySelector("#launcher-probe-auth"),
   launcherRun: document.querySelector("#launcher-run"),
   launcherStatus: document.querySelector("#launcher-status"),
+  taskBrief: document.querySelector("#task-brief"),
   runInfo: document.querySelector("#run-info"),
   workflowList: document.querySelector("#workflow-list"),
   nextStepsContent: document.querySelector("#next-steps-content"),
@@ -56,14 +67,19 @@ const elements = {
   runCompareScope: document.querySelector("#run-compare-scope"),
   runCompareSort: document.querySelector("#run-compare-sort"),
   runCompareTable: document.querySelector("#run-compare-table"),
+  runCompareSection: document.querySelector("#run-compare-section"),
   runDiffTable: document.querySelector("#run-diff-table"),
+  runDiffSection: document.querySelector("#run-diff-section"),
   preflights: document.querySelector("#preflights"),
+  preflightSection: document.querySelector("#preflight-section"),
   compareStatusFilter: document.querySelector("#compare-status-filter"),
   compareSort: document.querySelector("#compare-sort"),
   compareSortHint: document.querySelector("#compare-sort-hint"),
   compareTable: document.querySelector("#compare-table"),
+  agentCompareSection: document.querySelector("#agent-compare-section"),
   agentTrendTitle: document.querySelector("#agent-trend-title"),
   agentTrendTable: document.querySelector("#agent-trend-table"),
+  agentTrendSection: document.querySelector("#agent-trend-section"),
   resultSummary: document.querySelector("#result-summary"),
   resultDetails: document.querySelector("#result-details"),
   judgeSearch: document.querySelector("#judge-search"),
@@ -189,8 +205,17 @@ const MESSAGES = {
     launcherRunButton: "Start Benchmark",
     launcherStatusIdle: "Fill in the repository path, task pack, and agents, then start the benchmark.",
     launcherStatusRunning: "Benchmark is running. This can take a while for real external agents.",
+    launcherStatusRunningPhase: (phase, elapsed) =>
+      elapsed ? `${phase} · ${elapsed} elapsed` : phase,
     launcherStatusDone: (title) => `Benchmark finished. Current report: ${title}.`,
     launcherStatusError: (message) => `Run failed: ${message}`,
+    launcherPhases: {
+      idle: "Idle",
+      starting: "Starting benchmark",
+      preflight: "Running preflight",
+      benchmark: "Running agents",
+      report: "Writing report"
+    },
     launcherMode: "Local service",
     taskPackCustom: "Custom path"
   },
@@ -298,8 +323,17 @@ const MESSAGES = {
     launcherRunButton: "开始跑分",
     launcherStatusIdle: "填好仓库路径、任务包和 agent，然后直接开始跑分。",
     launcherStatusRunning: "Benchmark 正在运行。真实外部 agent 可能需要一段时间。",
+    launcherStatusRunningPhase: (phase, elapsed) =>
+      elapsed ? `${phase} · 已运行 ${elapsed}` : phase,
     launcherStatusDone: (title) => `Benchmark 已完成。当前报告：${title}。`,
     launcherStatusError: (message) => `运行失败：${message}`,
+    launcherPhases: {
+      idle: "空闲",
+      starting: "正在启动",
+      preflight: "正在预检",
+      benchmark: "正在运行",
+      report: "正在写报告"
+    },
     launcherMode: "本地服务",
     taskPackCustom: "自定义路径"
   }
@@ -362,11 +396,211 @@ function formatDuration(durationMs) {
   return `${(durationMs / 1000).toFixed(2)}s`;
 }
 
+function formatElapsedDuration(durationMs) {
+  if (!Number.isFinite(durationMs) || durationMs <= 0) {
+    return "";
+  }
+
+  const totalSeconds = Math.floor(durationMs / 1000);
+  if (totalSeconds < 60) {
+    return `${totalSeconds}s`;
+  }
+
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}m ${seconds}s`;
+}
+
 function formatCost(result) {
   return result.costKnown ? `$${result.estimatedCostUsd.toFixed(2)}` : "n/a";
 }
 
+function runtimeIdentity(record) {
+  return {
+    model: record.resolvedRuntime?.effectiveModel ?? record.requestedConfig?.model ?? "unknown",
+    reasoning:
+      record.resolvedRuntime?.effectiveReasoningEffort ??
+      record.requestedConfig?.reasoningEffort ??
+      "default",
+    source: record.resolvedRuntime?.source ?? "unknown",
+    verification: record.resolvedRuntime?.verification ?? "unknown"
+  };
+}
+
+function resultLabel(record) {
+  return record.displayLabel ?? record.agentTitle ?? record.variantId ?? record.agentId;
+}
+
+function baseAgentLabel(record) {
+  return record.baseAgentId ?? record.agentId;
+}
+
+function runtimeVerificationLabel(record) {
+  const runtime = runtimeIdentity(record);
+  return `${runtime.verification} / ${runtime.source}`;
+}
+
+function taskIntentSummary(task) {
+  const objective = task.metadata?.objective ?? task.description ?? "";
+  const rationale = task.metadata?.judgeRationale ?? "";
+  const repoTypes = task.metadata?.repoTypes?.length ? task.metadata.repoTypes.join(", ") : "generic";
+  return {
+    objective,
+    rationale,
+    repoTypes
+  };
+}
+
+function baselineTaskWarning(task) {
+  if (task.id === "official-repo-health" || task.id === "repo-health") {
+    return state.language === "zh-CN"
+      ? "??????????? bug ?? benchmark????? agent ???????????????????????"
+      : "This is not a code review or bug-fix benchmark. It only checks whether the agent made one small improvement without breaking baseline repository structure.";
+  }
+
+  return state.language === "zh-CN"
+    ? "???????? judge ?????? compare ???"
+    : "Read the task objective and judge rationale before interpreting the compare results.";
+}
+
+function currentRunPhaseLabel() {
+  if (!state.runStatus || state.runStatus.state !== "running") {
+    return "";
+  }
+
+  const phase = t(`launcherPhases.${state.runStatus.phase ?? "starting"}`);
+  if (!state.runStatus.startedAt) {
+    return phase;
+  }
+
+  const elapsed = formatElapsedDuration(Date.now() - new Date(state.runStatus.startedAt).getTime());
+  return t("launcherStatusRunningPhase", phase, elapsed);
+}
+
+function taskMeaningBadges(task) {
+  if (task.id === "official-repo-health" || task.id === "repo-health") {
+    return [
+      "Baseline Sanity Check",
+      state.language === "zh-CN" ? "??????" : "Not a code review",
+      state.language === "zh-CN" ? "?? bugfix benchmark" : "Not a bugfix benchmark"
+    ];
+  }
+
+  return [state.language === "zh-CN" ? "?????????" : "Interpret results through the task goal"];
+}
+
+function summarizeTaskPrompt(prompt) {
+  const compact = String(prompt ?? "")
+    .replaceAll(/\s+/g, " ")
+    .trim();
+  if (!compact) {
+    return "n/a";
+  }
+
+  return compact.length > 160 ? `${compact.slice(0, 157)}...` : compact;
+}
+
+function summarizeJudges(taskPack) {
+  const judges = Array.isArray(taskPack?.judges) ? taskPack.judges : [];
+  if (judges.length === 0) {
+    return state.language === "zh-CN" ? "?? judge" : "No judges";
+  }
+
+  const labels = judges.map((judge) => judge.label || judge.id).filter(Boolean);
+  const summary = labels.slice(0, 3).join(", ");
+  if (labels.length <= 3) {
+    return summary;
+  }
+
+  return `${summary}${state.language === "zh-CN" ? ` ? ${labels.length} ?` : ` +${labels.length - 3} more`}`;
+}
+
+function summarizeLauncherSelection(selectedTaskPack) {
+  const enabledCodex = state.launcherCodexVariants.filter((variant) => variant.enabled);
+  const otherAgents = selectedLauncherAgents();
+  const variantCount = enabledCodex.length + otherAgents.length;
+  const taskTitle = selectedTaskPack?.title || (state.language === "zh-CN" ? "??????" : "Custom task pack");
+  const variantNames = [
+    ...otherAgents.map((agentId) => state.availableAdapters.find((adapter) => adapter.id === agentId)?.title ?? agentId),
+    ...enabledCodex.map((variant) => variant.displayLabel || "Codex CLI")
+  ];
+  const selectionPreview = variantNames.slice(0, 3).join(", ");
+  const extraCount = Math.max(variantNames.length - 3, 0);
+  const preview =
+    variantNames.length === 0
+      ? state.language === "zh-CN"
+        ? "????? variant"
+        : "No variants selected"
+      : `${selectionPreview}${extraCount > 0 ? ` +${extraCount}` : ""}`;
+
+  return state.language === "zh-CN"
+    ? `???${taskTitle} | ?? ${variantCount} ? variant | ${preview}`
+    : `Task: ${taskTitle} | ${variantCount} variant(s) selected | ${preview}`;
+}
+
+function compareHighlights(run, result) {
+  const verdict = getRunVerdict(run);
+  const highlights = [];
+
+  if (verdict.bestAgent?.agentId === result.agentId) {
+    highlights.push(state.language === "zh-CN" ? "综合最佳" : "Best");
+  }
+  if (verdict.fastest?.agentId === result.agentId) {
+    highlights.push(state.language === "zh-CN" ? "最快" : "Fastest");
+  }
+  if (verdict.lowestKnownCost?.agentId === result.agentId) {
+    highlights.push(state.language === "zh-CN" ? "成本最低" : "Lowest Cost");
+  }
+  if (verdict.highestJudgePassRate?.agentId === result.agentId) {
+    highlights.push(state.language === "zh-CN" ? "Judge 最优" : "Top Judges");
+  }
+
+  return highlights;
+}
+
+function runFocusLine(run) {
+  const verdict = getRunVerdict(run);
+  const best = verdict.bestAgent ? resultLabel(verdict.bestAgent) : "n/a";
+  const fastest = verdict.fastest ? resultLabel(verdict.fastest) : "n/a";
+
+  if (run.task.id === "official-repo-health" || run.task.id === "repo-health") {
+    return state.language === "zh-CN"
+      ? `这是一次 baseline sanity check，不是代码审查。当前综合最佳是 ${best}，最快是 ${fastest}。`
+      : `This is a baseline sanity check, not a code review. Current best is ${best} and fastest is ${fastest}.`;
+  }
+
+  return state.language === "zh-CN"
+    ? `先按任务目标解读结果。当前综合最佳是 ${best}，最快是 ${fastest}。`
+    : `Interpret this run through the task objective first. Current best is ${best} and fastest is ${fastest}.`;
+}
+
+function defaultCodexVariant() {
+  const defaults = state.serviceInfo?.codexDefaults ?? {};
+  const model = defaults.effectiveModel ?? "";
+  const reasoning = defaults.effectiveReasoningEffort ?? "";
+  const labelParts = ["Codex CLI"];
+  if (model) {
+    labelParts.push(model);
+  }
+  if (reasoning) {
+    labelParts.push(reasoning);
+  }
+  return {
+    id: crypto.randomUUID(),
+    enabled: true,
+    displayLabel: labelParts.join(" · "),
+    model,
+    reasoningEffort: reasoning,
+    source: defaults.source ?? "unknown",
+    verification: defaults.verification ?? "unknown"
+  };
+}
+
 function renderStaticText() {
+  if (elements.resultLoaderSummary) {
+    elements.resultLoaderSummary.textContent =
+      state.language === "zh-CN" ? "打开已有结果（备用入口）" : "Open Existing Results (Fallback)";
+  }
   setText("app-title", t("appTitle"));
   setText("app-description", t("appDescription"));
   setText("language-label", t("languageLabel"));
@@ -436,6 +670,11 @@ function renderStaticText() {
 }
 
 function renderNextSteps() {
+  if (state.runInProgress && state.runStatus?.state === "running") {
+    elements.nextStepsContent.textContent = currentRunPhaseLabel() || t("launcherStatusRunning");
+    return;
+  }
+
   if (state.notice) {
     elements.nextStepsContent.textContent = state.notice;
     return;
@@ -456,8 +695,15 @@ function renderLauncher() {
   }
 
   setHidden(elements.launcherPanel, false);
+  if (!state.run) {
+    state.launcherExpanded = true;
+  }
   elements.launcherRepoPath.value = elements.launcherRepoPath.value || state.serviceInfo.repoPath || "";
   elements.launcherOutputPath.value = elements.launcherOutputPath.value || state.serviceInfo.defaultOutputPath || "";
+
+  if (state.launcherCodexVariants.length === 0) {
+    state.launcherCodexVariants = [defaultCodexVariant()];
+  }
 
   const options = [
     `<option value="">${escapeHtml(t("taskPackCustom"))}</option>`,
@@ -476,64 +722,292 @@ function renderLauncher() {
     elements.launcherTaskSelect.value = matching ? matching.path : "";
   }
 
-  elements.launcherAgents.innerHTML = state.availableAdapters
-    .map((adapter) => {
-      const checked = state.launcherSelectedAgentIds.includes(adapter.id) ? "checked" : "";
-      return `
-        <label class="checkbox">
-          <input type="checkbox" value="${escapeHtml(adapter.id)}" ${checked} />
-          <span>${escapeHtml(adapter.title)} <span class="muted">(${escapeHtml(adapter.id)})</span></span>
-        </label>
-      `;
-    })
+  const selectedTaskPack =
+    state.availableTaskPacks.find((taskPack) => taskPack.path === elements.launcherTaskPath.value) ?? null;
+  const realAdapters = state.availableAdapters.filter((adapter) => adapter.kind !== "demo" && adapter.id !== "codex");
+  const debugAdapters = state.availableAdapters.filter((adapter) => adapter.kind === "demo");
+  const codexDefaults = state.serviceInfo.codexDefaults ?? {};
+  const codexDefaultsText =
+    state.language === "zh-CN"
+      ? `??????? ${codexDefaults.effectiveModel ?? "unknown"} | ???? ${codexDefaults.effectiveReasoningEffort ?? "default"} | ${codexDefaults.verification ?? "unknown"} / ${codexDefaults.source ?? "unknown"}`
+      : `Current default: model ${codexDefaults.effectiveModel ?? "unknown"} | reasoning ${codexDefaults.effectiveReasoningEffort ?? "default"} | ${codexDefaults.verification ?? "unknown"} / ${codexDefaults.source ?? "unknown"}`;
+
+  const taskSummary = selectedTaskPack
+    ? `
+      <div class="launcher-section">
+        <h4>${escapeHtml(state.language === "zh-CN" ? "????" : "Task Intent")}</h4>
+        <p class="muted">${escapeHtml(selectedTaskPack.description ?? selectedTaskPack.objective ?? "")}</p>
+        <p class="muted"><strong>${escapeHtml(state.language === "zh-CN" ? "??" : "Objective")}:</strong> ${escapeHtml(
+            selectedTaskPack.objective ?? "n/a"
+          )}</p>
+        <p class="muted"><strong>${escapeHtml(state.language === "zh-CN" ? "Judge ??" : "Judge Rationale")}:</strong> ${escapeHtml(
+            selectedTaskPack.judgeRationale ?? "n/a"
+          )}</p>
+        <p class="muted"><strong>${escapeHtml(state.language === "zh-CN" ? "????" : "Repo Types")}:</strong> ${escapeHtml(
+            (selectedTaskPack.repoTypes ?? []).join(", ") || "generic"
+          )}</p>
+        <p class="muted"><strong>${escapeHtml(state.language === "zh-CN" ? "Prompt ??" : "Prompt Summary")}:</strong> ${escapeHtml(
+            summarizeTaskPrompt(selectedTaskPack.prompt)
+          )}</p>
+        <p class="muted"><strong>${escapeHtml(state.language === "zh-CN" ? "Judge ???" : "Judge Checks")}:</strong> ${escapeHtml(
+            summarizeJudges(selectedTaskPack)
+          )}</p>
+        <p class="warning-text">${escapeHtml(
+          selectedTaskPack.id === "official-repo-health"
+            ? baselineTaskWarning({ id: selectedTaskPack.id })
+            : state.language === "zh-CN"
+              ? "?? benchmark ???????????????"
+              : "Interpret this benchmark in the context of the task objective."
+        )}</p>
+      </div>
+    `
+    : "";
+
+  const codexVariants = state.launcherCodexVariants
+    .map(
+      (variant) => `
+        <div class="variant-card" data-codex-variant-id="${escapeHtml(variant.id)}">
+          <label class="checkbox">
+            <input type="checkbox" data-role="variant-enabled" ${variant.enabled ? "checked" : ""} />
+            <span>${escapeHtml(state.language === "zh-CN" ? "???? Codex ??" : "Enable this Codex variant")}</span>
+          </label>
+          <div class="launcher-grid">
+            <label class="field">
+              <span>${escapeHtml(state.language === "zh-CN" ? "???" : "Display Label")}</span>
+              <input data-role="variant-label" type="text" value="${escapeHtml(variant.displayLabel)}" />
+            </label>
+            <label class="field">
+              <span>${escapeHtml(state.language === "zh-CN" ? "???" : "Model")}</span>
+              <input data-role="variant-model" type="text" value="${escapeHtml(variant.model)}" placeholder="gpt-5.4" />
+            </label>
+            <label class="field">
+              <span>${escapeHtml(state.language === "zh-CN" ? "????" : "Reasoning Effort")}</span>
+              <input data-role="variant-reasoning" list="reasoning-levels" type="text" value="${escapeHtml(
+                variant.reasoningEffort
+              )}" placeholder="low / medium / high" />
+            </label>
+          </div>
+          <p class="muted">${escapeHtml(state.language === "zh-CN" ? "????" : "Default source")}: ${escapeHtml(
+            variant.source
+          )} | ${escapeHtml(state.language === "zh-CN" ? "???" : "Verification")}: ${escapeHtml(
+            variant.verification
+          )}</p>
+          <button type="button" class="variant-remove" data-role="variant-remove">${escapeHtml(
+            state.language === "zh-CN" ? "??????" : "Remove variant"
+          )}</button>
+        </div>
+      `
+    )
     .join("");
 
+  elements.launcherAgents.innerHTML = `
+    ${taskSummary}
+    <div class="launcher-section">
+      <h4>${escapeHtml(state.language === "zh-CN" ? "?? Agent" : "Real Agents")}</h4>
+      <p class="muted">${escapeHtml(
+        state.language === "zh-CN"
+          ? "????????? agent??????????????"
+          : "These are real external agents. Their results count toward the main comparison."
+      )}</p>
+      <div class="checkbox-grid">
+        ${realAdapters
+          .map((adapter) => {
+            const checked = state.launcherSelectedAgentIds.includes(adapter.id) ? "checked" : "";
+            return `
+              <label class="checkbox">
+                <input type="checkbox" data-role="real-agent" value="${escapeHtml(adapter.id)}" ${checked} />
+                <span>${escapeHtml(adapter.title)} <span class="muted">(${escapeHtml(adapter.id)})</span></span>
+              </label>
+            `;
+          })
+          .join("")}
+      </div>
+    </div>
+    <div class="launcher-section">
+      <div class="panel-header">
+        <h4>${escapeHtml(state.language === "zh-CN" ? "Codex ??" : "Codex Variants")}</h4>
+        <button id="launcher-add-codex-variant" type="button">${escapeHtml(
+          state.language === "zh-CN" ? "?? Codex ??" : "Add Codex variant"
+        )}</button>
+      </div>
+      <p class="muted">${escapeHtml(
+        state.language === "zh-CN"
+          ? "??? Codex ????????????????? CLI ??????????? inferred?"
+          : "Use multiple Codex variants to compare concrete model and reasoning configurations. When the CLI does not confirm them, RepoArena marks the identity as inferred."
+      )}</p>
+      <p class="muted">${escapeHtml(codexDefaultsText)}</p>
+      <datalist id="reasoning-levels">
+        <option value="low"></option>
+        <option value="medium"></option>
+        <option value="high"></option>
+      </datalist>
+      ${codexVariants}
+    </div>
+    <details class="launcher-section">
+      <summary>${escapeHtml(state.language === "zh-CN" ? "?? Agent???????????" : "Debug Agents (not selected by default)")}</summary>
+      <p class="muted">${escapeHtml(
+        state.language === "zh-CN"
+          ? "Demo Fast / Thorough / Budget ??????? UI ???? adapter???????????"
+          : "Demo Fast / Thorough / Budget are built-in synthetic adapters for validating the pipeline and UI. They do not represent real model capability."
+      )}</p>
+      <div class="checkbox-grid">
+        ${debugAdapters
+          .map((adapter) => {
+            const checked = state.launcherSelectedAgentIds.includes(adapter.id) ? "checked" : "";
+            return `
+              <label class="checkbox">
+                <input type="checkbox" data-role="debug-agent" value="${escapeHtml(adapter.id)}" ${checked} />
+                <span>${escapeHtml(adapter.title)} <span class="muted">(${escapeHtml(adapter.id)})</span></span>
+              </label>
+            `;
+          })
+          .join("")}
+      </div>
+    </details>
+  `;
+
   elements.launcherRun.disabled = state.runInProgress;
+  elements.launcherCompactSummary.textContent = summarizeLauncherSelection(selectedTaskPack);
+  elements.launcherToggle.textContent = state.launcherExpanded
+    ? state.language === "zh-CN"
+      ? "????"
+      : "Hide Setup"
+    : state.language === "zh-CN"
+      ? "????"
+      : "Show Setup";
+  setHidden(elements.launcherBody, !state.launcherExpanded);
   elements.launcherStatus.textContent = state.runInProgress
-    ? t("launcherStatusRunning")
+    ? currentRunPhaseLabel() || t("launcherStatusRunning")
     : state.notice ?? t("launcherStatusIdle");
 }
 
 async function detectService() {
   try {
-    const [infoResponse, adaptersResponse, taskPacksResponse] = await Promise.all([
+    const [infoResponse, adaptersResponse, taskPacksResponse, runStatusResponse] = await Promise.all([
       fetch("/api/ui-info"),
       fetch("/api/adapters"),
-      fetch("/api/taskpacks")
+      fetch("/api/taskpacks"),
+      fetch("/api/run-status", { cache: "no-store" })
     ]);
-    if (!infoResponse.ok || !adaptersResponse.ok || !taskPacksResponse.ok) {
+    if (!infoResponse.ok || !adaptersResponse.ok || !taskPacksResponse.ok || !runStatusResponse.ok) {
       return;
     }
 
     state.serviceInfo = await infoResponse.json();
     state.availableAdapters = await adaptersResponse.json();
     state.availableTaskPacks = await taskPacksResponse.json();
+    state.runStatus = await runStatusResponse.json();
+    state.runInProgress = state.runStatus?.state === "running";
+    if (state.runInProgress) {
+      startRunStatusPolling();
+    } else {
+      stopRunStatusPolling();
+    }
   } catch {
+    stopRunStatusPolling();
     state.serviceInfo = null;
     state.availableAdapters = [];
     state.availableTaskPacks = [];
+    state.runInProgress = false;
+    state.runStatus = null;
   }
 
   render();
 }
 
+async function pollRunStatus() {
+  if (!state.serviceInfo) {
+    return;
+  }
+
+  try {
+    const response = await fetch("/api/run-status", { cache: "no-store" });
+    if (!response.ok) {
+      return;
+    }
+
+    state.runStatus = await response.json();
+    if (state.runStatus?.state !== "running" && state.runStatusPollTimer) {
+      stopRunStatusPolling();
+    }
+  } catch {
+    state.runStatus = null;
+  }
+
+  renderLauncher();
+  renderNextSteps();
+}
+
+function stopRunStatusPolling() {
+  if (state.runStatusPollTimer) {
+    clearInterval(state.runStatusPollTimer);
+    state.runStatusPollTimer = null;
+  }
+}
+
+function startRunStatusPolling() {
+  stopRunStatusPolling();
+  void pollRunStatus();
+  state.runStatusPollTimer = window.setInterval(() => {
+    void pollRunStatus();
+  }, 1000);
+}
+
 function selectedLauncherAgents() {
-  return Array.from(elements.launcherAgents.querySelectorAll('input[type="checkbox"]:checked')).map((input) =>
-    input.value
-  );
+  return Array.from(
+    elements.launcherAgents.querySelectorAll('input[data-role="real-agent"]:checked, input[data-role="debug-agent"]:checked')
+  ).map((input) => input.value);
+}
+
+function selectedLauncherVariants() {
+  const codexVariants = state.launcherCodexVariants
+    .filter((variant) => variant.enabled)
+    .map((variant) => ({
+      baseAgentId: "codex",
+      displayLabel: variant.displayLabel.trim() || "Codex CLI",
+      config: {
+        model: variant.model.trim() || undefined,
+        reasoningEffort: variant.reasoningEffort.trim() || undefined
+      },
+      configSource: "ui"
+    }));
+
+  const otherAgents = selectedLauncherAgents().map((agentId) => ({
+    baseAgentId: agentId,
+    displayLabel: state.availableAdapters.find((adapter) => adapter.id === agentId)?.title ?? agentId,
+    config: {},
+    configSource: "ui"
+  }));
+
+  return [...otherAgents, ...codexVariants];
+}
+
+function syncLauncherStateFromDom() {
+  state.launcherSelectedAgentIds = selectedLauncherAgents();
+  state.launcherCodexVariants = Array.from(
+    elements.launcherAgents.querySelectorAll("[data-codex-variant-id]")
+  ).map((element) => ({
+    id: element.getAttribute("data-codex-variant-id"),
+    enabled: element.querySelector('[data-role="variant-enabled"]')?.checked ?? true,
+    displayLabel: element.querySelector('[data-role="variant-label"]')?.value ?? "Codex CLI",
+    model: element.querySelector('[data-role="variant-model"]')?.value ?? "",
+    reasoningEffort: element.querySelector('[data-role="variant-reasoning"]')?.value ?? "",
+    source: state.serviceInfo?.codexDefaults?.source ?? "unknown",
+    verification: state.serviceInfo?.codexDefaults?.verification ?? "unknown"
+  }));
 }
 
 async function handleLauncherRun() {
-  const agentIds = selectedLauncherAgents();
+  const agents = selectedLauncherVariants();
   const payload = {
     repoPath: elements.launcherRepoPath.value.trim(),
     taskPath: elements.launcherTaskPath.value.trim(),
     outputPath: elements.launcherOutputPath.value.trim() || undefined,
-    agentIds,
+    agents,
     probeAuth: elements.launcherProbeAuth.checked
   };
 
-  if (!payload.repoPath || !payload.taskPath || agentIds.length === 0) {
+  if (!payload.repoPath || !payload.taskPath || agents.length === 0) {
     state.notice =
       state.language === "zh-CN"
         ? "仓库路径、任务包路径和至少一个 agent 是必填项。"
@@ -543,7 +1017,13 @@ async function handleLauncherRun() {
   }
 
   state.runInProgress = true;
+  state.runStatus = {
+    state: "running",
+    phase: "starting",
+    startedAt: new Date().toISOString()
+  };
   state.notice = t("launcherStatusRunning");
+  startRunStatusPolling();
   render();
 
   try {
@@ -560,14 +1040,21 @@ async function handleLauncherRun() {
     }
 
     state.notice = t("launcherStatusDone", result.run.task.title);
+    state.launcherExpanded = false;
+    stopRunStatusPolling();
+    state.runStatus = null;
     applySingleRun(result.run, result.markdown);
   } catch (error) {
+    stopRunStatusPolling();
+    state.runStatus = null;
     state.runInProgress = false;
     state.notice = t("launcherStatusError", error instanceof Error ? error.message : String(error));
     render();
     return;
   }
 
+  stopRunStatusPolling();
+  state.runStatus = null;
   state.runInProgress = false;
   render();
 }
@@ -656,6 +1143,7 @@ function applySingleRun(run, markdown = null) {
 }
 
 function renderRunInfo(run) {
+  const intent = taskIntentSummary(run.task);
   elements.runInfo.innerHTML = `
     <div class="panel-header">
       <h2>${escapeHtml(t("runInfoTitle"))}</h2>
@@ -663,8 +1151,52 @@ function renderRunInfo(run) {
     </div>
     <p class="muted">${escapeHtml(t("createdAt"))} ${escapeHtml(run.createdAt)}</p>
     <p class="muted">${escapeHtml(t("taskSchema"))} ${escapeHtml(run.task.schemaVersion)}</p>
+    <p class="muted"><strong>${escapeHtml(state.language === "zh-CN" ? "????" : "Objective")}:</strong> ${escapeHtml(intent.objective || "n/a")}</p>
+    <p class="muted"><strong>${escapeHtml(state.language === "zh-CN" ? "Judge ??" : "Judge Rationale")}:</strong> ${escapeHtml(intent.rationale || "n/a")}</p>
+    <p class="warning-text">${escapeHtml(baselineTaskWarning(run.task))}</p>
   `;
   setHidden(elements.runInfo, false);
+}
+
+function renderTaskBrief(run) {
+  const intent = taskIntentSummary(run.task);
+  const repoTypes = intent.repoTypes && intent.repoTypes !== "generic" ? intent.repoTypes : "generic";
+  const resultCount = run.results.length;
+  const variantLabels = run.results.map((result) => resultLabel(result)).join(", ");
+  const badges = taskMeaningBadges(run.task);
+
+  elements.taskBrief.innerHTML = `
+    <div class="panel-header">
+      <h3>${escapeHtml(state.language === "zh-CN" ? "??????????" : "What this run actually measures")}</h3>
+      <span class="muted">${escapeHtml(resultCount)} ${escapeHtml(state.language === "zh-CN" ? "? variant" : "variants")}</span>
+    </div>
+    <div class="badge-row">
+      ${badges.map((badge) => `<span class="meaning-badge">${escapeHtml(badge)}</span>`).join("")}
+    </div>
+    <article class="brief-card brief-focus-card">
+      <p class="metric-label">${escapeHtml(state.language === "zh-CN" ? "???????" : "How to read this result")}</p>
+      <p>${escapeHtml(runFocusLine(run))}</p>
+    </article>
+    <div class="brief-grid">
+      <article class="brief-card">
+        <p class="metric-label">${escapeHtml(state.language === "zh-CN" ? "????" : "Objective")}</p>
+        <p>${escapeHtml(intent.objective || run.task.description || "n/a")}</p>
+      </article>
+      <article class="brief-card">
+        <p class="metric-label">${escapeHtml(state.language === "zh-CN" ? "Judge ??" : "Judge Rationale")}</p>
+        <p>${escapeHtml(intent.rationale || "n/a")}</p>
+      </article>
+      <article class="brief-card">
+        <p class="metric-label">${escapeHtml(state.language === "zh-CN" ? "????" : "Repo Types")}</p>
+        <p>${escapeHtml(repoTypes)}</p>
+      </article>
+      <article class="brief-card">
+        <p class="metric-label">${escapeHtml(state.language === "zh-CN" ? "??????" : "Compared Variants")}</p>
+        <p>${escapeHtml(variantLabels || "n/a")}</p>
+      </article>
+    </div>
+    <p class="warning-text">${escapeHtml(baselineTaskWarning(run.task))}</p>
+  `;
 }
 
 function renderRunList() {
@@ -771,165 +1303,19 @@ function renderRunCompareTable() {
   `;
 }
 
-function renderRunDiffTable() {
-  if (!state.run) {
-    elements.runDiffTable.innerHTML = `<p class="empty-state">${escapeHtml(state.language === "zh-CN" ? "还没有选中 run。" : "No run selected.")}</p>`;
-    return;
-  }
-
-  const diff = getRunToRunAgentDiff(state.runs, state.run);
-  if (!diff.previousRun) {
-    elements.runDiffTable.innerHTML =
-      `<p class="empty-state">${escapeHtml(state.language === "zh-CN" ? "当前任务还没有更早的 run 可用于比较。" : "No earlier run with the same task title is available for comparison.")}</p>`;
-    return;
-  }
-
-  if (diff.rows.length === 0) {
-    elements.runDiffTable.innerHTML = `<p class="empty-state">${escapeHtml(state.language === "zh-CN" ? "没有可比较的 agent 结果。" : "No comparable agent results found.")}</p>`;
-    return;
-  }
-
-  elements.runDiffTable.innerHTML = `
-    <p class="muted">${
-      state.language === "zh-CN"
-        ? `正在比较当前 run <code>${escapeHtml(state.run.runId)}</code> 与上一个同任务 run <code>${escapeHtml(
-            diff.previousRun.runId
-          )}</code>（${escapeHtml(diff.previousRun.createdAt)}）。`
-        : `Comparing current run <code>${escapeHtml(state.run.runId)}</code> against previous same-task run <code>${escapeHtml(
-            diff.previousRun.runId
-          )}</code> from ${escapeHtml(diff.previousRun.createdAt)}.`
-    }</p>
-    <table class="compare-table">
-      <thead>
-        <tr>
-          <th>${escapeHtml(state.language === "zh-CN" ? "Agent" : "Agent")}</th>
-          <th>${escapeHtml(state.language === "zh-CN" ? "状态变化" : "Status")}</th>
-          <th>${escapeHtml(state.language === "zh-CN" ? "耗时变化" : "Duration Delta")}</th>
-          <th>${escapeHtml(state.language === "zh-CN" ? "Token 变化" : "Token Delta")}</th>
-          <th>${escapeHtml(state.language === "zh-CN" ? "成本变化" : "Cost Delta")}</th>
-          <th>${escapeHtml(state.language === "zh-CN" ? "Judge 变化" : "Judge Delta")}</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${diff.rows
-          .map((row) => {
-            const isActive = row.agentId === state.selectedAgentId ? "active" : "";
-            return `
-              <tr class="${isActive}" data-run-diff-agent-id="${escapeHtml(row.agentId)}">
-                <td>
-                  <strong>${escapeHtml(row.currentResult?.agentTitle ?? row.previousResult?.agentTitle ?? row.agentId)}</strong><br />
-                  <code>${escapeHtml(row.agentId)}</code>
-                </td>
-                <td>${escapeHtml(row.statusChange)}</td>
-                <td>${formatSignedNumber(row.durationDeltaMs, (value) => `${value > 0 ? "+" : ""}${value}ms`)}</td>
-                <td>${formatSignedNumber(row.tokenDelta, (value) => `${value > 0 ? "+" : ""}${value}`)}</td>
-                <td>${formatSignedNumber(
-                  row.costDelta,
-                  (value) => `${value > 0 ? "+" : "-"}$${Math.abs(value).toFixed(2)}`,
-                  "lower"
-                )}</td>
-                <td>${formatSignedNumber(
-                  row.judgeDelta,
-                  (value) => `${value > 0 ? "+" : ""}${value}`,
-                  "higher"
-                )}</td>
-              </tr>
-            `;
-          })
-          .join("")}
-      </tbody>
-    </table>
-  `;
-}
-
-function renderAgentTrendTable(run) {
-  if (!state.selectedAgentId) {
-    elements.agentTrendTitle.textContent = t("agentTrendTitle");
-    elements.agentTrendTable.innerHTML = `<p class="empty-state">${escapeHtml(state.language === "zh-CN" ? "先选一个 agent，再看它的历史趋势。" : "Select an agent to view its run history.")}</p>`;
-    return;
-  }
-
-  const activeResult = run.results.find((result) => result.agentId === state.selectedAgentId) ?? null;
-  elements.agentTrendTitle.textContent = activeResult
-    ? `${t("agentTrendTitle")}: ${activeResult.agentTitle}`
-    : `${t("agentTrendTitle")}: ${state.selectedAgentId}`;
-
-  const rows = getAgentTrendRows(state.runs, run, state.selectedAgentId);
-  if (rows.length === 0) {
-    elements.agentTrendTable.innerHTML =
-      `<p class="empty-state">${escapeHtml(state.language === "zh-CN" ? "当前 agent 在这个任务下还没有历史记录。" : "No same-task history found for the selected agent.")}</p>`;
-    return;
-  }
-
-  elements.agentTrendTable.innerHTML = `
-    <p class="muted">${
-      state.language === "zh-CN"
-        ? `这是 <code>${escapeHtml(state.selectedAgentId)}</code> 在同一任务下的历史表现，按时间从早到晚排列。`
-        : `Same-task history for <code>${escapeHtml(state.selectedAgentId)}</code>, oldest to newest.`
-    }</p>
-    <table class="compare-table">
-      <thead>
-        <tr>
-          <th>${escapeHtml(state.language === "zh-CN" ? "Run" : "Run")}</th>
-          <th>${escapeHtml(state.language === "zh-CN" ? "创建时间" : "Created")}</th>
-          <th>${escapeHtml(state.language === "zh-CN" ? "状态" : "Status")}</th>
-          <th>${escapeHtml(state.language === "zh-CN" ? "耗时" : "Duration")}</th>
-          <th>${escapeHtml(t("metrics.tokens"))}</th>
-          <th>${escapeHtml(state.language === "zh-CN" ? "成本" : "Cost")}</th>
-          <th>${escapeHtml(state.language === "zh-CN" ? "Judge 通过" : "Judge Pass")}</th>
-          <th>${escapeHtml(state.language === "zh-CN" ? "相对上一轮变化" : "Delta vs Previous")}</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${rows
-          .map((row) => {
-            const isActive = row.run.runId === state.selectedRunId ? "active" : "";
-            const passedJudges = row.result.judgeResults.filter((judge) => judge.success).length;
-            const deltaParts = [
-              `${state.language === "zh-CN" ? "状态" : "status"} ${row.statusChange}`,
-              row.durationDeltaMs === null
-                ? `${state.language === "zh-CN" ? "耗时" : "duration"} n/a`
-                : `${state.language === "zh-CN" ? "耗时" : "duration"} ${row.durationDeltaMs > 0 ? "+" : ""}${row.durationDeltaMs}ms`,
-              row.tokenDelta === null
-                ? `${state.language === "zh-CN" ? "tokens" : "tokens"} n/a`
-                : `${state.language === "zh-CN" ? "tokens" : "tokens"} ${row.tokenDelta > 0 ? "+" : ""}${row.tokenDelta}`,
-              row.costDelta === null
-                ? `${state.language === "zh-CN" ? "成本" : "cost"} n/a`
-                : `${state.language === "zh-CN" ? "成本" : "cost"} ${row.costDelta > 0 ? "+" : "-"}$${Math.abs(row.costDelta).toFixed(2)}`,
-              row.judgeDelta === null
-                ? `${state.language === "zh-CN" ? "judges" : "judges"} n/a`
-                : `${state.language === "zh-CN" ? "judges" : "judges"} ${row.judgeDelta > 0 ? "+" : ""}${row.judgeDelta}`
-            ];
-
-            return `
-              <tr class="${isActive}" data-agent-trend-run-id="${escapeHtml(row.run.runId)}">
-                <td><code>${escapeHtml(row.run.runId)}</code></td>
-                <td>${escapeHtml(row.run.createdAt)}</td>
-                <td><span class="status-badge ${statusClass(row.result.status)}">${escapeHtml(row.result.status)}</span></td>
-                <td>${escapeHtml(formatDuration(row.result.durationMs))}</td>
-                <td>${row.result.tokenUsage}</td>
-                <td>${escapeHtml(formatCost(row.result))}</td>
-                <td>${passedJudges}/${row.result.judgeResults.length}</td>
-                <td><span class="muted">${escapeHtml(deltaParts.join(" | "))}</span></td>
-              </tr>
-            `;
-          })
-          .join("")}
-      </tbody>
-    </table>
-  `;
-}
-
 function renderPreflights(run) {
   elements.preflights.innerHTML = run.preflights
     .map(
       (preflight) => `
         <article class="preflight-card ${escapeHtml(preflight.status)}">
           <div class="panel-header">
-            <h3>${escapeHtml(preflight.agentTitle)}</h3>
+            <h3>${escapeHtml(resultLabel(preflight))}</h3>
             <span class="status-badge ${statusClass(preflight.status)}">${escapeHtml(preflight.status)}</span>
           </div>
           <p>${escapeHtml(preflight.summary)}</p>
+          <p class="muted">${escapeHtml(state.language === "zh-CN" ? "鍩虹 Agent" : "Base Agent")}: ${escapeHtml(baseAgentLabel(preflight))}</p>
+          <p class="muted">${escapeHtml(state.language === "zh-CN" ? "妯″瀷 / 鎬濊€冪瓑绾?" : "Model / Reasoning")}: ${escapeHtml(runtimeIdentity(preflight).model)} / ${escapeHtml(runtimeIdentity(preflight).reasoning)}</p>
+          <p class="muted">${escapeHtml(state.language === "zh-CN" ? "淇℃伅鏉ユ簮" : "Verification")}: ${escapeHtml(runtimeVerificationLabel(preflight))}</p>
           <p class="muted">${escapeHtml(state.language === "zh-CN" ? "支持层级" : "Tier")}: ${escapeHtml(preflight.capability.supportTier)} | ${escapeHtml(state.language === "zh-CN" ? "Trace" : "Trace")}: ${escapeHtml(
             preflight.capability.traceRichness
           )}</p>
@@ -963,22 +1349,24 @@ function renderVerdicts(run) {
   const cards = [
     {
       label: t("verdicts.bestAgent"),
-      value: verdict.bestAgent ? verdict.bestAgent.agentTitle : "n/a",
-      meta: verdict.bestAgent ? `${verdict.bestAgent.agentId} | ${verdict.bestAgent.status}` : t("verdicts.noResult")
+      value: verdict.bestAgent ? resultLabel(verdict.bestAgent) : "n/a",
+      meta: verdict.bestAgent
+        ? `${runtimeIdentity(verdict.bestAgent).model} | ${runtimeIdentity(verdict.bestAgent).reasoning}`
+        : t("verdicts.noResult")
     },
     {
       label: t("verdicts.fastest"),
-      value: verdict.fastest ? verdict.fastest.agentTitle : "n/a",
+      value: verdict.fastest ? resultLabel(verdict.fastest) : "n/a",
       meta: verdict.fastest ? formatDuration(verdict.fastest.durationMs) : t("verdicts.noResult")
     },
     {
       label: t("verdicts.lowestKnownCost"),
-      value: verdict.lowestKnownCost ? verdict.lowestKnownCost.agentTitle : "n/a",
+      value: verdict.lowestKnownCost ? resultLabel(verdict.lowestKnownCost) : "n/a",
       meta: verdict.lowestKnownCost ? formatCost(verdict.lowestKnownCost) : t("verdicts.noKnownCost")
     },
     {
       label: t("verdicts.highestJudgePassRate"),
-      value: verdict.highestJudgePassRate ? verdict.highestJudgePassRate.agentTitle : "n/a",
+      value: verdict.highestJudgePassRate ? resultLabel(verdict.highestJudgePassRate) : "n/a",
       meta: verdict.highestJudgePassRate
         ? `${verdict.highestJudgePassRate.judgeResults.filter((judge) => judge.success).length}/${verdict.highestJudgePassRate.judgeResults.length}`
         : t("verdicts.noResult")
@@ -1004,14 +1392,15 @@ function renderAgentList(run) {
   elements.agentList.innerHTML = run.results
     .map((result) => {
       const active = result.agentId === state.selectedAgentId ? "active" : "";
+      const runtime = runtimeIdentity(result);
       return `
         <button class="agent-button ${active}" type="button" data-agent-id="${escapeHtml(result.agentId)}">
           <div class="row">
-            <strong>${escapeHtml(result.agentTitle)}</strong>
+            <strong>${escapeHtml(resultLabel(result))}</strong>
             <span class="status-badge ${statusClass(result.status)}">${escapeHtml(result.status)}</span>
           </div>
           <div class="meta">
-            ${escapeHtml(result.agentId)} | ${escapeHtml(formatDuration(result.durationMs))} | ${escapeHtml(
+            ${escapeHtml(runtime.model)} | ${escapeHtml(runtime.reasoning)} | ${escapeHtml(formatDuration(result.durationMs))} | ${escapeHtml(
               formatCost(result)
             )}
           </div>
@@ -1019,60 +1408,6 @@ function renderAgentList(run) {
       `;
     })
     .join("");
-}
-
-function renderCompareTable(run) {
-  const results = getCompareResults(run, compareFilters);
-  const sortHintMap = {
-    status: state.language === "zh-CN" ? "按状态排序，同状态下更快的排前面。" : "Sorted by status, then fastest first.",
-    duration: state.language === "zh-CN" ? "按耗时排序，越快越靠前。" : "Sorted by fastest agents first.",
-    tokens: state.language === "zh-CN" ? "按 token 用量排序，越高越靠前。" : "Sorted by highest token usage first.",
-    cost: state.language === "zh-CN" ? "按已知成本排序，越低越靠前。" : "Sorted by lowest known cost first.",
-    changed: state.language === "zh-CN" ? "按改动文件数排序，越多越靠前。" : "Sorted by most changed files first.",
-    judges: state.language === "zh-CN" ? "按 judge 通过率排序，越高越靠前。" : "Sorted by highest judge pass rate first."
-  };
-  elements.compareSortHint.textContent = sortHintMap[compareFilters.sort] ?? sortHintMap.status;
-
-  if (results.length === 0) {
-    elements.compareTable.innerHTML = `<p class="empty-state">${escapeHtml(state.language === "zh-CN" ? "没有 agent 符合当前筛选条件。" : "No agents match the current compare filters.")}</p>`;
-    return;
-  }
-
-  elements.compareTable.innerHTML = `
-    <table class="compare-table">
-      <thead>
-        <tr>
-          <th>${escapeHtml(state.language === "zh-CN" ? "Agent" : "Agent")}</th>
-          <th>${escapeHtml(state.language === "zh-CN" ? "状态" : "Status")}</th>
-          <th>${escapeHtml(state.language === "zh-CN" ? "耗时" : "Duration")}</th>
-          <th>${escapeHtml(t("metrics.tokens"))}</th>
-          <th>${escapeHtml(state.language === "zh-CN" ? "成本" : "Cost")}</th>
-          <th>${escapeHtml(state.language === "zh-CN" ? "改动文件" : "Changed")}</th>
-          <th>${escapeHtml(state.language === "zh-CN" ? "Judges" : "Judges")}</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${results
-          .map((result) => {
-            const passedJudges = result.judgeResults.filter((judge) => judge.success).length;
-            const isActive = result.agentId === state.selectedAgentId ? "active" : "";
-
-            return `
-              <tr class="${isActive}" data-compare-agent-id="${escapeHtml(result.agentId)}">
-                <td><strong>${escapeHtml(result.agentTitle)}</strong><br /><code>${escapeHtml(result.agentId)}</code></td>
-                <td><span class="status-badge ${statusClass(result.status)}">${escapeHtml(result.status)}</span></td>
-                <td>${escapeHtml(formatDuration(result.durationMs))}</td>
-                <td>${result.tokenUsage}</td>
-                <td>${escapeHtml(formatCost(result))}</td>
-                <td>${result.changedFiles.length}</td>
-                <td>${passedJudges}/${result.judgeResults.length}</td>
-              </tr>
-            `;
-          })
-          .join("")}
-      </tbody>
-    </table>
-  `;
 }
 
 function renderStepCards(title, steps) {
@@ -1281,7 +1616,68 @@ function renderMarkdownPanel() {
   elements.markdownContent.innerHTML = renderMarkdownBlock(markdown);
 }
 
-function renderSelectedAgent() {
+function renderCompareTableV2(run) {
+  const results = getCompareResults(run, compareFilters);
+  const sortHintMap = {
+    status: state.language === "zh-CN" ? "先按状态分层，再把更快的结果排前面。" : "Sorted by status first, then by fastest duration.",
+    duration: state.language === "zh-CN" ? "按耗时排序，越快越靠前。" : "Sorted by fastest variants first.",
+    tokens: state.language === "zh-CN" ? "按 token 用量排序，越高越靠前。" : "Sorted by highest token usage first.",
+    cost: state.language === "zh-CN" ? "按已知成本排序，越低越靠前。" : "Sorted by lowest known cost first.",
+    changed: state.language === "zh-CN" ? "按改动文件数排序，越多越靠前。" : "Sorted by most changed files first.",
+    judges: state.language === "zh-CN" ? "按 judge 通过率排序，越高越靠前。" : "Sorted by highest judge pass rate first."
+  };
+  elements.compareSortHint.textContent = sortHintMap[compareFilters.sort] ?? sortHintMap.status;
+
+  if (results.length === 0) {
+    elements.compareTable.innerHTML = `<p class="empty-state">${escapeHtml(state.language === "zh-CN" ? "没有 variant 符合当前筛选条件。" : "No variants match the current compare filters.")}</p>`;
+    return;
+  }
+
+  elements.compareTable.innerHTML = `
+    <table class="compare-table">
+      <thead>
+        <tr>
+          <th>${escapeHtml(state.language === "zh-CN" ? "Variant" : "Variant")}</th>
+          <th>${escapeHtml(state.language === "zh-CN" ? "模型" : "Model")}</th>
+          <th>${escapeHtml(state.language === "zh-CN" ? "思考等级" : "Reasoning")}</th>
+          <th>${escapeHtml(state.language === "zh-CN" ? "可信度" : "Verification")}</th>
+          <th>${escapeHtml(state.language === "zh-CN" ? "状态" : "Status")}</th>
+          <th>${escapeHtml(state.language === "zh-CN" ? "耗时" : "Duration")}</th>
+          <th>${escapeHtml(t("metrics.tokens"))}</th>
+          <th>${escapeHtml(state.language === "zh-CN" ? "成本" : "Cost")}</th>
+          <th>${escapeHtml(state.language === "zh-CN" ? "改动文件" : "Changed")}</th>
+          <th>Judges</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${results
+          .map((result) => {
+            const passedJudges = result.judgeResults.filter((judge) => judge.success).length;
+            const isActive = result.agentId === state.selectedAgentId ? "active" : "";
+            const runtime = runtimeIdentity(result);
+
+            return `
+              <tr class="${isActive}" data-compare-agent-id="${escapeHtml(result.agentId)}">
+                <td><strong>${escapeHtml(resultLabel(result))}</strong><br /><code>${escapeHtml(baseAgentLabel(result))}</code></td>
+                <td>${escapeHtml(runtime.model)}</td>
+                <td>${escapeHtml(runtime.reasoning)}</td>
+                <td>${escapeHtml(runtimeVerificationLabel(result))}</td>
+                <td><span class="status-badge ${statusClass(result.status)}">${escapeHtml(result.status)}</span></td>
+                <td>${escapeHtml(formatDuration(result.durationMs))}</td>
+                <td>${result.tokenUsage}</td>
+                <td>${escapeHtml(formatCost(result))}</td>
+                <td>${result.changedFiles.length}</td>
+                <td>${passedJudges}/${result.judgeResults.length}</td>
+              </tr>
+            `;
+          })
+          .join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+function renderSelectedAgentV2() {
   if (!state.run || !state.selectedAgentId) {
     return;
   }
@@ -1291,18 +1687,24 @@ function renderSelectedAgent() {
     return;
   }
 
+  const runtime = runtimeIdentity(result);
+  const judgeKinds =
+    Array.from(new Set(result.judgeResults.map((judge) => formatJudgeType(judge.type)))).join(", ") ||
+    (state.language === "zh-CN" ? "无" : "None");
+
   elements.resultSummary.innerHTML = `
-    <h3>${escapeHtml(result.agentTitle)}</h3>
+    <h3>${escapeHtml(resultLabel(result))}</h3>
     <div class="summary-grid">
+      <div class="summary-row"><span>${escapeHtml(state.language === "zh-CN" ? "基础 Agent" : "Base Agent")}</span><strong>${escapeHtml(baseAgentLabel(result))}</strong></div>
+      <div class="summary-row"><span>${escapeHtml(state.language === "zh-CN" ? "模型" : "Model")}</span><strong>${escapeHtml(runtime.model)}</strong></div>
+      <div class="summary-row"><span>${escapeHtml(state.language === "zh-CN" ? "思考等级" : "Reasoning")}</span><strong>${escapeHtml(runtime.reasoning)}</strong></div>
+      <div class="summary-row"><span>${escapeHtml(state.language === "zh-CN" ? "可信度" : "Verification")}</span><strong>${escapeHtml(runtimeVerificationLabel(result))}</strong></div>
       <div class="summary-row"><span>${escapeHtml(state.language === "zh-CN" ? "状态" : "Status")}</span><strong>${escapeHtml(result.status)}</strong></div>
       <div class="summary-row"><span>${escapeHtml(state.language === "zh-CN" ? "耗时" : "Duration")}</span><strong>${escapeHtml(formatDuration(result.durationMs))}</strong></div>
       <div class="summary-row"><span>${escapeHtml(t("metrics.tokens"))}</span><strong>${result.tokenUsage}</strong></div>
       <div class="summary-row"><span>${escapeHtml(state.language === "zh-CN" ? "成本" : "Cost")}</span><strong>${escapeHtml(formatCost(result))}</strong></div>
       <div class="summary-row"><span>${escapeHtml(state.language === "zh-CN" ? "改动文件" : "Changed Files")}</span><strong>${result.changedFiles.length}</strong></div>
-      <div class="summary-row"><span>${escapeHtml(state.language === "zh-CN" ? "Judge 类型" : "Judge Types")}</span><strong>${escapeHtml(
-        Array.from(new Set(result.judgeResults.map((judge) => formatJudgeType(judge.type)))).join(", ") ||
-          (state.language === "zh-CN" ? "无" : "None")
-      )}</strong></div>
+      <div class="summary-row"><span>${escapeHtml(state.language === "zh-CN" ? "Judge 类型" : "Judge Types")}</span><strong>${escapeHtml(judgeKinds)}</strong></div>
       <div class="summary-row"><span>Trace</span><code>${escapeHtml(result.tracePath)}</code></div>
       <div class="summary-row"><span>Workspace</span><code>${escapeHtml(result.workspacePath)}</code></div>
     </div>
@@ -1310,6 +1712,17 @@ function renderSelectedAgent() {
   `;
 
   elements.resultDetails.innerHTML = [
+    `
+      <section class="detail-card">
+        <h3>Model Identity</h3>
+        <div class="summary-grid">
+          <div class="summary-row"><span>Requested</span><strong>${escapeHtml(result.requestedConfig?.model ?? "default")} / ${escapeHtml(result.requestedConfig?.reasoningEffort ?? "default")}</strong></div>
+          <div class="summary-row"><span>Effective</span><strong>${escapeHtml(runtime.model)} / ${escapeHtml(runtime.reasoning)}</strong></div>
+          <div class="summary-row"><span>Source</span><strong>${escapeHtml(runtime.source)}</strong></div>
+          <div class="summary-row"><span>Verification</span><strong>${escapeHtml(runtime.verification)}</strong></div>
+        </div>
+      </section>
+    `,
     renderStepCards(state.language === "zh-CN" ? "准备步骤" : "Setup", result.setupResults),
     renderJudgeCards(result),
     renderStepCards(state.language === "zh-CN" ? "收尾步骤" : "Teardown", result.teardownResults),
@@ -1334,18 +1747,25 @@ function renderDashboard(run) {
   elements.taskTitle.textContent = run.task.title;
   elements.taskMeta.textContent = `${run.task.id} | ${run.task.schemaVersion} | ${run.createdAt}`;
 
+  renderTaskBrief(run);
   renderRunInfo(run);
   renderMetrics(run);
   renderVerdicts(run);
   renderRunCompareTable();
-  renderRunDiffTable();
+  renderRunDiffTableV2();
   renderPreflights(run);
   renderAgentList(run);
-  renderCompareTable(run);
-  renderAgentTrendTable(run);
+  renderCompareTableV2(run);
+  renderAgentTrendTableV2(run);
   populateJudgeFilters(run);
-  renderSelectedAgent();
+  renderSelectedAgentV2();
   renderMarkdownPanel();
+  setHidden(elements.runCompareSection, state.runs.length <= 1);
+  setHidden(elements.runDiffSection, !findPreviousComparableRun(state.runs, run));
+  setHidden(
+    elements.agentTrendSection,
+    !state.selectedAgentId || getAgentTrendRows(state.runs, run, state.selectedAgentId).length <= 1
+  );
   renderNextSteps();
 }
 
@@ -1481,11 +1901,44 @@ elements.launcherTaskSelect.addEventListener("change", (event) => {
   if (value) {
     elements.launcherTaskPath.value = value;
   }
+  renderLauncher();
 });
-elements.launcherAgents.addEventListener("change", () => {
-  state.launcherSelectedAgentIds = selectedLauncherAgents();
+elements.launcherAgents.addEventListener("change", (event) => {
+  if (event.target?.id === "launcher-add-codex-variant") {
+    return;
+  }
+  syncLauncherStateFromDom();
+});
+elements.launcherAgents.addEventListener("input", () => {
+  syncLauncherStateFromDom();
+});
+elements.launcherAgents.addEventListener("click", (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) {
+    return;
+  }
+
+  if (target.id === "launcher-add-codex-variant") {
+    state.launcherCodexVariants = [...state.launcherCodexVariants, defaultCodexVariant()];
+    renderLauncher();
+    return;
+  }
+
+  if (target.getAttribute("data-role") === "variant-remove") {
+    const card = target.closest("[data-codex-variant-id]");
+    const variantId = card?.getAttribute("data-codex-variant-id");
+    state.launcherCodexVariants = state.launcherCodexVariants.filter((variant) => variant.id !== variantId);
+    if (state.launcherCodexVariants.length === 0) {
+      state.launcherCodexVariants = [defaultCodexVariant()];
+    }
+    renderLauncher();
+  }
 });
 elements.launcherRun.addEventListener("click", handleLauncherRun);
+elements.launcherToggle.addEventListener("click", () => {
+  state.launcherExpanded = !state.launcherExpanded;
+  renderLauncher();
+});
 elements.languageSelect.addEventListener("change", (event) => {
   state.language = String(event.target.value ?? "en");
   try {
@@ -1515,9 +1968,13 @@ elements.agentList.addEventListener("click", (event) => {
 
   state.selectedAgentId = button.getAttribute("data-agent-id");
   renderAgentList(state.run);
-  renderCompareTable(state.run);
-  renderAgentTrendTable(state.run);
-  renderSelectedAgent();
+  renderCompareTableV2(state.run);
+  renderAgentTrendTableV2(state.run);
+  renderSelectedAgentV2();
+  setHidden(
+    elements.agentTrendSection,
+    !state.selectedAgentId || getAgentTrendRows(state.runs, state.run, state.selectedAgentId).length <= 1
+  );
 });
 
 elements.compareTable.addEventListener("click", (event) => {
@@ -1528,9 +1985,13 @@ elements.compareTable.addEventListener("click", (event) => {
 
   state.selectedAgentId = row.getAttribute("data-compare-agent-id");
   renderAgentList(state.run);
-  renderCompareTable(state.run);
-  renderAgentTrendTable(state.run);
-  renderSelectedAgent();
+  renderCompareTableV2(state.run);
+  renderAgentTrendTableV2(state.run);
+  renderSelectedAgentV2();
+  setHidden(
+    elements.agentTrendSection,
+    !state.selectedAgentId || getAgentTrendRows(state.runs, state.run, state.selectedAgentId).length <= 1
+  );
 });
 
 elements.runCompareTable.addEventListener("click", (event) => {
@@ -1552,10 +2013,14 @@ elements.runDiffTable.addEventListener("click", (event) => {
 
   state.selectedAgentId = row.getAttribute("data-run-diff-agent-id");
   renderAgentList(state.run);
-  renderCompareTable(state.run);
-  renderRunDiffTable();
-  renderAgentTrendTable(state.run);
-  renderSelectedAgent();
+  renderCompareTableV2(state.run);
+  renderRunDiffTableV2();
+  renderAgentTrendTableV2(state.run);
+  renderSelectedAgentV2();
+  setHidden(
+    elements.agentTrendSection,
+    !state.selectedAgentId || getAgentTrendRows(state.runs, state.run, state.selectedAgentId).length <= 1
+  );
 });
 
 elements.agentTrendTable.addEventListener("click", (event) => {
@@ -1583,30 +2048,30 @@ elements.collapseAll.addEventListener("click", () => {
 
 elements.judgeSearch.addEventListener("input", (event) => {
   judgeFilters.search = String(event.target.value ?? "").trim().toLowerCase();
-  renderSelectedAgent();
+  renderSelectedAgentV2();
 });
 
 elements.judgeTypeFilter.addEventListener("change", (event) => {
   judgeFilters.type = String(event.target.value ?? "all");
-  renderSelectedAgent();
+  renderSelectedAgentV2();
 });
 
 elements.judgeStatusFilter.addEventListener("change", (event) => {
   judgeFilters.status = String(event.target.value ?? "all");
-  renderSelectedAgent();
+  renderSelectedAgentV2();
 });
 
 elements.compareStatusFilter.addEventListener("change", (event) => {
   compareFilters.status = String(event.target.value ?? "all");
   if (state.run) {
-    renderCompareTable(state.run);
+    renderCompareTableV2(state.run);
   }
 });
 
 elements.compareSort.addEventListener("change", (event) => {
   compareFilters.sort = String(event.target.value ?? "status");
   if (state.run) {
-    renderCompareTable(state.run);
+    renderCompareTableV2(state.run);
   }
 });
 

@@ -44,8 +44,8 @@ function formatTraceRichness(value: AdapterPreflightResult["capability"]["traceR
   }
 }
 
-function escapeHtml(value: string): string {
-  return value
+function escapeHtml(value: unknown): string {
+  return String(value ?? "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
@@ -150,6 +150,31 @@ function summarizeRun(run: BenchmarkRun): {
   };
 }
 
+function formatRuntimeIdentity(result: {
+  requestedConfig?: { model?: string; reasoningEffort?: string };
+  resolvedRuntime?: {
+    effectiveModel?: string;
+    effectiveReasoningEffort?: string;
+    source: string;
+    verification: string;
+  };
+}): {
+  model: string;
+  reasoning: string;
+  source: string;
+  verification: string;
+} {
+  return {
+    model: result.resolvedRuntime?.effectiveModel ?? result.requestedConfig?.model ?? "unknown",
+    reasoning:
+      result.resolvedRuntime?.effectiveReasoningEffort ??
+      result.requestedConfig?.reasoningEffort ??
+      "default",
+    source: result.resolvedRuntime?.source ?? "unknown",
+    verification: result.resolvedRuntime?.verification ?? "unknown"
+  };
+}
+
 function buildBadgePayload(run: BenchmarkRun): BadgePayload {
   const summary = summarizeRun(run);
   const message = `${summary.successCount}/${summary.totalAgents} passing`;
@@ -250,16 +275,22 @@ function renderJudgeList(run: BenchmarkRun["results"][number]): string {
 function renderPreflights(run: BenchmarkRun): string {
   return run.preflights
     .map((preflight) => {
+      const runtime = formatRuntimeIdentity(preflight);
       const details = (preflight.details ?? [])
         .map((detail) => `<li>${escapeHtml(detail)}</li>`)
         .join("");
 
       return `
         <section class="preflight ${statusTone(preflight.status)}">
-          <h2>${escapeHtml(preflight.agentTitle)} <span>${escapeHtml(preflight.agentId)}</span></h2>
+          <h2>${escapeHtml(preflight.displayLabel ?? preflight.agentTitle ?? preflight.agentId)} <span>${escapeHtml(preflight.variantId ?? preflight.agentId)}</span></h2>
           <p><strong>${escapeHtml(preflight.status)}</strong> ${escapeHtml(preflight.summary)}</p>
+          <p class="meta">Variant: ${escapeHtml(preflight.displayLabel ?? preflight.agentTitle ?? preflight.agentId)}</p>
+          <p class="meta">Base Agent: ${escapeHtml(preflight.baseAgentId ?? preflight.agentId)}</p>
           <p class="meta">Support tier: ${escapeHtml(formatSupportTier(preflight.capability.supportTier))}</p>
           <p class="meta">Invocation: ${escapeHtml(preflight.capability.invocationMethod)}</p>
+          <p class="meta">Model: ${escapeHtml(runtime.model)} | Reasoning: ${escapeHtml(
+            runtime.reasoning
+          )} | Verification: ${escapeHtml(runtime.verification)} | Source: ${escapeHtml(runtime.source)}</p>
           <p class="meta">Tokens: ${escapeHtml(formatAvailability(preflight.capability.tokenAvailability))} | Cost: ${escapeHtml(
             formatAvailability(preflight.capability.costAvailability)
           )} | Trace: ${escapeHtml(formatTraceRichness(preflight.capability.traceRichness))}</p>
@@ -288,6 +319,7 @@ function renderPreflights(run: BenchmarkRun): string {
 function renderAgentCards(run: BenchmarkRun): string {
   return run.results
     .map((result) => {
+      const runtime = formatRuntimeIdentity(result);
       const changedFiles = result.changedFiles;
       const addedFiles =
         result.diff.added.length === 0
@@ -304,11 +336,14 @@ function renderAgentCards(run: BenchmarkRun): string {
 
       return `
         <section class="card">
-          <h2>${escapeHtml(result.agentTitle)} <span>${escapeHtml(result.agentId)}</span></h2>
+          <h2>${escapeHtml(result.displayLabel ?? result.agentTitle ?? result.agentId)} <span>${escapeHtml(result.variantId ?? result.agentId)}</span></h2>
           <p>${escapeHtml(result.summary)}</p>
           <p class="meta">Preflight: ${escapeHtml(result.preflight.status)} - ${escapeHtml(
             result.preflight.summary
           )}</p>
+          <p class="meta">Model: ${escapeHtml(runtime.model)} | Reasoning: ${escapeHtml(
+            runtime.reasoning
+          )} | Verification: ${escapeHtml(runtime.verification)} | Source: ${escapeHtml(runtime.source)}</p>
           <div class="stats">
             <div><strong>Status</strong><span>${result.status}</span></div>
             <div><strong>Duration</strong><span>${escapeHtml(formatDuration(result.durationMs))}</span></div>
@@ -318,6 +353,17 @@ function renderAgentCards(run: BenchmarkRun): string {
             }</span></div>
           </div>
           ${renderCommandStepList("Setup", result.setupResults)}
+          <h3>Model Identity</h3>
+          <ul>
+            <li><strong>Requested</strong>: model=${escapeHtml(result.requestedConfig?.model ?? "default")} | reasoning=${escapeHtml(
+              result.requestedConfig?.reasoningEffort ?? "default"
+            )}</li>
+            <li><strong>Effective</strong>: model=${escapeHtml(runtime.model)} | reasoning=${escapeHtml(
+              runtime.reasoning
+            )}</li>
+            <li><strong>Source</strong>: ${escapeHtml(runtime.source)}</li>
+            <li><strong>Verification</strong>: ${escapeHtml(runtime.verification)}</li>
+          </ul>
           ${renderJudgeList(result)}
           ${renderCommandStepList("Teardown", result.teardownResults)}
           <h3>Changed Files</h3>
@@ -471,6 +517,14 @@ function renderHtml(run: BenchmarkRun): string {
         <p class="lede">${escapeHtml(run.task.title)} in ${escapeHtml(run.repoPath)}. Generated at ${escapeHtml(
           run.createdAt
         )} for run ${escapeHtml(run.runId)}.</p>
+        ${
+          run.task.metadata
+            ? `<p class="lede">Objective: ${escapeHtml(run.task.metadata.objective ?? "n/a")} | Judge rationale: ${escapeHtml(
+                run.task.metadata.judgeRationale ?? "n/a"
+              )}</p>`
+            : ""
+        }
+        <p class="lede">This report compares specific model configurations, not just adapter names. For baseline repo-health tasks, success only means the agent completed a small improvement without breaking baseline repository structure.</p>
       </header>
       <h2 class="section-title">Adapter Preflight</h2>
       <section class="preflights">
@@ -508,29 +562,35 @@ function renderMarkdown(run: BenchmarkRun): string {
     ...(run.task.metadata
       ? [
           `- Task Library: \`${run.task.metadata.source}\` by \`${run.task.metadata.owner}\``,
-          `- Repo Types: \`${run.task.metadata.repoTypes.join(", ") || "unspecified"}\``
+          `- Repo Types: \`${run.task.metadata.repoTypes.join(", ") || "unspecified"}\``,
+          `- Objective: \`${run.task.metadata.objective ?? "unspecified"}\``,
+          `- Judge Rationale: \`${run.task.metadata.judgeRationale ?? "unspecified"}\``
         ]
       : []),
     `- Success Rate: \`${summary.successCount}/${summary.totalAgents}\``,
     `- Failed: \`${summary.failedCount}\``,
     `- Total Tokens: \`${summary.totalTokens}\` | Known Cost: \`$${summary.knownCostUsd.toFixed(2)}\``,
     `- Badge Endpoint: \`badge.json\``,
+    "- Note: This run compares concrete agent variants. For baseline repo-health tasks, success is a sanity check, not a code-review score.",
     ""
   ];
 
   lines.push("## Adapter Preflight", "");
-  lines.push("| Agent | Status | Summary |");
-  lines.push("| --- | --- | --- |");
+  lines.push("| Variant | Base Agent | Model | Reasoning | Verification | Status | Summary |");
+  lines.push("| --- | --- | --- | --- | --- | --- | --- |");
   for (const preflight of run.preflights) {
-    lines.push(`| ${preflight.agentId} | ${preflight.status} | ${preflight.summary.replaceAll("\n", " ")} |`);
+    const runtime = formatRuntimeIdentity(preflight);
+    lines.push(
+      `| ${preflight.displayLabel} | ${preflight.baseAgentId} | ${runtime.model} | ${runtime.reasoning} | ${runtime.verification}/${runtime.source} | ${preflight.status} | ${preflight.summary.replaceAll("\n", " ")} |`
+    );
   }
 
   lines.push("", "## Capability Matrix", "");
-  lines.push("| Agent | Tier | Invocation | Tokens | Cost | Trace |");
-  lines.push("| --- | --- | --- | --- | --- | --- |");
+  lines.push("| Variant | Base Agent | Tier | Invocation | Tokens | Cost | Trace |");
+  lines.push("| --- | --- | --- | --- | --- | --- | --- |");
   for (const preflight of run.preflights) {
     lines.push(
-      `| ${preflight.agentId} | ${formatSupportTier(preflight.capability.supportTier)} | ${preflight.capability.invocationMethod.replaceAll("\n", " ")} | ${formatAvailability(preflight.capability.tokenAvailability)} | ${formatAvailability(preflight.capability.costAvailability)} | ${formatTraceRichness(preflight.capability.traceRichness)} |`
+      `| ${preflight.displayLabel} | ${preflight.baseAgentId} | ${formatSupportTier(preflight.capability.supportTier)} | ${preflight.capability.invocationMethod.replaceAll("\n", " ")} | ${formatAvailability(preflight.capability.tokenAvailability)} | ${formatAvailability(preflight.capability.costAvailability)} | ${formatTraceRichness(preflight.capability.traceRichness)} |`
     );
     if (preflight.capability.knownLimitations.length > 0) {
       lines.push(
@@ -540,12 +600,13 @@ function renderMarkdown(run: BenchmarkRun): string {
   }
 
   lines.push("", "## Results", "");
-  lines.push("| Agent | Status | Duration | Tokens | Cost | Changed Files | Judges |");
-  lines.push("| --- | --- | --- | ---: | --- | ---: | --- |");
+  lines.push("| Variant | Base Agent | Model | Reasoning | Verification | Status | Duration | Tokens | Cost | Changed Files | Judges |");
+  lines.push("| --- | --- | --- | --- | --- | --- | --- | ---: | --- | ---: | --- |");
   for (const result of run.results) {
+    const runtime = formatRuntimeIdentity(result);
     const passedJudgeCount = result.judgeResults.filter((judge) => judge.success).length;
     lines.push(
-      `| ${result.agentId} | ${result.status} | ${formatDuration(result.durationMs)} | ${result.tokenUsage} | ${
+      `| ${result.displayLabel} | ${result.baseAgentId} | ${runtime.model} | ${runtime.reasoning} | ${runtime.verification}/${runtime.source} | ${result.status} | ${formatDuration(result.durationMs)} | ${result.tokenUsage} | ${
         result.costKnown ? `$${result.estimatedCostUsd.toFixed(2)}` : "n/a"
       } | ${result.changedFiles.length} | ${passedJudgeCount}/${result.judgeResults.length} |`
     );
@@ -567,9 +628,13 @@ function renderMarkdown(run: BenchmarkRun): string {
   }
 
   for (const result of run.results) {
-    lines.push("", `### ${result.agentTitle} (\`${result.agentId}\`)`, "");
+    const runtime = formatRuntimeIdentity(result);
+    lines.push("", `### ${result.displayLabel} (\`${result.variantId}\`)`, "");
     lines.push(`- Summary: ${result.summary}`);
     lines.push(`- Preflight: ${result.preflight.status} - ${result.preflight.summary}`);
+    lines.push(
+      `- Model Identity: requested=${result.requestedConfig.model ?? "default"} | requested reasoning=${result.requestedConfig.reasoningEffort ?? "default"} | effective model=${runtime.model} | effective reasoning=${runtime.reasoning} | source=${runtime.source} | verification=${runtime.verification}`
+    );
     lines.push(`- Trace: \`${result.tracePath}\``);
     lines.push(`- Workspace: \`${result.workspacePath}\``);
 
@@ -614,11 +679,12 @@ function renderPrComment(run: BenchmarkRun): string {
     "",
     "### Review Table",
     "",
-    "| Attention | Agent | Tier | Preflight | Run | Duration | Tokens | Cost | Judges | Files | Notes |",
-    "| --- | --- | --- | --- | --- | --- | ---: | --- | --- | ---: | --- |"
+    "| Attention | Variant | Base Agent | Model | Reasoning | Verification | Tier | Preflight | Run | Duration | Tokens | Cost | Judges | Files | Notes |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | ---: | --- | --- | ---: | --- |"
   ];
 
   for (const result of run.results) {
+    const runtime = formatRuntimeIdentity(result);
     const passedJudgeCount = result.judgeResults.filter((judge) => judge.success).length;
     const failedJudge = result.judgeResults.find((judge) => !judge.success);
     const attention =
@@ -636,7 +702,7 @@ function renderPrComment(run: BenchmarkRun): string {
             ? result.preflight.summary
             : "ready";
     table.push(
-      `| ${attention} | ${result.agentId} | ${formatSupportTier(result.preflight.capability.supportTier)} | ${result.preflight.status} | ${result.status} | ${formatDuration(result.durationMs)} | ${result.tokenUsage} | ${
+      `| ${attention} | ${result.displayLabel} | ${result.baseAgentId} | ${runtime.model} | ${runtime.reasoning} | ${runtime.verification}/${runtime.source} | ${formatSupportTier(result.preflight.capability.supportTier)} | ${result.preflight.status} | ${result.status} | ${formatDuration(result.durationMs)} | ${result.tokenUsage} | ${
         result.costKnown ? `$${result.estimatedCostUsd.toFixed(2)}` : "n/a"
       } | ${passedJudgeCount}/${result.judgeResults.length} | ${result.changedFiles.length} | ${note.replaceAll("\n", " ")} |`
     );

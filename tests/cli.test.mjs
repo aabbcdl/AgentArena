@@ -258,6 +258,29 @@ test("repoarena doctor supports JSON output", async () => {
   assert.equal(payload[0].capability.supportTier, "supported");
 });
 
+test("repoarena doctor reports codex runtime overrides", async () => {
+  const result = await runCli(
+    [
+      "doctor",
+      "--agents",
+      "codex",
+      "--codex-model",
+      "gpt-5.4",
+      "--codex-reasoning",
+      "high",
+      "--json"
+    ],
+    path.resolve(".")
+  );
+
+  assert.equal(result.code, 0);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload[0].baseAgentId, "codex");
+  assert.equal(payload[0].resolvedRuntime.effectiveModel, "gpt-5.4");
+  assert.equal(payload[0].resolvedRuntime.effectiveReasoningEffort, "high");
+  assert.equal(payload[0].resolvedRuntime.source, "cli");
+});
+
 test("repoarena list-adapters supports JSON output", async () => {
   const result = await runCli(["list-adapters", "--json"], path.resolve("."));
 
@@ -266,6 +289,7 @@ test("repoarena list-adapters supports JSON output", async () => {
   assert.equal(Array.isArray(payload), true);
   assert.equal(payload.some((adapter) => adapter.id === "demo-fast"), true);
   assert.equal(payload.find((adapter) => adapter.id === "codex").capability.supportTier, "supported");
+  assert.equal(payload.find((adapter) => adapter.id === "codex").capability.configurableRuntime.model, true);
 });
 
 test("repoarena init-taskpack writes a starter YAML file", async () => {
@@ -330,6 +354,9 @@ test("repoarena run supports JSON output", async () => {
   const payload = JSON.parse(result.stdout);
   assert.equal(payload.task.id, "cli-json");
   assert.equal(payload.results[0].agentId, "demo-fast");
+  assert.equal(payload.results[0].baseAgentId, "demo-fast");
+  assert.equal(payload.results[0].variantId, "demo-fast");
+  assert.equal(payload.results[0].displayLabel, "Demo Fast");
   assert.equal(payload.results[0].judges.passed, 1);
   assert.match(payload.report.jsonPath, /summary\.json$/);
   assert.match(payload.report.badgePath, /badge\.json$/);
@@ -403,21 +430,100 @@ test("repoarena ui exposes metadata and adapter APIs", async () => {
     const infoResponse = await fetch(`http://127.0.0.1:${server.port}/api/ui-info`);
     const adaptersResponse = await fetch(`http://127.0.0.1:${server.port}/api/adapters`);
     const taskPacksResponse = await fetch(`http://127.0.0.1:${server.port}/api/taskpacks`);
+    const runStatusResponse = await fetch(`http://127.0.0.1:${server.port}/api/run-status`);
 
     assert.equal(infoResponse.status, 200);
     assert.equal(adaptersResponse.status, 200);
     assert.equal(taskPacksResponse.status, 200);
+    assert.equal(runStatusResponse.status, 200);
 
     const info = await infoResponse.json();
     const adapters = await adaptersResponse.json();
     const taskPacks = await taskPacksResponse.json();
+    const runStatus = await runStatusResponse.json();
 
     assert.equal(info.mode, "local-service");
+    assert.equal(typeof info.codexDefaults, "object");
+    assert.ok("source" in info.codexDefaults);
     assert.equal(Array.isArray(adapters), true);
     assert.equal(adapters.some((adapter) => adapter.id === "demo-fast"), true);
+    assert.equal(adapters.find((adapter) => adapter.id === "codex").capability.configurableRuntime.reasoningEffort, true);
     assert.equal(Array.isArray(taskPacks), true);
+    assert.equal(typeof taskPacks[0].objective, "string");
+    assert.equal(runStatus.state, "idle");
+    assert.equal(runStatus.phase, "idle");
   } finally {
     await server.stop();
+  }
+});
+
+test("repoarena ui exposes run progress while a benchmark is active", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-ui-"));
+  const repoPath = path.join(tempDir, "repo");
+  const outputPath = path.join(tempDir, "output");
+  const taskPath = path.join(tempDir, "task-progress.json");
+
+  await mkdir(repoPath, { recursive: true });
+  await writeFile(path.join(repoPath, "README.md"), "# UI Repo\n", "utf8");
+
+  await writeJson(taskPath, {
+    schemaVersion: "repoarena.taskpack/v1",
+    id: "ui-progress",
+    title: "UI Progress",
+    prompt: "Run from UI with visible progress",
+    judges: [
+      {
+        id: "slow-pass",
+        type: "command",
+        label: "Pass after a short delay",
+        command: "node -e \"setTimeout(() => process.exit(0), 2000)\""
+      }
+    ]
+  });
+
+  const server = await startUiServer(path.resolve("."));
+
+  try {
+    const runPromise = fetch(`http://127.0.0.1:${server.port}/api/run`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        repoPath,
+        taskPath,
+        outputPath,
+        agents: [
+          {
+            baseAgentId: "demo-fast",
+            displayLabel: "Demo Fast"
+          }
+        ],
+        probeAuth: false
+      })
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 250));
+
+    const statusResponse = await fetch(`http://127.0.0.1:${server.port}/api/run-status`);
+    assert.equal(statusResponse.status, 200);
+    const status = await statusResponse.json();
+    assert.equal(status.state, "running");
+    assert.notEqual(status.phase, "idle");
+    assert.equal(status.repoPath, repoPath);
+    assert.equal(status.taskPath, taskPath);
+
+    const response = await runPromise;
+    assert.equal(response.status, 200);
+    await response.json();
+
+    const finalStatusResponse = await fetch(`http://127.0.0.1:${server.port}/api/run-status`);
+    const finalStatus = await finalStatusResponse.json();
+    assert.equal(finalStatus.state, "idle");
+    assert.equal(finalStatus.phase, "idle");
+  } finally {
+    await server.stop();
+    await rm(tempDir, { recursive: true, force: true });
   }
 });
 
@@ -457,7 +563,12 @@ test("repoarena ui can execute a benchmark via API", async () => {
         repoPath,
         taskPath,
         outputPath,
-        agentIds: ["demo-fast"],
+        agents: [
+          {
+            baseAgentId: "demo-fast",
+            displayLabel: "Demo Fast"
+          }
+        ],
         probeAuth: false
       })
     });
@@ -466,6 +577,7 @@ test("repoarena ui can execute a benchmark via API", async () => {
     const payload = await response.json();
     assert.equal(payload.run.task.title, "UI Run");
     assert.equal(payload.run.results[0].agentId, "demo-fast");
+    assert.equal(payload.run.results[0].displayLabel, "Demo Fast");
     assert.equal(typeof payload.markdown, "string");
     assert.match(payload.report.htmlPath, /report\.html$/);
   } finally {

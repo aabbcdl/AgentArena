@@ -24,23 +24,26 @@
           <p id="app-description" class="muted">Load linked `summary.json` and `summary.md` files to inspect benchmark results interactively.</p>
         </div>
 
-        <label class="file-picker recommended-picker">
-          <strong id="runs-folder-title">Recommended: Load Run Folder</strong>
-          <p id="runs-folder-hint" class="muted picker-help">Select one RepoArena run folder or the whole `.repoarena` results folder.</p>
-          <input id="runs-folder" type="file" webkitdirectory directory multiple />
-        </label>
+        <details id="result-loader-panel" class="panel result-loader-panel">
+          <summary id="result-loader-summary">Open Existing Results (Fallback)</summary>
+          <label class="file-picker recommended-picker">
+            <strong id="runs-folder-title">Recommended: Load Run Folder</strong>
+            <p id="runs-folder-hint" class="muted picker-help">Select one RepoArena run folder or the whole `.repoarena` results folder.</p>
+            <input id="runs-folder" type="file" webkitdirectory directory multiple />
+          </label>
 
-        <label class="file-picker">
-          <strong id="summary-file-title">Load Summary JSON</strong>
-          <p id="summary-file-hint" class="muted picker-help">Use this only if you want to open a single `summary.json` file.</p>
-          <input id="summary-file" type="file" accept=".json,application/json" />
-        </label>
+          <label class="file-picker">
+            <strong id="summary-file-title">Load Summary JSON</strong>
+            <p id="summary-file-hint" class="muted picker-help">Use this only if you want to open a single `summary.json` file.</p>
+            <input id="summary-file" type="file" accept=".json,application/json" />
+          </label>
 
-        <label class="file-picker">
-          <strong id="markdown-file-title">Optional: Load Markdown Summary</strong>
-          <p id="markdown-file-hint" class="muted picker-help">Adds share text, PR table, and markdown panel for the selected run.</p>
-          <input id="markdown-file" type="file" accept=".md,text/markdown,text/plain" />
-        </label>
+          <label class="file-picker">
+            <strong id="markdown-file-title">Optional: Load Markdown Summary</strong>
+            <p id="markdown-file-hint" class="muted picker-help">Adds share text, PR table, and markdown panel for the selected run.</p>
+            <input id="markdown-file" type="file" accept=".md,text/markdown,text/plain" />
+          </label>
+        </details>
 
         <div id="run-info" class="panel hidden"></div>
 
@@ -78,40 +81,48 @@
       <main class="content">
         <section id="launcher-panel" class="detail-card hidden">
           <div class="panel-header">
-            <h2 id="launcher-title">Run Benchmark</h2>
-            <span id="launcher-mode" class="muted">Local service</span>
+            <div>
+              <h2 id="launcher-title">Run Benchmark</h2>
+              <p id="launcher-compact-summary" class="muted"></p>
+            </div>
+            <div class="actions">
+              <span id="launcher-mode" class="muted">Local service</span>
+              <button id="launcher-toggle" type="button">Hide Setup</button>
+            </div>
           </div>
-          <p id="launcher-description" class="muted"></p>
-          <div class="launcher-grid">
-            <label class="field">
-              <span id="launcher-repo-label">Repository Path</span>
-              <input id="launcher-repo-path" type="text" />
-            </label>
-            <label class="field">
-              <span id="launcher-task-select-label">Official Task Pack</span>
-              <select id="launcher-task-select"></select>
-            </label>
-            <label class="field">
-              <span id="launcher-task-path-label">Task Pack Path</span>
-              <input id="launcher-task-path" type="text" />
-            </label>
-            <label class="field">
-              <span id="launcher-output-label">Output Folder</span>
-              <input id="launcher-output-path" type="text" />
-            </label>
+          <div id="launcher-body">
+            <p id="launcher-description" class="muted"></p>
+            <div class="launcher-grid">
+              <label class="field">
+                <span id="launcher-repo-label">Repository Path</span>
+                <input id="launcher-repo-path" type="text" />
+              </label>
+              <label class="field">
+                <span id="launcher-task-select-label">Official Task Pack</span>
+                <select id="launcher-task-select"></select>
+              </label>
+              <label class="field">
+                <span id="launcher-task-path-label">Task Pack Path</span>
+                <input id="launcher-task-path" type="text" />
+              </label>
+              <label class="field">
+                <span id="launcher-output-label">Output Folder</span>
+                <input id="launcher-output-path" type="text" />
+              </label>
+            </div>
+            <section class="field">
+              <span id="launcher-agents-label">Agents</span>
+              <div id="launcher-agents" class="checkbox-grid"></div>
+            </section>
+            <div class="launcher-actions">
+              <label class="checkbox">
+                <input id="launcher-probe-auth" type="checkbox" checked />
+                <span id="launcher-probe-auth-label">Probe auth before run</span>
+              </label>
+              <button id="launcher-run" type="button">Start Benchmark</button>
+            </div>
+            <p id="launcher-status" class="muted"></p>
           </div>
-          <section class="field">
-            <span id="launcher-agents-label">Agents</span>
-            <div id="launcher-agents" class="checkbox-grid"></div>
-          </section>
-          <div class="launcher-actions">
-            <label class="checkbox">
-              <input id="launcher-probe-auth" type="checkbox" checked />
-              <span id="launcher-probe-auth-label">Probe auth before run</span>
-            </label>
-            <button id="launcher-run" type="button">Start Benchmark</button>
-          </div>
-          <p id="launcher-status" class="muted"></p>
         </section>
 
         <section id="empty-state" class="hero">
@@ -145,11 +156,13 @@
             </div>
           </div>
 
+          <section id="task-brief" class="detail-card"></section>
+
           <section id="metrics" class="metrics"></section>
 
           <section id="run-verdicts" class="metrics"></section>
 
-          <section class="detail-card">
+          <section id="run-compare-section" class="detail-card">
             <div class="panel-header">
               <h3 id="run-compare-title">Run Compare</h3>
             </div>
@@ -168,7 +181,7 @@
             <div id="run-compare-table" class="compare-table-wrap"></div>
           </section>
 
-          <section class="detail-card">
+          <section id="run-diff-section" class="detail-card">
             <div class="panel-header">
               <h3 id="run-diff-title">Run-to-Run Agent Diff</h3>
             </div>
@@ -176,9 +189,7 @@
             <div id="run-diff-table" class="compare-table-wrap"></div>
           </section>
 
-          <section id="preflights" class="preflights"></section>
-
-          <section class="detail-card">
+          <section id="agent-compare-section" class="detail-card">
             <div class="panel-header">
               <h3 id="agent-compare-title">Agent Compare</h3>
             </div>
@@ -201,7 +212,7 @@
             <div id="compare-table" class="compare-table-wrap"></div>
           </section>
 
-          <section class="detail-card">
+          <section id="agent-trend-section" class="detail-card">
             <div class="panel-header">
               <h3 id="agent-trend-title">Agent Trend</h3>
             </div>
@@ -212,6 +223,13 @@
           <section class="result-layout">
             <div id="result-summary" class="card result-summary"></div>
             <div id="result-details" class="result-details"></div>
+          </section>
+
+          <section id="preflight-section" class="detail-card">
+            <div class="panel-header">
+              <h3 id="preflight-title">Adapter Preflight</h3>
+            </div>
+            <div id="preflights" class="preflights"></div>
           </section>
 
           <section class="detail-card">

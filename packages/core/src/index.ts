@@ -113,6 +113,37 @@ export interface TaskPack {
   teardownCommands: CommandExecutionSpec[];
 }
 
+export interface AgentRequestedConfig {
+  model?: string;
+  reasoningEffort?: string;
+}
+
+export interface AgentSelection {
+  baseAgentId: string;
+  variantId: string;
+  displayLabel: string;
+  config: AgentRequestedConfig;
+  configSource?: "ui" | "cli";
+}
+
+export type AgentRuntimeSource =
+  | "ui"
+  | "cli"
+  | "env"
+  | "codex-config"
+  | "cli-default"
+  | "event-stream";
+
+export type AgentRuntimeVerification = "confirmed" | "inferred" | "unknown";
+
+export interface AgentResolvedRuntime {
+  effectiveModel?: string;
+  effectiveReasoningEffort?: string;
+  source: AgentRuntimeSource;
+  verification: AgentRuntimeVerification;
+  notes?: string[];
+}
+
 export interface TraceEvent {
   timestamp: string;
   agentId: string;
@@ -123,6 +154,7 @@ export interface TraceEvent {
 
 export interface AdapterExecutionContext {
   agentId: string;
+  selection: AgentSelection;
   repoPath: string;
   workspacePath: string;
   environment: NodeJS.ProcessEnv;
@@ -137,6 +169,7 @@ export interface AdapterExecutionResult {
   estimatedCostUsd: number;
   costKnown: boolean;
   changedFilesHint: string[];
+  resolvedRuntime?: AgentResolvedRuntime;
 }
 
 export type AdapterPreflightStatus = "ready" | "unverified" | "blocked" | "missing";
@@ -152,14 +185,24 @@ export interface AdapterCapability {
   costAvailability: AdapterMetricAvailability;
   traceRichness: AdapterTraceRichness;
   knownLimitations: string[];
+  configurableRuntime?: {
+    model: boolean;
+    reasoningEffort: boolean;
+  };
 }
 
 export interface AdapterPreflightOptions {
   probeAuth?: boolean;
+  selection?: AgentSelection;
 }
 
 export interface AdapterPreflightResult {
   agentId: string;
+  baseAgentId: string;
+  variantId: string;
+  displayLabel: string;
+  requestedConfig: AgentRequestedConfig;
+  resolvedRuntime?: AgentResolvedRuntime;
   agentTitle: string;
   adapterKind: "demo" | "external";
   status: AdapterPreflightStatus;
@@ -213,6 +256,11 @@ export interface DiffSummary {
 
 export interface AgentRunResult {
   agentId: string;
+  baseAgentId: string;
+  variantId: string;
+  displayLabel: string;
+  requestedConfig: AgentRequestedConfig;
+  resolvedRuntime?: AgentResolvedRuntime;
   agentTitle: string;
   status: "success" | "failed";
   adapterKind: "demo" | "external";
@@ -387,4 +435,36 @@ export function formatDuration(durationMs: number): string {
   }
 
   return `${(durationMs / 1_000).toFixed(2)}s`;
+}
+
+function slugifyVariantPart(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+export function createAgentSelection(input: {
+  baseAgentId: string;
+  displayLabel?: string;
+  config?: AgentRequestedConfig;
+  configSource?: "ui" | "cli";
+}): AgentSelection {
+  const config = input.config ?? {};
+  const variantParts = [input.baseAgentId];
+  if (config.model) {
+    variantParts.push(slugifyVariantPart(config.model) || "model");
+  }
+  if (config.reasoningEffort) {
+    variantParts.push(slugifyVariantPart(config.reasoningEffort) || "reasoning");
+  }
+
+  return {
+    baseAgentId: input.baseAgentId,
+    variantId: variantParts.join("-"),
+    displayLabel: input.displayLabel ?? input.baseAgentId,
+    config,
+    configSource: input.configSource
+  };
 }

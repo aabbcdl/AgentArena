@@ -12,8 +12,63 @@ const demoCapability = {
   tokenAvailability: "estimated",
   costAvailability: "estimated",
   traceRichness: "partial",
+  configurableRuntime: {
+    model: false,
+    reasoningEffort: false
+  },
   knownLimitations: ["Synthetic metrics"]
 };
+
+function createPreflight(overrides = {}) {
+  return {
+    agentId: overrides.agentId ?? "demo-fast",
+    baseAgentId: overrides.baseAgentId ?? overrides.agentId ?? "demo-fast",
+    variantId: overrides.variantId ?? overrides.agentId ?? "demo-fast",
+    displayLabel: overrides.displayLabel ?? overrides.agentTitle ?? "Demo Fast",
+    requestedConfig: overrides.requestedConfig ?? {},
+    resolvedRuntime: overrides.resolvedRuntime,
+    agentTitle: overrides.agentTitle ?? "Demo Fast",
+    adapterKind: overrides.adapterKind ?? "demo",
+    status: overrides.status ?? "ready",
+    summary: overrides.summary ?? "Ready",
+    capability: overrides.capability ?? demoCapability,
+    command: overrides.command,
+    details: overrides.details
+  };
+}
+
+function createResult(outputPath, overrides = {}) {
+  const agentId = overrides.agentId ?? "demo-fast";
+  return {
+    agentId,
+    baseAgentId: overrides.baseAgentId ?? agentId,
+    variantId: overrides.variantId ?? agentId,
+    displayLabel: overrides.displayLabel ?? overrides.agentTitle ?? agentId,
+    requestedConfig: overrides.requestedConfig ?? {},
+    resolvedRuntime: overrides.resolvedRuntime,
+    agentTitle: overrides.agentTitle ?? agentId,
+    adapterKind: overrides.adapterKind ?? "demo",
+    preflight: overrides.preflight ?? createPreflight(overrides),
+    status: overrides.status ?? "success",
+    summary: overrides.summary ?? "Done",
+    durationMs: overrides.durationMs ?? 1000,
+    tokenUsage: overrides.tokenUsage ?? 100,
+    estimatedCostUsd: overrides.estimatedCostUsd ?? 0,
+    costKnown: overrides.costKnown ?? false,
+    changedFiles: overrides.changedFiles ?? [],
+    changedFilesHint: overrides.changedFilesHint ?? overrides.changedFiles ?? [],
+    setupResults: overrides.setupResults ?? [],
+    judgeResults: overrides.judgeResults ?? [],
+    teardownResults: overrides.teardownResults ?? [],
+    tracePath: overrides.tracePath ?? path.join(outputPath, "agents", agentId, "trace.jsonl"),
+    workspacePath: overrides.workspacePath ?? `C:\\temp\\workspace\\${agentId}`,
+    diff: overrides.diff ?? {
+      added: [],
+      changed: [],
+      removed: []
+    }
+  };
+}
 
 test("writeReport sanitizes shareable output paths", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-report-"));
@@ -35,39 +90,15 @@ test("writeReport sanitizes shareable output paths", async () => {
       teardownCommands: []
     },
     preflights: [
-      {
-        agentId: "demo-fast",
-        agentTitle: "Demo Fast",
-        adapterKind: "demo",
-        status: "ready",
-        summary: "Ready",
-        capability: demoCapability,
+      createPreflight({
         command: "codex"
-      }
+      })
     ],
     results: [
-      {
-        agentId: "demo-fast",
-        agentTitle: "Demo Fast",
-        adapterKind: "demo",
-        preflight: {
-          agentId: "demo-fast",
-          agentTitle: "Demo Fast",
-          adapterKind: "demo",
-          status: "ready",
-          capability: demoCapability,
-          summary: "Ready",
-          command: "codex"
-        },
-        status: "success",
-        summary: "Done",
-        durationMs: 1000,
-        tokenUsage: 100,
+      createResult(outputPath, {
         estimatedCostUsd: 0.1,
         costKnown: true,
         changedFiles: ["repoarena-demo/demo-fast.md"],
-        changedFilesHint: ["repoarena-demo/demo-fast.md"],
-        setupResults: [],
         judgeResults: [
           {
             judgeId: "lint",
@@ -83,15 +114,12 @@ test("writeReport sanitizes shareable output paths", async () => {
             cwd: "C:\\temp\\workspace\\demo-fast"
           }
         ],
-        teardownResults: [],
-        tracePath: path.join(outputPath, "agents", "demo-fast", "trace.jsonl"),
-        workspacePath: "C:\\temp\\workspace\\demo-fast",
         diff: {
           added: ["repoarena-demo/demo-fast.md"],
           changed: [],
           removed: []
         }
-      }
+      })
     ]
   };
 
@@ -112,7 +140,7 @@ test("writeReport sanitizes shareable output paths", async () => {
   assert.match(markdown, /- Success Rate: `1\/1`/);
   assert.match(markdown, /- Badge Endpoint: `badge\.json`/);
   assert.match(markdown, /## Capability Matrix/);
-  assert.match(markdown, /\| Agent \| Status \| Duration \| Tokens \| Cost \| Changed Files \| Judges \|/);
+  assert.match(markdown, /\| Variant \| Base Agent \| Model \| Reasoning \| Verification \| Status \| Duration \| Tokens \| Cost \| Changed Files \| Judges \|/);
   assert.match(markdown, /`run\/agents\/demo-fast\/trace\.jsonl`/);
   assert.match(markdown, /target=README\.md/);
   assert.doesNotMatch(markdown, /C:\\temp\\workspace/);
@@ -121,8 +149,8 @@ test("writeReport sanitizes shareable output paths", async () => {
   assert.match(prComment, /## RepoArena Benchmark/);
   assert.match(prComment, /Overview: `1\/1` passing \| Failed: `0` \| Tokens: `100` \| Known Cost: `\$0\.10`/);
   assert.match(prComment, /### Review Table/);
-  assert.match(prComment, /\| Attention \| Agent \| Tier \| Preflight \| Run \| Duration \| Tokens \| Cost \| Judges \| Files \| Notes \|/);
-  assert.match(prComment, /\| ok \| demo-fast \| supported \| ready \| success \| 1\.00s \| 100 \| \$0\.10 \| 1\/1 \| 1 \| ready \|/);
+  assert.match(prComment, /\| Attention \| Variant \| Base Agent \| Model \| Reasoning \| Verification \| Tier \| Preflight \| Run \| Duration \| Tokens \| Cost \| Judges \| Files \| Notes \|/);
+  assert.match(prComment, /\| ok \| demo-fast \| demo-fast \| unknown \| default \| unknown\/unknown \| supported \| ready \| success \| 1\.00s \| 100 \| \$0\.10 \| 1\/1 \| 1 \| ready \|/);
   assert.match(prComment, /### Review Focus/);
   assert.match(prComment, /- No warnings or failures in this run\./);
   assert.match(prComment, /### Artifacts/);
@@ -152,27 +180,13 @@ test("writeReport includes a failure summary section for failed agents", async (
     },
     preflights: [],
     results: [
-      {
+      createResult(outputPath, {
         agentId: "demo-fail",
         agentTitle: "Demo Fail",
-        adapterKind: "demo",
-        preflight: {
-          agentId: "demo-fail",
-          agentTitle: "Demo Fail",
-          adapterKind: "demo",
-          status: "ready",
-          capability: demoCapability,
-          summary: "Ready"
-        },
+        displayLabel: "Demo Fail",
         status: "failed",
         summary: "Judge failures detected",
-        durationMs: 1000,
         tokenUsage: 50,
-        estimatedCostUsd: 0,
-        costKnown: false,
-        changedFiles: [],
-        changedFilesHint: [],
-        setupResults: [],
         judgeResults: [
           {
             judgeId: "snapshot",
@@ -186,16 +200,8 @@ test("writeReport includes a failure summary section for failed agents", async (
             stderr: "Snapshot mismatch",
             durationMs: 100
           }
-        ],
-        teardownResults: [],
-        tracePath: path.join(outputPath, "agents", "demo-fail", "trace.jsonl"),
-        workspacePath: "C:\\temp\\workspace\\demo-fail",
-        diff: {
-          added: [],
-          changed: [],
-          removed: []
-        }
-      }
+        ]
+      })
     ]
   };
 
@@ -209,7 +215,7 @@ test("writeReport includes a failure summary section for failed agents", async (
   assert.match(prComment, /### Review Focus/);
   assert.match(prComment, /- result `demo-fail`: Judge failures detected/);
   assert.match(prComment, /judge `Snapshot Check` \(snapshot\) target=fixtures\/actual\.txt expect=matches fixtures\/expected\.txt/);
-  assert.match(prComment, /\| fail \| demo-fail \| supported \| ready \| failed \| 1\.00s \| 50 \| n\/a \| 0\/1 \| 0 \| Judge failures detected \|/);
+  assert.match(prComment, /\| fail \| Demo Fail \| demo-fail \| unknown \| default \| unknown\/unknown \| supported \| failed \| failed \| 1\.00s \| 50 \| n\/a \| 0\/1 \| 0 \| Judge failures detected \|/);
 
   await rm(tempDir, { recursive: true, force: true });
 });
@@ -234,9 +240,10 @@ test("writeReport includes preflight warnings in PR comments", async () => {
       teardownCommands: []
     },
     preflights: [
-      {
+      createPreflight({
         agentId: "cursor",
         agentTitle: "Cursor",
+        displayLabel: "Cursor",
         adapterKind: "cursor",
         status: "unverified",
         summary: "CLI found but auth not verified",
@@ -244,43 +251,31 @@ test("writeReport includes preflight warnings in PR comments", async () => {
           ...demoCapability,
           supportTier: "experimental"
         }
-      }
+      })
     ],
     results: [
-      {
+      createResult(outputPath, {
         agentId: "cursor",
         agentTitle: "Cursor",
+        displayLabel: "Cursor",
         adapterKind: "cursor",
-        preflight: {
+        preflight: createPreflight({
           agentId: "cursor",
           agentTitle: "Cursor",
+          displayLabel: "Cursor",
           adapterKind: "cursor",
           status: "unverified",
+          summary: "CLI found but auth not verified",
           capability: {
             ...demoCapability,
             supportTier: "experimental"
-          },
-          summary: "CLI found but auth not verified"
-        },
+          }
+        }),
         status: "failed",
         summary: "Skipped because auth was not verified",
         durationMs: 0,
-        tokenUsage: 0,
-        estimatedCostUsd: 0,
-        costKnown: false,
-        changedFiles: [],
-        changedFilesHint: [],
-        setupResults: [],
-        judgeResults: [],
-        teardownResults: [],
-        tracePath: path.join(outputPath, "agents", "cursor", "trace.jsonl"),
-        workspacePath: "C:\\temp\\workspace\\cursor",
-        diff: {
-          added: [],
-          changed: [],
-          removed: []
-        }
-      }
+        tokenUsage: 0
+      })
     ]
   };
 
@@ -289,7 +284,7 @@ test("writeReport includes preflight warnings in PR comments", async () => {
 
   assert.match(prComment, /### Review Focus/);
   assert.match(prComment, /- preflight `cursor` \(experimental\): unverified - CLI found but auth not verified/);
-  assert.match(prComment, /\| fail \| cursor \| experimental \| unverified \| failed \| 0ms \| 0 \| n\/a \| 0\/0 \| 0 \| Skipped because auth was not verified \|/);
+  assert.match(prComment, /\| fail \| Cursor \| cursor \| unknown \| default \| unknown\/unknown \| experimental \| unverified \| failed \| 0ms \| 0 \| n\/a \| 0\/0 \| 0 \| Skipped because auth was not verified \|/);
 
   await rm(tempDir, { recursive: true, force: true });
 });

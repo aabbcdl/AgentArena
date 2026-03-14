@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildExecutionEnvironment, diffSnapshots, uniqueSorted } from "../packages/core/dist/index.js";
+import {
+  buildExecutionEnvironment,
+  createAgentSelection,
+  diffSnapshots,
+  uniqueSorted
+} from "../packages/core/dist/index.js";
 
 test("uniqueSorted removes duplicates and sorts values", () => {
   assert.deepEqual(uniqueSorted(["b", "a", "b"]), ["a", "b"]);
@@ -45,4 +50,22 @@ test("buildExecutionEnvironment applies inline overrides", () => {
 
   assert.equal(environment.REPOARENA_ALLOWED_TEST, "overridden");
   assert.equal(environment.REPOARENA_INLINE_ONLY, "inline");
+});
+
+test("createAgentSelection derives a stable variant id from model config", () => {
+  const selection = createAgentSelection({
+    baseAgentId: "codex",
+    displayLabel: "Codex CLI",
+    config: {
+      model: "gpt-5.4",
+      reasoningEffort: "high"
+    },
+    configSource: "ui"
+  });
+
+  assert.equal(selection.baseAgentId, "codex");
+  assert.equal(selection.variantId, "codex-gpt-5-4-high");
+  assert.equal(selection.displayLabel, "Codex CLI");
+  assert.equal(selection.config.model, "gpt-5.4");
+  assert.equal(selection.config.reasoningEffort, "high");
 });
