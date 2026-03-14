@@ -162,6 +162,7 @@ async function runBenchmarkCommand(parsed: ParsedArgs): Promise<void> {
   }
 
   console.log(`\nJSON summary: ${report.jsonPath}`);
+  console.log(`Markdown:      ${report.markdownPath}`);
   console.log(`HTML report:  ${report.htmlPath}`);
 
   if (benchmark.results.some((result) => result.status !== "success")) {

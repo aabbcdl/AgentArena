@@ -82,8 +82,9 @@ test("writeReport sanitizes shareable output paths", async () => {
     ]
   };
 
-  const { jsonPath } = await writeReport(benchmarkRun);
+  const { jsonPath, markdownPath } = await writeReport(benchmarkRun);
   const summary = JSON.parse(await readFile(jsonPath, "utf8"));
+  const markdown = await readFile(markdownPath, "utf8");
 
   assert.equal(summary.repoPath, ".");
   assert.equal(summary.outputPath, ".");
@@ -91,6 +92,9 @@ test("writeReport sanitizes shareable output paths", async () => {
   assert.equal(summary.results[0].tracePath, "run/agents/demo-fast/trace.jsonl");
   assert.equal(summary.results[0].workspacePath, "workspace/demo-fast");
   assert.equal(summary.results[0].judgeResults[0].cwd, "workspace/demo-fast");
+  assert.match(markdown, /# RepoArena Summary/);
+  assert.match(markdown, /`run\/agents\/demo-fast\/trace\.jsonl`/);
+  assert.doesNotMatch(markdown, /C:\\temp\\workspace/);
 
   await rm(tempDir, { recursive: true, force: true });
 });

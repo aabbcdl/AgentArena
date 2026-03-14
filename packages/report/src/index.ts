@@ -347,15 +347,78 @@ function renderHtml(run: BenchmarkRun): string {
 </html>`;
 }
 
-export async function writeReport(run: BenchmarkRun): Promise<{ htmlPath: string; jsonPath: string }> {
+function renderMarkdown(run: BenchmarkRun): string {
+  const lines: string[] = [
+    "# RepoArena Summary",
+    "",
+    `- Run ID: \`${run.runId}\``,
+    `- Created At: \`${run.createdAt}\``,
+    `- Task: \`${run.task.title}\``,
+    `- Repository: \`${run.repoPath}\``,
+    ""
+  ];
+
+  lines.push("## Adapter Preflight", "");
+  lines.push("| Agent | Status | Summary |");
+  lines.push("| --- | --- | --- |");
+  for (const preflight of run.preflights) {
+    lines.push(`| ${preflight.agentId} | ${preflight.status} | ${preflight.summary.replaceAll("\n", " ")} |`);
+  }
+
+  lines.push("", "## Results", "");
+  lines.push("| Agent | Status | Duration | Tokens | Cost | Changed Files |");
+  lines.push("| --- | --- | --- | ---: | --- | ---: |");
+  for (const result of run.results) {
+    lines.push(
+      `| ${result.agentId} | ${result.status} | ${formatDuration(result.durationMs)} | ${result.tokenUsage} | ${
+        result.costKnown ? `$${result.estimatedCostUsd.toFixed(2)}` : "n/a"
+      } | ${result.changedFiles.length} |`
+    );
+  }
+
+  for (const result of run.results) {
+    lines.push("", `### ${result.agentTitle} (\`${result.agentId}\`)`, "");
+    lines.push(`- Summary: ${result.summary}`);
+    lines.push(`- Preflight: ${result.preflight.status} - ${result.preflight.summary}`);
+    lines.push(`- Trace: \`${result.tracePath}\``);
+    lines.push(`- Workspace: \`${result.workspacePath}\``);
+
+    if (result.changedFiles.length > 0) {
+      lines.push("- Changed Files:");
+      for (const file of result.changedFiles) {
+        lines.push(`  - \`${file}\``);
+      }
+    } else {
+      lines.push("- Changed Files: none");
+    }
+
+    if (result.judgeResults.length > 0) {
+      lines.push("- Judges:");
+      for (const judge of result.judgeResults) {
+        lines.push(
+          `  - ${judge.label}: ${judge.success ? "pass" : "fail"} (${formatDuration(judge.durationMs)})`
+        );
+      }
+    }
+  }
+
+  lines.push("", "## Prompt", "", "```text", run.task.prompt, "```", "");
+  return lines.join("\n");
+}
+
+export async function writeReport(
+  run: BenchmarkRun
+): Promise<{ htmlPath: string; jsonPath: string; markdownPath: string }> {
   await ensureDirectory(run.outputPath);
   const publicRun = sanitizeRun(run);
 
   const jsonPath = path.join(run.outputPath, "summary.json");
   const htmlPath = path.join(run.outputPath, "report.html");
+  const markdownPath = path.join(run.outputPath, "summary.md");
 
   await fs.writeFile(jsonPath, JSON.stringify(publicRun, null, 2), "utf8");
   await fs.writeFile(htmlPath, renderHtml(publicRun), "utf8");
+  await fs.writeFile(markdownPath, renderMarkdown(publicRun), "utf8");
 
-  return { htmlPath, jsonPath };
+  return { htmlPath, jsonPath, markdownPath };
 }
