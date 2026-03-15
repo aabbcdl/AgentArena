@@ -30,7 +30,9 @@ body {
 }
 
 button,
-input {
+input,
+select,
+textarea {
   font: inherit;
 }
 
@@ -436,12 +438,22 @@ input {
 }
 
 .field input,
-.field select {
+.field select,
+.field textarea {
   width: 100%;
   border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--paper);
   padding: 10px 12px;
+}
+
+.field textarea {
+  resize: vertical;
+  min-height: 120px;
+}
+
+.field-wide {
+  grid-column: 1 / -1;
 }
 
 .checkbox-grid {
@@ -462,6 +474,36 @@ input {
   border: 1px solid var(--border);
   border-radius: 16px;
   background: var(--paper);
+}
+
+.provider-editor {
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid rgba(159, 69, 37, 0.25);
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(159, 69, 37, 0.05), rgba(159, 69, 37, 0.02)), var(--paper);
+}
+
+.inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-top: 14px;
+}
+
+.inline-actions button {
+  border: 1px solid var(--border);
+  background: var(--paper);
+  border-radius: 999px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.risk-badge {
+  border-color: rgba(143, 52, 38, 0.25);
+  background: rgba(143, 52, 38, 0.08);
+  color: var(--danger);
 }
 
 .variant-remove {

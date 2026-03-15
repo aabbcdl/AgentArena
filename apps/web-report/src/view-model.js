@@ -17,6 +17,9 @@ export function summarizeRun(run) {
 
 function runtimeIdentity(result) {
   return {
+    provider: result.resolvedRuntime?.providerProfileName ?? result.requestedConfig?.providerProfileId ?? "official",
+    providerKind: result.resolvedRuntime?.providerKind ?? "unknown",
+    providerSource: result.resolvedRuntime?.providerSource ?? "unknown",
     model: result.resolvedRuntime?.effectiveModel ?? result.requestedConfig?.model ?? "unknown",
     reasoning:
       result.resolvedRuntime?.effectiveReasoningEffort ??
@@ -25,6 +28,10 @@ function runtimeIdentity(result) {
     source: result.resolvedRuntime?.source ?? "unknown",
     verification: result.resolvedRuntime?.verification ?? "unknown"
   };
+}
+
+function resultKey(result) {
+  return result.variantId ?? result.agentId;
 }
 
 function resultLabel(result) {
@@ -174,7 +181,7 @@ export function buildShareCard(run) {
   if (verdict.bestAgent) {
     const runtime = runtimeIdentity(verdict.bestAgent);
     lines.push(
-      `Best variant: ${resultLabel(verdict.bestAgent)} (${baseAgentLabel(verdict.bestAgent)} | ${runtime.model} | ${runtime.reasoning})`
+      `Best variant: ${resultLabel(verdict.bestAgent)} (${baseAgentLabel(verdict.bestAgent)} | ${runtime.provider} | ${runtime.model} | ${runtime.reasoning})`
     );
   }
 
@@ -234,13 +241,13 @@ export function buildShareCardSvg(run) {
 
 export function buildPrTable(run) {
   const header = [
-    "| Variant | Base Agent | Model | Reasoning | Verification | Status | Duration | Tokens | Cost | Judges | Files |",
-    "| --- | --- | --- | --- | --- | --- | --- | ---: | --- | --- | ---: |"
+    "| Variant | Base Agent | Provider | Provider Kind | Model | Reasoning | Verification | Status | Duration | Tokens | Cost | Judges | Files |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | ---: | --- | --- | ---: |"
   ];
   const rows = run.results.map((result) => {
     const runtime = runtimeIdentity(result);
     const passedJudges = result.judgeResults.filter((judge) => judge.success).length;
-    return `| ${resultLabel(result)} | ${baseAgentLabel(result)} | ${runtime.model} | ${runtime.reasoning} | ${runtime.verification}/${runtime.source} | ${result.status} | ${result.durationMs}ms | ${result.tokenUsage} | ${
+    return `| ${resultLabel(result)} | ${baseAgentLabel(result)} | ${runtime.provider} | ${runtime.providerKind} | ${runtime.model} | ${runtime.reasoning} | ${runtime.verification}/${runtime.source} | ${result.status} | ${result.durationMs}ms | ${result.tokenUsage} | ${
       result.costKnown ? `$${result.estimatedCostUsd.toFixed(2)}` : "n/a"
     } | ${passedJudges}/${result.judgeResults.length} | ${result.changedFiles.length} |`;
   });
@@ -274,8 +281,8 @@ export function getRunToRunAgentDiff(runs, currentRun) {
     };
   }
 
-  const currentByAgent = new Map(currentRun.results.map((result) => [result.agentId, result]));
-  const previousByAgent = new Map(previousRun.results.map((result) => [result.agentId, result]));
+  const currentByAgent = new Map(currentRun.results.map((result) => [resultKey(result), result]));
+  const previousByAgent = new Map(previousRun.results.map((result) => [resultKey(result), result]));
   const agentIds = Array.from(new Set([...currentByAgent.keys(), ...previousByAgent.keys()])).sort();
 
   return {
@@ -315,7 +322,7 @@ export function getAgentTrendRows(runs, currentRun, agentId) {
   const rows = [];
   let previousResult = null;
   for (const run of sameTaskRuns) {
-    const result = run.results.find((entry) => entry.agentId === agentId) ?? null;
+    const result = run.results.find((entry) => resultKey(entry) === agentId) ?? null;
     if (!result) {
       continue;
     }

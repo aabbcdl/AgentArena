@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { promises as fs } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import {
   AdapterCapability,
@@ -7,12 +8,23 @@ import {
   AdapterExecutionResult,
   AdapterPreflightOptions,
   AdapterPreflightResult,
+  ClaudeProviderProfile,
   AgentResolvedRuntime,
   AgentAdapter,
   ensureDirectory,
   normalizePath,
   uniqueSorted
 } from "@repoarena/core";
+import {
+  buildClaudeProviderEnvironment,
+  getClaudeProviderProfile,
+  getClaudeProviderProfileSecret,
+  listClaudeProviderProfiles,
+  saveClaudeProviderProfile,
+  deleteClaudeProviderProfile,
+  setClaudeProviderProfileSecret,
+  writeClaudeWorkspaceSettings
+} from "./claude-provider-profiles.js";
 
 interface DemoProfile {
   title: string;
@@ -152,12 +164,14 @@ const CLAUDE_CODE_CAPABILITY: AdapterCapability = {
   costAvailability: "available",
   traceRichness: "partial",
   configurableRuntime: {
-    model: false,
-    reasoningEffort: false
+    model: true,
+    reasoningEffort: false,
+    providerProfile: true
   },
   knownLimitations: [
     "Changed files are inferred from workspace diff, not emitted directly by the adapter.",
-    "Authentication and CLI flags may vary by local install."
+    "Authentication and CLI flags may vary by local install.",
+    "Third-party provider profiles rely on Claude-compatible behavior and may diverge from official results."
   ]
 };
 const CURSOR_CAPABILITY: AdapterCapability = {
@@ -268,6 +282,36 @@ async function resolveCodexRuntime(context: {
     source: "cli-default",
     verification: "unknown",
     notes: ["Codex CLI default runtime could not be resolved from RepoArena, environment, or ~/.codex/config.toml."]
+  };
+}
+
+async function resolveClaudeRuntime(context: {
+  requestedConfig?: AdapterExecutionContext["selection"]["config"];
+}): Promise<{
+  runtime: AgentResolvedRuntime;
+  profile: ClaudeProviderProfile;
+}> {
+  const requestedConfig = context.requestedConfig ?? {};
+  const profile = await getClaudeProviderProfile(requestedConfig.providerProfileId);
+  const runtime: AgentResolvedRuntime = {
+    effectiveModel: requestedConfig.model?.trim() || profile.primaryModel?.trim() || undefined,
+    effectiveReasoningEffort: undefined,
+    providerProfileId: profile.id,
+    providerProfileName: profile.name,
+    providerKind: profile.kind,
+    providerSource: profile.kind === "official" ? "official-login" : "profile-config",
+    source: profile.kind === "official" ? "official-login" : "profile-config",
+    verification: "inferred",
+    notes: [
+      profile.kind === "official"
+        ? "Using built-in official Claude Code profile."
+        : "Using a provider-switched Claude Code profile."
+    ]
+  };
+
+  return {
+    runtime,
+    profile
   };
 }
 
@@ -764,7 +808,8 @@ async function probeHelp(invocation: InvocationSpec, cwd: string): Promise<Proce
 
 async function probeClaudeLikeAuth(
   invocation: InvocationSpec,
-  cwd: string
+  cwd: string,
+  environment?: NodeJS.ProcessEnv
 ): Promise<{
   status: AdapterPreflightResult["status"];
   summary: string;
@@ -785,6 +830,9 @@ async function probeClaudeLikeAuth(
       prompt
     ],
     cwd
+    ,
+    agentTimeoutMs(),
+    environment
   );
 
   const parsed = parseClaudeEvents(execution.stdout);
@@ -810,6 +858,33 @@ async function probeClaudeLikeAuth(
     summary: parsed.error ?? "CLI is installed but could not complete an authenticated probe.",
     details
   };
+}
+
+async function probeClaudeProfileAuth(
+  invocation: InvocationSpec,
+  profileId: string | undefined,
+  requestedModel?: string
+): Promise<{
+  status: AdapterPreflightResult["status"];
+  summary: string;
+  details?: string[];
+}> {
+  const probeRoot = await fs.mkdtemp(path.join(os.tmpdir(), "repoarena-claude-probe-"));
+  try {
+    const workspacePath = path.join(probeRoot, "workspace");
+    await ensureDirectory(workspacePath);
+    const providerRuntime = await writeClaudeWorkspaceSettings(workspacePath, profileId, requestedModel);
+    return await probeClaudeLikeAuth(
+      invocation,
+      workspacePath,
+      {
+        ...process.env,
+        ...providerRuntime.environment
+      }
+    );
+  } finally {
+    await fs.rm(probeRoot, { recursive: true, force: true }).catch(() => {});
+  }
 }
 
 class DemoAdapter implements AgentAdapter {
@@ -1111,12 +1186,18 @@ abstract class ClaudeLikeAdapter implements AgentAdapter {
   protected async executeClaudeLike(
     context: AdapterExecutionContext,
     eventType: string,
-    finishLabel: string
+    finishLabel: string,
+    options?: {
+      extraArgs?: string[];
+      extraEnvironment?: NodeJS.ProcessEnv;
+      resolvedRuntime?: AgentResolvedRuntime;
+    }
   ): Promise<AdapterExecutionResult> {
     const prompt = buildAgentPrompt(context);
     const invocation = await this.resolveInvocation();
     const args = [
       ...invocation.argsPrefix,
+      ...(options?.extraArgs ?? []),
       "-p",
       "--output-format",
       "stream-json",
@@ -1132,7 +1213,8 @@ abstract class ClaudeLikeAdapter implements AgentAdapter {
       message: `Starting ${this.title} adapter`,
       metadata: {
         command: invocation.displayCommand,
-        args
+        args,
+        resolvedRuntime: options?.resolvedRuntime
       }
     });
 
@@ -1141,7 +1223,10 @@ abstract class ClaudeLikeAdapter implements AgentAdapter {
       args,
       context.workspacePath,
       agentTimeoutMs(),
-      context.environment
+      {
+        ...context.environment,
+        ...options?.extraEnvironment
+      }
     );
     const parsed = parseClaudeEvents(execution.stdout);
     const summary =
@@ -1162,6 +1247,7 @@ abstract class ClaudeLikeAdapter implements AgentAdapter {
         tokenUsage: parsed.tokenUsage,
         estimatedCostUsd: parsed.estimatedCostUsd,
         costKnown: parsed.costKnown,
+        resolvedRuntime: options?.resolvedRuntime,
         error: parsed.error,
         stderr: execution.stderr.trim()
       }
@@ -1173,7 +1259,8 @@ abstract class ClaudeLikeAdapter implements AgentAdapter {
       tokenUsage: parsed.tokenUsage,
       estimatedCostUsd: parsed.estimatedCostUsd,
       costKnown: parsed.costKnown,
-      changedFilesHint: []
+      changedFilesHint: [],
+      resolvedRuntime: options?.resolvedRuntime
     };
   }
 }
@@ -1188,8 +1275,136 @@ class ClaudeCodeAdapter extends ClaudeLikeAdapter {
     return await resolveClaudeInvocation();
   }
 
+  async preflight(options?: AdapterPreflightOptions): Promise<AdapterPreflightResult> {
+    const invocation = await this.resolveInvocation();
+    const resolved = await resolveClaudeRuntime({
+      requestedConfig: options?.selection?.config
+    });
+
+    try {
+      const help = await probeHelp(invocation, process.cwd());
+      if (help.exitCode !== 0) {
+        return createPreflightResult(
+          options?.selection,
+          this.id,
+          this.title,
+          this.kind,
+          this.capability,
+          "missing",
+          "CLI did not respond successfully to --help.",
+          resolved.runtime,
+          invocation.displayCommand,
+          [help.stderr.trim()].filter(Boolean)
+        );
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return createPreflightResult(
+        options?.selection,
+        this.id,
+        this.title,
+        this.kind,
+        this.capability,
+        "missing",
+        "CLI could not be launched.",
+        resolved.runtime,
+        invocation.displayCommand,
+        [message]
+      );
+    }
+
+    if (resolved.profile.kind !== "official" && !(await getClaudeProviderProfileSecret(resolved.profile.id))) {
+      return createPreflightResult(
+        options?.selection,
+        this.id,
+        this.title,
+        this.kind,
+        this.capability,
+        "blocked",
+        `Provider profile "${resolved.profile.name}" does not have a stored secret.`,
+        resolved.runtime,
+        invocation.displayCommand,
+        ["Store a secret for this profile before running Claude Code against a third-party provider."]
+      );
+    }
+
+    if (options?.probeAuth) {
+      const authProbe =
+        resolved.profile.kind === "official"
+          ? await probeClaudeLikeAuth(invocation, process.cwd())
+          : await probeClaudeProfileAuth(
+              invocation,
+              resolved.profile.id,
+              options?.selection?.config.model ?? resolved.profile.primaryModel
+            );
+      return createPreflightResult(
+        options?.selection,
+        this.id,
+        this.title,
+        this.kind,
+        this.capability,
+        authProbe.status,
+        authProbe.summary,
+        resolved.runtime,
+        invocation.displayCommand,
+        authProbe.details
+      );
+    }
+
+    return createPreflightResult(
+      options?.selection,
+      this.id,
+      this.title,
+      this.kind,
+      this.capability,
+      "unverified",
+      "CLI is installed. Authentication was not probed in this run.",
+      resolved.runtime,
+      invocation.displayCommand
+    );
+  }
+
   async execute(context: AdapterExecutionContext): Promise<AdapterExecutionResult> {
-    return await this.executeClaudeLike(context, "adapter.claude.result", "Claude Code");
+    const { runtime, profile } = await resolveClaudeRuntime({
+      requestedConfig: context.selection.config
+    });
+    const providerRuntime = await writeClaudeWorkspaceSettings(
+      context.workspacePath,
+      profile.id,
+      context.selection.config.model ?? profile.primaryModel
+    );
+    const extraArgs = runtime.effectiveModel ? ["--model", runtime.effectiveModel] : [];
+    const profileRiskNote =
+      profile.kind === "official"
+        ? "Using Claude Code official profile without a third-party provider override."
+        : "This result was produced through a provider-switched Claude Code configuration.";
+
+    await context.trace({
+      type: "adapter.claude.profile",
+      message: profileRiskNote,
+      metadata: {
+        providerProfileId: profile.id,
+        providerProfileName: profile.name,
+        providerKind: profile.kind,
+        settingsPath: providerRuntime.settingsPath,
+        effectiveModel: runtime.effectiveModel
+      }
+    });
+
+    const result = await this.executeClaudeLike(context, "adapter.claude.result", "Claude Code", {
+      extraArgs,
+      extraEnvironment: providerRuntime.environment,
+      resolvedRuntime: runtime
+    });
+
+    return {
+      ...result,
+      summary:
+        profile.kind === "official"
+          ? result.summary
+          : `${result.summary}\n\nThis result was produced through a provider-switched Claude Code configuration.`,
+      resolvedRuntime: runtime
+    };
   }
 }
 
@@ -1260,9 +1475,18 @@ export async function getCodexDefaultResolvedRuntime(): Promise<AgentResolvedRun
   return await resolveCodexRuntime({});
 }
 
+export {
+  listClaudeProviderProfiles,
+  getClaudeProviderProfile,
+  saveClaudeProviderProfile,
+  deleteClaudeProviderProfile,
+  setClaudeProviderProfileSecret
+};
+
 export const __testUtils = {
   parseCodexEvents,
   parseClaudeEvents,
   resolveCodexRuntime,
-  readCodexConfigDefaults
+  readCodexConfigDefaults,
+  resolveClaudeRuntime
 };

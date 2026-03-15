@@ -4,8 +4,23 @@ import { exec } from "node:child_process";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { getCodexDefaultResolvedRuntime, listAvailableAdapters, preflightAdapters } from "@repoarena/adapters";
-import { AdapterPreflightResult, AgentSelection, BenchmarkRun, createAgentSelection, formatDuration } from "@repoarena/core";
+import {
+  deleteClaudeProviderProfile,
+  getCodexDefaultResolvedRuntime,
+  listAvailableAdapters,
+  listClaudeProviderProfiles,
+  preflightAdapters,
+  saveClaudeProviderProfile,
+  setClaudeProviderProfileSecret
+} from "@repoarena/adapters";
+import {
+  AdapterPreflightResult,
+  AgentSelection,
+  BenchmarkRun,
+  ClaudeProviderProfile,
+  createAgentSelection,
+  formatDuration
+} from "@repoarena/core";
 import { writeReport } from "@repoarena/report";
 import { runBenchmark } from "@repoarena/runner";
 import { loadTaskPack } from "@repoarena/taskpacks";
@@ -17,6 +32,8 @@ interface ParsedArgs {
   agentIds: string[];
   codexModel?: string;
   codexReasoning?: string;
+  claudeProfile?: string;
+  claudeModel?: string;
   outputPath?: string;
   probeAuth: boolean;
   strict: boolean;
@@ -43,6 +60,7 @@ interface UiRunPayload {
     config?: {
       model?: string;
       reasoningEffort?: string;
+      providerProfileId?: string;
     };
     configSource?: "ui" | "cli";
   }>;
@@ -51,6 +69,24 @@ interface UiRunPayload {
   probeAuth?: boolean;
   updateSnapshots?: boolean;
   maxConcurrency?: number;
+}
+
+interface UiProviderProfilePayload {
+  id?: string;
+  name: string;
+  kind: ClaudeProviderProfile["kind"];
+  homepage?: string;
+  baseUrl?: string;
+  apiFormat: ClaudeProviderProfile["apiFormat"];
+  primaryModel?: string;
+  thinkingModel?: string;
+  defaultHaikuModel?: string;
+  defaultSonnetModel?: string;
+  defaultOpusModel?: string;
+  extraEnv?: Record<string, string>;
+  writeCommonConfig?: boolean;
+  notes?: string;
+  secret?: string;
 }
 
 type UiRunPhase = "idle" | "starting" | "preflight" | "benchmark" | "report";
@@ -192,13 +228,22 @@ function normalizeCliSelections(parsed: ParsedArgs): AgentSelection[] {
             model: parsed.codexModel?.trim() || undefined,
             reasoningEffort: parsed.codexReasoning?.trim() || undefined
           }
+        : agentId === "claude-code"
+          ? {
+              model: parsed.claudeModel?.trim() || undefined,
+              providerProfileId: parsed.claudeProfile?.trim() || undefined
+            }
         : {};
 
     return createAgentSelection({
       baseAgentId: agentId,
       displayLabel: adapter?.title ?? agentId,
       config,
-      configSource: agentId === "codex" && (config.model || config.reasoningEffort) ? "cli" : undefined
+      configSource:
+        (agentId === "codex" && (config.model || config.reasoningEffort)) ||
+        (agentId === "claude-code" && (config.model || config.providerProfileId))
+          ? "cli"
+          : undefined
     });
   });
 }
@@ -227,7 +272,7 @@ function printHelp(): void {
   console.log(`RepoArena CLI
 
 Usage:
-  repoarena run --repo <path> --task <task.json> --agents <comma,separated> [--codex-model <model>] [--codex-reasoning <value>] [--probe-auth] [--update-snapshots] [--max-concurrency <n>] [--json]
+  repoarena run --repo <path> --task <task.json> --agents <comma,separated> [--codex-model <model>] [--codex-reasoning <value>] [--claude-profile <id>] [--claude-model <model>] [--probe-auth] [--update-snapshots] [--max-concurrency <n>] [--json]
   repoarena doctor [--agents <comma,separated>] [--probe-auth] [--strict] [--json]
   repoarena list-adapters [--json]
   repoarena init-taskpack [--template <name>] [--output <path>] [--force]
@@ -238,6 +283,7 @@ Examples:
   repoarena run --repo . --task examples/taskpacks/demo-repo-health.json --agents demo-fast,demo-thorough
   repoarena run --repo . --task examples/taskpacks/demo-repo-health.json --agents codex,claude-code --probe-auth
   repoarena run --repo . --task examples/taskpacks/demo-repo-health.yaml --agents codex --codex-model gpt-5.4 --codex-reasoning high
+  repoarena run --repo . --task examples/taskpacks/official/repo-health.yaml --agents claude-code --claude-profile claude-official --claude-model claude-3-7-sonnet-latest
   repoarena run --repo . --task examples/taskpacks/demo-repo-health.yaml --agents demo-fast --update-snapshots
   repoarena run --repo . --task examples/taskpacks/demo-repo-health.yaml --agents demo-fast --json
   repoarena doctor --agents codex,claude-code,cursor --probe-auth
@@ -292,6 +338,12 @@ function parseArgs(argv: string[]): ParsedArgs {
         break;
       case "--codex-reasoning":
         parsed.codexReasoning = args.shift();
+        break;
+      case "--claude-profile":
+        parsed.claudeProfile = args.shift();
+        break;
+      case "--claude-model":
+        parsed.claudeModel = args.shift();
         break;
       case "--probe-auth":
         parsed.probeAuth = true;
@@ -821,6 +873,7 @@ async function runUi(parsed: ParsedArgs): Promise<void> {
       const requestUrl = new URL(request.url ?? "/", `http://${host}:${port}`);
 
       if (request.method === "GET" && requestUrl.pathname === "/api/ui-info") {
+        const providerProfiles = await listClaudeProviderProfiles();
         response.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
         response.end(
           JSON.stringify(
@@ -830,6 +883,17 @@ async function runUi(parsed: ParsedArgs): Promise<void> {
               defaultTaskPath: path.join(OFFICIAL_TASKPACK_ROOT, "repo-health.yaml"),
               defaultOutputPath: path.join(process.cwd(), ".repoarena", "ui-runs"),
               codexDefaults,
+              claudeProviderProfiles: providerProfiles.map((profile) => ({
+                id: profile.id,
+                name: profile.name,
+                kind: profile.kind,
+                apiFormat: profile.apiFormat,
+                primaryModel: profile.primaryModel,
+                secretStored: profile.secretStored,
+                isBuiltIn: profile.isBuiltIn
+              })),
+              riskNotice:
+                "Provider-switched Claude Code variants use compatibility settings and may behave differently from official Claude Code.",
               host,
               port
             },
@@ -851,6 +915,77 @@ async function runUi(parsed: ParsedArgs): Promise<void> {
         response.writeHead(payload.statusCode, payload.headers);
         response.end(payload.body);
         return;
+      }
+
+      if (request.method === "GET" && requestUrl.pathname === "/api/provider-profiles") {
+        const profiles = await listClaudeProviderProfiles();
+        const payload = jsonResponse(profiles);
+        response.writeHead(payload.statusCode, payload.headers);
+        response.end(payload.body);
+        return;
+      }
+
+      if (request.method === "POST" && requestUrl.pathname === "/api/provider-profiles") {
+        const rawBody = await readRequestBody(request);
+        const payload = JSON.parse(rawBody) as UiProviderProfilePayload;
+        const profile = await saveClaudeProviderProfile(payload);
+        if (payload.secret?.trim()) {
+          await setClaudeProviderProfileSecret(profile.id, payload.secret);
+        }
+        const profiles = await listClaudeProviderProfiles();
+        const responsePayload = jsonResponse({
+          profile: profiles.find((entry) => entry.id === profile.id),
+          profiles
+        });
+        response.writeHead(responsePayload.statusCode, responsePayload.headers);
+        response.end(responsePayload.body);
+        return;
+      }
+
+      const providerProfileMatch = requestUrl.pathname.match(/^\/api\/provider-profiles\/([^/]+)(?:\/(secret))?$/);
+      if (providerProfileMatch) {
+        const profileId = decodeURIComponent(providerProfileMatch[1]);
+        const action = providerProfileMatch[2];
+
+        if (request.method === "PUT" && !action) {
+          const rawBody = await readRequestBody(request);
+          const payload = JSON.parse(rawBody) as UiProviderProfilePayload;
+          const profile = await saveClaudeProviderProfile({
+            ...payload,
+            id: profileId
+          });
+          const profiles = await listClaudeProviderProfiles();
+          const responsePayload = jsonResponse({
+            profile: profiles.find((entry) => entry.id === profile.id),
+            profiles
+          });
+          response.writeHead(responsePayload.statusCode, responsePayload.headers);
+          response.end(responsePayload.body);
+          return;
+        }
+
+        if (request.method === "DELETE" && !action) {
+          await deleteClaudeProviderProfile(profileId);
+          const profiles = await listClaudeProviderProfiles();
+          const responsePayload = jsonResponse({ profiles });
+          response.writeHead(responsePayload.statusCode, responsePayload.headers);
+          response.end(responsePayload.body);
+          return;
+        }
+
+        if (request.method === "POST" && action === "secret") {
+          const rawBody = await readRequestBody(request);
+          const payload = JSON.parse(rawBody) as { secret?: string };
+          await setClaudeProviderProfileSecret(profileId, payload.secret ?? "");
+          const profiles = await listClaudeProviderProfiles();
+          const responsePayload = jsonResponse({
+            profile: profiles.find((entry) => entry.id === profileId),
+            profiles
+          });
+          response.writeHead(responsePayload.statusCode, responsePayload.headers);
+          response.end(responsePayload.body);
+          return;
+        }
       }
 
       if (request.method === "GET" && requestUrl.pathname === "/api/taskpacks") {

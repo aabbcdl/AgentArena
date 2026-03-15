@@ -127,8 +127,8 @@ test("share helpers produce shareable summary text and PR tables", () => {
 
   assert.match(shareCard, /RepoArena \| Task A/);
   assert.match(shareCard, /Best variant: demo-fast/);
-  assert.match(prTable, /\| Variant \| Base Agent \| Model \| Reasoning \| Verification \| Status \| Duration \| Tokens \| Cost \| Judges \| Files \|/);
-  assert.match(prTable, /\| demo-fast \| demo-fast \| unknown \| default \| unknown\/unknown \| success \| 1000ms \| 100 \| \$0\.10 \| 2\/2 \| 1 \|/);
+  assert.match(prTable, /\| Variant \| Base Agent \| Provider \| Provider Kind \| Model \| Reasoning \| Verification \| Status \| Duration \| Tokens \| Cost \| Judges \| Files \|/);
+  assert.match(prTable, /\| demo-fast \| demo-fast \| official \| unknown \| unknown \| default \| unknown\/unknown \| success \| 1000ms \| 100 \| \$0\.10 \| 2\/2 \| 1 \|/);
 });
 
 test("buildShareCardSvg returns a shareable SVG card", () => {

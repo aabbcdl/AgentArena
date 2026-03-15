@@ -1,6 +1,13 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { AdapterPreflightResult, BenchmarkRun, ensureDirectory, formatDuration } from "@repoarena/core";
+import {
+  AdapterPreflightResult,
+  AgentRequestedConfig,
+  AgentResolvedRuntime,
+  BenchmarkRun,
+  ensureDirectory,
+  formatDuration
+} from "@repoarena/core";
 
 interface BadgePayload {
   schemaVersion: 1;
@@ -151,20 +158,21 @@ function summarizeRun(run: BenchmarkRun): {
 }
 
 function formatRuntimeIdentity(result: {
-  requestedConfig?: { model?: string; reasoningEffort?: string };
-  resolvedRuntime?: {
-    effectiveModel?: string;
-    effectiveReasoningEffort?: string;
-    source: string;
-    verification: string;
-  };
+  requestedConfig?: AgentRequestedConfig;
+  resolvedRuntime?: AgentResolvedRuntime;
 }): {
+  provider: string;
+  providerKind: string;
+  providerSource: string;
   model: string;
   reasoning: string;
   source: string;
   verification: string;
 } {
   return {
+    provider: result.resolvedRuntime?.providerProfileName ?? result.requestedConfig?.providerProfileId ?? "official",
+    providerKind: result.resolvedRuntime?.providerKind ?? "unknown",
+    providerSource: result.resolvedRuntime?.providerSource ?? "unknown",
     model: result.resolvedRuntime?.effectiveModel ?? result.requestedConfig?.model ?? "unknown",
     reasoning:
       result.resolvedRuntime?.effectiveReasoningEffort ??
@@ -286,6 +294,7 @@ function renderPreflights(run: BenchmarkRun): string {
           <p><strong>${escapeHtml(preflight.status)}</strong> ${escapeHtml(preflight.summary)}</p>
           <p class="meta">Variant: ${escapeHtml(preflight.displayLabel ?? preflight.agentTitle ?? preflight.agentId)}</p>
           <p class="meta">Base Agent: ${escapeHtml(preflight.baseAgentId ?? preflight.agentId)}</p>
+          <p class="meta">Provider: ${escapeHtml(runtime.provider)} | Kind: ${escapeHtml(runtime.providerKind)} | Provider Source: ${escapeHtml(runtime.providerSource)}</p>
           <p class="meta">Support tier: ${escapeHtml(formatSupportTier(preflight.capability.supportTier))}</p>
           <p class="meta">Invocation: ${escapeHtml(preflight.capability.invocationMethod)}</p>
           <p class="meta">Model: ${escapeHtml(runtime.model)} | Reasoning: ${escapeHtml(
@@ -355,6 +364,7 @@ function renderAgentCards(run: BenchmarkRun): string {
           ${renderCommandStepList("Setup", result.setupResults)}
           <h3>Model Identity</h3>
           <ul>
+            <li><strong>Provider</strong>: ${escapeHtml(runtime.provider)} (${escapeHtml(runtime.providerKind)}) via ${escapeHtml(runtime.providerSource)}</li>
             <li><strong>Requested</strong>: model=${escapeHtml(result.requestedConfig?.model ?? "default")} | reasoning=${escapeHtml(
               result.requestedConfig?.reasoningEffort ?? "default"
             )}</li>
@@ -364,6 +374,11 @@ function renderAgentCards(run: BenchmarkRun): string {
             <li><strong>Source</strong>: ${escapeHtml(runtime.source)}</li>
             <li><strong>Verification</strong>: ${escapeHtml(runtime.verification)}</li>
           </ul>
+          ${
+            runtime.providerKind !== "official" && runtime.provider !== "official"
+              ? `<p class="meta">This result was produced through a provider-switched Claude Code configuration.</p>`
+              : ""
+          }
           ${renderJudgeList(result)}
           ${renderCommandStepList("Teardown", result.teardownResults)}
           <h3>Changed Files</h3>
@@ -576,12 +591,12 @@ function renderMarkdown(run: BenchmarkRun): string {
   ];
 
   lines.push("## Adapter Preflight", "");
-  lines.push("| Variant | Base Agent | Model | Reasoning | Verification | Status | Summary |");
-  lines.push("| --- | --- | --- | --- | --- | --- | --- |");
+  lines.push("| Variant | Base Agent | Provider | Provider Kind | Model | Reasoning | Verification | Status | Summary |");
+  lines.push("| --- | --- | --- | --- | --- | --- | --- | --- | --- |");
   for (const preflight of run.preflights) {
     const runtime = formatRuntimeIdentity(preflight);
     lines.push(
-      `| ${preflight.displayLabel} | ${preflight.baseAgentId} | ${runtime.model} | ${runtime.reasoning} | ${runtime.verification}/${runtime.source} | ${preflight.status} | ${preflight.summary.replaceAll("\n", " ")} |`
+      `| ${preflight.displayLabel} | ${preflight.baseAgentId} | ${runtime.provider} | ${runtime.providerKind} | ${runtime.model} | ${runtime.reasoning} | ${runtime.verification}/${runtime.source} | ${preflight.status} | ${preflight.summary.replaceAll("\n", " ")} |`
     );
   }
 
@@ -600,13 +615,13 @@ function renderMarkdown(run: BenchmarkRun): string {
   }
 
   lines.push("", "## Results", "");
-  lines.push("| Variant | Base Agent | Model | Reasoning | Verification | Status | Duration | Tokens | Cost | Changed Files | Judges |");
-  lines.push("| --- | --- | --- | --- | --- | --- | --- | ---: | --- | ---: | --- |");
+  lines.push("| Variant | Base Agent | Provider | Provider Kind | Model | Reasoning | Verification | Status | Duration | Tokens | Cost | Changed Files | Judges |");
+  lines.push("| --- | --- | --- | --- | --- | --- | --- | --- | --- | ---: | --- | ---: | --- |");
   for (const result of run.results) {
     const runtime = formatRuntimeIdentity(result);
     const passedJudgeCount = result.judgeResults.filter((judge) => judge.success).length;
     lines.push(
-      `| ${result.displayLabel} | ${result.baseAgentId} | ${runtime.model} | ${runtime.reasoning} | ${runtime.verification}/${runtime.source} | ${result.status} | ${formatDuration(result.durationMs)} | ${result.tokenUsage} | ${
+      `| ${result.displayLabel} | ${result.baseAgentId} | ${runtime.provider} | ${runtime.providerKind} | ${runtime.model} | ${runtime.reasoning} | ${runtime.verification}/${runtime.source} | ${result.status} | ${formatDuration(result.durationMs)} | ${result.tokenUsage} | ${
         result.costKnown ? `$${result.estimatedCostUsd.toFixed(2)}` : "n/a"
       } | ${result.changedFiles.length} | ${passedJudgeCount}/${result.judgeResults.length} |`
     );
@@ -633,8 +648,12 @@ function renderMarkdown(run: BenchmarkRun): string {
     lines.push(`- Summary: ${result.summary}`);
     lines.push(`- Preflight: ${result.preflight.status} - ${result.preflight.summary}`);
     lines.push(
+      `- Provider Identity: provider=${runtime.provider} | kind=${runtime.providerKind} | provider source=${runtime.providerSource}`,
       `- Model Identity: requested=${result.requestedConfig.model ?? "default"} | requested reasoning=${result.requestedConfig.reasoningEffort ?? "default"} | effective model=${runtime.model} | effective reasoning=${runtime.reasoning} | source=${runtime.source} | verification=${runtime.verification}`
     );
+    if (runtime.providerKind !== "official" && runtime.provider !== "official") {
+      lines.push("- Risk Note: This result was produced through a provider-switched Claude Code configuration.");
+    }
     lines.push(`- Trace: \`${result.tracePath}\``);
     lines.push(`- Workspace: \`${result.workspacePath}\``);
 
@@ -679,8 +698,8 @@ function renderPrComment(run: BenchmarkRun): string {
     "",
     "### Review Table",
     "",
-    "| Attention | Variant | Base Agent | Model | Reasoning | Verification | Tier | Preflight | Run | Duration | Tokens | Cost | Judges | Files | Notes |",
-    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | ---: | --- | --- | ---: | --- |"
+    "| Attention | Variant | Base Agent | Provider | Provider Kind | Model | Reasoning | Verification | Tier | Preflight | Run | Duration | Tokens | Cost | Judges | Files | Notes |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | ---: | --- | --- | ---: | --- |"
   ];
 
   for (const result of run.results) {
@@ -702,7 +721,7 @@ function renderPrComment(run: BenchmarkRun): string {
             ? result.preflight.summary
             : "ready";
     table.push(
-      `| ${attention} | ${result.displayLabel} | ${result.baseAgentId} | ${runtime.model} | ${runtime.reasoning} | ${runtime.verification}/${runtime.source} | ${formatSupportTier(result.preflight.capability.supportTier)} | ${result.preflight.status} | ${result.status} | ${formatDuration(result.durationMs)} | ${result.tokenUsage} | ${
+      `| ${attention} | ${result.displayLabel} | ${result.baseAgentId} | ${runtime.provider} | ${runtime.providerKind} | ${runtime.model} | ${runtime.reasoning} | ${runtime.verification}/${runtime.source} | ${formatSupportTier(result.preflight.capability.supportTier)} | ${result.preflight.status} | ${result.status} | ${formatDuration(result.durationMs)} | ${result.tokenUsage} | ${
         result.costKnown ? `$${result.estimatedCostUsd.toFixed(2)}` : "n/a"
       } | ${passedJudgeCount}/${result.judgeResults.length} | ${result.changedFiles.length} | ${note.replaceAll("\n", " ")} |`
     );

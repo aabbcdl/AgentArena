@@ -23,11 +23,14 @@ const state = {
   serviceInfo: null,
   availableAdapters: [],
   availableTaskPacks: [],
+  availableProviderProfiles: [],
   runInProgress: false,
   runStatus: null,
   runStatusPollTimer: null,
   launcherSelectedAgentIds: [],
   launcherCodexVariants: [],
+  launcherClaudeVariants: [],
+  launcherProviderEditor: null,
   launcherExpanded: true
 };
 
@@ -351,6 +354,125 @@ const MESSAGES = {
   }
 };
 
+MESSAGES["zh-CN"] = {
+  ...MESSAGES.en,
+  appTitle: "交互报告",
+  appDescription: "打开一次 RepoArena 跑分结果，直接看谁成功、改了什么、哪里失败了。",
+  languageLabel: "语言",
+  runsFolderTitle: "推荐：打开结果文件夹",
+  runsFolderHint: "选择一个 RepoArena 单次结果目录，或整个 `.repoarena` 结果目录。这是最省事的入口。",
+  summaryFileTitle: "打开 Summary JSON",
+  summaryFileHint: "只有单个 `summary.json` 文件时再用这个入口。",
+  markdownFileTitle: "可选：打开 Markdown Summary",
+  markdownFileHint: "加载后会补充分享文案、PR 表格和 Markdown 面板。",
+  workflowTitle: "推荐流程",
+  workflowSteps: [
+    "先点“推荐：打开结果文件夹”。",
+    "选择一个结果目录，例如 `.repoarena/manual-run`，或者更上层的结果目录。",
+    "报告加载后，先看顶部结论卡片，再点左侧 variant 查看细节。"
+  ],
+  nextStepsTitle: "下一步",
+  nextStepsEmpty: "优先用“推荐：打开结果文件夹”。如果你手头只有一个文件，就加载 `summary.json`。`summary.md` 是可选增强项。",
+  nextStepsLoaded: (run, runCount) =>
+    `已加载 ${runCount} 个 run。当前是“${run.task.title}”。下一步先看顶部结论卡片，再点左侧或 Agent Compare 里的 variant 进入详情。`,
+  runsHeading: "运行记录",
+  agentsHeading: "Variants",
+  heroEyebrow: "交互查看器",
+  heroTitle: "不用翻完整页静态报告，直接看一次 benchmark 的结论。",
+  heroDescription: "RepoArena 会把多个 AI coding agent 放到同一个仓库任务里比较，然后把结果整理成可审查、可分享的报告。",
+  heroWhatTitle: "RepoArena 是干什么的",
+  heroWhatBody: "它会在同一个仓库任务上运行多个 coding agent 或模型变体，统一记录成功率、耗时、Token、成本、改动文件和 judge 结果。",
+  heroHowTitle: "怎么开始",
+  heroHowSteps: [
+    "先用 CLI 或本页面发起一次 benchmark。",
+    "结果会自动加载到这里。",
+    "先看任务说明和 Compare 表，再点单个 variant 看详情。"
+  ],
+  topbarEyebrow: "运行总览",
+  expandLogs: "展开日志",
+  collapseLogs: "收起日志",
+  runCompareTitle: "Run 对比",
+  runDiffTitle: "同任务 Run 差异",
+  runDiffDescription: "把当前 run 和上一次同名任务 run 直接对比。",
+  agentCompareTitle: "Variant 对比",
+  agentTrendTitle: "Variant 趋势",
+  agentTrendDescription: "查看当前选中 variant 在同一任务下的多次表现。",
+  judgeFiltersTitle: "Judge 筛选",
+  markdownSummaryTitle: "Markdown 摘要",
+  copySummary: "复制摘要",
+  copyPrTable: "复制 PR 表格",
+  copyShareSvg: "复制分享 SVG",
+  downloadShareSvg: "下载分享 SVG",
+  judgeSearchPlaceholder: "搜索 label、target、expectation",
+  noRunsLoaded: "还没有加载任何 run。",
+  noReportLoaded: "还没有加载报告。",
+  runInfoTitle: "当前 Run",
+  createdAt: "创建时间",
+  taskSchema: "任务 Schema",
+  linkedMarkdown: "已关联 markdown",
+  jsonOnly: "仅 JSON",
+  metrics: {
+    agents: "Variant 数",
+    success: "成功",
+    failed: "失败",
+    tokens: "Tokens",
+    knownCost: "已知成本"
+  },
+  verdicts: {
+    bestAgent: "最佳 Variant",
+    fastest: "最快",
+    lowestKnownCost: "最低已知成本",
+    highestJudgePassRate: "最高 Judge 通过率",
+    noResult: "暂无结果",
+    noKnownCost: "暂无已知成本"
+  },
+  runCompareScopeCurrent: "仅当前任务",
+  runCompareScopeAll: "所有任务",
+  runCompareSortCreated: "按创建时间（新到旧）",
+  runCompareSortSuccess: "按成功率（高到低）",
+  runCompareSortTokens: "按 Token（高到低）",
+  runCompareSortCost: "按已知成本（低到高）",
+  compareStatusAll: "全部状态",
+  compareStatusSuccess: "成功",
+  compareStatusFailed: "失败",
+  compareSortStatus: "状态",
+  compareSortDuration: "耗时（快到慢）",
+  compareSortTokens: "Tokens（高到低）",
+  compareSortCost: "成本（低到高）",
+  compareSortChanged: "改动文件（多到少）",
+  compareSortJudges: "Judge 通过率（高到低）",
+  judgeTypeAll: "全部类型",
+  judgeStatusAll: "全部状态",
+  judgeStatusPass: "通过",
+  judgeStatusFail: "失败",
+  launcherTitle: "发起 Benchmark",
+  launcherDescription: "通过本地 RepoArena 服务，直接在这个页面里发起一次 benchmark。",
+  launcherRepoLabel: "仓库路径",
+  launcherTaskSelectLabel: "官方任务包",
+  launcherTaskPathLabel: "任务包路径",
+  launcherOutputLabel: "输出目录",
+  launcherAgentsLabel: "参与对比的 Variants",
+  launcherProbeAuthLabel: "运行前先探测鉴权",
+  launcherRunButton: "开始跑分",
+  launcherStatusIdle: "填好仓库路径、任务包和至少一个 variant，然后开始跑分。",
+  launcherStatusRunning: "Benchmark 正在运行。真实外部 agent 可能需要一些时间。",
+  launcherStatusRunningPhase: (phase, elapsed) => (elapsed ? `${phase} | 已运行 ${elapsed}` : phase),
+  launcherStatusDone: (title) => `Benchmark 已完成。当前报告：${title}。`,
+  launcherStatusError: (message) => `运行失败：${message}`,
+  launcherProgressTitle: "实时进度",
+  launcherCurrentAgentIdle: "等待开始。",
+  launcherCurrentAgentLabel: (agent) => `当前 Variant：${agent}`,
+  launcherLogEmpty: "还没有进度日志。",
+  launcherPhases: {
+    idle: "空闲",
+    starting: "启动 benchmark",
+    preflight: "运行预检",
+    benchmark: "运行 agents",
+    report: "写入报告"
+  },
+  launcherMode: "本地服务",
+  taskPackCustom: "自定义路径"
+};
 const judgeFilters = {
   search: "",
   type: "all",
@@ -429,6 +551,9 @@ function formatCost(result) {
 
 function runtimeIdentity(record) {
   return {
+    provider: record.resolvedRuntime?.providerProfileName ?? record.requestedConfig?.providerProfileId ?? "official",
+    providerKind: record.resolvedRuntime?.providerKind ?? "unknown",
+    providerSource: record.resolvedRuntime?.providerSource ?? "unknown",
     model: record.resolvedRuntime?.effectiveModel ?? record.requestedConfig?.model ?? "unknown",
     reasoning:
       record.resolvedRuntime?.effectiveReasoningEffort ??
@@ -447,9 +572,70 @@ function baseAgentLabel(record) {
   return record.baseAgentId ?? record.agentId;
 }
 
+function recordKey(record) {
+  return record.variantId ?? record.agentId;
+}
+
 function runtimeVerificationLabel(record) {
   const runtime = runtimeIdentity(record);
   return `${runtime.verification} / ${runtime.source}`;
+}
+
+function localText(zh, en) {
+  return state.language === "zh-CN" ? zh : en;
+}
+
+function providerDisplayName(profile) {
+  if (!profile) {
+    return localText("Official", "Official");
+  }
+  return profile.name;
+}
+
+function defaultClaudeVariant(profile) {
+  const model = profile?.primaryModel ?? "";
+  const displayLabel =
+    profile?.kind === "official"
+      ? "Claude Code · Official"
+      : `Claude Code · ${providerDisplayName(profile)}${model ? ` · ${model}` : ""}`;
+
+  return {
+    id: crypto.randomUUID(),
+    profileId: profile?.id ?? "claude-official",
+    enabled: false,
+    displayLabel,
+    model,
+    providerName: providerDisplayName(profile),
+    providerKind: profile?.kind ?? "official",
+    secretStored: Boolean(profile?.secretStored),
+    isBuiltIn: Boolean(profile?.isBuiltIn)
+  };
+}
+
+function syncClaudeVariantsWithProfiles() {
+  const previousByProfileId = new Map(
+    state.launcherClaudeVariants.map((variant) => [variant.profileId, variant])
+  );
+
+  state.launcherClaudeVariants = state.availableProviderProfiles.map((profile) => {
+    const existing = previousByProfileId.get(profile.id);
+    const base = existing ?? defaultClaudeVariant(profile);
+    const fallbackLabel =
+      profile.kind === "official"
+        ? "Claude Code · Official"
+        : `Claude Code · ${providerDisplayName(profile)}${base.model?.trim() || profile.primaryModel || "default"}`;
+
+    return {
+      ...base,
+      profileId: profile.id,
+      providerName: profile.name,
+      providerKind: profile.kind,
+      secretStored: Boolean(profile.secretStored),
+      isBuiltIn: Boolean(profile.isBuiltIn),
+      displayLabel: base.displayLabel?.trim() || fallbackLabel,
+      model: base.model ?? profile.primaryModel ?? ""
+    };
+  });
 }
 
 function taskIntentSummary(task) {
@@ -465,14 +651,16 @@ function taskIntentSummary(task) {
 
 function baselineTaskWarning(task) {
   if (task.id === "official-repo-health" || task.id === "repo-health") {
-    return state.language === "zh-CN"
-      ? "??????????? bug ?? benchmark????? agent ???????????????????????"
-      : "This is not a code review or bug-fix benchmark. It only checks whether the agent made one small improvement without breaking baseline repository structure.";
+    return localText(
+      "这不是代码审查，也不是 bugfix benchmark。它只检查 agent 是否做了一个小改动，同时没有破坏仓库的基础结构。",
+      "This is not a code review or bug-fix benchmark. It only checks whether the agent made one small improvement without breaking baseline repository structure."
+    );
   }
 
-  return state.language === "zh-CN"
-    ? "???????? judge ?????? compare ???"
-    : "Read the task objective and judge rationale before interpreting the compare results.";
+  return localText(
+    "先看任务目标和 judge 依据，再解读 compare 结果。",
+    "Read the task objective and judge rationale before interpreting the compare results."
+  );
 }
 
 function currentRunPhaseLabel() {
@@ -493,12 +681,12 @@ function taskMeaningBadges(task) {
   if (task.id === "official-repo-health" || task.id === "repo-health") {
     return [
       "Baseline Sanity Check",
-      state.language === "zh-CN" ? "??????" : "Not a code review",
-      state.language === "zh-CN" ? "?? bugfix benchmark" : "Not a bugfix benchmark"
+      localText("不是代码审查", "Not a code review"),
+      localText("不是 bugfix benchmark", "Not a bugfix benchmark")
     ];
   }
 
-  return [state.language === "zh-CN" ? "?????????" : "Interpret results through the task goal"];
+  return [localText("按任务目标解释结果", "Interpret results through the task goal")];
 }
 
 function summarizeTaskPrompt(prompt) {
@@ -515,7 +703,7 @@ function summarizeTaskPrompt(prompt) {
 function summarizeJudges(taskPack) {
   const judges = Array.isArray(taskPack?.judges) ? taskPack.judges : [];
   if (judges.length === 0) {
-    return state.language === "zh-CN" ? "?? judge" : "No judges";
+    return localText("没有 judge", "No judges");
   }
 
   const labels = judges.map((judge) => judge.label || judge.id).filter(Boolean);
@@ -524,47 +712,49 @@ function summarizeJudges(taskPack) {
     return summary;
   }
 
-  return `${summary}${state.language === "zh-CN" ? ` ? ${labels.length} ?` : ` +${labels.length - 3} more`}`;
+  return `${summary}${state.language === "zh-CN" ? ` 等共 ${labels.length} 项` : ` +${labels.length - 3} more`}`;
 }
 
 function summarizeLauncherSelection(selectedTaskPack) {
   const enabledCodex = state.launcherCodexVariants.filter((variant) => variant.enabled);
+  const enabledClaude = state.launcherClaudeVariants.filter((variant) => variant.enabled);
   const otherAgents = selectedLauncherAgents();
-  const variantCount = enabledCodex.length + otherAgents.length;
-  const taskTitle = selectedTaskPack?.title || (state.language === "zh-CN" ? "??????" : "Custom task pack");
+  const variantCount = enabledCodex.length + enabledClaude.length + otherAgents.length;
+  const taskTitle = selectedTaskPack?.title || localText("自定义任务包", "Custom task pack");
   const variantNames = [
     ...otherAgents.map((agentId) => state.availableAdapters.find((adapter) => adapter.id === agentId)?.title ?? agentId),
+    ...enabledClaude.map((variant) => variant.displayLabel || "Claude Code"),
     ...enabledCodex.map((variant) => variant.displayLabel || "Codex CLI")
   ];
   const selectionPreview = variantNames.slice(0, 3).join(", ");
   const extraCount = Math.max(variantNames.length - 3, 0);
   const preview =
     variantNames.length === 0
-      ? state.language === "zh-CN"
-        ? "????? variant"
-        : "No variants selected"
+      ? localText("还没有选择 variant", "No variants selected")
       : `${selectionPreview}${extraCount > 0 ? ` +${extraCount}` : ""}`;
 
-  return state.language === "zh-CN"
-    ? `???${taskTitle} | ?? ${variantCount} ? variant | ${preview}`
-    : `Task: ${taskTitle} | ${variantCount} variant(s) selected | ${preview}`;
+  return localText(
+    `任务：${taskTitle} | 已选 ${variantCount} 个 variant | ${preview}`,
+    `Task: ${taskTitle} | ${variantCount} variant(s) selected | ${preview}`
+  );
 }
 
 function compareHighlights(run, result) {
   const verdict = getRunVerdict(run);
   const highlights = [];
+  const key = recordKey(result);
 
-  if (verdict.bestAgent?.agentId === result.agentId) {
-    highlights.push(state.language === "zh-CN" ? "综合最佳" : "Best");
+  if (recordKey(verdict.bestAgent ?? {}) === key) {
+    highlights.push("Best");
   }
-  if (verdict.fastest?.agentId === result.agentId) {
-    highlights.push(state.language === "zh-CN" ? "最快" : "Fastest");
+  if (recordKey(verdict.fastest ?? {}) === key) {
+    highlights.push("Fastest");
   }
-  if (verdict.lowestKnownCost?.agentId === result.agentId) {
-    highlights.push(state.language === "zh-CN" ? "成本最低" : "Lowest Cost");
+  if (recordKey(verdict.lowestKnownCost ?? {}) === key) {
+    highlights.push(localText("最低成本", "Lowest Cost"));
   }
-  if (verdict.highestJudgePassRate?.agentId === result.agentId) {
-    highlights.push(state.language === "zh-CN" ? "Judge 最优" : "Top Judges");
+  if (recordKey(verdict.highestJudgePassRate ?? {}) === key) {
+    highlights.push(localText("Judge 最佳", "Top Judges"));
   }
 
   return highlights;
@@ -739,6 +929,33 @@ function renderLauncherProgress() {
     .join("");
 }
 
+function createProviderEditorState(profile = null) {
+  return {
+    id: profile?.id ?? "",
+    name: profile?.name ?? "",
+    kind: profile?.kind ?? "anthropic-compatible",
+    homepage: profile?.homepage ?? "",
+    baseUrl: profile?.baseUrl ?? "",
+    apiFormat: profile?.apiFormat ?? "anthropic-messages",
+    primaryModel: profile?.primaryModel ?? "",
+    thinkingModel: profile?.thinkingModel ?? "",
+    defaultHaikuModel: profile?.defaultHaikuModel ?? "",
+    defaultSonnetModel: profile?.defaultSonnetModel ?? "",
+    defaultOpusModel: profile?.defaultOpusModel ?? "",
+    notes: profile?.notes ?? "",
+    extraEnv: profile?.extraEnv ? JSON.stringify(profile.extraEnv, null, 2) : "{}",
+    writeCommonConfig: profile?.writeCommonConfig ?? true,
+    secret: ""
+  };
+}
+
+function openProviderEditor(profileId = null) {
+  const profile = profileId
+    ? state.availableProviderProfiles.find((entry) => entry.id === profileId) ?? null
+    : null;
+  state.launcherProviderEditor = createProviderEditorState(profile);
+}
+
 function renderLauncher() {
   if (!state.serviceInfo) {
     setHidden(elements.launcherPanel, true);
@@ -755,6 +972,7 @@ function renderLauncher() {
   if (state.launcherCodexVariants.length === 0) {
     state.launcherCodexVariants = [defaultCodexVariant()];
   }
+  syncClaudeVariantsWithProfiles();
 
   const options = [
     `<option value="">${escapeHtml(t("taskPackCustom"))}</option>`,
@@ -775,40 +993,40 @@ function renderLauncher() {
 
   const selectedTaskPack =
     state.availableTaskPacks.find((taskPack) => taskPack.path === elements.launcherTaskPath.value) ?? null;
-  const realAdapters = state.availableAdapters.filter((adapter) => adapter.kind !== "demo" && adapter.id !== "codex");
+  const realAdapters = state.availableAdapters.filter(
+    (adapter) => adapter.kind !== "demo" && adapter.id !== "codex" && adapter.id !== "claude-code"
+  );
   const debugAdapters = state.availableAdapters.filter((adapter) => adapter.kind === "demo");
   const codexDefaults = state.serviceInfo.codexDefaults ?? {};
-  const codexDefaultsText =
-    state.language === "zh-CN"
-      ? `??????? ${codexDefaults.effectiveModel ?? "unknown"} | ???? ${codexDefaults.effectiveReasoningEffort ?? "default"} | ${codexDefaults.verification ?? "unknown"} / ${codexDefaults.source ?? "unknown"}`
-      : `Current default: model ${codexDefaults.effectiveModel ?? "unknown"} | reasoning ${codexDefaults.effectiveReasoningEffort ?? "default"} | ${codexDefaults.verification ?? "unknown"} / ${codexDefaults.source ?? "unknown"}`;
+  const codexDefaultsText = localText(
+    `当前默认：模型 ${codexDefaults.effectiveModel ?? "unknown"} | 推理 ${codexDefaults.effectiveReasoningEffort ?? "default"} | ${codexDefaults.verification ?? "unknown"} / ${codexDefaults.source ?? "unknown"}`,
+    `Current default: model ${codexDefaults.effectiveModel ?? "unknown"} | reasoning ${codexDefaults.effectiveReasoningEffort ?? "default"} | ${codexDefaults.verification ?? "unknown"} / ${codexDefaults.source ?? "unknown"}`
+  );
 
   const taskSummary = selectedTaskPack
     ? `
       <div class="launcher-section">
-        <h4>${escapeHtml(state.language === "zh-CN" ? "????" : "Task Intent")}</h4>
+        <h4>${escapeHtml(localText("任务说明", "Task Intent"))}</h4>
         <p class="muted">${escapeHtml(selectedTaskPack.description ?? selectedTaskPack.objective ?? "")}</p>
-        <p class="muted"><strong>${escapeHtml(state.language === "zh-CN" ? "??" : "Objective")}:</strong> ${escapeHtml(
+        <p class="muted"><strong>${escapeHtml(localText("目标", "Objective"))}:</strong> ${escapeHtml(
             selectedTaskPack.objective ?? "n/a"
           )}</p>
-        <p class="muted"><strong>${escapeHtml(state.language === "zh-CN" ? "Judge ??" : "Judge Rationale")}:</strong> ${escapeHtml(
+        <p class="muted"><strong>${escapeHtml(localText("Judge 依据", "Judge Rationale"))}:</strong> ${escapeHtml(
             selectedTaskPack.judgeRationale ?? "n/a"
           )}</p>
-        <p class="muted"><strong>${escapeHtml(state.language === "zh-CN" ? "????" : "Repo Types")}:</strong> ${escapeHtml(
+        <p class="muted"><strong>${escapeHtml(localText("适用仓库", "Repo Types"))}:</strong> ${escapeHtml(
             (selectedTaskPack.repoTypes ?? []).join(", ") || "generic"
           )}</p>
-        <p class="muted"><strong>${escapeHtml(state.language === "zh-CN" ? "Prompt ??" : "Prompt Summary")}:</strong> ${escapeHtml(
+        <p class="muted"><strong>${escapeHtml(localText("Prompt 摘要", "Prompt Summary"))}:</strong> ${escapeHtml(
             summarizeTaskPrompt(selectedTaskPack.prompt)
           )}</p>
-        <p class="muted"><strong>${escapeHtml(state.language === "zh-CN" ? "Judge ???" : "Judge Checks")}:</strong> ${escapeHtml(
+        <p class="muted"><strong>${escapeHtml(localText("Judge 检查项", "Judge Checks"))}:</strong> ${escapeHtml(
             summarizeJudges(selectedTaskPack)
           )}</p>
         <p class="warning-text">${escapeHtml(
           selectedTaskPack.id === "official-repo-health"
             ? baselineTaskWarning({ id: selectedTaskPack.id })
-            : state.language === "zh-CN"
-              ? "?? benchmark ???????????????"
-              : "Interpret this benchmark in the context of the task objective."
+            : localText("按任务目标解读这次 benchmark。", "Interpret this benchmark in the context of the task objective.")
         )}</p>
       </div>
     `
@@ -820,46 +1038,178 @@ function renderLauncher() {
         <div class="variant-card" data-codex-variant-id="${escapeHtml(variant.id)}">
           <label class="checkbox">
             <input type="checkbox" data-role="variant-enabled" ${variant.enabled ? "checked" : ""} />
-            <span>${escapeHtml(state.language === "zh-CN" ? "???? Codex ??" : "Enable this Codex variant")}</span>
+            <span>${escapeHtml(localText("启用这个 Codex variant", "Enable this Codex variant"))}</span>
           </label>
           <div class="launcher-grid">
             <label class="field">
-              <span>${escapeHtml(state.language === "zh-CN" ? "???" : "Display Label")}</span>
+              <span>${escapeHtml(localText("显示名", "Display Label"))}</span>
               <input data-role="variant-label" type="text" value="${escapeHtml(variant.displayLabel)}" />
             </label>
             <label class="field">
-              <span>${escapeHtml(state.language === "zh-CN" ? "???" : "Model")}</span>
+              <span>${escapeHtml(localText("模型", "Model"))}</span>
               <input data-role="variant-model" type="text" value="${escapeHtml(variant.model)}" placeholder="gpt-5.4" />
             </label>
             <label class="field">
-              <span>${escapeHtml(state.language === "zh-CN" ? "????" : "Reasoning Effort")}</span>
+              <span>${escapeHtml(localText("推理等级", "Reasoning Effort"))}</span>
               <input data-role="variant-reasoning" list="reasoning-levels" type="text" value="${escapeHtml(
                 variant.reasoningEffort
               )}" placeholder="low / medium / high" />
             </label>
           </div>
-          <p class="muted">${escapeHtml(state.language === "zh-CN" ? "????" : "Default source")}: ${escapeHtml(
+          <p class="muted">${escapeHtml(localText("默认来源", "Default source"))}: ${escapeHtml(
             variant.source
-          )} | ${escapeHtml(state.language === "zh-CN" ? "???" : "Verification")}: ${escapeHtml(
+          )} | ${escapeHtml(localText("可信度", "Verification"))}: ${escapeHtml(
             variant.verification
           )}</p>
           <button type="button" class="variant-remove" data-role="variant-remove">${escapeHtml(
-            state.language === "zh-CN" ? "??????" : "Remove variant"
+            localText("删除这个 variant", "Remove variant")
           )}</button>
         </div>
       `
     )
     .join("");
 
+  const claudeVariants = state.launcherClaudeVariants
+    .map((variant) => {
+      const profile = state.availableProviderProfiles.find((entry) => entry.id === variant.profileId);
+      const riskBadges = [];
+      if (profile?.kind !== "official") {
+        riskBadges.push(localText("Third-party Provider", "Third-party Provider"));
+        riskBadges.push(localText("Compatibility Mode", "Compatibility Mode"));
+        riskBadges.push(localText("User-managed Secret", "User-managed Secret"));
+      }
+
+      return `
+        <div class="variant-card" data-claude-variant-id="${escapeHtml(variant.id)}">
+          <label class="checkbox">
+            <input type="checkbox" data-role="claude-variant-enabled" ${variant.enabled ? "checked" : ""} />
+            <span>${escapeHtml(localText("启用这个 Claude Code variant", "Enable this Claude Code variant"))}</span>
+          </label>
+          <div class="launcher-grid">
+            <label class="field">
+              <span>${escapeHtml(localText("显示名", "Display Label"))}</span>
+              <input data-role="claude-variant-label" type="text" value="${escapeHtml(variant.displayLabel)}" />
+            </label>
+            <label class="field">
+              <span>${escapeHtml(localText("模型", "Model"))}</span>
+              <input data-role="claude-variant-model" type="text" value="${escapeHtml(variant.model ?? "")}" placeholder="${escapeHtml(profile?.primaryModel ?? "model")}" />
+            </label>
+          </div>
+          <p class="muted">${escapeHtml(localText("Provider", "Provider"))}: ${escapeHtml(profile?.name ?? variant.providerName ?? "Official")} | ${escapeHtml(localText("类型", "Kind"))}: ${escapeHtml(profile?.kind ?? variant.providerKind ?? "official")}</p>
+          <p class="muted">${escapeHtml(localText("密钥状态", "Secret"))}: ${escapeHtml(
+            profile?.kind === "official"
+              ? localText("官方登录态", "Official login")
+              : profile?.secretStored
+                ? localText("已保存到 Windows Credential Manager", "Stored in Windows Credential Manager")
+                : localText("未保存，运行会被阻止", "Missing; runs will be blocked")
+          )}</p>
+          ${
+            riskBadges.length > 0
+              ? `<div class="badge-row">${riskBadges.map((badge) => `<span class="meaning-badge risk-badge">${escapeHtml(badge)}</span>`).join("")}</div>`
+              : ""
+          }
+          <div class="inline-actions">
+            ${
+              profile?.isBuiltIn
+                ? `<span class="muted">${escapeHtml(localText("官方内置 Provider", "Built-in official provider"))}</span>`
+                : `<button type="button" data-role="provider-edit" data-profile-id="${escapeHtml(profile?.id ?? "claude-official")}">${escapeHtml(localText("编辑 Provider", "Edit Provider"))}</button>
+                   <button type="button" data-role="provider-delete" data-profile-id="${escapeHtml(profile?.id ?? "")}">${escapeHtml(localText("删除 Provider", "Delete Provider"))}</button>`
+            }
+          </div>
+        </div>
+      `;
+    })
+    .join("");
+
+  const providerEditor = state.launcherProviderEditor
+    ? `
+      <div class="provider-editor" data-provider-editor="true">
+        <div class="panel-header">
+          <h4>${escapeHtml(state.launcherProviderEditor.id ? localText("编辑 Claude Provider", "Edit Claude Provider") : localText("新增 Claude Provider", "Add Claude Provider"))}</h4>
+        </div>
+        <p class="warning-text">${escapeHtml(
+          localText(
+            "第三方兼容层可能改变 Claude Code 行为。结果代表“Claude Code + 该 provider/profile”的表现，不是 Claude 官方能力，也不是 RepoArena 原生 API agent。",
+            "Third-party compatibility layers can change Claude Code behavior. Results represent “Claude Code + this provider/profile”, not native RepoArena API agents."
+          )
+        )}</p>
+        <div class="launcher-grid">
+          <label class="field">
+            <span>${escapeHtml(localText("Provider 名称", "Provider Name"))}</span>
+            <input data-role="provider-name" type="text" value="${escapeHtml(state.launcherProviderEditor.name)}" />
+          </label>
+          <label class="field">
+            <span>${escapeHtml(localText("类型", "Kind"))}</span>
+            <select data-role="provider-kind">
+              <option value="anthropic-compatible" ${state.launcherProviderEditor.kind === "anthropic-compatible" ? "selected" : ""}>Anthropic Compatible</option>
+              <option value="openai-proxy" ${state.launcherProviderEditor.kind === "openai-proxy" ? "selected" : ""}>OpenAI Proxy</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>${escapeHtml(localText("官网链接", "Homepage"))}</span>
+            <input data-role="provider-homepage" type="text" value="${escapeHtml(state.launcherProviderEditor.homepage)}" />
+          </label>
+          <label class="field">
+            <span>${escapeHtml(localText("Base URL", "Base URL"))}</span>
+            <input data-role="provider-base-url" type="text" value="${escapeHtml(state.launcherProviderEditor.baseUrl)}" />
+          </label>
+          <label class="field">
+            <span>${escapeHtml(localText("API 格式", "API Format"))}</span>
+            <select data-role="provider-api-format">
+              <option value="anthropic-messages" ${state.launcherProviderEditor.apiFormat === "anthropic-messages" ? "selected" : ""}>Anthropic Messages</option>
+              <option value="openai-chat-via-proxy" ${state.launcherProviderEditor.apiFormat === "openai-chat-via-proxy" ? "selected" : ""}>OpenAI Chat via Proxy</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>${escapeHtml(localText("主模型", "Primary Model"))}</span>
+            <input data-role="provider-primary-model" type="text" value="${escapeHtml(state.launcherProviderEditor.primaryModel)}" placeholder="gpt-5.4" />
+          </label>
+          <label class="field">
+            <span>${escapeHtml(localText("Thinking 模型", "Thinking Model"))}</span>
+            <input data-role="provider-thinking-model" type="text" value="${escapeHtml(state.launcherProviderEditor.thinkingModel)}" />
+          </label>
+          <label class="field">
+            <span>${escapeHtml(localText("Haiku 默认模型", "Default Haiku Model"))}</span>
+            <input data-role="provider-haiku-model" type="text" value="${escapeHtml(state.launcherProviderEditor.defaultHaikuModel)}" />
+          </label>
+          <label class="field">
+            <span>${escapeHtml(localText("Sonnet 默认模型", "Default Sonnet Model"))}</span>
+            <input data-role="provider-sonnet-model" type="text" value="${escapeHtml(state.launcherProviderEditor.defaultSonnetModel)}" />
+          </label>
+          <label class="field">
+            <span>${escapeHtml(localText("Opus 默认模型", "Default Opus Model"))}</span>
+            <input data-role="provider-opus-model" type="text" value="${escapeHtml(state.launcherProviderEditor.defaultOpusModel)}" />
+          </label>
+          <label class="field field-wide">
+            <span>${escapeHtml(localText("备注", "Notes"))}</span>
+            <input data-role="provider-notes" type="text" value="${escapeHtml(state.launcherProviderEditor.notes)}" />
+          </label>
+          <label class="field field-wide">
+            <span>${escapeHtml(localText("额外环境变量 JSON", "Extra Env JSON"))}</span>
+            <textarea data-role="provider-extra-env" rows="6">${escapeHtml(state.launcherProviderEditor.extraEnv)}</textarea>
+          </label>
+          <label class="field field-wide">
+            <span>${escapeHtml(localText("API Key / Token", "API Key / Token"))}</span>
+            <input data-role="provider-secret" type="password" value="" placeholder="${escapeHtml(localText("留空则不修改当前已保存 secret", "Leave blank to keep the currently stored secret"))}" />
+          </label>
+        </div>
+        <label class="checkbox">
+          <input data-role="provider-write-common-config" type="checkbox" ${state.launcherProviderEditor.writeCommonConfig ? "checked" : ""} />
+          <span>${escapeHtml(localText("写入通用 Claude Code 配置", "Write common Claude Code config"))}</span>
+        </label>
+        <div class="inline-actions">
+          <button type="button" data-role="provider-save">${escapeHtml(localText("保存 Provider", "Save Provider"))}</button>
+          <button type="button" data-role="provider-cancel">${escapeHtml(localText("取消", "Cancel"))}</button>
+        </div>
+      </div>
+    `
+    : "";
+
   elements.launcherAgents.innerHTML = `
     ${taskSummary}
     <div class="launcher-section">
-      <h4>${escapeHtml(state.language === "zh-CN" ? "?? Agent" : "Real Agents")}</h4>
-      <p class="muted">${escapeHtml(
-        state.language === "zh-CN"
-          ? "????????? agent??????????????"
-          : "These are real external agents. Their results count toward the main comparison."
-      )}</p>
+      <h4>${escapeHtml(localText("真实 Agents", "Real Agents"))}</h4>
+      <p class="muted">${escapeHtml(localText("这些是直接参与主对比的真实外部 agent。", "These are real external agents. Their results count toward the main comparison."))}</p>
       <div class="checkbox-grid">
         ${realAdapters
           .map((adapter) => {
@@ -876,16 +1226,28 @@ function renderLauncher() {
     </div>
     <div class="launcher-section">
       <div class="panel-header">
-        <h4>${escapeHtml(state.language === "zh-CN" ? "Codex ??" : "Codex Variants")}</h4>
+        <h4>${escapeHtml(localText("Claude Code Provider Profiles", "Claude Code Provider Profiles"))}</h4>
+        <button id="launcher-add-provider" type="button">${escapeHtml(localText("新增 Claude Provider", "Add Claude Provider"))}</button>
+      </div>
+      <p class="muted">${escapeHtml(localText(
+        "这里比较的是同一个 Claude Code harness 下，不同 provider/profile 的变体。",
+        "These are provider-switched Claude Code variants under the same Claude Code harness."
+      ))}</p>
+      <p class="warning-text">${escapeHtml(state.serviceInfo.riskNotice ?? "")}</p>
+      ${claudeVariants || `<p class="empty-state">${escapeHtml(localText("还没有可用的 Claude Provider。", "No Claude provider profiles available yet."))}</p>`}
+      ${providerEditor}
+    </div>
+    <div class="launcher-section">
+      <div class="panel-header">
+        <h4>${escapeHtml(localText("Codex Variants", "Codex Variants"))}</h4>
         <button id="launcher-add-codex-variant" type="button">${escapeHtml(
-          state.language === "zh-CN" ? "?? Codex ??" : "Add Codex variant"
+          localText("新增 Codex variant", "Add Codex variant")
         )}</button>
       </div>
-      <p class="muted">${escapeHtml(
-        state.language === "zh-CN"
-          ? "??? Codex ????????????????? CLI ??????????? inferred?"
-          : "Use multiple Codex variants to compare concrete model and reasoning configurations. When the CLI does not confirm them, RepoArena marks the identity as inferred."
-      )}</p>
+      <p class="muted">${escapeHtml(localText(
+        "用多个 Codex variant 比较具体模型和推理等级。CLI 没有明确返回时，RepoArena 会把身份标成 inferred。",
+        "Use multiple Codex variants to compare concrete model and reasoning configurations. When the CLI does not confirm them, RepoArena marks the identity as inferred."
+      ))}</p>
       <p class="muted">${escapeHtml(codexDefaultsText)}</p>
       <datalist id="reasoning-levels">
         <option value="low"></option>
@@ -895,12 +1257,11 @@ function renderLauncher() {
       ${codexVariants}
     </div>
     <details class="launcher-section">
-      <summary>${escapeHtml(state.language === "zh-CN" ? "?? Agent???????????" : "Debug Agents (not selected by default)")}</summary>
-      <p class="muted">${escapeHtml(
-        state.language === "zh-CN"
-          ? "Demo Fast / Thorough / Budget ??????? UI ???? adapter???????????"
-          : "Demo Fast / Thorough / Budget are built-in synthetic adapters for validating the pipeline and UI. They do not represent real model capability."
-      )}</p>
+      <summary>${escapeHtml(localText("Debug Agents（默认不选）", "Debug Agents (not selected by default)"))}</summary>
+      <p class="muted">${escapeHtml(localText(
+        "Demo Fast / Thorough / Budget 只是内置的 synthetic adapter，用来验证流水线和 UI，不代表真实模型能力。",
+        "Demo Fast / Thorough / Budget are built-in synthetic adapters for validating the pipeline and UI. They do not represent real model capability."
+      ))}</p>
       <div class="checkbox-grid">
         ${debugAdapters
           .map((adapter) => {
@@ -920,12 +1281,8 @@ function renderLauncher() {
   elements.launcherRun.disabled = state.runInProgress;
   elements.launcherCompactSummary.textContent = summarizeLauncherSelection(selectedTaskPack);
   elements.launcherToggle.textContent = state.launcherExpanded
-    ? state.language === "zh-CN"
-      ? "????"
-      : "Hide Setup"
-    : state.language === "zh-CN"
-      ? "????"
-      : "Show Setup";
+    ? localText("收起设置", "Hide Setup")
+    : localText("展开设置", "Show Setup");
   setHidden(elements.launcherBody, !state.launcherExpanded);
   elements.launcherStatus.textContent = state.runInProgress
     ? currentRunPhaseLabel() || t("launcherStatusRunning")
@@ -935,13 +1292,14 @@ function renderLauncher() {
 
 async function detectService() {
   try {
-    const [infoResponse, adaptersResponse, taskPacksResponse, runStatusResponse] = await Promise.all([
+    const [infoResponse, adaptersResponse, taskPacksResponse, runStatusResponse, providerProfilesResponse] = await Promise.all([
       fetch("/api/ui-info"),
       fetch("/api/adapters"),
       fetch("/api/taskpacks"),
-      fetch("/api/run-status", { cache: "no-store" })
+      fetch("/api/run-status", { cache: "no-store" }),
+      fetch("/api/provider-profiles")
     ]);
-    if (!infoResponse.ok || !adaptersResponse.ok || !taskPacksResponse.ok || !runStatusResponse.ok) {
+    if (!infoResponse.ok || !adaptersResponse.ok || !taskPacksResponse.ok || !runStatusResponse.ok || !providerProfilesResponse.ok) {
       return;
     }
 
@@ -949,6 +1307,8 @@ async function detectService() {
     state.availableAdapters = await adaptersResponse.json();
     state.availableTaskPacks = await taskPacksResponse.json();
     state.runStatus = await runStatusResponse.json();
+    state.availableProviderProfiles = await providerProfilesResponse.json();
+    syncClaudeVariantsWithProfiles();
     state.runInProgress = state.runStatus?.state === "running";
     if (state.runInProgress) {
       startRunStatusPolling();
@@ -960,6 +1320,7 @@ async function detectService() {
     state.serviceInfo = null;
     state.availableAdapters = [];
     state.availableTaskPacks = [];
+    state.availableProviderProfiles = [];
     state.runInProgress = false;
     state.runStatus = null;
   }
@@ -1024,6 +1385,18 @@ function selectedLauncherVariants() {
       configSource: "ui"
     }));
 
+  const claudeVariants = state.launcherClaudeVariants
+    .filter((variant) => variant.enabled)
+    .map((variant) => ({
+      baseAgentId: "claude-code",
+      displayLabel: variant.displayLabel.trim() || `Claude Code · ${variant.providerName ?? "Official"}`,
+      config: {
+        model: variant.model.trim() || undefined,
+        providerProfileId: variant.profileId
+      },
+      configSource: "ui"
+    }));
+
   const otherAgents = selectedLauncherAgents().map((agentId) => ({
     baseAgentId: agentId,
     displayLabel: state.availableAdapters.find((adapter) => adapter.id === agentId)?.title ?? agentId,
@@ -1031,7 +1404,7 @@ function selectedLauncherVariants() {
     configSource: "ui"
   }));
 
-  return [...otherAgents, ...codexVariants];
+  return [...otherAgents, ...claudeVariants, ...codexVariants];
 }
 
 function syncLauncherStateFromDom() {
@@ -1047,6 +1420,25 @@ function syncLauncherStateFromDom() {
     source: state.serviceInfo?.codexDefaults?.source ?? "unknown",
     verification: state.serviceInfo?.codexDefaults?.verification ?? "unknown"
   }));
+  state.launcherClaudeVariants = Array.from(
+    elements.launcherAgents.querySelectorAll("[data-claude-variant-id]")
+  ).map((element) => {
+    const profileId = element.getAttribute("data-profile-id") || "claude-official";
+    const profile = state.availableProviderProfiles.find((entry) => entry.id === profileId);
+    return {
+      id: element.getAttribute("data-claude-variant-id"),
+      profileId,
+      enabled: element.querySelector('[data-role="claude-variant-enabled"]')?.checked ?? false,
+      displayLabel:
+        element.querySelector('[data-role="claude-variant-label"]')?.value ??
+        `Claude Code · ${profile?.name ?? "Official"}`,
+      model: element.querySelector('[data-role="claude-variant-model"]')?.value ?? "",
+      providerName: profile?.name ?? "Official",
+      providerKind: profile?.kind ?? "official",
+      secretStored: Boolean(profile?.secretStored),
+      isBuiltIn: Boolean(profile?.isBuiltIn)
+    };
+  });
 }
 
 async function handleLauncherRun() {
@@ -1111,6 +1503,105 @@ async function handleLauncherRun() {
   render();
 }
 
+async function refreshProviderProfiles() {
+  const response = await fetch("/api/provider-profiles", { cache: "no-store" });
+  if (!response.ok) {
+    throw new Error("Failed to load provider profiles.");
+  }
+
+  state.availableProviderProfiles = await response.json();
+  syncClaudeVariantsWithProfiles();
+}
+
+async function saveProviderProfileFromEditor() {
+  const editor = elements.launcherAgents.querySelector("[data-provider-editor='true']");
+  if (!editor) {
+    return;
+  }
+
+  const readValue = (selector) => editor.querySelector(selector)?.value?.trim() ?? "";
+  const readChecked = (selector) => editor.querySelector(selector)?.checked ?? false;
+  let extraEnv = {};
+  const extraEnvRaw = editor.querySelector('[data-role="provider-extra-env"]')?.value?.trim() ?? "{}";
+  try {
+    extraEnv = extraEnvRaw ? JSON.parse(extraEnvRaw) : {};
+  } catch {
+    throw new Error(localText("额外环境变量 JSON 无法解析。", "Extra env JSON is invalid."));
+  }
+
+  const payload = {
+    name: readValue('[data-role="provider-name"]'),
+    kind: readValue('[data-role="provider-kind"]'),
+    homepage: readValue('[data-role="provider-homepage"]') || undefined,
+    baseUrl: readValue('[data-role="provider-base-url"]') || undefined,
+    apiFormat: readValue('[data-role="provider-api-format"]'),
+    primaryModel: readValue('[data-role="provider-primary-model"]') || undefined,
+    thinkingModel: readValue('[data-role="provider-thinking-model"]') || undefined,
+    defaultHaikuModel: readValue('[data-role="provider-haiku-model"]') || undefined,
+    defaultSonnetModel: readValue('[data-role="provider-sonnet-model"]') || undefined,
+    defaultOpusModel: readValue('[data-role="provider-opus-model"]') || undefined,
+    notes: readValue('[data-role="provider-notes"]') || undefined,
+    extraEnv,
+    writeCommonConfig: readChecked('[data-role="provider-write-common-config"]')
+  };
+  const secret = editor.querySelector('[data-role="provider-secret"]')?.value ?? "";
+
+  if (!payload.name) {
+    throw new Error(localText("Provider 名称不能为空。", "Provider name is required."));
+  }
+
+  const isEdit = Boolean(state.launcherProviderEditor?.id);
+  const url = isEdit
+    ? `/api/provider-profiles/${encodeURIComponent(state.launcherProviderEditor.id)}`
+    : "/api/provider-profiles";
+  const method = isEdit ? "PUT" : "POST";
+  const response = await fetch(url, {
+    method,
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(isEdit ? payload : { ...payload, secret: secret || undefined })
+  });
+
+  const result = await response.json();
+  if (!response.ok) {
+    throw new Error(result.error || "Failed to save provider profile.");
+  }
+
+  if (isEdit && secret.trim()) {
+    const secretResponse = await fetch(`/api/provider-profiles/${encodeURIComponent(state.launcherProviderEditor.id)}/secret`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ secret })
+    });
+    const secretResult = await secretResponse.json();
+    if (!secretResponse.ok) {
+      throw new Error(secretResult.error || "Failed to store provider secret.");
+    }
+    state.availableProviderProfiles = secretResult.profiles ?? state.availableProviderProfiles;
+  } else {
+    state.availableProviderProfiles = result.profiles ?? state.availableProviderProfiles;
+  }
+
+  syncClaudeVariantsWithProfiles();
+  state.launcherProviderEditor = null;
+}
+
+async function deleteProviderProfileById(profileId) {
+  const response = await fetch(`/api/provider-profiles/${encodeURIComponent(profileId)}`, {
+    method: "DELETE"
+  });
+  const result = await response.json();
+  if (!response.ok) {
+    throw new Error(result.error || "Failed to delete provider profile.");
+  }
+
+  state.availableProviderProfiles = result.profiles ?? [];
+  syncClaudeVariantsWithProfiles();
+}
+
 function deltaClass(value, preferred = "lower") {
   if (value === null || value === 0) {
     return "delta-neutral";
@@ -1172,8 +1663,8 @@ function updateCurrentRun() {
     return;
   }
 
-  if (!state.run.results.some((result) => result.agentId === state.selectedAgentId)) {
-    state.selectedAgentId = state.run.results[0]?.agentId ?? null;
+  if (!state.run.results.some((result) => recordKey(result) === state.selectedAgentId)) {
+    state.selectedAgentId = recordKey(state.run.results[0] ?? {}) ?? null;
   }
 }
 
@@ -1203,8 +1694,8 @@ function renderRunInfo(run) {
     </div>
     <p class="muted">${escapeHtml(t("createdAt"))} ${escapeHtml(run.createdAt)}</p>
     <p class="muted">${escapeHtml(t("taskSchema"))} ${escapeHtml(run.task.schemaVersion)}</p>
-    <p class="muted"><strong>${escapeHtml(state.language === "zh-CN" ? "????" : "Objective")}:</strong> ${escapeHtml(intent.objective || "n/a")}</p>
-    <p class="muted"><strong>${escapeHtml(state.language === "zh-CN" ? "Judge ??" : "Judge Rationale")}:</strong> ${escapeHtml(intent.rationale || "n/a")}</p>
+    <p class="muted"><strong>${escapeHtml(localText("目标", "Objective"))}:</strong> ${escapeHtml(intent.objective || "n/a")}</p>
+    <p class="muted"><strong>${escapeHtml(localText("Judge 依据", "Judge Rationale"))}:</strong> ${escapeHtml(intent.rationale || "n/a")}</p>
     <p class="warning-text">${escapeHtml(baselineTaskWarning(run.task))}</p>
   `;
   setHidden(elements.runInfo, false);
@@ -1219,31 +1710,31 @@ function renderTaskBrief(run) {
 
   elements.taskBrief.innerHTML = `
     <div class="panel-header">
-      <h3>${escapeHtml(state.language === "zh-CN" ? "??????????" : "What this run actually measures")}</h3>
-      <span class="muted">${escapeHtml(resultCount)} ${escapeHtml(state.language === "zh-CN" ? "? variant" : "variants")}</span>
+      <h3>${escapeHtml(localText("这次 benchmark 在测什么", "What this run actually measures"))}</h3>
+      <span class="muted">${escapeHtml(resultCount)} ${escapeHtml(localText("个 variant", "variants"))}</span>
     </div>
     <div class="badge-row">
       ${badges.map((badge) => `<span class="meaning-badge">${escapeHtml(badge)}</span>`).join("")}
     </div>
     <article class="brief-card brief-focus-card">
-      <p class="metric-label">${escapeHtml(state.language === "zh-CN" ? "???????" : "How to read this result")}</p>
+      <p class="metric-label">${escapeHtml(localText("如何解读这次结果", "How to read this result"))}</p>
       <p>${escapeHtml(runFocusLine(run))}</p>
     </article>
     <div class="brief-grid">
       <article class="brief-card">
-        <p class="metric-label">${escapeHtml(state.language === "zh-CN" ? "????" : "Objective")}</p>
+        <p class="metric-label">${escapeHtml(localText("目标", "Objective"))}</p>
         <p>${escapeHtml(intent.objective || run.task.description || "n/a")}</p>
       </article>
       <article class="brief-card">
-        <p class="metric-label">${escapeHtml(state.language === "zh-CN" ? "Judge ??" : "Judge Rationale")}</p>
+        <p class="metric-label">${escapeHtml(localText("Judge 依据", "Judge Rationale"))}</p>
         <p>${escapeHtml(intent.rationale || "n/a")}</p>
       </article>
       <article class="brief-card">
-        <p class="metric-label">${escapeHtml(state.language === "zh-CN" ? "????" : "Repo Types")}</p>
+        <p class="metric-label">${escapeHtml(localText("适用仓库", "Repo Types"))}</p>
         <p>${escapeHtml(repoTypes)}</p>
       </article>
       <article class="brief-card">
-        <p class="metric-label">${escapeHtml(state.language === "zh-CN" ? "??????" : "Compared Variants")}</p>
+        <p class="metric-label">${escapeHtml(localText("参与对比的 Variants", "Compared Variants"))}</p>
         <p>${escapeHtml(variantLabels || "n/a")}</p>
       </article>
     </div>
@@ -1365,9 +1856,10 @@ function renderPreflights(run) {
             <span class="status-badge ${statusClass(preflight.status)}">${escapeHtml(preflight.status)}</span>
           </div>
           <p>${escapeHtml(preflight.summary)}</p>
-          <p class="muted">${escapeHtml(state.language === "zh-CN" ? "鍩虹 Agent" : "Base Agent")}: ${escapeHtml(baseAgentLabel(preflight))}</p>
-          <p class="muted">${escapeHtml(state.language === "zh-CN" ? "妯″瀷 / 鎬濊€冪瓑绾?" : "Model / Reasoning")}: ${escapeHtml(runtimeIdentity(preflight).model)} / ${escapeHtml(runtimeIdentity(preflight).reasoning)}</p>
-          <p class="muted">${escapeHtml(state.language === "zh-CN" ? "淇℃伅鏉ユ簮" : "Verification")}: ${escapeHtml(runtimeVerificationLabel(preflight))}</p>
+          <p class="muted">${escapeHtml(localText("基础 Agent", "Base Agent"))}: ${escapeHtml(baseAgentLabel(preflight))}</p>
+          <p class="muted">${escapeHtml(localText("Provider", "Provider"))}: ${escapeHtml(runtimeIdentity(preflight).provider)} | ${escapeHtml(localText("类型", "Kind"))}: ${escapeHtml(runtimeIdentity(preflight).providerKind)}</p>
+          <p class="muted">${escapeHtml(localText("模型 / 推理", "Model / Reasoning"))}: ${escapeHtml(runtimeIdentity(preflight).model)} / ${escapeHtml(runtimeIdentity(preflight).reasoning)}</p>
+          <p class="muted">${escapeHtml(localText("可信度", "Verification"))}: ${escapeHtml(runtimeVerificationLabel(preflight))}</p>
           <p class="muted">${escapeHtml(state.language === "zh-CN" ? "支持层级" : "Tier")}: ${escapeHtml(preflight.capability.supportTier)} | ${escapeHtml(state.language === "zh-CN" ? "Trace" : "Trace")}: ${escapeHtml(
             preflight.capability.traceRichness
           )}</p>
@@ -1443,16 +1935,16 @@ function renderAgentList(run) {
   elements.agentList.classList.remove("empty-state");
   elements.agentList.innerHTML = run.results
     .map((result) => {
-      const active = result.agentId === state.selectedAgentId ? "active" : "";
+      const active = recordKey(result) === state.selectedAgentId ? "active" : "";
       const runtime = runtimeIdentity(result);
       return `
-        <button class="agent-button ${active}" type="button" data-agent-id="${escapeHtml(result.agentId)}">
+        <button class="agent-button ${active}" type="button" data-agent-id="${escapeHtml(recordKey(result))}">
           <div class="row">
             <strong>${escapeHtml(resultLabel(result))}</strong>
             <span class="status-badge ${statusClass(result.status)}">${escapeHtml(result.status)}</span>
           </div>
           <div class="meta">
-            ${escapeHtml(runtime.model)} | ${escapeHtml(runtime.reasoning)} | ${escapeHtml(formatDuration(result.durationMs))} | ${escapeHtml(
+            ${escapeHtml(runtime.provider)} | ${escapeHtml(runtime.model)} | ${escapeHtml(formatDuration(result.durationMs))} | ${escapeHtml(
               formatCost(result)
             )}
           </div>
@@ -1671,17 +2163,17 @@ function renderMarkdownPanel() {
 function renderCompareTableV2(run) {
   const results = getCompareResults(run, compareFilters);
   const sortHintMap = {
-    status: state.language === "zh-CN" ? "先按状态分层，再把更快的结果排前面。" : "Sorted by status first, then by fastest duration.",
-    duration: state.language === "zh-CN" ? "按耗时排序，越快越靠前。" : "Sorted by fastest variants first.",
-    tokens: state.language === "zh-CN" ? "按 token 用量排序，越高越靠前。" : "Sorted by highest token usage first.",
-    cost: state.language === "zh-CN" ? "按已知成本排序，越低越靠前。" : "Sorted by lowest known cost first.",
-    changed: state.language === "zh-CN" ? "按改动文件数排序，越多越靠前。" : "Sorted by most changed files first.",
-    judges: state.language === "zh-CN" ? "按 judge 通过率排序，越高越靠前。" : "Sorted by highest judge pass rate first."
+    status: localText("先按状态分层，再把更快的结果排前面。", "Sorted by status first, then by fastest duration."),
+    duration: localText("按耗时排序，越快越靠前。", "Sorted by fastest variants first."),
+    tokens: localText("按 token 用量排序，越高越靠前。", "Sorted by highest token usage first."),
+    cost: localText("按已知成本排序，越低越靠前。", "Sorted by lowest known cost first."),
+    changed: localText("按改动文件数排序，越多越靠前。", "Sorted by most changed files first."),
+    judges: localText("按 judge 通过率排序，越高越靠前。", "Sorted by highest judge pass rate first.")
   };
   elements.compareSortHint.textContent = sortHintMap[compareFilters.sort] ?? sortHintMap.status;
 
   if (results.length === 0) {
-    elements.compareTable.innerHTML = `<p class="empty-state">${escapeHtml(state.language === "zh-CN" ? "没有 variant 符合当前筛选条件。" : "No variants match the current compare filters.")}</p>`;
+    elements.compareTable.innerHTML = `<p class="empty-state">${escapeHtml(localText("没有 variant 符合当前筛选条件。", "No variants match the current compare filters."))}</p>`;
     return;
   }
 
@@ -1689,28 +2181,32 @@ function renderCompareTableV2(run) {
     <table class="compare-table">
       <thead>
         <tr>
-          <th>${escapeHtml(state.language === "zh-CN" ? "Variant" : "Variant")}</th>
-          <th>${escapeHtml(state.language === "zh-CN" ? "模型" : "Model")}</th>
-          <th>${escapeHtml(state.language === "zh-CN" ? "思考等级" : "Reasoning")}</th>
-          <th>${escapeHtml(state.language === "zh-CN" ? "可信度" : "Verification")}</th>
-          <th>${escapeHtml(state.language === "zh-CN" ? "状态" : "Status")}</th>
-          <th>${escapeHtml(state.language === "zh-CN" ? "耗时" : "Duration")}</th>
+          <th>${escapeHtml("Variant")}</th>
+          <th>${escapeHtml(localText("Provider", "Provider"))}</th>
+          <th>${escapeHtml(localText("类型", "Kind"))}</th>
+          <th>${escapeHtml(localText("模型", "Model"))}</th>
+          <th>${escapeHtml(localText("推理", "Reasoning"))}</th>
+          <th>${escapeHtml(localText("可信度", "Verification"))}</th>
+          <th>${escapeHtml(localText("状态", "Status"))}</th>
+          <th>${escapeHtml(localText("耗时", "Duration"))}</th>
           <th>${escapeHtml(t("metrics.tokens"))}</th>
-          <th>${escapeHtml(state.language === "zh-CN" ? "成本" : "Cost")}</th>
-          <th>${escapeHtml(state.language === "zh-CN" ? "改动文件" : "Changed")}</th>
-          <th>Judges</th>
+          <th>${escapeHtml(localText("成本", "Cost"))}</th>
+          <th>${escapeHtml(localText("改动文件", "Changed"))}</th>
+          <th>${escapeHtml("Judges")}</th>
         </tr>
       </thead>
       <tbody>
         ${results
           .map((result) => {
             const passedJudges = result.judgeResults.filter((judge) => judge.success).length;
-            const isActive = result.agentId === state.selectedAgentId ? "active" : "";
+            const isActive = recordKey(result) === state.selectedAgentId ? "active" : "";
             const runtime = runtimeIdentity(result);
 
             return `
-              <tr class="${isActive}" data-compare-agent-id="${escapeHtml(result.agentId)}">
+              <tr class="${isActive}" data-compare-agent-id="${escapeHtml(recordKey(result))}">
                 <td><strong>${escapeHtml(resultLabel(result))}</strong><br /><code>${escapeHtml(baseAgentLabel(result))}</code></td>
+                <td>${escapeHtml(runtime.provider)}</td>
+                <td>${escapeHtml(runtime.providerKind)}</td>
                 <td>${escapeHtml(runtime.model)}</td>
                 <td>${escapeHtml(runtime.reasoning)}</td>
                 <td>${escapeHtml(runtimeVerificationLabel(result))}</td>
@@ -1734,7 +2230,7 @@ function renderSelectedAgentV2() {
     return;
   }
 
-  const result = state.run.results.find((entry) => entry.agentId === state.selectedAgentId);
+  const result = state.run.results.find((entry) => recordKey(entry) === state.selectedAgentId);
   if (!result) {
     return;
   }
@@ -1742,21 +2238,23 @@ function renderSelectedAgentV2() {
   const runtime = runtimeIdentity(result);
   const judgeKinds =
     Array.from(new Set(result.judgeResults.map((judge) => formatJudgeType(judge.type)))).join(", ") ||
-    (state.language === "zh-CN" ? "无" : "None");
+    localText("无", "None");
 
   elements.resultSummary.innerHTML = `
     <h3>${escapeHtml(resultLabel(result))}</h3>
     <div class="summary-grid">
-      <div class="summary-row"><span>${escapeHtml(state.language === "zh-CN" ? "基础 Agent" : "Base Agent")}</span><strong>${escapeHtml(baseAgentLabel(result))}</strong></div>
-      <div class="summary-row"><span>${escapeHtml(state.language === "zh-CN" ? "模型" : "Model")}</span><strong>${escapeHtml(runtime.model)}</strong></div>
-      <div class="summary-row"><span>${escapeHtml(state.language === "zh-CN" ? "思考等级" : "Reasoning")}</span><strong>${escapeHtml(runtime.reasoning)}</strong></div>
-      <div class="summary-row"><span>${escapeHtml(state.language === "zh-CN" ? "可信度" : "Verification")}</span><strong>${escapeHtml(runtimeVerificationLabel(result))}</strong></div>
-      <div class="summary-row"><span>${escapeHtml(state.language === "zh-CN" ? "状态" : "Status")}</span><strong>${escapeHtml(result.status)}</strong></div>
-      <div class="summary-row"><span>${escapeHtml(state.language === "zh-CN" ? "耗时" : "Duration")}</span><strong>${escapeHtml(formatDuration(result.durationMs))}</strong></div>
+      <div class="summary-row"><span>${escapeHtml(localText("基础 Agent", "Base Agent"))}</span><strong>${escapeHtml(baseAgentLabel(result))}</strong></div>
+      <div class="summary-row"><span>${escapeHtml(localText("Provider", "Provider"))}</span><strong>${escapeHtml(runtime.provider)}</strong></div>
+      <div class="summary-row"><span>${escapeHtml(localText("类型", "Kind"))}</span><strong>${escapeHtml(runtime.providerKind)}</strong></div>
+      <div class="summary-row"><span>${escapeHtml(localText("模型", "Model"))}</span><strong>${escapeHtml(runtime.model)}</strong></div>
+      <div class="summary-row"><span>${escapeHtml(localText("推理", "Reasoning"))}</span><strong>${escapeHtml(runtime.reasoning)}</strong></div>
+      <div class="summary-row"><span>${escapeHtml(localText("可信度", "Verification"))}</span><strong>${escapeHtml(runtimeVerificationLabel(result))}</strong></div>
+      <div class="summary-row"><span>${escapeHtml(localText("状态", "Status"))}</span><strong>${escapeHtml(result.status)}</strong></div>
+      <div class="summary-row"><span>${escapeHtml(localText("耗时", "Duration"))}</span><strong>${escapeHtml(formatDuration(result.durationMs))}</strong></div>
       <div class="summary-row"><span>${escapeHtml(t("metrics.tokens"))}</span><strong>${result.tokenUsage}</strong></div>
-      <div class="summary-row"><span>${escapeHtml(state.language === "zh-CN" ? "成本" : "Cost")}</span><strong>${escapeHtml(formatCost(result))}</strong></div>
-      <div class="summary-row"><span>${escapeHtml(state.language === "zh-CN" ? "改动文件" : "Changed Files")}</span><strong>${result.changedFiles.length}</strong></div>
-      <div class="summary-row"><span>${escapeHtml(state.language === "zh-CN" ? "Judge 类型" : "Judge Types")}</span><strong>${escapeHtml(judgeKinds)}</strong></div>
+      <div class="summary-row"><span>${escapeHtml(localText("成本", "Cost"))}</span><strong>${escapeHtml(formatCost(result))}</strong></div>
+      <div class="summary-row"><span>${escapeHtml(localText("改动文件", "Changed Files"))}</span><strong>${result.changedFiles.length}</strong></div>
+      <div class="summary-row"><span>${escapeHtml(localText("Judge 类型", "Judge Types"))}</span><strong>${escapeHtml(judgeKinds)}</strong></div>
       <div class="summary-row"><span>Trace</span><code>${escapeHtml(result.tracePath)}</code></div>
       <div class="summary-row"><span>Workspace</span><code>${escapeHtml(result.workspacePath)}</code></div>
     </div>
@@ -1775,15 +2273,31 @@ function renderSelectedAgentV2() {
         </div>
       </section>
     `,
-    renderStepCards(state.language === "zh-CN" ? "准备步骤" : "Setup", result.setupResults),
-    renderJudgeCards(result),
-    renderStepCards(state.language === "zh-CN" ? "收尾步骤" : "Teardown", result.teardownResults),
     `
       <section class="detail-card">
-        <h3>${escapeHtml(state.language === "zh-CN" ? "改动文件" : "Changed Files")}</h3>
+        <h3>Provider Identity</h3>
+        <div class="summary-grid">
+          <div class="summary-row"><span>Requested Profile</span><strong>${escapeHtml(result.requestedConfig?.providerProfileId ?? "official")}</strong></div>
+          <div class="summary-row"><span>Effective Provider</span><strong>${escapeHtml(runtime.provider)}</strong></div>
+          <div class="summary-row"><span>Provider Kind</span><strong>${escapeHtml(runtime.providerKind)}</strong></div>
+          <div class="summary-row"><span>Provider Source</span><strong>${escapeHtml(runtime.providerSource)}</strong></div>
+        </div>
+        ${
+          runtime.providerKind !== "official" && runtime.provider !== "official"
+            ? `<p class="warning-text">${escapeHtml("This result was produced through a provider-switched Claude Code configuration.")}</p>`
+            : ""
+        }
+      </section>
+    `,
+    renderStepCards(localText("准备步骤", "Setup"), result.setupResults),
+    renderJudgeCards(result),
+    renderStepCards(localText("收尾步骤", "Teardown"), result.teardownResults),
+    `
+      <section class="detail-card">
+        <h3>${escapeHtml(localText("改动文件", "Changed Files"))}</h3>
         ${
           result.changedFiles.length === 0
-            ? `<p class="empty-state">${escapeHtml(state.language === "zh-CN" ? "没有检测到 diff。" : "No diff detected.")}</p>`
+            ? `<p class="empty-state">${escapeHtml(localText("没有检测到 diff。", "No diff detected."))}</p>`
             : `<ul>${result.changedFiles.map((file) => `<li>${escapeHtml(file)}</li>`).join("")}</ul>`
         }
       </section>
@@ -1973,6 +2487,54 @@ elements.launcherAgents.addEventListener("click", (event) => {
   if (target.id === "launcher-add-codex-variant") {
     state.launcherCodexVariants = [...state.launcherCodexVariants, defaultCodexVariant()];
     renderLauncher();
+    return;
+  }
+
+  if (target.id === "launcher-add-provider") {
+    openProviderEditor();
+    renderLauncher();
+    return;
+  }
+
+  if (target.getAttribute("data-role") === "provider-edit") {
+    openProviderEditor(target.getAttribute("data-profile-id"));
+    renderLauncher();
+    return;
+  }
+
+  if (target.getAttribute("data-role") === "provider-cancel") {
+    state.launcherProviderEditor = null;
+    renderLauncher();
+    return;
+  }
+
+  if (target.getAttribute("data-role") === "provider-save") {
+    void (async () => {
+      try {
+        await saveProviderProfileFromEditor();
+        state.notice = localText("Claude Provider 已保存。", "Claude provider saved.");
+      } catch (error) {
+        state.notice = error instanceof Error ? error.message : String(error);
+      }
+      render();
+    })();
+    return;
+  }
+
+  if (target.getAttribute("data-role") === "provider-delete") {
+    const profileId = target.getAttribute("data-profile-id");
+    if (!profileId) {
+      return;
+    }
+    void (async () => {
+      try {
+        await deleteProviderProfileById(profileId);
+        state.notice = localText("Claude Provider 已删除。", "Claude provider deleted.");
+      } catch (error) {
+        state.notice = error instanceof Error ? error.message : String(error);
+      }
+      render();
+    })();
     return;
   }
 
@@ -2179,3 +2741,4 @@ try {
 
 detectService();
 render();
+

@@ -56,13 +56,16 @@ async function getAvailablePort() {
   });
 }
 
-async function startUiServer(cwd, extraArgs = []) {
+async function startUiServer(cwd, extraArgs = [], envOverrides = {}) {
   const cliPath = path.resolve("packages/cli/dist/index.js");
   const port = await getAvailablePort();
   const child = spawn(process.execPath, [cliPath, "ui", "--host", "127.0.0.1", "--port", String(port), "--no-open", ...extraArgs], {
     cwd,
     stdio: ["ignore", "pipe", "pipe"],
-    env: process.env
+    env: {
+      ...process.env,
+      ...envOverrides
+    }
   });
 
   let stdout = "";
@@ -454,6 +457,84 @@ test("repoarena ui exposes metadata and adapter APIs", async () => {
     assert.equal(runStatus.phase, "idle");
   } finally {
     await server.stop();
+  }
+});
+
+test("repoarena ui exposes Claude provider profile APIs", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-ui-profiles-"));
+  const registryPath = path.join(tempDir, "claude-provider-profiles.json");
+  const server = await startUiServer(
+    path.resolve("."),
+    [],
+    {
+      REPOARENA_CLAUDE_PROFILE_ROOT: tempDir,
+      REPOARENA_CLAUDE_PROFILES_FILE: registryPath,
+      REPOARENA_CLAUDE_SECRET_PREFIX: `RepoArena/test/${Date.now()}/`
+    }
+  );
+
+  try {
+    const profilesResponse = await fetch(`http://127.0.0.1:${server.port}/api/provider-profiles`);
+    assert.equal(profilesResponse.status, 200);
+    const initialProfiles = await profilesResponse.json();
+    assert.equal(Array.isArray(initialProfiles), true);
+    assert.equal(initialProfiles.some((profile) => profile.id === "claude-official"), true);
+
+    const createResponse = await fetch(`http://127.0.0.1:${server.port}/api/provider-profiles`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        name: "NewAPI",
+        kind: "anthropic-compatible",
+        baseUrl: "https://api.example.com",
+        apiFormat: "anthropic-messages",
+        primaryModel: "gpt-5.4"
+      })
+    });
+    assert.equal(createResponse.status, 200);
+    const createdPayload = await createResponse.json();
+    assert.equal(createdPayload.profile.name, "NewAPI");
+    assert.equal(createdPayload.profile.kind, "anthropic-compatible");
+
+    const uiInfoResponse = await fetch(`http://127.0.0.1:${server.port}/api/ui-info`);
+    assert.equal(uiInfoResponse.status, 200);
+    const uiInfo = await uiInfoResponse.json();
+    assert.equal(Array.isArray(uiInfo.claudeProviderProfiles), true);
+    assert.equal(uiInfo.claudeProviderProfiles.some((profile) => profile.id === createdPayload.profile.id), true);
+
+    const updateResponse = await fetch(
+      `http://127.0.0.1:${server.port}/api/provider-profiles/${encodeURIComponent(createdPayload.profile.id)}`,
+      {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          name: "NewAPI Updated",
+          kind: "openai-proxy",
+          baseUrl: "https://proxy.example.com/v1",
+          apiFormat: "openai-chat-via-proxy",
+          primaryModel: "gpt-5.4"
+        })
+      }
+    );
+    assert.equal(updateResponse.status, 200);
+    const updatedPayload = await updateResponse.json();
+    assert.equal(updatedPayload.profile.name, "NewAPI Updated");
+    assert.equal(updatedPayload.profile.kind, "openai-proxy");
+
+    const deleteResponse = await fetch(
+      `http://127.0.0.1:${server.port}/api/provider-profiles/${encodeURIComponent(createdPayload.profile.id)}`,
+      { method: "DELETE" }
+    );
+    assert.equal(deleteResponse.status, 200);
+    const deletedPayload = await deleteResponse.json();
+    assert.equal(deletedPayload.profiles.some((profile) => profile.id === createdPayload.profile.id), false);
+  } finally {
+    await server.stop();
+    await rm(tempDir, { recursive: true, force: true });
   }
 });
 

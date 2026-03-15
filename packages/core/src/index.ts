@@ -116,6 +116,7 @@ export interface TaskPack {
 export interface AgentRequestedConfig {
   model?: string;
   reasoningEffort?: string;
+  providerProfileId?: string;
 }
 
 export interface AgentSelection {
@@ -132,16 +133,50 @@ export type AgentRuntimeSource =
   | "env"
   | "codex-config"
   | "cli-default"
-  | "event-stream";
+  | "event-stream"
+  | "profile-config"
+  | "official-login"
+  | "unknown";
 
 export type AgentRuntimeVerification = "confirmed" | "inferred" | "unknown";
 
 export interface AgentResolvedRuntime {
   effectiveModel?: string;
   effectiveReasoningEffort?: string;
+  providerProfileId?: string;
+  providerProfileName?: string;
+  providerKind?: ClaudeProviderProfileKind;
+  providerSource?: "official-login" | "profile-config" | "env" | "unknown";
   source: AgentRuntimeSource;
   verification: AgentRuntimeVerification;
   notes?: string[];
+}
+
+export type ClaudeProviderProfileKind = "official" | "anthropic-compatible" | "openai-proxy";
+export type ClaudeProviderApiFormat = "anthropic-messages" | "openai-chat-via-proxy";
+export type ClaudeProviderRiskFlag =
+  | "third-party-provider"
+  | "compatibility-mode"
+  | "user-managed-secret";
+
+export interface ClaudeProviderProfile {
+  id: string;
+  name: string;
+  kind: ClaudeProviderProfileKind;
+  homepage?: string;
+  baseUrl?: string;
+  apiFormat: ClaudeProviderApiFormat;
+  primaryModel?: string;
+  thinkingModel?: string;
+  defaultHaikuModel?: string;
+  defaultSonnetModel?: string;
+  defaultOpusModel?: string;
+  extraEnv: Record<string, string>;
+  writeCommonConfig: boolean;
+  notes?: string;
+  riskFlags: ClaudeProviderRiskFlag[];
+  isBuiltIn?: boolean;
+  secretStored?: boolean;
 }
 
 export interface TraceEvent {
@@ -188,6 +223,7 @@ export interface AdapterCapability {
   configurableRuntime?: {
     model: boolean;
     reasoningEffort: boolean;
+    providerProfile?: boolean;
   };
 }
 
@@ -453,6 +489,9 @@ export function createAgentSelection(input: {
 }): AgentSelection {
   const config = input.config ?? {};
   const variantParts = [input.baseAgentId];
+  if (config.providerProfileId) {
+    variantParts.push(slugifyVariantPart(config.providerProfileId) || "profile");
+  }
   if (config.model) {
     variantParts.push(slugifyVariantPart(config.model) || "model");
   }

@@ -1,9 +1,19 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { __testUtils, getAdapter, listAvailableAdapters } from "../packages/adapters/dist/index.js";
+import {
+  buildClaudeProviderEnvironment,
+  deleteClaudeProviderProfile,
+  getClaudeProviderProfileSecret,
+  listClaudeProviderProfiles,
+  saveClaudeProviderProfile,
+  setClaudeProviderProfileSecret,
+  supportsWindowsCredentialManager,
+  writeClaudeWorkspaceSettings
+} from "../packages/adapters/dist/claude-provider-profiles.js";
 
 test("listAvailableAdapters exposes capability metadata", () => {
   const adapters = listAvailableAdapters();
@@ -220,4 +230,174 @@ test("parseClaudeEvents normalizes token, cost, and error data", () => {
   assert.equal(parsed.estimatedCostUsd, 0.11);
   assert.equal(parsed.costKnown, false);
   assert.equal(parsed.error, "permission_error");
+});
+
+test("Claude provider profiles persist metadata without leaking secrets", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-claude-profiles-"));
+  const registryPath = path.join(tempDir, "claude-provider-profiles.json");
+  const originalRoot = process.env.REPOARENA_CLAUDE_PROFILE_ROOT;
+  const originalFile = process.env.REPOARENA_CLAUDE_PROFILES_FILE;
+  const originalPrefix = process.env.REPOARENA_CLAUDE_SECRET_PREFIX;
+  process.env.REPOARENA_CLAUDE_PROFILE_ROOT = tempDir;
+  process.env.REPOARENA_CLAUDE_PROFILES_FILE = registryPath;
+  process.env.REPOARENA_CLAUDE_SECRET_PREFIX = `RepoArena/test/${Date.now()}/`;
+
+  let profileId;
+  try {
+    const profile = await saveClaudeProviderProfile({
+      name: "NewAPI",
+      kind: "anthropic-compatible",
+      homepage: "https://example.com",
+      baseUrl: "https://api.example.com",
+      apiFormat: "anthropic-messages",
+      primaryModel: "gpt-5.4",
+      extraEnv: {
+        FOO: "bar"
+      },
+      notes: "test profile"
+    });
+    profileId = profile.id;
+
+    if (supportsWindowsCredentialManager()) {
+      await setClaudeProviderProfileSecret(profileId, "sk-test-provider-secret");
+      assert.equal(await getClaudeProviderProfileSecret(profileId), "sk-test-provider-secret");
+    }
+
+    const listed = await listClaudeProviderProfiles();
+    const saved = listed.find((entry) => entry.id === profileId);
+    assert.ok(saved);
+    assert.equal(saved.name, "NewAPI");
+    assert.equal(saved.kind, "anthropic-compatible");
+    assert.equal(saved.primaryModel, "gpt-5.4");
+    assert.deepEqual(saved.riskFlags, ["third-party-provider", "compatibility-mode", "user-managed-secret"]);
+    if (supportsWindowsCredentialManager()) {
+      assert.equal(saved.secretStored, true);
+    }
+
+    const registryContents = await readFile(registryPath, "utf8");
+    assert.doesNotMatch(registryContents, /sk-test-provider-secret/);
+    assert.match(registryContents, /"name": "NewAPI"/);
+
+    await deleteClaudeProviderProfile(profileId);
+    const afterDelete = await listClaudeProviderProfiles();
+    assert.equal(afterDelete.some((entry) => entry.id === profileId), false);
+  } finally {
+    if (profileId && supportsWindowsCredentialManager()) {
+      try {
+        await setClaudeProviderProfileSecret(profileId, "");
+      } catch {}
+    }
+    if (originalRoot === undefined) {
+      delete process.env.REPOARENA_CLAUDE_PROFILE_ROOT;
+    } else {
+      process.env.REPOARENA_CLAUDE_PROFILE_ROOT = originalRoot;
+    }
+    if (originalFile === undefined) {
+      delete process.env.REPOARENA_CLAUDE_PROFILES_FILE;
+    } else {
+      process.env.REPOARENA_CLAUDE_PROFILES_FILE = originalFile;
+    }
+    if (originalPrefix === undefined) {
+      delete process.env.REPOARENA_CLAUDE_SECRET_PREFIX;
+    } else {
+      process.env.REPOARENA_CLAUDE_SECRET_PREFIX = originalPrefix;
+    }
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("resolveClaudeRuntime and workspace settings respect provider profiles", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-claude-runtime-"));
+  const registryPath = path.join(tempDir, "claude-provider-profiles.json");
+  const workspacePath = path.join(tempDir, "workspace");
+  const originalRoot = process.env.REPOARENA_CLAUDE_PROFILE_ROOT;
+  const originalFile = process.env.REPOARENA_CLAUDE_PROFILES_FILE;
+  const originalPrefix = process.env.REPOARENA_CLAUDE_SECRET_PREFIX;
+  process.env.REPOARENA_CLAUDE_PROFILE_ROOT = tempDir;
+  process.env.REPOARENA_CLAUDE_PROFILES_FILE = registryPath;
+  process.env.REPOARENA_CLAUDE_SECRET_PREFIX = `RepoArena/test/${Date.now()}/`;
+
+  let profileId;
+  try {
+    await mkdir(workspacePath, { recursive: true });
+    const official = await __testUtils.resolveClaudeRuntime({
+      requestedConfig: {}
+    });
+    assert.equal(official.profile.id, "claude-official");
+    assert.equal(official.runtime.providerKind, "official");
+    assert.equal(official.runtime.providerSource, "official-login");
+
+    const profile = await saveClaudeProviderProfile({
+      name: "Proxy OpenAI",
+      kind: "openai-proxy",
+      homepage: "https://proxy.example.com",
+      baseUrl: "https://proxy.example.com/v1",
+      apiFormat: "openai-chat-via-proxy",
+      primaryModel: "gpt-5.4",
+      defaultSonnetModel: "gpt-5.4-mini",
+      extraEnv: {
+        OPENAI_COMPAT_MODE: "1"
+      }
+    });
+    profileId = profile.id;
+
+    if (supportsWindowsCredentialManager()) {
+      await setClaudeProviderProfileSecret(profileId, "sk-test-proxy-secret");
+    }
+
+    const resolved = await __testUtils.resolveClaudeRuntime({
+      requestedConfig: {
+        providerProfileId: profileId,
+        model: "gpt-5.4"
+      }
+    });
+    assert.equal(resolved.profile.id, profileId);
+    assert.equal(resolved.runtime.providerProfileId, profileId);
+    assert.equal(resolved.runtime.providerKind, "openai-proxy");
+    assert.equal(resolved.runtime.providerSource, "profile-config");
+    assert.equal(resolved.runtime.effectiveModel, "gpt-5.4");
+
+    const providerEnvironment = await buildClaudeProviderEnvironment(profileId, "gpt-5.4");
+    assert.equal(providerEnvironment.profile.id, profileId);
+    assert.equal(providerEnvironment.effectiveModel, "gpt-5.4");
+    assert.equal(providerEnvironment.environment.ANTHROPIC_BASE_URL, "https://proxy.example.com/v1");
+    assert.equal(providerEnvironment.environment.ANTHROPIC_MODEL, "gpt-5.4");
+    assert.equal(providerEnvironment.environment.OPENAI_COMPAT_MODE, "1");
+    if (supportsWindowsCredentialManager()) {
+      assert.equal(providerEnvironment.environment.ANTHROPIC_AUTH_TOKEN, "sk-test-proxy-secret");
+    }
+
+    const workspaceSettings = await writeClaudeWorkspaceSettings(workspacePath, profileId, "gpt-5.4");
+    const settingsContent = JSON.parse(
+      await readFile(path.join(workspacePath, ".claude", "settings.local.json"), "utf8")
+    );
+    assert.equal(workspaceSettings.profile.id, profileId);
+    assert.equal(settingsContent.env.ANTHROPIC_BASE_URL, "https://proxy.example.com/v1");
+    assert.equal(settingsContent.env.ANTHROPIC_MODEL, "gpt-5.4");
+    assert.equal(settingsContent.env.OPENAI_COMPAT_MODE, "1");
+    assert.equal(settingsContent.permissions.allow.length, 0);
+    assert.equal(settingsContent.permissions.deny.length, 0);
+  } finally {
+    if (profileId && supportsWindowsCredentialManager()) {
+      try {
+        await setClaudeProviderProfileSecret(profileId, "");
+      } catch {}
+    }
+    if (originalRoot === undefined) {
+      delete process.env.REPOARENA_CLAUDE_PROFILE_ROOT;
+    } else {
+      process.env.REPOARENA_CLAUDE_PROFILE_ROOT = originalRoot;
+    }
+    if (originalFile === undefined) {
+      delete process.env.REPOARENA_CLAUDE_PROFILES_FILE;
+    } else {
+      process.env.REPOARENA_CLAUDE_PROFILES_FILE = originalFile;
+    }
+    if (originalPrefix === undefined) {
+      delete process.env.REPOARENA_CLAUDE_SECRET_PREFIX;
+    } else {
+      process.env.REPOARENA_CLAUDE_SECRET_PREFIX = originalPrefix;
+    }
+    await rm(tempDir, { recursive: true, force: true });
+  }
 });
