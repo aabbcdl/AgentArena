@@ -538,6 +538,32 @@ test("repoarena ui exposes Claude provider profile APIs", async () => {
   }
 });
 
+test("repoarena ui rejects oversized request bodies with 413", async () => {
+  const server = await startUiServer(path.resolve("."));
+
+  try {
+    const oversizedBody = JSON.stringify({
+      name: "x".repeat(1_100_000),
+      kind: "anthropic-compatible",
+      apiFormat: "anthropic-messages"
+    });
+
+    const response = await fetch(`http://127.0.0.1:${server.port}/api/provider-profiles`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: oversizedBody
+    });
+
+    assert.equal(response.status, 413);
+    const payload = await response.json();
+    assert.equal(payload.error, "Request body too large.");
+  } finally {
+    await server.stop();
+  }
+});
+
 test("repoarena ui exposes run progress while a benchmark is active", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-ui-"));
   const repoPath = path.join(tempDir, "repo");
@@ -598,13 +624,19 @@ test("repoarena ui exposes run progress while a benchmark is active", async () =
     assert.match(status.logs[0].message, /Starting benchmark|Running preflight|Created run/);
 
     const response = await runPromise;
-    assert.equal(response.status, 200);
-    await response.json();
+    assert.equal(response.status, 202);
 
-    const finalStatusResponse = await fetch(`http://127.0.0.1:${server.port}/api/run-status`);
-    const finalStatus = await finalStatusResponse.json();
-    assert.equal(finalStatus.state, "idle");
-    assert.equal(finalStatus.phase, "idle");
+    let finalStatus;
+    for (let i = 0; i < 30; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      const pollResponse = await fetch(`http://127.0.0.1:${server.port}/api/run-status`);
+      finalStatus = await pollResponse.json();
+      if (finalStatus.state === "done" || finalStatus.state === "error") {
+        break;
+      }
+    }
+    assert.equal(finalStatus.state, "done");
+    assert.ok(finalStatus.result);
   } finally {
     await server.stop();
     await rm(tempDir, { recursive: true, force: true });
@@ -657,8 +689,19 @@ test("repoarena ui can execute a benchmark via API", async () => {
       })
     });
 
-    assert.equal(response.status, 200);
-    const payload = await response.json();
+    assert.equal(response.status, 202);
+
+    let finalStatus;
+    for (let i = 0; i < 30; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      const pollResponse = await fetch(`http://127.0.0.1:${server.port}/api/run-status`);
+      finalStatus = await pollResponse.json();
+      if (finalStatus.state === "done" || finalStatus.state === "error") {
+        break;
+      }
+    }
+    assert.equal(finalStatus.state, "done");
+    const payload = finalStatus.result;
     assert.equal(payload.run.task.title, "UI Run");
     assert.equal(payload.run.results[0].agentId, "demo-fast");
     assert.equal(payload.run.results[0].displayLabel, "Demo Fast");

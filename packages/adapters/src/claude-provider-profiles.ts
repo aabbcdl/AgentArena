@@ -124,7 +124,7 @@ async function writeRegistry(registry: ProfileRegistryFile): Promise<void> {
 }
 
 function powershellExecutable(): string {
-  return process.env.ComSpec ? "powershell.exe" : "powershell";
+  return process.platform === "win32" ? "powershell.exe" : "powershell";
 }
 
 function encodeForPowerShell(value: string): string {

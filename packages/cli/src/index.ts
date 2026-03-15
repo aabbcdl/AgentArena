@@ -101,7 +101,7 @@ interface UiRunLogEntry {
 }
 
 interface UiRunStatus {
-  state: "idle" | "running";
+  state: "idle" | "running" | "done" | "error";
   phase: UiRunPhase;
   startedAt?: string;
   repoPath?: string;
@@ -112,6 +112,8 @@ interface UiRunStatus {
   currentDisplayLabel?: string;
   logs: UiRunLogEntry[];
   updatedAt: string;
+  result?: unknown;
+  error?: string;
 }
 
 const CLI_PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -119,6 +121,7 @@ const WORKSPACE_ROOT = path.resolve(CLI_PACKAGE_ROOT, "..", "..");
 const WEB_REPORT_DIST_ROOT = path.join(WORKSPACE_ROOT, "apps", "web-report", "dist");
 const OFFICIAL_TASKPACK_ROOT = path.join(WORKSPACE_ROOT, "examples", "taskpacks", "official");
 const DEFAULT_UI_PORT = 4317;
+const MAX_REQUEST_BODY_BYTES = 1_048_576;
 
 const TASKPACK_TEMPLATES: Record<string, string> = {
   "repo-health": `schemaVersion: repoarena.taskpack/v1
@@ -739,10 +742,22 @@ function textResponse(
   };
 }
 
+function createHttpError(message: string, statusCode: number): Error & { statusCode: number } {
+  const error = new Error(message) as Error & { statusCode: number };
+  error.statusCode = statusCode;
+  return error;
+}
+
 async function readRequestBody(request: http.IncomingMessage): Promise<string> {
   const chunks: Buffer[] = [];
+  let totalBytes = 0;
   for await (const chunk of request) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    totalBytes += buffer.length;
+    if (totalBytes > MAX_REQUEST_BODY_BYTES) {
+      throw createHttpError("Request body too large.", 413);
+    }
+    chunks.push(buffer);
   }
 
   return Buffer.concat(chunks).toString("utf8");
@@ -927,7 +942,15 @@ async function runUi(parsed: ParsedArgs): Promise<void> {
 
       if (request.method === "POST" && requestUrl.pathname === "/api/provider-profiles") {
         const rawBody = await readRequestBody(request);
-        const payload = JSON.parse(rawBody) as UiProviderProfilePayload;
+        let payload: UiProviderProfilePayload;
+        try {
+          payload = JSON.parse(rawBody) as UiProviderProfilePayload;
+        } catch {
+          const invalid = jsonResponse({ error: "Invalid JSON in request body." }, 400);
+          response.writeHead(invalid.statusCode, invalid.headers);
+          response.end(invalid.body);
+          return;
+        }
         const profile = await saveClaudeProviderProfile(payload);
         if (payload.secret?.trim()) {
           await setClaudeProviderProfileSecret(profile.id, payload.secret);
@@ -949,7 +972,15 @@ async function runUi(parsed: ParsedArgs): Promise<void> {
 
         if (request.method === "PUT" && !action) {
           const rawBody = await readRequestBody(request);
-          const payload = JSON.parse(rawBody) as UiProviderProfilePayload;
+          let payload: UiProviderProfilePayload;
+          try {
+            payload = JSON.parse(rawBody) as UiProviderProfilePayload;
+          } catch {
+            const invalid = jsonResponse({ error: "Invalid JSON in request body." }, 400);
+            response.writeHead(invalid.statusCode, invalid.headers);
+            response.end(invalid.body);
+            return;
+          }
           const profile = await saveClaudeProviderProfile({
             ...payload,
             id: profileId
@@ -975,7 +1006,15 @@ async function runUi(parsed: ParsedArgs): Promise<void> {
 
         if (request.method === "POST" && action === "secret") {
           const rawBody = await readRequestBody(request);
-          const payload = JSON.parse(rawBody) as { secret?: string };
+          let payload: { secret?: string };
+          try {
+            payload = JSON.parse(rawBody) as { secret?: string };
+          } catch {
+            const invalid = jsonResponse({ error: "Invalid JSON in request body." }, 400);
+            response.writeHead(invalid.statusCode, invalid.headers);
+            response.end(invalid.body);
+            return;
+          }
           await setClaudeProviderProfileSecret(profileId, payload.secret ?? "");
           const profiles = await listClaudeProviderProfiles();
           const responsePayload = jsonResponse({
@@ -1012,9 +1051,17 @@ async function runUi(parsed: ParsedArgs): Promise<void> {
         }
 
         const rawBody = await readRequestBody(request);
-        const payload = JSON.parse(rawBody) as UiRunPayload;
-        const selections = normalizeUiSelections(payload);
-        if (!payload.repoPath || !payload.taskPath || selections.length === 0) {
+        let runPayload: UiRunPayload;
+        try {
+          runPayload = JSON.parse(rawBody) as UiRunPayload;
+        } catch {
+          const invalid = jsonResponse({ error: "Invalid JSON in request body." }, 400);
+          response.writeHead(invalid.statusCode, invalid.headers);
+          response.end(invalid.body);
+          return;
+        }
+        const selections = normalizeUiSelections(runPayload);
+        if (!runPayload.repoPath || !runPayload.taskPath || selections.length === 0) {
           const invalid = jsonResponse(
             { error: "repoPath, taskPath, and at least one agent selection are required." },
             400
@@ -1024,94 +1071,101 @@ async function runUi(parsed: ParsedArgs): Promise<void> {
           return;
         }
 
+        setRunStatus({
+          state: "running",
+          phase: "starting",
+          startedAt: new Date().toISOString(),
+          repoPath: runPayload.repoPath,
+          taskPath: runPayload.taskPath,
+          outputPath: runPayload.outputPath
+        });
+        appendRunLog({
+          phase: "starting",
+          message: `Starting benchmark for ${selections.length} selection(s).`
+        });
+
         activeRun = (async () => {
-          setRunStatus({
-            state: "running",
-            phase: "starting",
-            startedAt: new Date().toISOString(),
-            repoPath: payload.repoPath,
-            taskPath: payload.taskPath,
-            outputPath: payload.outputPath
-          });
-          appendRunLog({
-            phase: "starting",
-            message: `Starting benchmark for ${selections.length} selection(s).`
-          });
-          const benchmark = await runBenchmark({
-            repoPath: payload.repoPath,
-            taskPath: payload.taskPath,
-            agentIds: selections.map((selection) => selection.baseAgentId),
-            agents: selections,
-            outputPath: payload.outputPath,
-            probeAuth: payload.probeAuth,
-            updateSnapshots: payload.updateSnapshots,
-            maxConcurrency: payload.maxConcurrency,
-            onProgress: (event) => {
-              const phase =
-                event.phase === "starting" || event.phase === "preflight"
-                  ? event.phase
-                  : event.phase === "report"
-                    ? "report"
-                    : "benchmark";
-              setRunStatus({
-                phase,
-                currentAgentId:
-                  event.phase === "agent-start" || event.phase === "agent-finish"
-                    ? event.agentId
-                    : activeRunStatus.currentAgentId,
-                currentVariantId:
-                  event.phase === "agent-start" || event.phase === "agent-finish"
-                    ? event.variantId
-                    : activeRunStatus.currentVariantId,
-                currentDisplayLabel:
-                  event.phase === "agent-start" || event.phase === "agent-finish"
-                    ? event.displayLabel
-                    : activeRunStatus.currentDisplayLabel
-              });
-              appendRunLog({
-                phase,
-                message: event.message,
-                agentId: event.agentId,
-                variantId: event.variantId,
-                displayLabel: event.displayLabel
-              });
-            }
-          });
-          setRunStatus({
-            phase: "report",
-            currentAgentId: undefined,
-            currentVariantId: undefined,
-            currentDisplayLabel: undefined
-          });
-          setRunStatus({ phase: "report" });
-          appendRunLog({
-            phase: "report",
-            message: "Writing report artifacts."
-          });
-          const report = await writeReport(benchmark);
-          appendRunLog({
-            phase: "report",
-            message: "Report artifacts are ready."
-          });
-          const run = JSON.parse(await fs.readFile(report.jsonPath, "utf8"));
-          const markdown = await fs.readFile(report.markdownPath, "utf8");
-          return {
-            run,
-            markdown,
-            report
-          };
+          try {
+            const benchmark = await runBenchmark({
+              repoPath: runPayload.repoPath,
+              taskPath: runPayload.taskPath,
+              agentIds: selections.map((selection) => selection.baseAgentId),
+              agents: selections,
+              outputPath: runPayload.outputPath,
+              probeAuth: runPayload.probeAuth,
+              updateSnapshots: runPayload.updateSnapshots,
+              maxConcurrency: runPayload.maxConcurrency,
+              onProgress: (event) => {
+                const phase =
+                  event.phase === "starting" || event.phase === "preflight"
+                    ? event.phase
+                    : event.phase === "report"
+                      ? "report"
+                      : "benchmark";
+                setRunStatus({
+                  phase,
+                  currentAgentId:
+                    event.phase === "agent-start" || event.phase === "agent-finish"
+                      ? event.agentId
+                      : activeRunStatus.currentAgentId,
+                  currentVariantId:
+                    event.phase === "agent-start" || event.phase === "agent-finish"
+                      ? event.variantId
+                      : activeRunStatus.currentVariantId,
+                  currentDisplayLabel:
+                    event.phase === "agent-start" || event.phase === "agent-finish"
+                      ? event.displayLabel
+                      : activeRunStatus.currentDisplayLabel
+                });
+                appendRunLog({
+                  phase,
+                  message: event.message,
+                  agentId: event.agentId,
+                  variantId: event.variantId,
+                  displayLabel: event.displayLabel
+                });
+              }
+            });
+            setRunStatus({
+              phase: "report",
+              currentAgentId: undefined,
+              currentVariantId: undefined,
+              currentDisplayLabel: undefined
+            });
+            appendRunLog({
+              phase: "report",
+              message: "Writing report artifacts."
+            });
+            const report = await writeReport(benchmark);
+            appendRunLog({
+              phase: "report",
+              message: "Report artifacts are ready."
+            });
+            const run = JSON.parse(await fs.readFile(report.jsonPath, "utf8"));
+            const markdown = await fs.readFile(report.markdownPath, "utf8");
+            setRunStatus({
+              state: "done",
+              phase: "idle",
+              result: { run, markdown, report }
+            });
+          } catch (runError) {
+            const errorMessage = runError instanceof Error ? runError.message : String(runError);
+            appendRunLog({
+              phase: activeRunStatus.phase,
+              message: `Run failed: ${errorMessage}`
+            });
+            setRunStatus({
+              state: "error",
+              error: errorMessage
+            });
+          } finally {
+            activeRun = null;
+          }
         })();
 
-        try {
-          const runResult = await activeRun;
-          const successPayload = jsonResponse(runResult);
-          response.writeHead(successPayload.statusCode, successPayload.headers);
-          response.end(successPayload.body);
-        } finally {
-          activeRun = null;
-          resetRunStatus();
-        }
-
+        const accepted = jsonResponse({ accepted: true }, 202);
+        response.writeHead(accepted.statusCode, accepted.headers);
+        response.end(accepted.body);
         return;
       }
 
@@ -1145,9 +1199,13 @@ async function runUi(parsed: ParsedArgs): Promise<void> {
       response.writeHead(methodNotAllowed.statusCode, methodNotAllowed.headers);
       response.end(methodNotAllowed.body);
     } catch (error) {
+      const statusCode =
+        typeof (error as { statusCode?: unknown })?.statusCode === "number"
+          ? ((error as { statusCode: number }).statusCode ?? 500)
+          : 500;
       const payload = jsonResponse(
         { error: error instanceof Error ? error.message : String(error) },
-        500
+        statusCode
       );
       response.writeHead(payload.statusCode, payload.headers);
       response.end(payload.body);

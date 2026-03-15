@@ -54,13 +54,13 @@ function formatErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function resolveTimeoutMs(value: string | undefined, fallbackMs: number): number {
+function resolvePositiveInt(value: string | undefined, fallback: number): number {
   const parsed = Number.parseInt(value ?? "", 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallbackMs;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 function agentConcurrency(options: BenchmarkOptions): number {
-  return options.maxConcurrency ?? resolveTimeoutMs(process.env.REPOARENA_MAX_CONCURRENCY, DEFAULT_AGENT_CONCURRENCY);
+  return options.maxConcurrency ?? resolvePositiveInt(process.env.REPOARENA_MAX_CONCURRENCY, DEFAULT_AGENT_CONCURRENCY);
 }
 
 async function mapWithConcurrency<T, R>(

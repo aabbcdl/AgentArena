@@ -21,6 +21,7 @@ import {
 } from "@repoarena/core";
 
 const DEFAULT_JUDGE_TIMEOUT_MS = 5 * 60 * 1_000;
+const sharedAjv = new Ajv({ allErrors: true, strict: false });
 
 export interface JudgeExecutionOptions {
   updateSnapshots?: boolean;
@@ -186,6 +187,11 @@ async function runCommandJudge(
     const timeoutHandle = setTimeout(() => {
       timedOut = true;
       child.kill();
+      setTimeout(() => {
+        if (!child.killed) {
+          child.kill("SIGKILL");
+        }
+      }, 5_000);
     }, timeoutMs);
 
     child.stdout.on("data", (chunk: Buffer) => {
@@ -515,8 +521,7 @@ async function runJsonSchemaJudge(judge: JsonSchemaJudge, workspacePath: string)
         )
       ) as Record<string, unknown>);
     const payload = JSON.parse(await fs.readFile(targetPath, "utf8")) as unknown;
-    const ajv = new Ajv({ allErrors: true, strict: false });
-    const validate = ajv.compile(schema);
+    const validate = sharedAjv.compile(schema);
     const success = Boolean(validate(payload));
     const validationErrors =
       validate.errors?.map((error) => `${error.instancePath || "/"} ${error.message ?? "invalid"}`) ?? [];
@@ -610,6 +615,11 @@ export async function runCommandStep(
     const timeoutHandle = setTimeout(() => {
       timedOut = true;
       child.kill();
+      setTimeout(() => {
+        if (!child.killed) {
+          child.kill("SIGKILL");
+        }
+      }, 5_000);
     }, timeoutMs);
 
     child.stdout.on("data", (chunk: Buffer) => {

@@ -226,7 +226,7 @@ function buildAgentPrompt(context: AdapterExecutionContext): string {
 }
 
 async function readCodexConfigDefaults(): Promise<CodexConfigDefaults> {
-  const configPath = path.join(process.env.USERPROFILE ?? "", ".codex", "config.toml");
+  const configPath = path.join(process.env.USERPROFILE ?? process.env.HOME ?? os.homedir(), ".codex", "config.toml");
   try {
     const contents = await fs.readFile(configPath, "utf8");
     const model = contents.match(/^\s*model\s*=\s*"([^"]+)"/m)?.[1]?.trim();
@@ -393,8 +393,7 @@ async function resolveCursorAgentCliPath(): Promise<string | undefined> {
   const installRoots = process.platform === "win32"
     ? [
         path.join(process.env.LOCALAPPDATA ?? "", "Programs", "Cursor", "resources", "app", "bin", "cursor.cmd"),
-        path.join(process.env.ProgramFiles ?? "", "Cursor", "resources", "app", "bin", "cursor.exe"),
-        path.join("D:", "soft", "cursor", "resources", "app", "bin", "cursor.cmd")
+        path.join(process.env.ProgramFiles ?? "", "Cursor", "resources", "app", "bin", "cursor.exe")
       ]
     : [
         "/Applications/Cursor.app/Contents/Resources/app/bin/cursor",
@@ -480,6 +479,11 @@ async function runProcess(
     const timeoutHandle = setTimeout(() => {
       timedOut = true;
       child.kill();
+      setTimeout(() => {
+        if (!child.killed) {
+          child.kill("SIGKILL");
+        }
+      }, 5_000);
     }, timeoutMs);
 
     child.stdout.on("data", (chunk: Buffer) => {
