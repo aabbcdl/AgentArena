@@ -1207,6 +1207,10 @@ async function detectService() {
     }
   } catch (error) {
     console.error("detectService failed", error);
+    state.notice = localText(
+      "本地服务初始化失败，请检查 /api/ui-info 和浏览器控制台。",
+      "Local service bootstrap failed. Check /api/ui-info and the browser console."
+    );
     stopRunStatusPolling();
     state.serviceInfo = null;
     state.availableAdapters = [];

@@ -24,6 +24,8 @@ The current version focuses on a runnable local benchmark loop:
 - JSON and YAML task pack support
 - task pack metadata and an official task pack library
 - task-level environment allowlists
+- browser-level smoke coverage for the local web report flow
+- an optional Docker runner shell for more reproducible execution environments
 - step-level environment overrides for setup, judges, and teardown
 - built-in command, file, glob, snapshot, and JSON judges
 - diff detection

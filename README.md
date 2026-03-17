@@ -36,6 +36,8 @@ This repository already contains a runnable prototype with:
 - an interactive `apps/web-report` UI that can either run local benchmarks through `repoarena ui` or open existing reports
 - GitHub Actions smoke benchmarks that can comment results on pull requests
 - GitHub Actions CI with a smoke benchmark run
+- a browser-level web-report smoke test in CI
+- an optional Docker runner image for more reproducible local execution
 
 ## Quick Start
 
@@ -125,6 +127,13 @@ Run the full local arena pass:
 
 ```bash
 pnpm demo:arena
+```
+
+Run the browser-level web-report smoke test (after installing Playwright Chromium):
+
+```bash
+npx playwright install --with-deps chromium
+REPOARENA_RUN_BROWSER_SMOKE=1 pnpm test:web-report:e2e
 ```
 
 ## Example Workflow
@@ -269,6 +278,7 @@ docs/
 - [Benchmark fairness](./docs/fairness.md)
 - [Adapter capabilities](./docs/adapter-capabilities.md)
 - [Web report app](./apps/web-report/README.md)
+- [Runner Docker](./docs/runner-docker.md)
 - [Official task packs](./examples/taskpacks/official/README.md)
 - [YAML task pack example](./examples/taskpacks/demo-repo-health.yaml)
 

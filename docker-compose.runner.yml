@@ -1,0 +1,10 @@
+services:
+  repoarena-runner:
+    build:
+      context: .
+      dockerfile: Dockerfile.runner
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+    stdin_open: true
+    tty: true

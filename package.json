@@ -15,10 +15,12 @@
     "doctor": "pnpm build && node packages/cli/dist/index.js doctor --agents codex,claude-code,cursor,demo-fast --probe-auth",
     "lint": "pnpm -r --if-present lint",
     "test": "pnpm build && node --test tests/*.test.mjs",
+    "test:web-report:e2e": "pnpm build && node --test tests/web-report.e2e.mjs",
     "typecheck": "pnpm -r --if-present typecheck"
   },
   "devDependencies": {
     "@types/node": "^24.5.2",
+    "playwright": "^1.53.0",
     "typescript": "^5.9.2"
   }
 }
