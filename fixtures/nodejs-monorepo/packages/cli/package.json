@@ -1,0 +1,19 @@
+{
+  "name": "@test-monorepo/cli",
+  "version": "1.0.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "test-cli": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "node --test src/**/*.test.ts"
+  },
+  "dependencies": {
+    "@test-monorepo/core": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

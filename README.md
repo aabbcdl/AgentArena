@@ -277,10 +277,12 @@ docs/
 - [Project overview](./docs/overview.md)
 - [Benchmark fairness](./docs/fairness.md)
 - [Adapter capabilities](./docs/adapter-capabilities.md)
+- [Task pack modes](./docs/taskpack-modes.md) - Standard vs User repository
 - [Web report app](./apps/web-report/README.md)
 - [Runner Docker](./docs/runner-docker.md)
 - [Official task packs](./examples/taskpacks/official/README.md)
 - [YAML task pack example](./examples/taskpacks/demo-repo-health.yaml)
+- [Standard test repository](./fixtures/nodejs-monorepo/README.md)
 
 ## License
 

@@ -18,6 +18,8 @@ metadata:
   dependencies: []
   judgeRationale: Cross-module checks verify the agent understands package dependencies.
   differentiator: Requires architectural understanding - weak agents break module boundaries or introduce circular deps.
+# Use standard test repository for fair comparison | 使用标准测试仓库进行公平对比
+repoSource: "builtin://nodejs-monorepo"
 prompt: |
   ## Task | 任务
   

@@ -94,12 +94,22 @@ export type TaskJudge =
 export interface TaskPackMetadata {
   source: "official" | "community";
   owner: string;
+  difficulty?: "easy" | "medium" | "hard";
   objective?: string;
   repoTypes: string[];
   tags: string[];
   dependencies: string[];
   judgeRationale?: string;
+  differentiator?: string;
 }
+
+/**
+ * Repository source configuration for task packs.
+ * - "user": Use the user-provided repository (default)
+ * - "builtin://name": Use a built-in standard test repository for fair comparison
+ * - "https://...": Clone an external repository (future support)
+ */
+export type RepoSource = string;
 
 export interface TaskPack {
   schemaVersion: typeof TASK_PACK_SCHEMA_V1;
@@ -108,6 +118,8 @@ export interface TaskPack {
   description?: string;
   prompt: string;
   metadata?: TaskPackMetadata;
+  /** Repository source - "user" for user repo, "builtin://name" for standard test repo */
+  repoSource?: RepoSource;
   envAllowList: string[];
   setupCommands: CommandExecutionSpec[];
   judges: TaskJudge[];

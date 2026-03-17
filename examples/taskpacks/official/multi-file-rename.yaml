@@ -18,6 +18,8 @@ metadata:
   dependencies: []
   judgeRationale: Comprehensive checks verify all occurrences were updated correctly.
   differentiator: This is where agents differ most - weak agents miss imports, comments, or break references.
+# Use standard test repository for fair comparison | 使用标准测试仓库进行公平对比
+repoSource: "builtin://nodejs-monorepo"
 prompt: |
   ## Task | 任务
   

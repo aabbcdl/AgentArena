@@ -1,0 +1,16 @@
+{
+  "name": "@test-monorepo/runner",
+  "version": "1.0.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "node --test src/**/*.test.ts"
+  },
+  "dependencies": {
+    "@test-monorepo/core": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

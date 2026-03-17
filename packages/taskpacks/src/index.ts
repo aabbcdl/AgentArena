@@ -170,14 +170,24 @@ function normalizeMetadata(value: unknown): TaskPackMetadata | undefined {
     );
   }
 
+  const difficulty = assertOptionalString(metadata.difficulty, "metadata.difficulty");
+  if (difficulty !== undefined && !["easy", "medium", "hard"].includes(difficulty)) {
+    throw new Error(
+      `Task pack field "metadata.difficulty" must be "easy", "medium", or "hard". ` +
+      `Received: "${difficulty}".`
+    );
+  }
+
   return {
     source,
     owner: assertString(metadata.owner, "metadata.owner"),
+    difficulty: difficulty as "easy" | "medium" | "hard" | undefined,
     objective: assertOptionalString(metadata.objective, "metadata.objective"),
     repoTypes: assertStringArray(metadata.repoTypes, "metadata.repoTypes"),
     tags: assertStringArray(metadata.tags, "metadata.tags"),
     dependencies: assertStringArray(metadata.dependencies, "metadata.dependencies"),
-    judgeRationale: assertOptionalString(metadata.judgeRationale, "metadata.judgeRationale")
+    judgeRationale: assertOptionalString(metadata.judgeRationale, "metadata.judgeRationale"),
+    differentiator: assertOptionalString(metadata.differentiator, "metadata.differentiator")
   };
 }
 
@@ -421,6 +431,8 @@ export async function loadTaskPack(taskPath: string): Promise<TaskPack> {
   const setupCommandsInput = Array.isArray(parsed.setupCommands) ? parsed.setupCommands : [];
   const teardownCommandsInput = Array.isArray(parsed.teardownCommands) ? parsed.teardownCommands : [];
 
+  const repoSource = assertOptionalString(parsed.repoSource, "repoSource");
+
   return {
     schemaVersion: TASK_PACK_SCHEMA_V1,
     id: taskId,
@@ -428,6 +440,7 @@ export async function loadTaskPack(taskPath: string): Promise<TaskPack> {
     description: typeof parsed.description === "string" ? parsed.description : undefined,
     prompt: assertString(parsed.prompt, "prompt"),
     metadata: normalizeMetadata(parsed.metadata),
+    repoSource,
     envAllowList: assertStringArray(parsed.envAllowList, "envAllowList"),
     setupCommands: setupCommandsInput.map((value, index) => {
       if (!value || typeof value !== "object") {
