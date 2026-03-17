@@ -18,10 +18,20 @@ import {
 import { parse as parseYaml } from "yaml";
 
 function assertString(value: unknown, label: string): string {
-  if (typeof value !== "string" || value.trim().length === 0) {
-    throw new Error(`Task pack field "${label}" must be a non-empty string.`);
+  if (typeof value !== "string") {
+    throw new Error(
+      `Task pack field "${label}" must be a string. ` +
+      `Received type: ${typeof value}. ` +
+      `Example: "${label}": "my-value"`
+    );
   }
-
+  if (value.trim().length === 0) {
+    throw new Error(
+      `Task pack field "${label}" must be a non-empty string. ` +
+      `Received empty or whitespace-only string. ` +
+      `Example: "${label}": "my-value"`
+    );
+  }
   return value;
 }
 
@@ -29,7 +39,6 @@ function assertOptionalString(value: unknown, label: string): string | undefined
   if (value === undefined) {
     return undefined;
   }
-
   return assertString(value, label);
 }
 
@@ -37,11 +46,27 @@ function assertOptionalPositiveInteger(value: unknown, label: string): number | 
   if (value === undefined) {
     return undefined;
   }
-
-  if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
-    throw new Error(`Task pack field "${label}" must be a positive integer when provided.`);
+  if (typeof value !== "number") {
+    throw new Error(
+      `Task pack field "${label}" must be a number. ` +
+      `Received type: ${typeof value}. ` +
+      `Example: "${label}": 1000`
+    );
   }
-
+  if (!Number.isInteger(value)) {
+    throw new Error(
+      `Task pack field "${label}" must be an integer. ` +
+      `Received: ${value}. ` +
+      `Example: "${label}": 1000`
+    );
+  }
+  if (value <= 0) {
+    throw new Error(
+      `Task pack field "${label}" must be a positive integer. ` +
+      `Received: ${value}. ` +
+      `Example: "${label}": 1000`
+    );
+  }
   return value;
 }
 
@@ -49,11 +74,13 @@ function assertOptionalBoolean(value: unknown, label: string): boolean | undefin
   if (value === undefined) {
     return undefined;
   }
-
   if (typeof value !== "boolean") {
-    throw new Error(`Task pack field "${label}" must be a boolean when provided.`);
+    throw new Error(
+      `Task pack field "${label}" must be a boolean. ` +
+      `Received type: ${typeof value}. ` +
+      `Example: "${label}": true`
+    );
   }
-
   return value;
 }
 
@@ -61,11 +88,27 @@ function assertOptionalNonNegativeInteger(value: unknown, label: string): number
   if (value === undefined) {
     return undefined;
   }
-
-  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
-    throw new Error(`Task pack field "${label}" must be a non-negative integer when provided.`);
+  if (typeof value !== "number") {
+    throw new Error(
+      `Task pack field "${label}" must be a number. ` +
+      `Received type: ${typeof value}. ` +
+      `Example: "${label}": 0`
+    );
   }
-
+  if (!Number.isInteger(value)) {
+    throw new Error(
+      `Task pack field "${label}" must be an integer. ` +
+      `Received: ${value}. ` +
+      `Example: "${label}": 0`
+    );
+  }
+  if (value < 0) {
+    throw new Error(
+      `Task pack field "${label}" must be a non-negative integer. ` +
+      `Received: ${value}. ` +
+      `Example: "${label}": 0`
+    );
+  }
   return value;
 }
 
@@ -73,11 +116,13 @@ function assertStringArray(value: unknown, label: string): string[] {
   if (value === undefined) {
     return [];
   }
-
   if (!Array.isArray(value)) {
-    throw new Error(`Task pack field "${label}" must be an array of strings when provided.`);
+    throw new Error(
+      `Task pack field "${label}" must be an array. ` +
+      `Received type: ${typeof value}. ` +
+      `Example: "${label}": ["value1", "value2"]`
+    );
   }
-
   return value.map((entry, index) => assertString(entry, `${label}[${index}]`));
 }
 
@@ -85,24 +130,28 @@ function assertStringRecord(value: unknown, label: string): Record<string, strin
   if (value === undefined) {
     return undefined;
   }
-
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(`Task pack field "${label}" must be an object of string values when provided.`);
+    throw new Error(
+      `Task pack field "${label}" must be an object. ` +
+      `Received type: ${Array.isArray(value) ? "array" : typeof value}. ` +
+      `Example: "${label}": { "KEY": "value" }`
+    );
   }
-
   const entries = Object.entries(value as Record<string, unknown>).map(([key, entryValue]) => [
     key,
     assertString(entryValue, `${label}.${key}`)
   ]);
-
   return Object.fromEntries(entries);
 }
 
 function assertObject(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(`Task pack field "${label}" must be an object.`);
+    throw new Error(
+      `Task pack field "${label}" must be an object. ` +
+      `Received type: ${Array.isArray(value) ? "array" : typeof value}. ` +
+      `Example: "${label}": { "key": "value" }`
+    );
   }
-
   return value as Record<string, unknown>;
 }
 
@@ -114,7 +163,11 @@ function normalizeMetadata(value: unknown): TaskPackMetadata | undefined {
   const metadata = assertObject(value, "metadata");
   const source = assertString(metadata.source, "metadata.source");
   if (source !== "official" && source !== "community") {
-    throw new Error(`Task pack field "metadata.source" must be "official" or "community".`);
+    throw new Error(
+      `Task pack field "metadata.source" must be "official" or "community". ` +
+      `Received: "${source}". ` +
+      `Example: "metadata": { "source": "official", "owner": "RepoArena" }`
+    );
   }
 
   return {
@@ -178,7 +231,10 @@ function normalizeJudge(
 
   if (type === "json-value") {
     if (!Object.prototype.hasOwnProperty.call(value, "expected")) {
-      throw new Error(`Task pack field "judges[${index}].expected" is required.`);
+      throw new Error(
+        `Task pack field "judges[${index}].expected" is required for type "json-value". ` +
+        `Example: { "type": "json-value", "path": "data.json", "pointer": "/status", "expected": "ready" }`
+      );
     }
 
     const judge: JsonValueJudge = {
@@ -217,7 +273,8 @@ function normalizeJudge(
 
     if (judge.equals === undefined && judge.min === undefined && judge.max === undefined) {
       throw new Error(
-        `Task pack field "judges[${index}]" for type "file-count" must define equals, min, or max.`
+        `Task pack field "judges[${index}]" for type "file-count" must define equals, min, or max. ` +
+        `Example: { "type": "file-count", "pattern": "*.ts", "min": 1, "max": 10 }`
       );
     }
 
@@ -240,7 +297,9 @@ function normalizeJudge(
     const schemaPath = assertOptionalString(value.schemaPath, `judges[${index}].schemaPath`);
     if (!schema && !schemaPath) {
       throw new Error(
-        `Task pack field "judges[${index}]" for type "json-schema" must define schema or schemaPath.`
+        `Task pack field "judges[${index}]" for type "json-schema" must define schema or schemaPath. ` +
+        `Example with inline schema: { "type": "json-schema", "path": "data.json", "schema": { "type": "object" } } ` +
+        `Example with schema file: { "type": "json-schema", "path": "data.json", "schemaPath": "schema.json" }`
       );
     }
 
@@ -255,7 +314,21 @@ function normalizeJudge(
     return judge;
   }
 
-  throw new Error(`Task pack judge at index ${index} has unsupported type "${String(type)}".`);
+  const supportedTypes = [
+    "command",
+    "file-exists",
+    "file-contains",
+    "json-value",
+    "glob",
+    "file-count",
+    "snapshot",
+    "json-schema"
+  ];
+  throw new Error(
+    `Task pack judge at index ${index} has unsupported type "${String(type)}". ` +
+    `Supported types: ${supportedTypes.join(", ")}. ` +
+    `Example: { "type": "file-exists", "label": "README exists", "path": "README.md" }`
+  );
 }
 
 function normalizeCommandSpec(
@@ -282,14 +355,50 @@ export async function loadTaskPack(taskPath: string): Promise<TaskPack> {
   const extension = path.extname(resolvedPath).toLowerCase();
 
   if (![".json", ".yaml", ".yml"].includes(extension)) {
-    throw new Error("RepoArena task packs must use .json, .yaml, or .yml extensions.");
+    throw new Error(
+      `RepoArena task packs must use .json, .yaml, or .yml extensions. ` +
+      `Received file: "${path.basename(taskPath)}" with extension "${extension}". ` +
+      `Example: "my-task.yaml" or "my-task.json"`
+    );
   }
 
-  const rawContent = await fs.readFile(resolvedPath, "utf8");
-  const parsed =
-    extension === ".json"
-      ? (JSON.parse(rawContent) as Record<string, unknown>)
-      : (parseYaml(rawContent) as Record<string, unknown>);
+  let rawContent: string;
+  try {
+    rawContent = await fs.readFile(resolvedPath, "utf8");
+  } catch (error) {
+    const errorCode = (error as NodeJS.ErrnoException).code;
+    if (errorCode === "ENOENT") {
+      throw new Error(
+        `Task pack file not found: "${resolvedPath}". ` +
+        `Please check the file path and ensure the file exists.`
+      );
+    }
+    if (errorCode === "EACCES") {
+      throw new Error(
+        `Permission denied reading task pack file: "${resolvedPath}". ` +
+        `Please check file permissions.`
+      );
+    }
+    throw new Error(
+      `Failed to read task pack file: "${resolvedPath}". ` +
+      `Error: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+
+  let parsed: Record<string, unknown>;
+  try {
+    parsed =
+      extension === ".json"
+        ? (JSON.parse(rawContent) as Record<string, unknown>)
+        : (parseYaml(rawContent) as Record<string, unknown>);
+  } catch (error) {
+    throw new Error(
+      `Failed to parse task pack file: "${resolvedPath}". ` +
+      `The file contains invalid ${extension === ".json" ? "JSON" : "YAML"}. ` +
+      `Error: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+
   const taskId = assertString(parsed.id, "id");
   const schemaVersion =
     parsed.schemaVersion === undefined
@@ -297,7 +406,11 @@ export async function loadTaskPack(taskPath: string): Promise<TaskPack> {
       : assertString(parsed.schemaVersion, "schemaVersion");
 
   if (schemaVersion !== TASK_PACK_SCHEMA_V1) {
-    throw new Error(`Unsupported task pack schema version "${schemaVersion}".`);
+    throw new Error(
+      `Unsupported task pack schema version "${schemaVersion}". ` +
+      `Expected: "${TASK_PACK_SCHEMA_V1}". ` +
+      `Please update your task pack to use the current schema version.`
+    );
   }
 
   const judgesInput = Array.isArray(parsed.judges)

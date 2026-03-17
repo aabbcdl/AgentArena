@@ -272,31 +272,119 @@ function normalizeUiSelections(payload: UiRunPayload): AgentSelection[] {
 }
 
 function printHelp(): void {
-  console.log(`RepoArena CLI
+  console.log(`RepoArena CLI - AI Agent Benchmarking Framework
 
 Usage:
-  repoarena run --repo <path> --task <task.json> --agents <comma,separated> [--codex-model <model>] [--codex-reasoning <value>] [--claude-profile <id>] [--claude-model <model>] [--probe-auth] [--update-snapshots] [--max-concurrency <n>] [--json]
-  repoarena doctor [--agents <comma,separated>] [--probe-auth] [--strict] [--json]
+  repoarena <command> [options]
+
+Commands:
+  run              Run a benchmark against a repository
+  doctor           Check adapter availability and authentication
+  list-adapters    List all available adapters and their capabilities
+  init-taskpack    Create a new task pack from a template
+  init-ci          Create a CI workflow file for automated benchmarks
+  ui               Start the web UI server
+
+Run Command:
+  repoarena run --repo <path> --task <path> --agents <list> [options]
+
+  Required:
+    --repo <path>              Path to the repository to benchmark
+    --task <path>              Path to the task pack file (.json, .yaml, .yml)
+    --agents <list>            Comma-separated list of agent IDs to benchmark
+
+  Optional:
+    --output <path>            Output directory for results (default: .repoarena/runs/<run-id>)
+    --probe-auth               Test adapter authentication before running
+    --update-snapshots         Update snapshot files if they differ
+    --max-concurrency <n>      Maximum number of agents to run in parallel (default: 1)
+    --json                     Output results as JSON
+
+  Codex Options:
+    --codex-model <model>      Override the Codex model (e.g., gpt-5.4)
+    --codex-reasoning <value>  Set reasoning effort (low, medium, high)
+
+  Claude Code Options:
+    --claude-profile <id>      Use a specific Claude provider profile
+    --claude-model <model>     Override the Claude model
+
+Doctor Command:
+  repoarena doctor [options]
+
+  Options:
+    --agents <list>            Comma-separated list of agents to check (default: all)
+    --probe-auth               Test authentication for each adapter
+    --strict                   Exit with error if any adapter is not ready
+    --json                     Output results as JSON
+
+List Adapters Command:
   repoarena list-adapters [--json]
-  repoarena init-taskpack [--template <name>] [--output <path>] [--force]
-  repoarena init-ci [--task <path>] [--agents <comma,separated>] [--output <workflow.yml>] [--ci-template <pull-request|smoke|nightly>] [--ci-output-dir <path>] [--force]
-  repoarena ui [--host <host>] [--port <port>] [--no-open]
+
+Init Taskpack Command:
+  repoarena init-taskpack [options]
+
+  Options:
+    --template <name>          Template to use (repo-health, json-api, snapshot)
+    --output <path>            Output file path (default: repoarena.taskpack.yaml)
+    --force                    Overwrite existing file
+
+Init CI Command:
+  repoarena init-ci [options]
+
+  Options:
+    --task <path>              Path to the task pack file
+    --agents <list>            Comma-separated list of agents
+    --output <path>            Output workflow file path
+    --ci-template <type>       Workflow template (pull-request, smoke, nightly)
+    --ci-output-dir <path>     CI output directory (default: .repoarena/ci-benchmark)
+    --force                    Overwrite existing file
+
+UI Command:
+  repoarena ui [options]
+
+  Options:
+    --host <host>              Server host (default: 127.0.0.1)
+    --port <port>              Server port (default: 4317)
+    --no-open                  Don't open browser automatically
 
 Examples:
+  # Run a basic benchmark with demo adapters
   repoarena run --repo . --task examples/taskpacks/demo-repo-health.json --agents demo-fast,demo-thorough
+
+  # Run with Codex and Claude Code, testing authentication
   repoarena run --repo . --task examples/taskpacks/demo-repo-health.json --agents codex,claude-code --probe-auth
+
+  # Run with specific Codex model and reasoning
   repoarena run --repo . --task examples/taskpacks/demo-repo-health.yaml --agents codex --codex-model gpt-5.4 --codex-reasoning high
+
+  # Run with Claude Code using a provider profile
   repoarena run --repo . --task examples/taskpacks/official/repo-health.yaml --agents claude-code --claude-profile claude-official --claude-model claude-3-7-sonnet-latest
+
+  # Update snapshots during benchmark
   repoarena run --repo . --task examples/taskpacks/demo-repo-health.yaml --agents demo-fast --update-snapshots
+
+  # Output results as JSON
   repoarena run --repo . --task examples/taskpacks/demo-repo-health.yaml --agents demo-fast --json
+
+  # Check all adapters with authentication probe
   repoarena doctor --agents codex,claude-code,cursor --probe-auth
+
+  # Strict doctor check (fails if any adapter not ready)
   repoarena doctor --agents codex,claude-code,cursor --probe-auth --strict
-  repoarena doctor --agents codex,demo-fast --json
-  repoarena list-adapters --json
-  repoarena init-taskpack --template repo-health --output repoarena.taskpack.yaml
+
+  # Create a new task pack from template
+  repoarena init-taskpack --template repo-health --output my-task.yaml
+
+  # Create a CI workflow for pull requests
   repoarena init-ci --task repoarena.taskpack.yaml --agents demo-fast,codex
+
+  # Create a nightly CI workflow
   repoarena init-ci --ci-template nightly --task examples/taskpacks/official/repo-health.yaml --agents demo-fast
+
+  # Start the web UI
   repoarena ui --host 127.0.0.1 --port 4317
+
+For more information, visit: https://github.com/aabbcdl/RepoArena
 `);
 }
 
@@ -323,30 +411,62 @@ function parseArgs(argv: string[]): ParsedArgs {
     switch (token) {
       case "--repo":
         parsed.repoPath = args.shift();
+        if (!parsed.repoPath) {
+          throw new Error("--repo requires a path argument. Example: --repo . or --repo /path/to/repo");
+        }
         break;
       case "--task":
         parsed.taskPath = args.shift();
+        if (!parsed.taskPath) {
+          throw new Error("--task requires a path argument. Example: --task taskpack.yaml");
+        }
         break;
       case "--agents":
-        parsed.agentIds = (args.shift() ?? "")
+        const agentsValue = args.shift();
+        if (!agentsValue) {
+          throw new Error("--agents requires a comma-separated list. Example: --agents demo-fast,codex");
+        }
+        parsed.agentIds = agentsValue
           .split(",")
           .map((value) => value.trim())
           .filter(Boolean);
+        if (parsed.agentIds.length === 0) {
+          throw new Error("--agents list cannot be empty. Example: --agents demo-fast,codex");
+        }
         break;
       case "--output":
         parsed.outputPath = args.shift();
+        if (!parsed.outputPath) {
+          throw new Error("--output requires a path argument. Example: --output ./results");
+        }
         break;
       case "--codex-model":
         parsed.codexModel = args.shift();
+        if (!parsed.codexModel) {
+          throw new Error("--codex-model requires a model name. Example: --codex-model gpt-5.4");
+        }
         break;
       case "--codex-reasoning":
         parsed.codexReasoning = args.shift();
+        if (!parsed.codexReasoning) {
+          throw new Error("--codex-reasoning requires a value. Example: --codex-reasoning high");
+        }
+        const validReasoning = ["low", "medium", "high"];
+        if (!validReasoning.includes(parsed.codexReasoning.toLowerCase())) {
+          throw new Error(`--codex-reasoning must be one of: ${validReasoning.join(", ")}. Got: ${parsed.codexReasoning}`);
+        }
         break;
       case "--claude-profile":
         parsed.claudeProfile = args.shift();
+        if (!parsed.claudeProfile) {
+          throw new Error("--claude-profile requires a profile ID. Example: --claude-profile claude-official");
+        }
         break;
       case "--claude-model":
         parsed.claudeModel = args.shift();
+        if (!parsed.claudeModel) {
+          throw new Error("--claude-model requires a model name. Example: --claude-model claude-3-7-sonnet-latest");
+        }
         break;
       case "--probe-auth":
         parsed.probeAuth = true;
@@ -362,28 +482,50 @@ function parseArgs(argv: string[]): ParsedArgs {
         break;
       case "--template":
         parsed.templateName = args.shift();
+        if (!parsed.templateName) {
+          throw new Error("--template requires a template name. Available: repo-health, json-api, snapshot");
+        }
         break;
       case "--force":
         parsed.force = true;
         break;
       case "--ci-template":
         parsed.ciTemplate = args.shift();
+        if (!parsed.ciTemplate) {
+          throw new Error("--ci-template requires a template type. Available: pull-request, smoke, nightly");
+        }
+        const validTemplates = ["pull-request", "smoke", "nightly"];
+        if (!validTemplates.includes(parsed.ciTemplate)) {
+          throw new Error(`--ci-template must be one of: ${validTemplates.join(", ")}. Got: ${parsed.ciTemplate}`);
+        }
         break;
       case "--ci-output-dir":
         parsed.ciOutputDir = args.shift();
+        if (!parsed.ciOutputDir) {
+          throw new Error("--ci-output-dir requires a path argument. Example: --ci-output-dir .repoarena/ci");
+        }
         break;
       case "--workflow":
         parsed.workflowPath = args.shift();
+        if (!parsed.workflowPath) {
+          throw new Error("--workflow requires a path argument. Example: --workflow .github/workflows/benchmark.yml");
+        }
         break;
       case "--host":
         parsed.host = args.shift();
+        if (!parsed.host) {
+          throw new Error("--host requires a hostname. Example: --host 127.0.0.1");
+        }
         break;
       case "--port": {
-        const value = Number.parseInt(args.shift() ?? "", 10);
-        if (!Number.isInteger(value) || value <= 0) {
-          throw new Error("--port must be a positive integer.");
+        const portValue = args.shift();
+        if (!portValue) {
+          throw new Error("--port requires a port number. Example: --port 4317");
         }
-
+        const value = Number.parseInt(portValue, 10);
+        if (!Number.isInteger(value) || value <= 0 || value > 65535) {
+          throw new Error(`--port must be a valid port number (1-65535). Got: ${portValue}`);
+        }
         parsed.port = value;
         break;
       }
@@ -391,11 +533,14 @@ function parseArgs(argv: string[]): ParsedArgs {
         parsed.noOpen = true;
         break;
       case "--max-concurrency": {
-        const value = Number.parseInt(args.shift() ?? "", 10);
-        if (!Number.isInteger(value) || value <= 0) {
-          throw new Error("--max-concurrency must be a positive integer.");
+        const concurrencyValue = args.shift();
+        if (!concurrencyValue) {
+          throw new Error("--max-concurrency requires a number. Example: --max-concurrency 4");
         }
-
+        const value = Number.parseInt(concurrencyValue, 10);
+        if (!Number.isInteger(value) || value <= 0) {
+          throw new Error(`--max-concurrency must be a positive integer. Got: ${concurrencyValue}`);
+        }
         parsed.maxConcurrency = value;
         break;
       }
@@ -404,7 +549,10 @@ function parseArgs(argv: string[]): ParsedArgs {
         printHelp();
         process.exit(0);
       default:
-        throw new Error(`Unknown argument: ${token}`);
+        throw new Error(
+          `Unknown argument: ${token}\n` +
+          `Run "repoarena --help" for usage information.`
+        );
     }
   }
 
@@ -1237,11 +1385,77 @@ async function runUi(parsed: ParsedArgs): Promise<void> {
 }
 
 async function runBenchmarkCommand(parsed: ParsedArgs): Promise<void> {
-  if (!parsed.repoPath || !parsed.taskPath || parsed.agentIds.length === 0) {
-    throw new Error("Missing required arguments. Use --repo, --task, and --agents.");
+  if (!parsed.repoPath) {
+    throw new Error(
+      "Missing required argument: --repo\n" +
+      "Example: repoarena run --repo . --task taskpack.yaml --agents demo-fast\n" +
+      'Run "repoarena --help" for more information.'
+    );
+  }
+
+  if (!parsed.taskPath) {
+    throw new Error(
+      "Missing required argument: --task\n" +
+      "Example: repoarena run --repo . --task taskpack.yaml --agents demo-fast\n" +
+      'Run "repoarena --help" for more information.'
+    );
+  }
+
+  if (parsed.agentIds.length === 0) {
+    throw new Error(
+      "Missing required argument: --agents\n" +
+      "Example: repoarena run --repo . --task taskpack.yaml --agents demo-fast,codex\n" +
+      'Run "repoarena --help" for more information.'
+    );
+  }
+
+  // Validate repo path exists
+  try {
+    const repoStat = await fs.stat(parsed.repoPath);
+    if (!repoStat.isDirectory()) {
+      throw new Error(`--repo path is not a directory: ${parsed.repoPath}`);
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      throw new Error(`--repo path does not exist: ${parsed.repoPath}`);
+    }
+    throw error;
+  }
+
+  // Validate task path exists
+  try {
+    await fs.access(parsed.taskPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      throw new Error(`--task file does not exist: ${parsed.taskPath}`);
+    }
+    throw error;
+  }
+
+  // Validate agent IDs
+  const availableAdapters = listAvailableAdapters();
+  const availableIds = availableAdapters.map((a) => a.id);
+  const invalidAgents = parsed.agentIds.filter((id) => !availableIds.includes(id));
+  if (invalidAgents.length > 0) {
+    throw new Error(
+      `Unknown agent(s): ${invalidAgents.join(", ")}\n` +
+      `Available agents: ${availableIds.join(", ")}\n` +
+      'Run "repoarena list-adapters" for more information.'
+    );
   }
 
   const selections = normalizeCliSelections(parsed);
+
+  if (!parsed.json) {
+    console.log(`\nStarting RepoArena benchmark...`);
+    console.log(`Repository: ${parsed.repoPath}`);
+    console.log(`Task: ${parsed.taskPath}`);
+    console.log(`Agents: ${parsed.agentIds.join(", ")}`);
+    if (parsed.probeAuth) {
+      console.log(`Authentication probe: enabled`);
+    }
+    console.log("");
+  }
 
   const benchmark = await runBenchmark({
     repoPath: parsed.repoPath,
@@ -1260,39 +1474,43 @@ async function runBenchmarkCommand(parsed: ParsedArgs): Promise<void> {
     console.log(JSON.stringify(buildBenchmarkOutputSummary(benchmark, report), null, 2));
   } else {
     console.log(`\nRepoArena run complete: ${benchmark.runId}`);
+    console.log(`\nPreflight Results:`);
     for (const preflight of benchmark.preflights) {
+      const statusIcon = preflight.status === "ready" ? "✓" : preflight.status === "unverified" ? "?" : "✗";
       console.log(
-        [
-          `preflight ${preflight.displayLabel}`,
-          `status=${preflight.status}`,
-          `model=${preflight.resolvedRuntime?.effectiveModel ?? "unknown"}`,
-          `reasoning=${preflight.resolvedRuntime?.effectiveReasoningEffort ?? "unknown"}`,
-          `verification=${preflight.resolvedRuntime?.verification ?? "unknown"}`,
-          `summary=${preflight.summary}`
-        ].join(" | ")
+        `  ${statusIcon} ${preflight.displayLabel}: ${preflight.status} - ${preflight.summary}`
       );
+      if (preflight.resolvedRuntime?.effectiveModel) {
+        console.log(`    Model: ${preflight.resolvedRuntime.effectiveModel}`);
+      }
     }
 
-    console.log("");
+    console.log(`\nBenchmark Results:`);
     for (const result of benchmark.results) {
+      const statusIcon = result.status === "success" ? "✓" : "✗";
       console.log(
-        [
-          `- ${result.displayLabel}`,
-          `status=${result.status}`,
-          `model=${result.resolvedRuntime?.effectiveModel ?? "unknown"}`,
-          `reasoning=${result.resolvedRuntime?.effectiveReasoningEffort ?? "unknown"}`,
-          `verification=${result.resolvedRuntime?.verification ?? "unknown"}`,
-          `duration=${formatDuration(result.durationMs)}`,
-          `tokens=${result.tokenUsage}`,
-          `cost=${result.costKnown ? `$${result.estimatedCostUsd.toFixed(2)}` : "n/a"}`,
-          `changed=${result.changedFiles.length}`
-        ].join(" | ")
+        `  ${statusIcon} ${result.displayLabel}: ${result.status} (${formatDuration(result.durationMs)})`
       );
+      console.log(`    status=${result.status}`);
+      console.log(`    Tokens: ${result.tokenUsage} | Cost: ${result.costKnown ? `$${result.estimatedCostUsd.toFixed(2)}` : "n/a"} | Files changed: ${result.changedFiles.length}`);
+
+      const passedJudges = result.judgeResults.filter((j) => j.success).length;
+      const totalJudges = result.judgeResults.length;
+      if (totalJudges > 0) {
+        console.log(`    Judges: ${passedJudges}/${totalJudges} passed`);
+      }
     }
 
-    console.log(`\nJSON summary: ${report.jsonPath}`);
-    console.log(`Markdown:      ${report.markdownPath}`);
-    console.log(`HTML report:  ${report.htmlPath}`);
+    const successCount = benchmark.results.filter((r) => r.status === "success").length;
+    const totalCount = benchmark.results.length;
+    console.log(`\nSummary: ${successCount}/${totalCount} agents succeeded`);
+
+    console.log(`\nOutput Files:`);
+    console.log(`  JSON summary: ${report.jsonPath}`);
+    console.log(`  Markdown:     ${report.markdownPath}`);
+    console.log(`  HTML report:  ${report.htmlPath}`);
+    console.log(`  Badge:        ${report.badgePath}`);
+    console.log(`  PR comment:   ${report.prCommentPath}`);
   }
 
   if (benchmark.results.some((result) => result.status !== "success")) {
@@ -1351,43 +1569,60 @@ function buildBenchmarkOutputSummary(
 }
 
 async function main(): Promise<void> {
-  const parsed = parseArgs(process.argv.slice(2));
+  try {
+    const parsed = parseArgs(process.argv.slice(2));
 
-  if (parsed.command === "doctor") {
-    await runDoctor(parsed);
-    return;
+    if (!parsed.command) {
+      printHelp();
+      return;
+    }
+
+    switch (parsed.command) {
+      case "doctor":
+        await runDoctor(parsed);
+        break;
+      case "run":
+        await runBenchmarkCommand(parsed);
+        break;
+      case "list-adapters":
+        await runListAdapters(parsed);
+        break;
+      case "init-taskpack":
+        await runInitTaskpack(parsed);
+        break;
+      case "init-ci":
+        await runInitCi(parsed);
+        break;
+      case "ui":
+        await runUi(parsed);
+        break;
+      case "help":
+      case "--help":
+      case "-h":
+        printHelp();
+        break;
+      default:
+        throw new Error(
+          `Unknown command: ${parsed.command}\n` +
+          `Available commands: run, doctor, list-adapters, init-taskpack, init-ci, ui\n` +
+          'Run "repoarena --help" for usage information.'
+        );
+    }
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`\nError: ${message}`);
+
+    // Provide helpful suggestions based on common errors
+    if (message.includes("ENOENT") || message.includes("does not exist")) {
+      console.error("\nTip: Check that the file path is correct and the file exists.");
+    } else if (message.includes("Unknown agent")) {
+      console.error('\nTip: Run "repoarena list-adapters" to see available agents.');
+    } else if (message.includes("Missing required")) {
+      console.error('\nTip: Run "repoarena --help" for usage information.');
+    }
+
+    process.exitCode = 1;
   }
-
-  if (parsed.command === "run") {
-    await runBenchmarkCommand(parsed);
-    return;
-  }
-
-  if (parsed.command === "list-adapters") {
-    await runListAdapters(parsed);
-    return;
-  }
-
-  if (parsed.command === "init-taskpack") {
-    await runInitTaskpack(parsed);
-    return;
-  }
-
-  if (parsed.command === "init-ci") {
-    await runInitCi(parsed);
-    return;
-  }
-
-  if (parsed.command === "ui") {
-    await runUi(parsed);
-    return;
-  }
-
-  printHelp();
 }
 
-main().catch((error: unknown) => {
-  const message = error instanceof Error ? error.message : String(error);
-  console.error(`RepoArena failed: ${message}`);
-  process.exitCode = 1;
-});
+void main();

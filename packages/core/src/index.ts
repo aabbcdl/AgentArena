@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 export const TASK_PACK_SCHEMA_V1 = "repoarena.taskpack/v1";
@@ -356,7 +357,41 @@ export function createRunId(date = new Date()): string {
 }
 
 export function normalizePath(inputPath: string): string {
-  return inputPath.split(path.sep).join("/");
+  return inputPath
+    .split(path.sep)
+    .join("/")
+    .replace(/\\/g, "/");
+}
+
+export function isWindowsLikePath(inputPath: string): boolean {
+  return /^[a-zA-Z]:[\\/]/.test(inputPath) || inputPath.includes("\\");
+}
+
+export function portableRelativePath(fromPath: string, toPath: string): string {
+  if (isWindowsLikePath(fromPath) || isWindowsLikePath(toPath)) {
+    return path.win32.relative(fromPath, toPath).replace(/\\/g, "/");
+  }
+
+  return path.posix.relative(fromPath, toPath).replace(/\\/g, "/");
+}
+
+export function portableBasename(inputPath: string): string {
+  return isWindowsLikePath(inputPath) ? path.win32.basename(inputPath) : path.posix.basename(inputPath);
+}
+
+export function isPathInsideWorkspace(workspacePath: string, targetPath: string): boolean {
+  const resolvedWorkspace = path.resolve(workspacePath);
+  const resolvedTarget = path.resolve(targetPath);
+  const relativePath = path.relative(resolvedWorkspace, resolvedTarget);
+  return !relativePath.startsWith("..") && !path.isAbsolute(relativePath);
+}
+
+export function safePathJoin(basePath: string, ...segments: string[]): string {
+  const joined = path.join(basePath, ...segments);
+  if (!isPathInsideWorkspace(basePath, joined)) {
+    throw new Error(`Path traversal detected: attempted to access "${joined}" outside workspace "${basePath}"`);
+  }
+  return joined;
 }
 
 export function buildExecutionEnvironment(
@@ -398,7 +433,13 @@ export async function snapshotDirectory(rootPath: string): Promise<Map<string, F
   const snapshots = new Map<string, FileSnapshotEntry>();
 
   async function walk(currentPath: string): Promise<void> {
-    const entries = await fs.readdir(currentPath, { withFileTypes: true });
+    let entries;
+    try {
+      entries = await fs.readdir(currentPath, { withFileTypes: true });
+    } catch (error) {
+      // Skip directories that cannot be read (e.g., permission issues)
+      return;
+    }
 
     for (const entry of entries) {
       const absolutePath = path.join(currentPath, entry.name);
@@ -417,9 +458,15 @@ export async function snapshotDirectory(rootPath: string): Promise<Map<string, F
         continue;
       }
 
-      const fileBuffer = await fs.readFile(absolutePath);
-      const hash = createHash("sha1").update(fileBuffer).digest("hex");
-      snapshots.set(relativePath, { relativePath, hash });
+      try {
+        const fileBuffer = await fs.readFile(absolutePath);
+        // Use SHA-256 for better security (SHA-1 is sufficient for file comparison but SHA-256 is more future-proof)
+        const hash = createHash("sha256").update(fileBuffer).digest("hex");
+        snapshots.set(relativePath, { relativePath, hash });
+      } catch (error) {
+        // Skip files that cannot be read
+        continue;
+      }
     }
   }
 
@@ -466,11 +513,34 @@ export function uniqueSorted(values: string[]): string[] {
 }
 
 export function formatDuration(durationMs: number): string {
-  if (durationMs < 1_000) {
-    return `${durationMs}ms`;
+  if (!Number.isFinite(durationMs) || durationMs < 0) {
+    return "0ms";
   }
 
-  return `${(durationMs / 1_000).toFixed(2)}s`;
+  if (durationMs < 1_000) {
+    return `${Math.round(durationMs)}ms`;
+  }
+
+  if (durationMs < 60_000) {
+    return `${(durationMs / 1_000).toFixed(2)}s`;
+  }
+
+  const minutes = Math.floor(durationMs / 60_000);
+  const seconds = ((durationMs % 60_000) / 1_000).toFixed(1);
+  return `${minutes}m ${seconds}s`;
+}
+
+export function getPlatformInfo(): { platform: string; arch: string; nodeVersion: string } {
+  return {
+    platform: os.platform(),
+    arch: os.arch(),
+    nodeVersion: process.version
+  };
+}
+
+export function validateTaskPackId(id: string): boolean {
+  // Task pack IDs should be alphanumeric with hyphens, 3-64 characters
+  return /^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$/.test(id) || /^[a-z0-9]{1,64}$/.test(id);
 }
 
 function slugifyVariantPart(value: string): string {

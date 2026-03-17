@@ -65,6 +65,14 @@ function secretTarget(profileId: string): string {
   return `${prefix}${profileId}`;
 }
 
+function secretDirectory(): string {
+  return path.join(appDataRoot(), "secrets");
+}
+
+function secretFilePath(profileId: string): string {
+  return path.join(secretDirectory(), `${profileId}.secret`);
+}
+
 function slugify(value: string): string {
   return value
     .trim()
@@ -227,8 +235,37 @@ try {
   await runPowerShellJson(script);
 }
 
+async function setSecretFile(profileId: string, secret: string): Promise<void> {
+  await fs.mkdir(secretDirectory(), { recursive: true });
+  const filePath = secretFilePath(profileId);
+  await fs.writeFile(filePath, `${secret.trim()}\n`, { encoding: "utf8", mode: 0o600 });
+  await fs.chmod(filePath, 0o600).catch(() => {});
+}
+
+async function getSecretFile(profileId: string): Promise<string | null> {
+  try {
+    return (await fs.readFile(secretFilePath(profileId), "utf8")).trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+async function deleteSecretFile(profileId: string): Promise<void> {
+  await fs.rm(secretFilePath(profileId), { force: true });
+}
+
+async function hasStoredSecret(profileId: string): Promise<boolean> {
+  if (process.platform === "win32") {
+    return (await getSecretWindows(profileId)) !== null;
+  }
+
+  return (await getSecretFile(profileId)) !== null;
+}
+
 export function supportsWindowsCredentialManager(): boolean {
-  return process.platform === "win32";
+  // Legacy public helper kept for compatibility with existing callers/tests.
+  // RepoArena now supports profile secret storage on every platform.
+  return true;
 }
 
 export async function listClaudeProviderProfiles(): Promise<ClaudeProviderProfile[]> {
@@ -237,7 +274,7 @@ export async function listClaudeProviderProfiles(): Promise<ClaudeProviderProfil
     registry.profiles.map(async (profile) => ({
       ...profile,
       isBuiltIn: false,
-      secretStored: supportsWindowsCredentialManager() ? (await getSecretWindows(profile.id)) !== null : false
+      secretStored: await hasStoredSecret(profile.id)
     }))
   );
 
@@ -297,7 +334,7 @@ export async function saveClaudeProviderProfile(input: ClaudeProviderProfileInpu
 
   return {
     ...profile,
-    secretStored: supportsWindowsCredentialManager() ? (await getSecretWindows(profile.id)) !== null : false
+    secretStored: await hasStoredSecret(profile.id)
   };
 }
 
@@ -312,34 +349,42 @@ export async function deleteClaudeProviderProfile(profileId: string): Promise<vo
     profiles: registry.profiles.filter((entry) => entry.id !== profileId)
   });
 
-  if (supportsWindowsCredentialManager()) {
+  if (process.platform === "win32") {
     await deleteSecretWindows(profileId);
+  } else {
+    await deleteSecretFile(profileId);
   }
 }
 
 export async function setClaudeProviderProfileSecret(profileId: string, secret: string): Promise<void> {
-  if (!supportsWindowsCredentialManager()) {
-    throw new Error("Windows Credential Manager storage is only supported on Windows.");
-  }
-
   if (profileId === BUILT_IN_OFFICIAL_PROFILE.id) {
     throw new Error("The built-in official Claude profile does not use a stored secret.");
   }
 
   if (!secret.trim()) {
-    await deleteSecretWindows(profileId);
+    if (process.platform === "win32") {
+      await deleteSecretWindows(profileId);
+    } else {
+      await deleteSecretFile(profileId);
+    }
     return;
   }
 
-  await setSecretWindows(profileId, secret.trim());
+  if (process.platform === "win32") {
+    await setSecretWindows(profileId, secret.trim());
+  } else {
+    await setSecretFile(profileId, secret.trim());
+  }
 }
 
 export async function getClaudeProviderProfileSecret(profileId: string): Promise<string | null> {
-  if (profileId === BUILT_IN_OFFICIAL_PROFILE.id || !supportsWindowsCredentialManager()) {
+  if (profileId === BUILT_IN_OFFICIAL_PROFILE.id) {
     return null;
   }
 
-  return await getSecretWindows(profileId);
+  return process.platform === "win32"
+    ? await getSecretWindows(profileId)
+    : await getSecretFile(profileId);
 }
 
 export async function buildClaudeProviderEnvironment(

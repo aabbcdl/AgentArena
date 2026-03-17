@@ -72,12 +72,66 @@ function escapeRegExp(value: string): string {
 
 function globToRegExp(pattern: string): RegExp {
   let source = "^";
+  let inBraces = false;
+  let braceDepth = 0;
 
   for (let index = 0; index < pattern.length; index += 1) {
     const char = pattern[index];
     const next = pattern[index + 1];
     const nextNext = pattern[index + 2];
 
+    // Handle escape sequences
+    if (char === "\\") {
+      if (next) {
+        source += escapeRegExp(next);
+        index += 1;
+        continue;
+      }
+    }
+
+    // Handle character classes
+    if (char === "[") {
+      let classContent = "";
+      index += 1;
+      while (index < pattern.length && pattern[index] !== "]") {
+        if (pattern[index] === "\\") {
+          classContent += pattern[index];
+          index += 1;
+          if (index < pattern.length) {
+            classContent += pattern[index];
+          }
+        } else {
+          classContent += pattern[index];
+        }
+        index += 1;
+      }
+      source += `[${classContent}]`;
+      continue;
+    }
+
+    // Handle brace expansion (simplified)
+    if (char === "{") {
+      inBraces = true;
+      braceDepth++;
+      source += "(";
+      continue;
+    }
+
+    if (char === "}" && inBraces) {
+      braceDepth--;
+      if (braceDepth === 0) {
+        inBraces = false;
+      }
+      source += ")";
+      continue;
+    }
+
+    if (char === "," && inBraces) {
+      source += "|";
+      continue;
+    }
+
+    // Handle wildcards
     if (char === "*") {
       if (next === "*" && nextNext === "/") {
         source += "(?:.*/)?";
@@ -96,11 +150,22 @@ function globToRegExp(pattern: string): RegExp {
       continue;
     }
 
+    // Handle path separators
+    if (char === "/") {
+      source += "/";
+      continue;
+    }
+
     source += escapeRegExp(char);
   }
 
   source += "$";
-  return new RegExp(source);
+  
+  try {
+    return new RegExp(source);
+  } catch (error) {
+    throw new Error(`Invalid glob pattern "${pattern}": ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 async function listWorkspaceFiles(rootPath: string): Promise<string[]> {
@@ -134,7 +199,11 @@ function resolveJsonPointer(root: unknown, pointer: string): unknown {
   }
 
   if (!pointer.startsWith("/")) {
-    throw new Error(`JSON pointer "${pointer}" must start with "/".`);
+    throw new Error(
+      `JSON pointer "${pointer}" must start with "/". ` +
+      `Example: "/foo/bar" or "/0". ` +
+      `Use "~0" for "~" and "~1" for "/" in property names.`
+    );
   }
 
   const segments = pointer
@@ -143,18 +212,57 @@ function resolveJsonPointer(root: unknown, pointer: string): unknown {
     .map((segment) => segment.replaceAll("~1", "/").replaceAll("~0", "~"));
 
   let current: unknown = root;
+  const path: string[] = [];
+
   for (const segment of segments) {
+    path.push(segment);
+
     if (Array.isArray(current)) {
       const index = Number.parseInt(segment, 10);
-      if (!Number.isInteger(index) || index < 0 || index >= current.length) {
-        throw new Error(`JSON pointer segment "${segment}" is not a valid array index.`);
+      if (!Number.isInteger(index)) {
+        throw new Error(
+          `JSON pointer segment "${segment}" at path "/${path.join("/")}" is not a valid array index. ` +
+          `Expected an integer, got "${segment}".`
+        );
+      }
+      if (index < 0) {
+        throw new Error(
+          `JSON pointer segment "${segment}" at path "/${path.join("/")}" is negative. ` +
+          `Array indices must be non-negative integers.`
+        );
+      }
+      if (index >= current.length) {
+        throw new Error(
+          `JSON pointer segment "${segment}" at path "/${path.join("/")}" is out of bounds. ` +
+          `Array has ${current.length} elements (indices 0-${current.length - 1}).`
+        );
       }
       current = current[index];
       continue;
     }
 
-    if (!current || typeof current !== "object" || !(segment in current)) {
-      throw new Error(`JSON pointer segment "${segment}" does not exist.`);
+    if (current === null || current === undefined) {
+      throw new Error(
+        `JSON pointer segment "${segment}" at path "/${path.join("/")}" cannot be accessed. ` +
+        `Parent is ${current === null ? "null" : "undefined"}.`
+      );
+    }
+
+    if (typeof current !== "object") {
+      throw new Error(
+        `JSON pointer segment "${segment}" at path "/${path.join("/")}" cannot be accessed. ` +
+        `Parent is a ${typeof current}, not an object.`
+      );
+    }
+
+    if (!(segment in current)) {
+      const availableKeys = Object.keys(current as Record<string, unknown>);
+      const suggestion = availableKeys.length > 0
+        ? `Available properties: ${availableKeys.slice(0, 10).join(", ")}${availableKeys.length > 10 ? "..." : ""}`
+        : "Object has no properties.";
+      throw new Error(
+        `JSON pointer segment "${segment}" at path "/${path.join("/")}" does not exist. ${suggestion}`
+      );
     }
 
     current = (current as Record<string, unknown>)[segment];

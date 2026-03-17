@@ -6,8 +6,225 @@ import {
   AgentResolvedRuntime,
   BenchmarkRun,
   ensureDirectory,
-  formatDuration
+  formatDuration,
+  portableBasename,
+  portableRelativePath
 } from "@repoarena/core";
+
+// Internationalization support
+export type Locale = "en" | "zh-CN";
+
+export interface ReportTranslations {
+  title: string;
+  summary: string;
+  adapterPreflight: string;
+  benchmarkResults: string;
+  setup: string;
+  teardown: string;
+  judges: string;
+  changedFiles: string;
+  diffBreakdown: string;
+  added: string;
+  changed: string;
+  removed: string;
+  noCommandsExecuted: string;
+  noJudgesExecuted: string;
+  noDiffDetected: string;
+  none: string;
+  pass: string;
+  fail: string;
+  debugOutput: string;
+  stdout: string;
+  stderr: string;
+  cwd: string;
+  successRate: string;
+  failed: string;
+  totalTokens: string;
+  knownCost: string;
+  badgeEndpoint: string;
+  note: string;
+  taskLibrary: string;
+  repoTypes: string;
+  objective: string;
+  judgeRationale: string;
+  provider: string;
+  providerKind: string;
+  providerSource: string;
+  model: string;
+  reasoning: string;
+  verification: string;
+  source: string;
+  supportTier: string;
+  invocation: string;
+  tokens: string;
+  cost: string;
+  trace: string;
+  authPrerequisites: string;
+  knownLimitations: string;
+  variant: string;
+  baseAgent: string;
+  status: string;
+  duration: string;
+  judgesPassed: string;
+  filesChanged: string;
+  preflight: string;
+  run: string;
+  attention: string;
+  reviewTable: string;
+  reviewFocus: string;
+  artifacts: string;
+  artifactsNote: string;
+  noWarningsOrFailures: string;
+  riskNote: string;
+  prompt: string;
+  generatedAt: string;
+  forRun: string;
+  comparesModelConfigurations: string;
+  baselineRepoHealthNote: string;
+}
+
+const translations: Record<Locale, ReportTranslations> = {
+  en: {
+    title: "RepoArena Report",
+    summary: "RepoArena Summary",
+    adapterPreflight: "Adapter Preflight",
+    benchmarkResults: "Benchmark Results",
+    setup: "Setup",
+    teardown: "Teardown",
+    judges: "Judges",
+    changedFiles: "Changed Files",
+    diffBreakdown: "Diff Breakdown",
+    added: "Added",
+    changed: "Changed",
+    removed: "Removed",
+    noCommandsExecuted: "No commands executed.",
+    noJudgesExecuted: "No judges executed.",
+    noDiffDetected: "No diff detected.",
+    none: "None",
+    pass: "pass",
+    fail: "fail",
+    debugOutput: "Debug output",
+    stdout: "stdout",
+    stderr: "stderr",
+    cwd: "cwd",
+    successRate: "Success Rate",
+    failed: "Failed",
+    totalTokens: "Total Tokens",
+    knownCost: "Known Cost",
+    badgeEndpoint: "Badge Endpoint",
+    note: "Note",
+    taskLibrary: "Task Library",
+    repoTypes: "Repo Types",
+    objective: "Objective",
+    judgeRationale: "Judge Rationale",
+    provider: "Provider",
+    providerKind: "Provider Kind",
+    providerSource: "Provider Source",
+    model: "Model",
+    reasoning: "Reasoning",
+    verification: "Verification",
+    source: "Source",
+    supportTier: "Support Tier",
+    invocation: "Invocation",
+    tokens: "Tokens",
+    cost: "Cost",
+    trace: "Trace",
+    authPrerequisites: "Auth Prerequisites",
+    knownLimitations: "Known Limitations",
+    variant: "Variant",
+    baseAgent: "Base Agent",
+    status: "Status",
+    duration: "Duration",
+    judgesPassed: "Judges",
+    filesChanged: "Files",
+    preflight: "Preflight",
+    run: "Run",
+    attention: "Attention",
+    reviewTable: "Review Table",
+    reviewFocus: "Review Focus",
+    artifacts: "Artifacts",
+    artifactsNote: "Use `report.html` for drill-down, `summary.md` for share text, and `badge.json` for Shields endpoint output.",
+    noWarningsOrFailures: "No warnings or failures in this run.",
+    riskNote: "This result was produced through a provider-switched Claude Code configuration.",
+    prompt: "Prompt",
+    generatedAt: "Generated at",
+    forRun: "for run",
+    comparesModelConfigurations: "This report compares specific model configurations, not just adapter names.",
+    baselineRepoHealthNote: "For baseline repo-health tasks, success only means the agent completed a small improvement without breaking baseline repository structure."
+  },
+  "zh-CN": {
+    title: "RepoArena 报告",
+    summary: "RepoArena 摘要",
+    adapterPreflight: "适配器预检",
+    benchmarkResults: "基准测试结果",
+    setup: "设置",
+    teardown: "清理",
+    judges: "评判器",
+    changedFiles: "变更文件",
+    diffBreakdown: "差异分解",
+    added: "新增",
+    changed: "修改",
+    removed: "删除",
+    noCommandsExecuted: "未执行任何命令。",
+    noJudgesExecuted: "未执行任何评判器。",
+    noDiffDetected: "未检测到差异。",
+    none: "无",
+    pass: "通过",
+    fail: "失败",
+    debugOutput: "调试输出",
+    stdout: "标准输出",
+    stderr: "标准错误",
+    cwd: "工作目录",
+    successRate: "成功率",
+    failed: "失败",
+    totalTokens: "总令牌数",
+    knownCost: "已知成本",
+    badgeEndpoint: "徽章端点",
+    note: "注意",
+    taskLibrary: "任务库",
+    repoTypes: "仓库类型",
+    objective: "目标",
+    judgeRationale: "评判依据",
+    provider: "提供商",
+    providerKind: "提供商类型",
+    providerSource: "提供商来源",
+    model: "模型",
+    reasoning: "推理",
+    verification: "验证",
+    source: "来源",
+    supportTier: "支持级别",
+    invocation: "调用方式",
+    tokens: "令牌",
+    cost: "成本",
+    trace: "追踪",
+    authPrerequisites: "认证前提",
+    knownLimitations: "已知限制",
+    variant: "变体",
+    baseAgent: "基础代理",
+    status: "状态",
+    duration: "耗时",
+    judgesPassed: "评判器",
+    filesChanged: "文件",
+    preflight: "预检",
+    run: "运行",
+    attention: "关注",
+    reviewTable: "审查表",
+    reviewFocus: "审查重点",
+    artifacts: "产物",
+    artifactsNote: "使用 `report.html` 进行详细查看，`summary.md` 用于分享文本，`badge.json` 用于 Shields 端点输出。",
+    noWarningsOrFailures: "本次运行没有警告或失败。",
+    riskNote: "此结果是通过提供商切换的 Claude Code 配置生成的。",
+    prompt: "提示词",
+    generatedAt: "生成于",
+    forRun: "运行",
+    comparesModelConfigurations: "此报告比较特定的模型配置，而不仅仅是适配器名称。",
+    baselineRepoHealthNote: "对于基线仓库健康任务，成功仅意味着代理完成了小幅改进而没有破坏基线仓库结构。"
+  }
+};
+
+function getTranslations(locale: Locale = "en"): ReportTranslations {
+  return translations[locale] || translations.en;
+}
 
 interface BadgePayload {
   schemaVersion: 1;
@@ -78,25 +295,29 @@ function normalizePath(value: string): string {
 }
 
 function sanitizePath(value: string, basePath: string, prefix: string): string {
-  const relativePath = normalizePath(path.relative(basePath, value));
-  if (relativePath.length > 0 && !relativePath.startsWith("..")) {
+  const relativePath = normalizePath(portableRelativePath(basePath, value));
+  if (relativePath.length > 0 && !relativePath.startsWith("..") && !/^[a-zA-Z]:/.test(relativePath)) {
     return `${prefix}/${relativePath}`;
   }
 
-  return path.basename(value);
+  return portableBasename(value);
 }
 
 function sanitizeWorkspaceScopedPath(value: string, workspacePath: string, agentId: string): string {
-  const relativePath = normalizePath(path.relative(workspacePath, value));
+  const relativePath = normalizePath(portableRelativePath(workspacePath, value));
   if (relativePath === "") {
     return `workspace/${agentId}`;
   }
 
-  if (!relativePath.startsWith("..")) {
+  if (!relativePath.startsWith("..") && !/^[a-zA-Z]:/.test(relativePath)) {
     return `workspace/${agentId}/${relativePath}`;
   }
 
-  return path.basename(value);
+  if (portableBasename(value) === agentId) {
+    return `workspace/${agentId}`;
+  }
+
+  return portableBasename(value);
 }
 
 function sanitizeRun(run: BenchmarkRun): BenchmarkRun {
@@ -129,7 +350,7 @@ function sanitizeRun(run: BenchmarkRun): BenchmarkRun {
         cwd: sanitizeWorkspaceScopedPath(step.cwd, result.workspacePath, result.agentId)
       })),
       tracePath: sanitizePath(result.tracePath, run.outputPath, "run"),
-      workspacePath: `workspace/${path.basename(result.workspacePath)}`
+      workspacePath: `workspace/${portableBasename(result.workspacePath)}`
     }))
   };
 }

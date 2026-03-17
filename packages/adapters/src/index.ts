@@ -13,6 +13,7 @@ import {
   AgentAdapter,
   ensureDirectory,
   normalizePath,
+  portableRelativePath,
   uniqueSorted
 } from "@repoarena/core";
 import {
@@ -46,6 +47,14 @@ interface ProcessResult {
   stdout: string;
   stderr: string;
   timedOut: boolean;
+  signal?: NodeJS.Signals;
+  error?: string;
+}
+
+interface ProcessError extends Error {
+  code?: string;
+  signal?: NodeJS.Signals;
+  exitCode?: number | null;
 }
 
 interface CodexUsageEvent {
@@ -466,47 +475,114 @@ async function runProcess(
   timeoutMs = agentTimeoutMs(),
   environment?: NodeJS.ProcessEnv
 ): Promise<ProcessResult> {
-  return await new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
-      cwd,
-      env: environment,
-      stdio: ["ignore", "pipe", "pipe"]
-    });
-
+  return await new Promise((resolve) => {
+    let child: ReturnType<typeof spawn> | null = null;
     let stdout = "";
     let stderr = "";
     let timedOut = false;
+    let resolved = false;
+    let signal: NodeJS.Signals | undefined;
+    let processError: string | undefined;
+
+    const cleanup = () => {
+      if (child && !child.killed) {
+        try {
+          child.kill("SIGTERM");
+          // Give process time to terminate gracefully
+          setTimeout(() => {
+            if (child && !child.killed) {
+              child.kill("SIGKILL");
+            }
+          }, 2000);
+        } catch {
+          // Ignore kill errors
+        }
+      }
+    };
+
+    const finish = (result: ProcessResult) => {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timeoutHandle);
+      resolve(result);
+    };
+
     const timeoutHandle = setTimeout(() => {
       timedOut = true;
-      child.kill();
+      cleanup();
+      // Wait a bit for the process to actually terminate
       setTimeout(() => {
-        if (!child.killed) {
-          child.kill("SIGKILL");
-        }
-      }, 5_000);
+        finish({
+          exitCode: null,
+          stdout,
+          stderr: `${stderr}\n${formatTimeoutMessage(timeoutMs)}`.trim(),
+          timedOut: true,
+          signal: "SIGTERM"
+        });
+      }, 1000);
     }, timeoutMs);
 
-    child.stdout.on("data", (chunk: Buffer) => {
+    try {
+      child = spawn(command, args, {
+        cwd,
+        env: environment,
+        stdio: ["ignore", "pipe", "pipe"],
+        shell: process.platform === "win32", // Use shell on Windows for better compatibility
+        windowsHide: true
+      });
+    } catch (error) {
+      clearTimeout(timeoutHandle);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      finish({
+        exitCode: -1,
+        stdout: "",
+        stderr: `Failed to spawn process: ${errorMessage}`,
+        timedOut: false,
+        error: errorMessage
+      });
+      return;
+    }
+
+    child.stdout?.on("data", (chunk: Buffer) => {
       stdout += chunk.toString();
     });
 
-    child.stderr.on("data", (chunk: Buffer) => {
+    child.stderr?.on("data", (chunk: Buffer) => {
       stderr += chunk.toString();
     });
 
-    child.on("error", (error) => {
+    child.on("error", (error: ProcessError) => {
       clearTimeout(timeoutHandle);
-      reject(error);
+      processError = error.message;
+      finish({
+        exitCode: error.exitCode ?? -1,
+        stdout,
+        stderr: `${stderr}\nProcess error: ${error.message}`.trim(),
+        timedOut: false,
+        signal: error.signal,
+        error: error.message
+      });
     });
-    child.on("close", (exitCode) => {
+
+    child.on("close", (exitCode, closeSignal) => {
       clearTimeout(timeoutHandle);
+      signal = closeSignal ?? undefined;
       const timeoutSuffix = timedOut ? `\n${formatTimeoutMessage(timeoutMs)}` : "";
-      resolve({
+      const errorSuffix = processError ? `\nProcess error: ${processError}` : "";
+      finish({
         exitCode,
         stdout,
-        stderr: `${stderr}${timeoutSuffix}`.trim(),
-        timedOut
+        stderr: `${stderr}${timeoutSuffix}${errorSuffix}`.trim(),
+        timedOut,
+        signal
       });
+    });
+
+    // Handle process not responding
+    child.on("disconnect", () => {
+      if (!resolved) {
+        stderr += "\nProcess disconnected unexpectedly.";
+      }
     });
   });
 }
@@ -602,8 +678,8 @@ function parseCodexEvents(stdout: string, workspacePath: string): {
           continue;
         }
 
-        const relativePath = normalizePath(path.relative(workspacePath, change.path));
-        if (!relativePath.startsWith("..")) {
+        const relativePath = normalizePath(portableRelativePath(workspacePath, change.path));
+        if (relativePath && !relativePath.startsWith("..") && !/^[a-zA-Z]:/.test(relativePath)) {
           changedFiles.add(relativePath);
         }
       }
@@ -807,7 +883,18 @@ async function resolveClaudeInvocation(): Promise<InvocationSpec> {
 }
 
 async function probeHelp(invocation: InvocationSpec, cwd: string): Promise<ProcessResult> {
-  return await runProcess(invocation.command, [...invocation.argsPrefix, "--help"], cwd);
+  try {
+    return await runProcess(invocation.command, [...invocation.argsPrefix, "--help"], cwd, 30_000);
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    return {
+      exitCode: -1,
+      stdout: "",
+      stderr: `Failed to probe help: ${errorMessage}`,
+      timedOut: false,
+      error: errorMessage
+    };
+  }
 }
 
 async function probeClaudeLikeAuth(
@@ -820,24 +907,34 @@ async function probeClaudeLikeAuth(
   details?: string[];
 }> {
   const prompt = "Reply with the single word READY and stop.";
-  const execution = await runProcess(
-    invocation.command,
-    [
-      ...invocation.argsPrefix,
-      "-p",
-      "--output-format",
-      "stream-json",
-      "--verbose",
-      "--permission-mode",
-      "bypassPermissions",
-      "--no-session-persistence",
-      prompt
-    ],
-    cwd
-    ,
-    agentTimeoutMs(),
-    environment
-  );
+  let execution: ProcessResult;
+  
+  try {
+    execution = await runProcess(
+      invocation.command,
+      [
+        ...invocation.argsPrefix,
+        "-p",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--permission-mode",
+        "bypassPermissions",
+        "--no-session-persistence",
+        prompt
+      ],
+      cwd,
+      60_000, // Shorter timeout for auth probe
+      environment
+    );
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    return {
+      status: "blocked",
+      summary: "Failed to execute authentication probe.",
+      details: [errorMessage]
+    };
+  }
 
   const parsed = parseClaudeEvents(execution.stdout);
 
@@ -846,6 +943,14 @@ async function probeClaudeLikeAuth(
       status: "blocked",
       summary: "Authenticated probe timed out before the CLI produced a result.",
       details: [execution.stderr.trim()].filter(Boolean)
+    };
+  }
+
+  if (execution.error) {
+    return {
+      status: "blocked",
+      summary: "Process execution failed.",
+      details: [execution.error, execution.stderr.trim()].filter(Boolean)
     };
   }
 
@@ -970,8 +1075,40 @@ class CodexCliAdapter implements AgentAdapter {
       requestedConfig: options?.selection?.config,
       configSource: options?.selection?.configSource
     });
+    
     try {
       const result = await probeHelp(invocation, process.cwd());
+      
+      if (result.timedOut) {
+        return createPreflightResult(
+          options?.selection,
+          this.id,
+          this.title,
+          this.kind,
+          this.capability,
+          "blocked",
+          "CLI help probe timed out.",
+          resolvedRuntime,
+          invocation.displayCommand,
+          [result.stderr.trim()].filter(Boolean)
+        );
+      }
+      
+      if (result.error) {
+        return createPreflightResult(
+          options?.selection,
+          this.id,
+          this.title,
+          this.kind,
+          this.capability,
+          "missing",
+          "CLI could not be launched.",
+          resolvedRuntime,
+          invocation.displayCommand,
+          [result.error]
+        );
+      }
+      
       if (result.exitCode === 0) {
         return createPreflightResult(
           options?.selection,
@@ -985,6 +1122,19 @@ class CodexCliAdapter implements AgentAdapter {
           invocation.displayCommand
         );
       }
+      
+      return createPreflightResult(
+        options?.selection,
+        this.id,
+        this.title,
+        this.kind,
+        this.capability,
+        "unverified",
+        "CLI was found, but readiness could not be fully confirmed.",
+        resolvedRuntime,
+        invocation.displayCommand,
+        [result.stderr.trim()].filter(Boolean)
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       return createPreflightResult(
@@ -1000,18 +1150,6 @@ class CodexCliAdapter implements AgentAdapter {
         [message]
       );
     }
-
-    return createPreflightResult(
-      options?.selection,
-      this.id,
-      this.title,
-      this.kind,
-      this.capability,
-      "unverified",
-      "CLI was found, but readiness could not be fully confirmed.",
-      resolvedRuntime,
-      invocation.displayCommand
-    );
   }
 
   async execute(context: AdapterExecutionContext): Promise<AdapterExecutionResult> {
@@ -1062,23 +1200,50 @@ class CodexCliAdapter implements AgentAdapter {
       }
     });
 
-    const execution = await runProcess(
-      invocation.command,
-      args,
-      context.workspacePath,
-      agentTimeoutMs(),
-      context.environment
-    );
+    let execution: ProcessResult;
+    try {
+      execution = await runProcess(
+        invocation.command,
+        args,
+        context.workspacePath,
+        agentTimeoutMs(),
+        context.environment
+      );
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      await context.trace({
+        type: "adapter.error",
+        message: "Failed to execute Codex CLI",
+        metadata: { error: errorMessage }
+      });
+      return {
+        status: "failed",
+        summary: `Codex CLI execution failed: ${errorMessage}`,
+        tokenUsage: 0,
+        estimatedCostUsd: 0,
+        costKnown: false,
+        changedFilesHint: [],
+        resolvedRuntime
+      };
+    }
+
     const parsed = parseCodexEvents(execution.stdout, context.workspacePath);
     const lastMessage = await fs.readFile(outputLastMessagePath, "utf8").catch(() => "");
-    const summary =
-      lastMessage.trim() ||
-      parsed.summaryFromEvents ||
-      (execution.timedOut
-        ? "Codex CLI timed out before producing a final message."
-        : execution.exitCode === 0
-          ? "Codex CLI completed without a final message."
-          : "Codex CLI failed before producing a final message.");
+    
+    let summary: string;
+    if (execution.error) {
+      summary = `Codex CLI process error: ${execution.error}`;
+    } else if (execution.timedOut) {
+      summary = "Codex CLI timed out before producing a final message.";
+    } else if (lastMessage.trim()) {
+      summary = lastMessage.trim();
+    } else if (parsed.summaryFromEvents) {
+      summary = parsed.summaryFromEvents;
+    } else if (execution.exitCode === 0) {
+      summary = "Codex CLI completed without a final message.";
+    } else {
+      summary = `Codex CLI failed with exit code ${execution.exitCode}.`;
+    }
 
     await context.trace({
       type: "adapter.codex.result",
@@ -1086,6 +1251,8 @@ class CodexCliAdapter implements AgentAdapter {
       metadata: {
         exitCode: execution.exitCode,
         timedOut: execution.timedOut,
+        signal: execution.signal,
+        error: execution.error,
         threadId: parsed.threadId,
         tokenUsage: parsed.tokenUsage,
         changedFilesHint: parsed.changedFilesHint,
@@ -1095,7 +1262,7 @@ class CodexCliAdapter implements AgentAdapter {
     });
 
     return {
-      status: execution.exitCode === 0 ? "success" : "failed",
+      status: execution.exitCode === 0 && !execution.error ? "success" : "failed",
       summary,
       tokenUsage: parsed.tokenUsage,
       estimatedCostUsd: 0,
@@ -1222,24 +1389,50 @@ abstract class ClaudeLikeAdapter implements AgentAdapter {
       }
     });
 
-    const execution = await runProcess(
-      invocation.command,
-      args,
-      context.workspacePath,
-      agentTimeoutMs(),
-      {
-        ...context.environment,
-        ...options?.extraEnvironment
-      }
-    );
+    let execution: ProcessResult;
+    try {
+      execution = await runProcess(
+        invocation.command,
+        args,
+        context.workspacePath,
+        agentTimeoutMs(),
+        {
+          ...context.environment,
+          ...options?.extraEnvironment
+        }
+      );
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      await context.trace({
+        type: "adapter.error",
+        message: `Failed to execute ${this.title}`,
+        metadata: { error: errorMessage }
+      });
+      return {
+        status: "failed",
+        summary: `${this.title} execution failed: ${errorMessage}`,
+        tokenUsage: 0,
+        estimatedCostUsd: 0,
+        costKnown: false,
+        changedFilesHint: [],
+        resolvedRuntime: options?.resolvedRuntime
+      };
+    }
+
     const parsed = parseClaudeEvents(execution.stdout);
-    const summary =
-      parsed.summaryFromEvents ||
-      (execution.timedOut
-        ? `${this.title} timed out before producing a final message.`
-        : execution.exitCode === 0
-          ? `${this.title} completed without a final message.`
-          : `${this.title} failed before producing a final message.`);
+    
+    let summary: string;
+    if (execution.error) {
+      summary = `${this.title} process error: ${execution.error}`;
+    } else if (execution.timedOut) {
+      summary = `${this.title} timed out before producing a final message.`;
+    } else if (parsed.summaryFromEvents) {
+      summary = parsed.summaryFromEvents;
+    } else if (execution.exitCode === 0) {
+      summary = `${this.title} completed without a final message.`;
+    } else {
+      summary = `${this.title} failed with exit code ${execution.exitCode}.`;
+    }
 
     await context.trace({
       type: eventType,
@@ -1247,18 +1440,20 @@ abstract class ClaudeLikeAdapter implements AgentAdapter {
       metadata: {
         exitCode: execution.exitCode,
         timedOut: execution.timedOut,
+        signal: execution.signal,
+        error: execution.error,
         sessionId: parsed.sessionId,
         tokenUsage: parsed.tokenUsage,
         estimatedCostUsd: parsed.estimatedCostUsd,
         costKnown: parsed.costKnown,
         resolvedRuntime: options?.resolvedRuntime,
-        error: parsed.error,
+        parsedError: parsed.error,
         stderr: execution.stderr.trim()
       }
     });
 
     return {
-      status: execution.exitCode === 0 ? "success" : "failed",
+      status: execution.exitCode === 0 && !execution.error ? "success" : "failed",
       summary,
       tokenUsage: parsed.tokenUsage,
       estimatedCostUsd: parsed.estimatedCostUsd,
