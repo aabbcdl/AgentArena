@@ -1,0 +1,75 @@
+schemaVersion: repoarena.taskpack/v1
+id: official-multi-file-rename
+title: Official Multi-File Rename
+description: Rename a symbol consistently across all files in the repository.
+metadata:
+  source: official
+  owner: RepoArena
+  difficulty: hard
+  objective: Test agent's ability to coordinate changes across multiple files.
+  repoTypes:
+    - node
+    - typescript
+    - generic
+  tags:
+    - refactor
+    - multi-file
+    - coordination
+  dependencies: []
+  judgeRationale: Comprehensive checks verify all occurrences were updated correctly.
+  differentiator: This is where agents differ most - weak agents miss imports, comments, or break references.
+prompt: |
+  ## Task | 任务
+  
+  Rename the symbol `getUserData` to `fetchUserProfile` throughout the entire codebase.
+  
+  Your rename must:
+  1. Update ALL occurrences of the function name
+  2. Update all import statements that reference it
+  3. Update all exports
+  4. Update JSDoc/comments that mention the old name
+  5. Update any string references (error messages, log statements)
+  
+  ## Files to Check | 需要检查的文件类型
+  
+  - `*.ts` - TypeScript source files
+  - `*.js` - JavaScript files
+  - `*.mjs` - ES Module files
+  - `*.test.ts` - Test files
+  - `*.md` - Documentation (comments/references)
+  
+  ## Verification | 验证步骤
+  
+  After your changes:
+  1. Run `grep -r "getUserData" .` to verify no old name remains
+  2. Ensure all files compile without errors
+  3. Run tests to verify nothing is broken
+  
+  ## Common Mistakes to Avoid | 常见错误
+  
+  - Forgetting to update imports in other files
+  - Missing test file references
+  - Breaking relative import paths
+  - Not updating export statements
+  - Leaving old name in comments
+judges:
+  - id: no-old-name-remains
+    type: command
+    label: No old symbol name remains
+    command: grep -r "getUserData" --include="*.ts" --include="*.js" --include="*.mjs" . || echo "Clean"
+    timeoutMs: 10000
+  - id: new-name-present
+    type: command
+    label: New symbol name exists
+    command: grep -r "fetchUserProfile" --include="*.ts" --include="*.js" . | head -1
+    timeoutMs: 10000
+  - id: typescript-compiles
+    type: command
+    label: TypeScript compiles without errors
+    command: npx tsc --noEmit 2>&1 || echo "No TypeScript or compile errors"
+    timeoutMs: 60000
+  - id: tests-pass
+    type: command
+    label: All tests still pass
+    command: pnpm test -- --runInBand 2>&1 || echo "Tests pass or no tests"
+    timeoutMs: 120000

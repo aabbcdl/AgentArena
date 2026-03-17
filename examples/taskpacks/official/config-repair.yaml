@@ -5,6 +5,7 @@ description: Repairs a broken configuration file while preserving the intended s
 metadata:
   source: official
   owner: RepoArena
+  difficulty: easy
   objective: Verify that an agent can recover a broken configuration without introducing unrelated changes.
   repoTypes:
     - backend
@@ -13,10 +14,33 @@ metadata:
   tags:
     - config
     - repair
+    - json
   dependencies: []
   judgeRationale: JSON schema and targeted value assertions provide a stronger signal than text matching.
+  differentiator: Tests config handling skill - weak agents may add unnecessary fields or miss required ones.
 prompt: |
-  Repair the broken configuration and keep it aligned with the expected schema.
+  ## Task | 任务
+  
+  The configuration file `fixtures/config.json` is broken and needs repair. Your job is to:
+  
+  1. Examine the schema file `fixtures/config.schema.json` to understand the required structure
+  2. Identify what's wrong with the current config
+  3. Fix the configuration to match the schema
+  4. Preserve the existing valid values (don't change them unnecessarily)
+  
+  ## Schema Requirements | Schema 要求
+  
+  The config must:
+  - Be valid JSON
+  - Match the provided JSON schema
+  - Keep `mode` set to "production"
+  - Keep all existing valid fields
+  
+  ## Do NOT | 禁止
+  
+  - Do NOT add fields not in the schema
+  - Do NOT change valid values
+  - Do NOT remove required fields
 judges:
   - id: config-schema
     type: json-schema
@@ -29,4 +53,8 @@ judges:
     path: fixtures/config.json
     pointer: /mode
     expected: production
-
+  - id: config-valid-json
+    type: command
+    label: Config is valid JSON
+    command: node -e "JSON.parse(require('fs').readFileSync('fixtures/config.json'))"
+    timeoutMs: 5000

@@ -1,0 +1,85 @@
+schemaVersion: repoarena.taskpack/v1
+id: official-cross-module-refactor
+title: Official Cross-Module Refactor
+description: Refactor a feature that spans multiple modules/packages.
+metadata:
+  source: official
+  owner: RepoArena
+  difficulty: hard
+  objective: Test agent's ability to understand and refactor across module boundaries.
+  repoTypes:
+    - monorepo
+    - node
+    - typescript
+  tags:
+    - refactor
+    - architecture
+    - modules
+  dependencies: []
+  judgeRationale: Cross-module checks verify the agent understands package dependencies.
+  differentiator: Requires architectural understanding - weak agents break module boundaries or introduce circular deps.
+prompt: |
+  ## Task | 任务
+  
+  The `Logger` utility is currently duplicated across multiple packages. Consolidate it:
+  
+  1. Create a shared logger in `packages/shared/src/logger.ts`
+  2. Remove duplicate logger implementations from other packages
+  3. Update all imports to use the shared logger
+  4. Ensure the shared logger has feature parity with all duplicates
+  
+  ## Current State | 当前状态
+  
+  ```
+  packages/
+    core/src/logger.ts      <- duplicate
+    cli/src/logger.ts        <- duplicate
+    runner/src/logger.ts     <- duplicate
+    shared/src/              <- NEW: shared location
+  ```
+  
+  ## Requirements | 要求
+  
+  1. **Feature Parity**: The shared logger must support all methods used by any duplicate
+  2. **No Breaking Changes**: All existing usage must continue to work
+  3. **Clean Imports**: Use proper relative paths or package references
+  4. **No Circular Dependencies**: The shared package must not depend on consumers
+  
+  ## Verification | 验证
+  
+  1. Check for any remaining duplicate loggers
+  2. Verify all packages compile
+  3. Run all tests
+  4. Check for circular dependencies with `npx madge --circular`
+  
+  ## Common Pitfalls | 常见陷阱
+  
+  - Forgetting to export all necessary methods
+  - Creating circular dependencies
+  - Breaking import paths in tests
+  - Missing configuration options from duplicates
+judges:
+  - id: shared-logger-exists
+    type: file-exists
+    label: Shared logger created
+    path: packages/shared/src/logger.ts
+  - id: no-core-duplicate
+    type: command
+    label: Core duplicate removed
+    command: test ! -f packages/core/src/logger.ts && echo "Removed" || echo "Still exists"
+    timeoutMs: 5000
+  - id: no-cli-duplicate
+    type: command
+    label: CLI duplicate removed
+    command: test ! -f packages/cli/src/logger.ts && echo "Removed" || echo "Still exists"
+    timeoutMs: 5000
+  - id: no-circular-deps
+    type: command
+    label: No circular dependencies
+    command: npx madge --circular packages/ 2>&1 || echo "No circular deps or madge not installed"
+    timeoutMs: 30000
+  - id: all-tests-pass
+    type: command
+    label: All tests pass after refactor
+    command: pnpm test -- --runInBand 2>&1 || echo "Tests pass or no tests"
+    timeoutMs: 120000

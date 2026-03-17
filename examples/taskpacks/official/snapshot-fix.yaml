@@ -5,6 +5,7 @@ description: Brings generated output back in sync with a stored snapshot.
 metadata:
   source: official
   owner: RepoArena
+  difficulty: easy
   objective: Evaluate whether an agent can repair snapshot regressions with minimal collateral changes.
   repoTypes:
     - frontend
@@ -13,15 +14,42 @@ metadata:
   tags:
     - snapshot
     - regression
+    - testing
   dependencies:
     - node
   judgeRationale: Snapshot comparison is the clearest correctness signal when output must match a stored fixture.
+  differentiator: Tests precision - weak agents may fix snapshot but break other functionality or over-modify.
 prompt: |
-  Update the implementation so generated output matches the stored snapshot fixture.
+  ## Task | 任务
+  
+  The generated output in `fixtures/actual.txt` doesn't match the expected snapshot. Your job is to:
+  
+  1. Compare `fixtures/actual.txt` with `fixtures/expected.txt`
+  2. Identify what's different
+  3. Fix the code that generates `fixtures/actual.txt` so output matches
+  4. Do NOT just copy expected.txt over actual.txt - fix the source!
+  
+  ## Important | 重要
+  
+  - The snapshot is the source of truth
+  - Output must match EXACTLY (including whitespace, newlines)
+  - Fix the generator, not the output file directly
+  - Minimal changes to achieve match
+  
+  ## Process | 流程
+  
+  1. Run the generator if it exists: `node scripts/generate.mjs`
+  2. Compare: `diff fixtures/actual.txt fixtures/expected.txt`
+  3. Find and fix the bug in the generator
+  4. Re-run and verify match
 judges:
   - id: snapshot-check
     type: snapshot
     label: Output matches snapshot
     path: fixtures/actual.txt
     snapshotPath: fixtures/expected.txt
-
+  - id: generator-works
+    type: command
+    label: Generator runs without error
+    command: node scripts/generate.mjs 2>&1 || echo "No generator script"
+    timeoutMs: 30000

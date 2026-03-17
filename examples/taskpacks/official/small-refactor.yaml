@@ -5,6 +5,7 @@ description: Performs a low-risk refactor while keeping core repository structur
 metadata:
   source: official
   owner: RepoArena
+  difficulty: medium
   objective: Measure whether an agent can apply a constrained refactor without destabilizing the codebase.
   repoTypes:
     - generic
@@ -14,8 +15,31 @@ metadata:
     - maintainability
   dependencies: []
   judgeRationale: File-presence, source-tree, and manifest checks help detect accidental damage during small refactors.
+  differentiator: Tests refactoring discipline - weak agents may break behavior or introduce bugs during refactoring.
 prompt: |
-  Make a small maintainability-focused refactor with minimal behavioral risk.
+  ## Task | 任务
+  
+  Perform a small maintainability-focused refactor. Choose ONE of the following:
+  
+  1. **Extract a repeated code pattern** into a reusable function
+  2. **Rename unclear variable/function names** to more descriptive ones
+  3. **Simplify a complex conditional** logic
+  4. **Add missing type annotations** (if TypeScript)
+  
+  ## Requirements | 要求
+  
+  - The refactor must NOT change any external behavior
+  - All existing tests must still pass (if any)
+  - The refactor should improve code readability or maintainability
+  - Do NOT add new features
+  - Do NOT delete existing functionality
+  
+  ## Verification | 验证
+  
+  Before submitting, verify:
+  - Code still compiles/runs
+  - Tests still pass (if any)
+  - No new lint errors introduced
 judges:
   - id: source-tree-present
     type: glob
@@ -26,4 +50,8 @@ judges:
     type: file-exists
     label: README still exists
     path: README.md
-
+  - id: no-package-changes
+    type: command
+    label: package.json dependencies unchanged
+    command: git diff package.json | grep -E "^[+-].*dependencies" || echo "No dependency changes"
+    timeoutMs: 10000

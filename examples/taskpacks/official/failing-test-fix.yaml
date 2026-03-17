@@ -5,6 +5,7 @@ description: Repairs a failing test while preserving the surrounding test suite.
 metadata:
   source: official
   owner: RepoArena
+  difficulty: medium
   objective: Measure whether an agent can isolate and repair a failing test case.
   repoTypes:
     - node
@@ -12,19 +13,46 @@ metadata:
   tags:
     - tests
     - bugfix
+    - debugging
   dependencies:
     - node
   judgeRationale: Test commands and targeted fixture checks validate the actual bugfix path.
+  differentiator: Tests debugging skill - weak agents may "fix" tests by making them pass incorrectly, or break other tests.
 prompt: |
-  Fix the failing test and keep the rest of the repository behavior intact.
+  ## Task | 任务
+  
+  There is a failing test in this repository. Your job is to:
+  
+  1. Run the test suite to identify the failing test
+  2. Analyze the test failure to understand the root cause
+  3. Fix the underlying bug in the implementation (NOT the test)
+  4. Ensure ALL tests pass after your fix
+  
+  ## Important | 重要
+  
+  - Do NOT modify the test file itself - fix the implementation
+  - Do NOT skip or disable the failing test
+  - Do NOT make changes that could break other passing tests
+  - The fix should be minimal and targeted
+  
+  ## Process | 流程
+  
+  1. Run `pnpm test` to see the failure
+  2. Read the test code to understand expected behavior
+  3. Find and fix the bug in the source code
+  4. Run tests again to verify all pass
 judges:
-  - id: test-command
+  - id: all-tests-pass
     type: command
-    label: Target test command passes
+    label: All tests pass
     command: pnpm test -- --runInBand
     timeoutMs: 120000
   - id: package-manifest-exists
     type: file-exists
     label: Package manifest still exists
     path: package.json
-
+  - id: test-file-unchanged
+    type: command
+    label: Test file was not modified
+    command: git diff --name-only | grep -v "\.test\." || true
+    timeoutMs: 10000

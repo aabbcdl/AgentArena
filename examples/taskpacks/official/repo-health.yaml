@@ -5,6 +5,7 @@ description: Validates baseline repository health after a minimal improvement ta
 metadata:
   source: official
   owner: RepoArena
+  difficulty: easy
   objective: Check that an agent can make a small useful change without damaging repository structure.
   repoTypes:
     - generic
@@ -14,8 +15,29 @@ metadata:
     - maintenance
   dependencies: []
   judgeRationale: Basic file and manifest checks catch the most common accidental breakages.
+  differentiator: Baseline test - all competent agents should pass. Failure indicates basic capability issues.
 prompt: |
-  Inspect the repository, make one small useful improvement, and preserve baseline project structure.
+  ## Task | 任务
+  
+  Inspect the repository and make ONE small useful improvement. Your improvement should:
+  
+  1. Be genuinely useful (not just adding comments or whitespace)
+  2. Not break any existing functionality
+  3. Not remove any existing files
+  4. Follow the project's existing code style
+  
+  Examples of useful improvements:
+  - Add a missing error handler
+  - Fix a typo in documentation
+  - Add a helpful utility function
+  - Improve a confusing variable name
+  
+  ## Constraints | 约束
+  
+  - Do NOT delete any existing files
+  - Do NOT modify package.json dependencies
+  - Do NOT add new dependencies
+  - Preserve all existing file structure
 judges:
   - id: readme-exists
     type: file-exists
@@ -25,4 +47,8 @@ judges:
     type: file-exists
     label: Package manifest exists
     path: package.json
-
+  - id: src-files-preserved
+    type: glob
+    label: Source files still exist
+    pattern: "**/*.{js,ts,mjs}"
+    minMatches: 1

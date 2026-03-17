@@ -5,6 +5,7 @@ description: Repairs a JSON API contract using schema and value assertions.
 metadata:
   source: official
   owner: RepoArena
+  difficulty: medium
   objective: Validate an agent's ability to repair structured JSON output under explicit contract checks.
   repoTypes:
     - api
@@ -16,8 +17,29 @@ metadata:
     - contract
   dependencies: []
   judgeRationale: Combined schema and pointer checks capture both payload shape and business-critical values.
+  differentiator: Tests API contract understanding - weak agents may satisfy schema but miss business rules.
 prompt: |
-  Update the implementation so the JSON payload matches the required contract and expected values.
+  ## Task | 任务
+  
+  The API response in `fixtures/response.json` violates its contract. Fix it:
+  
+  1. Read the schema at `fixtures/response.schema.json`
+  2. Read the expected values specification
+  3. Modify `fixtures/response.json` to satisfy BOTH:
+     - The JSON schema (structure)
+     - The expected values (business rules)
+  
+  ## Contract Requirements | 契约要求
+  
+  The response must:
+  - Match the JSON schema exactly
+  - Have `status` field set to "ready"
+  - Preserve all valid existing data
+  - Not contain extra undocumented fields
+  
+  ## Context | 上下文
+  
+  This is an API response that clients depend on. Breaking the contract will cause integration failures.
 judges:
   - id: payload-schema
     type: json-schema
@@ -30,3 +52,8 @@ judges:
     path: fixtures/response.json
     pointer: /status
     expected: ready
+  - id: payload-valid
+    type: command
+    label: Response is valid JSON
+    command: node -e "const r = require('./fixtures/response.json'); console.log('Valid JSON')"
+    timeoutMs: 5000

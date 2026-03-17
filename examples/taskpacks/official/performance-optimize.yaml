@@ -1,0 +1,85 @@
+schemaVersion: repoarena.taskpack/v1
+id: official-performance-optimize
+title: Official Performance Optimize
+description: Identify and fix performance bottlenecks in the codebase.
+metadata:
+  source: official
+  owner: RepoArena
+  difficulty: hard
+  objective: Test agent's ability to identify and fix performance issues without breaking functionality.
+  repoTypes:
+    - node
+    - backend
+    - typescript
+  tags:
+    - performance
+    - optimization
+    - algorithms
+  dependencies:
+    - node
+  judgeRationale: Performance metrics combined with correctness checks verify true optimization.
+  differentiator: Requires performance analysis skills - weak agents may optimize wrong areas or break edge cases.
+prompt: |
+  ## Task | 任务
+  
+  The codebase has performance issues. Identify and fix the bottleneck(s):
+  
+  1. Profile or analyze the code to find slow operations
+  2. Identify the root cause(s) of performance problems
+  3. Apply targeted optimizations
+  4. Verify functionality is preserved (all tests pass)
+  
+  ## Common Performance Issues to Look For | 常见性能问题
+  
+  - O(n²) or worse algorithms in loops
+  - Repeated expensive operations (cache misses)
+  - Unnecessary synchronous operations
+  - Inefficient data structure usage
+  - Memory leaks or excessive allocations
+  - Repeated regex compilation
+  - Blocking I/O in hot paths
+  
+  ## Constraints | 约束
+  
+  - All existing tests must still pass
+  - The API/behavior must remain the same
+  - Do not use unsafe optimizations (shared state, mutation)
+  - Document your changes with comments
+  
+  ## Verification | 验证
+  
+  Before and after your changes, measure:
+  ```bash
+  # If there's a benchmark
+  pnpm benchmark
+  
+  # Or time the operation
+  time node scripts/perf-test.mjs
+  ```
+  
+  ## Success Criteria | 成功标准
+  
+  - At least 20% improvement in execution time
+  - All tests pass
+  - No new bugs introduced
+judges:
+  - id: tests-still-pass
+    type: command
+    label: All tests pass after optimization
+    command: pnpm test -- --runInBand 2>&1 || echo "Tests pass"
+    timeoutMs: 120000
+  - id: no-unsafe-patterns
+    type: command
+    label: No unsafe optimization patterns
+    command: grep -r "any\|@ts-ignore\|eval\|Function(" --include="*.ts" packages/*/src/*.ts | grep -v ".d.ts" || echo "Clean"
+    timeoutMs: 10000
+  - id: performance-improved
+    type: command
+    label: Performance benchmark shows improvement
+    command: pnpm benchmark 2>&1 || echo "No benchmark - check manually"
+    timeoutMs: 60000
+  - id: source-files-preserved
+    type: glob
+    label: Source files still exist
+    pattern: packages/**/src/*.ts
+    minMatches: 1
