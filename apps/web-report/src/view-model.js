@@ -347,3 +347,134 @@ export function getAgentTrendRows(runs, currentRun, agentId) {
 
   return rows;
 }
+
+/**
+ * 跨运行对比：聚合多个 run 的结果，按 agent 聚合
+ * 用于对比同一 agent 在不同配置/模型下的表现
+ */
+export function getCrossRunCompareRows(selectedRuns) {
+  if (!selectedRuns || selectedRuns.length === 0) {
+    return { runs: [], agents: [], rows: [] };
+  }
+
+  // 收集所有 run 的所有 agent variant
+  const agentMap = new Map(); // key: variantId, value: array of {run, result}
+  
+  for (const run of selectedRuns) {
+    for (const result of run.results) {
+      const key = resultKey(result);
+      if (!agentMap.has(key)) {
+        agentMap.set(key, []);
+      }
+      agentMap.get(key).push({
+        run,
+        result,
+        runtime: runtimeIdentity(result)
+      });
+    }
+  }
+
+  // 为每个 agent 生成跨运行对比数据
+  const rows = [];
+  for (const [agentId, entries] of agentMap) {
+    if (entries.length === 0) continue;
+
+    const firstEntry = entries[0];
+    const stats = {
+      totalRuns: entries.length,
+      successCount: entries.filter(e => e.result.status === "success").length,
+      totalDurationMs: entries.reduce((sum, e) => sum + e.result.durationMs, 0),
+      totalTokens: entries.reduce((sum, e) => sum + e.result.tokenUsage, 0),
+      totalCost: entries.filter(e => e.result.costKnown).reduce((sum, e) => sum + e.result.estimatedCostUsd, 0),
+      costKnownCount: entries.filter(e => e.result.costKnown).length,
+      totalJudgePasses: entries.reduce((sum, e) => sum + passedJudgeCount(e.result), 0),
+      totalJudges: entries.reduce((sum, e) => sum + e.result.judgeResults.length, 0)
+    };
+
+    // 按不同维度聚合的运行详情
+    const byModel = new Map();
+    const byProvider = new Map();
+    
+    for (const entry of entries) {
+      const modelKey = entry.runtime.model || "unknown";
+      const providerKey = entry.runtime.provider || "unknown";
+      
+      if (!byModel.has(modelKey)) byModel.set(modelKey, []);
+      byModel.get(modelKey).push(entry);
+      
+      if (!byProvider.has(providerKey)) byProvider.set(providerKey, []);
+      byProvider.get(providerKey).push(entry);
+    }
+
+    rows.push({
+      agentId,
+      displayLabel: resultLabel(firstEntry.result),
+      baseAgent: baseAgentLabel(firstEntry.result),
+      stats,
+      entries,
+      byModel: Object.fromEntries(byModel),
+      byProvider: Object.fromEntries(byProvider),
+      bestRuntime: entries.reduce((best, e) => {
+        if (e.result.status !== "success") return best;
+        if (!best || e.result.durationMs < best.durationMs) {
+          return { run: e.run, result: e.result, runtime: e.runtime };
+        }
+        return best;
+      }, null)
+    });
+  }
+
+  // 按成功率降序，然后按耗时升序排序
+  rows.sort((a, b) => {
+    const successDelta = b.stats.successCount - a.stats.successCount;
+    if (successDelta !== 0) return successDelta;
+    return a.stats.totalDurationMs - b.stats.totalDurationMs;
+  });
+
+  return {
+    runs: selectedRuns,
+    agents: Array.from(agentMap.keys()),
+    rows
+  };
+}
+
+/**
+ * 获取跨运行对比的最佳配置推荐
+ */
+export function getCrossRunRecommendation(crossRunData) {
+  if (!crossRunData || crossRunData.rows.length === 0) {
+    return null;
+  }
+
+  // 找出成功率最高且平均耗时最低的配置
+  const candidates = crossRunData.rows
+    .filter(row => row.stats.successCount > 0)
+    .map(row => ({
+      agentId: row.agentId,
+      displayLabel: row.displayLabel,
+      successRate: row.stats.successCount / row.stats.totalRuns,
+      avgDurationMs: row.stats.totalDurationMs / row.stats.totalRuns,
+      avgTokens: row.stats.totalTokens / row.stats.totalRuns,
+      avgCost: row.stats.costKnownCount > 0 
+        ? row.stats.totalCost / row.stats.costKnownCount 
+        : null,
+      bestRuntime: row.bestRuntime
+    }));
+
+  if (candidates.length === 0) return null;
+
+  // 综合评分：成功率权重 60%，耗时权重 30%，成本权重 10%
+  const maxSuccessRate = Math.max(...candidates.map(c => c.successRate));
+  const minDuration = Math.min(...candidates.filter(c => c.avgDurationMs > 0).map(c => c.avgDurationMs));
+  const minCost = Math.min(...candidates.filter(c => c.avgCost !== null).map(c => c.avgCost));
+
+  for (const c of candidates) {
+    const successScore = c.successRate / maxSuccessRate;
+    const durationScore = minDuration > 0 ? minDuration / c.avgDurationMs : 0;
+    const costScore = c.avgCost !== null && minCost > 0 ? minCost / c.avgCost : 0;
+    c.score = successScore * 0.6 + durationScore * 0.3 + costScore * 0.1;
+  }
+
+  candidates.sort((a, b) => b.score - a.score);
+  return candidates[0];
+}

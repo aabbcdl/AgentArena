@@ -31,7 +31,10 @@ const state = {
   launcherCodexVariants: [],
   launcherClaudeVariants: [],
   launcherProviderEditor: null,
-  launcherExpanded: true
+  launcherExpanded: true,
+  crossRunSelectMode: false,
+  crossRunSelectedIds: new Set(),
+  crossRunCompareData: null
 };
 
 const elements = {
@@ -102,7 +105,20 @@ const elements = {
   downloadShareSvg: document.querySelector("#download-share-svg"),
   clipboardStatus: document.querySelector("#clipboard-status"),
   expandAll: document.querySelector("#expand-all"),
-  collapseAll: document.querySelector("#collapse-all")
+  collapseAll: document.querySelector("#collapse-all"),
+  crossRunCompareSection: document.querySelector("#cross-run-compare-section"),
+  crossRunCompareTitle: document.querySelector("#cross-run-compare-title"),
+  crossRunDescription: document.querySelector("#cross-run-description"),
+  crossRunToggleSelect: document.querySelector("#cross-run-toggle-select"),
+  crossRunSelectionPanel: document.querySelector("#cross-run-selection-panel"),
+  crossRunSearch: document.querySelector("#cross-run-search"),
+  crossRunSelectionList: document.querySelector("#cross-run-selection-list"),
+  crossRunCompareBtn: document.querySelector("#cross-run-compare-btn"),
+  crossRunClearBtn: document.querySelector("#cross-run-clear-btn"),
+  crossRunCompareView: document.querySelector("#cross-run-compare-view"),
+  crossRunCompareSummary: document.querySelector("#cross-run-compare-summary"),
+  crossRunCloseCompare: document.querySelector("#cross-run-close-compare"),
+  crossRunCompareTable: document.querySelector("#cross-run-compare-table")
 };
 
 const MESSAGES = {
@@ -228,7 +244,23 @@ const MESSAGES = {
       report: "Writing report"
     },
     launcherMode: "Local service",
-    taskPackCustom: "Custom path"
+    taskPackCustom: "Custom path",
+    crossRunCompareTitle: "Cross-Run Compare",
+    crossRunDescription: "Select multiple runs to compare agent performance across different model configurations.",
+    crossRunToggleSelect: "Select Runs to Compare",
+    crossRunSearchPlaceholder: "Search by task or run ID",
+    crossRunCompareBtn: "Compare Selected",
+    crossRunClearBtn: "Clear Selection",
+    crossRunCloseCompare: "Close Compare",
+    crossRunSelectHint: "Select 2-10 runs to compare",
+    crossRunNoRuns: "No runs available for comparison",
+    crossRunEmptySelection: "Select at least 2 runs to compare",
+    crossRunBestConfig: "Best Configuration",
+    crossRunAvgDuration: "Avg Duration",
+    crossRunAvgTokens: "Avg Tokens",
+    crossRunAvgCost: "Avg Cost",
+    crossRunSuccessRate: "Success Rate",
+    crossRunRuns: "Runs"
   },
   "zh-CN": {
     appTitle: "交互报告",
@@ -351,7 +383,23 @@ const MESSAGES = {
       report: "写入报告"
     },
     launcherMode: "本地服务",
-    taskPackCustom: "自定义路径"
+    taskPackCustom: "自定义路径",
+    crossRunCompareTitle: "跨运行对比",
+    crossRunDescription: "选择多个运行来对比不同模型配置下的 Agent 表现",
+    crossRunToggleSelect: "选择运行进行对比",
+    crossRunSearchPlaceholder: "按任务名或运行 ID 搜索",
+    crossRunCompareBtn: "对比选中的运行",
+    crossRunClearBtn: "清空选择",
+    crossRunCloseCompare: "关闭对比",
+    crossRunSelectHint: "选择 2-10 个运行进行对比",
+    crossRunNoRuns: "没有可用于对比的运行",
+    crossRunEmptySelection: "至少选择 2 个运行进行对比",
+    crossRunBestConfig: "最佳配置",
+    crossRunAvgDuration: "平均耗时",
+    crossRunAvgTokens: "平均 Tokens",
+    crossRunAvgCost: "平均成本",
+    crossRunSuccessRate: "成功率",
+    crossRunRuns: "运行数"
   }
 };const judgeFilters = {
   search: "",
@@ -2642,6 +2690,193 @@ try {
   state.language = localStorage.getItem("repoarena.webReport.language") || "zh-CN";
 } catch {
   state.language = "zh-CN";
+}
+
+// 跨运行对比功能
+elements.crossRunToggleSelect.addEventListener("click", () => {
+  state.crossRunSelectMode = !state.crossRunSelectMode;
+  if (!state.crossRunSelectMode) {
+    state.crossRunSelectedIds.clear();
+    state.crossRunCompareData = null;
+  }
+  renderCrossRunCompare();
+});
+
+elements.crossRunSearch.addEventListener("input", () => {
+  renderCrossRunSelectionList();
+});
+
+elements.crossRunSelectionList.addEventListener("click", (event) => {
+  const checkbox = event.target.closest('input[type="checkbox"]');
+  if (!checkbox) return;
+  
+  const runId = checkbox.getAttribute("data-run-id");
+  if (!runId) return;
+  
+  if (checkbox.checked) {
+    state.crossRunSelectedIds.add(runId);
+  } else {
+    state.crossRunSelectedIds.delete(runId);
+  }
+  elements.crossRunCompareBtn.disabled = state.crossRunSelectedIds.size < 2;
+  renderCrossRunSelectionList();
+});
+
+elements.crossRunCompareBtn.addEventListener("click", () => {
+  const selectedRuns = state.runs.filter(run => state.crossRunSelectedIds.has(run.runId));
+  if (selectedRuns.length < 2) return;
+  
+  state.crossRunCompareData = getCrossRunCompareRows(selectedRuns);
+  state.crossRunSelectMode = false;
+  renderCrossRunCompare();
+});
+
+elements.crossRunClearBtn.addEventListener("click", () => {
+  state.crossRunSelectedIds.clear();
+  state.crossRunCompareData = null;
+  elements.crossRunCompareBtn.disabled = true;
+  renderCrossRunSelectionList();
+  renderCrossRunCompare();
+});
+
+elements.crossRunCloseCompare.addEventListener("click", () => {
+  state.crossRunCompareData = null;
+  state.crossRunSelectedIds.clear();
+  renderCrossRunCompare();
+});
+
+function renderCrossRunCompare() {
+  if (state.runs.length < 2) {
+    setHidden(elements.crossRunCompareSection, true);
+    return;
+  }
+
+  setHidden(elements.crossRunCompareSection, false);
+  elements.crossRunCompareTitle.textContent = t("crossRunCompareTitle");
+  elements.crossRunDescription.textContent = t("crossRunDescription");
+  elements.crossRunCompareBtn.textContent = t("crossRunCompareBtn");
+  elements.crossRunClearBtn.textContent = t("crossRunClearBtn");
+  elements.crossRunCloseCompare.textContent = t("crossRunCloseCompare");
+  elements.crossRunSearch.placeholder = t("crossRunSearchPlaceholder");
+
+  const isSelectedMode = state.crossRunSelectMode;
+  elements.crossRunToggleSelect.textContent = isSelectedMode 
+    ? localText("取消选择", "Cancel Selection") 
+    : t("crossRunToggleSelect");
+  setHidden(elements.crossRunSelectionPanel, !isSelectedMode);
+  setHidden(elements.crossRunCompareView, !state.crossRunCompareData);
+
+  if (isSelectedMode) {
+    renderCrossRunSelectionList();
+    elements.crossRunCompareBtn.disabled = state.crossRunSelectedIds.size < 2;
+  }
+
+  if (state.crossRunCompareData) {
+    renderCrossRunCompareTable();
+  }
+}
+
+function renderCrossRunSelectionList() {
+  const searchTerm = (elements.crossRunSearch?.value || "").toLowerCase();
+  const filteredRuns = state.runs.filter(run => 
+    !searchTerm || 
+    run.task.title.toLowerCase().includes(searchTerm) ||
+    run.runId.toLowerCase().includes(searchTerm)
+  );
+
+  if (filteredRuns.length === 0) {
+    elements.crossRunSelectionList.innerHTML = `<p class="empty-state">${escapeHtml(t("crossRunNoRuns"))}</p>`;
+    return;
+  }
+
+  elements.crossRunSelectionList.innerHTML = filteredRuns.map(run => {
+    const summary = summarizeRun(run);
+    const isSelected = state.crossRunSelectedIds.has(run.runId);
+    const runtime = run.results[0] ? runtimeIdentity(run.results[0]) : {};
+    
+    return `
+      <label class="cross-run-item ${isSelected ? "selected" : ""}">
+        <input type="checkbox" data-run-id="${escapeHtml(run.runId)}" ${isSelected ? "checked" : ""} />
+        <div class="cross-run-item-content">
+          <strong>${escapeHtml(run.task.title)}</strong>
+          <p class="muted">
+            ${escapeHtml(run.runId.slice(0, 16))}... | 
+            ${escapeHtml(run.createdAt.slice(0, 10))} |
+            ${summary.successCount}/${summary.totalAgents} ${localText("成功", "passed")} |
+            Model: ${escapeHtml(runtime.model || "unknown")} |
+            Provider: ${escapeHtml(runtime.provider || "official")}
+          </p>
+        </div>
+      </label>
+    `;
+  }).join("");
+}
+
+function renderCrossRunCompareTable() {
+  if (!state.crossRunCompareData || state.crossRunCompareData.rows.length === 0) {
+    elements.crossRunCompareTable.innerHTML = `<p class="empty-state">${escapeHtml(t("crossRunEmptySelection"))}</p>`;
+    return;
+  }
+
+  const { runs, rows } = state.crossRunCompareData;
+  elements.crossRunCompareSummary.textContent = localText(
+    `对比 ${runs.length} 个运行，共 ${rows.length} 个 Agent 配置`,
+    `Comparing ${runs.length} runs with ${rows.length} agent configurations`
+  );
+
+  const recommendation = getCrossRunRecommendation(state.crossRunCompareData);
+
+  const header = `
+    <table class="compare-table">
+      <thead>
+        <tr>
+          <th>${escapeHtml(localText("配置名称", "Variant"))}</th>
+          <th>${escapeHtml(localText("基础 Agent", "Base Agent"))}</th>
+          <th>${escapeHtml(t("crossRunRuns"))}</th>
+          <th>${escapeHtml(t("crossRunSuccessRate"))}</th>
+          <th>${escapeHtml(t("crossRunAvgDuration"))}</th>
+          <th>${escapeHtml(t("crossRunAvgTokens"))}</th>
+          <th>${escapeHtml(t("crossRunAvgCost"))}</th>
+          <th>${escapeHtml(localText("最佳模型", "Best Model"))}</th>
+          <th>${escapeHtml(localText("最佳 Provider", "Best Provider"))}</th>
+        </tr>
+      </thead>
+      <tbody>
+  `;
+
+  const body = rows.map(row => {
+    const avgDuration = Math.round(row.stats.totalDurationMs / row.stats.totalRuns);
+    const avgTokens = Math.round(row.stats.totalTokens / row.stats.totalRuns);
+    const avgCost = row.stats.costKnownCount > 0 
+      ? (row.stats.totalCost / row.stats.costKnownCount).toFixed(4)
+      : null;
+    const successRate = ((row.stats.successCount / row.stats.totalRuns) * 100).toFixed(1);
+    const isRecommended = recommendation && recommendation.agentId === row.agentId;
+
+    return `
+      <tr class="${isRecommended ? "recommended-row" : ""}">
+        <td>
+          <strong>${escapeHtml(row.displayLabel)}</strong>
+          ${isRecommended ? `<span class="badge">${escapeHtml(t("crossRunBestConfig"))}</span>` : ""}
+        </td>
+        <td>${escapeHtml(row.baseAgent)}</td>
+        <td>${row.stats.totalRuns}</td>
+        <td>
+          <span class="status-badge ${row.stats.successCount === row.stats.totalRuns ? "status-success" : row.stats.successCount > 0 ? "status-partial" : "status-fail"}">
+            ${successRate}%
+          </span>
+          (${row.stats.successCount}/${row.stats.totalRuns})
+        </td>
+        <td>${escapeHtml(formatDuration(avgDuration))}</td>
+        <td>${avgTokens.toLocaleString()}</td>
+        <td>${avgCost !== null ? `$${avgCost}` : "n/a"}</td>
+        <td>${escapeHtml(row.bestRuntime?.runtime?.model || "n/a")}</td>
+        <td>${escapeHtml(row.bestRuntime?.runtime?.provider || "n/a")}</td>
+      </tr>
+    `;
+  }).join("");
+
+  elements.crossRunCompareTable.innerHTML = header + body + "</tbody></table>";
 }
 
 detectService();

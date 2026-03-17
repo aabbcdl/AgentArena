@@ -188,6 +188,31 @@
             <div id="run-compare-table" class="compare-table-wrap"></div>
           </section>
 
+          <section id="cross-run-compare-section" class="detail-card">
+            <div class="panel-header">
+              <h3 id="cross-run-compare-title">Cross-Run Compare</h3>
+              <button id="cross-run-toggle-select" type="button">Select Runs to Compare</button>
+            </div>
+            <p id="cross-run-description" class="muted">Select multiple runs to compare agent performance across different model configurations.</p>
+            <div id="cross-run-selection-panel" class="cross-run-selection hidden">
+              <div class="filter-bar">
+                <input id="cross-run-search" type="search" placeholder="Search by task or run ID" />
+              </div>
+              <div id="cross-run-selection-list" class="cross-run-selection-list"></div>
+              <div class="inline-actions">
+                <button id="cross-run-compare-btn" type="button" disabled>Compare Selected</button>
+                <button id="cross-run-clear-btn" type="button">Clear Selection</button>
+              </div>
+            </div>
+            <div id="cross-run-compare-view" class="cross-run-compare-view hidden">
+              <div class="panel-header">
+                <h4 id="cross-run-compare-summary"></h4>
+                <button id="cross-run-close-compare" type="button">Close Compare</button>
+              </div>
+              <div id="cross-run-compare-table" class="compare-table-wrap"></div>
+            </div>
+          </section>
+
           <section id="run-diff-section" class="detail-card">
             <div class="panel-header">
               <h3 id="run-diff-title">Run-to-Run Agent Diff</h3>
