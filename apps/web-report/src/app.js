@@ -36,7 +36,9 @@ const state = {
   launcherExpanded: true,
   crossRunSelectMode: false,
   crossRunSelectedIds: new Set(),
-  crossRunCompareData: null
+  crossRunCompareData: null,
+  expandedCompareAgentId: null,
+  sidebarOpen: false
 };
 
 const elements = {
@@ -62,6 +64,7 @@ const elements = {
   launcherProgressTitle: document.querySelector("#launcher-progress-title"),
   launcherCurrentAgent: document.querySelector("#launcher-current-agent"),
   launcherLogList: document.querySelector("#launcher-log-list"),
+  launcherValidation: document.querySelector("#launcher-validation"),
   taskBrief: document.querySelector("#task-brief"),
   runInfo: document.querySelector("#run-info"),
   runList: document.querySelector("#run-list"),
@@ -117,7 +120,10 @@ const elements = {
   crossRunCompareView: document.querySelector("#cross-run-compare-view"),
   crossRunCompareSummary: document.querySelector("#cross-run-compare-summary"),
   crossRunCloseCompare: document.querySelector("#cross-run-close-compare"),
-  crossRunCompareTable: document.querySelector("#cross-run-compare-table")
+  crossRunCompareTable: document.querySelector("#cross-run-compare-table"),
+  sidebarToggle: document.querySelector("#sidebar-toggle"),
+  sidebarBackdrop: document.querySelector("#sidebar-backdrop"),
+  sidebar: document.querySelector(".sidebar")
 };
 
 const MESSAGES = {
@@ -1466,7 +1472,46 @@ function syncLauncherStateFromDom() {
   saveLauncherConfig();
 }
 
+function validateLauncher() {
+  const messages = [];
+  if (!elements.launcherRepoPath.value.trim()) {
+    messages.push({ level: "error", text: localText("仓库路径不能为空。", "Repository path is required.") });
+  }
+  if (!elements.launcherTaskPath.value.trim()) {
+    messages.push({ level: "error", text: localText("任务包路径不能为空。", "Task pack path is required.") });
+  }
+  const agents = selectedLauncherVariants();
+  if (agents.length === 0) {
+    messages.push({ level: "error", text: localText("至少需要启用一个 agent 或 variant。", "At least one agent or variant must be enabled.") });
+  }
+  const selectedTaskPack = state.availableTaskPacks.find((tp) => tp.path === elements.launcherTaskPath.value);
+  if (selectedTaskPack?.repoSource?.startsWith("builtin://")) {
+    messages.push({ level: "warning", text: localText("此任务包使用内置仓库，你填写的仓库路径将被忽略。", "This task pack uses a built-in repo. Your repository path will be ignored.") });
+  }
+  const noSecretVariants = state.launcherClaudeVariants.filter((v) => v.enabled && !v.secretStored && v.providerKind !== "official");
+  for (const v of noSecretVariants) {
+    messages.push({ level: "warning", text: localText(`Claude variant "${v.displayLabel}" 的密钥未保存，运行可能失败。`, `Claude variant "${v.displayLabel}" has no stored secret — the run may fail.`) });
+  }
+  return messages;
+}
+
+function renderLauncherValidation(messages) {
+  if (!messages || messages.length === 0) {
+    elements.launcherValidation.innerHTML = "";
+    return;
+  }
+  elements.launcherValidation.innerHTML = messages
+    .map((m) => `<div class="validation-msg validation-${escapeHtml(m.level)}">${escapeHtml(m.text)}</div>`)
+    .join("");
+}
+
 async function handleLauncherRun() {
+  const messages = validateLauncher();
+  renderLauncherValidation(messages);
+  if (messages.some((m) => m.level === "error")) {
+    return;
+  }
+
   const agents = selectedLauncherVariants();
   const payload = {
     repoPath: elements.launcherRepoPath.value.trim(),
@@ -1476,16 +1521,8 @@ async function handleLauncherRun() {
     probeAuth: elements.launcherProbeAuth.checked
   };
 
-  if (!payload.repoPath || !payload.taskPath || agents.length === 0) {
-    state.notice =
-      state.language === "zh-CN"
-        ? "仓库路径、任务包路径和至少一个 agent 是必填项。"
-        : "Repository path, task pack path, and at least one agent are required.";
-    render();
-    return;
-  }
-
   // Immediate visual feedback before anything async
+  elements.launcherValidation.innerHTML = "";
   elements.launcherRun.disabled = true;
   elements.launcherRun.textContent = state.language === "zh-CN" ? "正在启动..." : "Starting...";
   elements.launcherStatus.textContent = state.language === "zh-CN" ? "正在提交跑分请求..." : "Submitting benchmark request...";
@@ -1789,6 +1826,10 @@ function renderRunList() {
           <div class="meta">${escapeHtml(run.createdAt)}</div>
           <div class="meta">${successCount}/${run.results.length} success | ${escapeHtml(run.runId)}</div>
           <div class="meta">${hasMarkdown ? escapeHtml(t("linkedMarkdown")) : escapeHtml(t("jsonOnly"))}</div>
+          <div class="run-actions">
+            <button type="button" class="run-action-btn" data-role="export-run" data-run-id="${escapeHtml(run.runId)}" title="${escapeHtml(localText("导出 JSON", "Export JSON"))}">⬇</button>
+            <button type="button" class="run-action-btn" data-role="delete-run" data-run-id="${escapeHtml(run.runId)}" title="${escapeHtml(localText("删除", "Delete"))}">✕</button>
+          </div>
         </button>
       `;
     })
@@ -2353,13 +2394,16 @@ function renderComparisonBars(run) {
   const maxDuration = Math.max(...results.map((r) => r.durationMs || 0), 1);
   const maxCost = Math.max(...results.filter((r) => r.costKnown).map((r) => r.estimatedCostUsd), 0.01);
 
-  function barRows(getValue, maxVal, formatFn, colorFn) {
+  function barRows(getValue, maxVal, formatFn, colorFn, tooltipFn) {
     return results.map((r) => {
       const val = getValue(r);
       const pct = maxVal > 0 ? Math.round((val / maxVal) * 100) : 0;
       const color = colorFn(r);
+      const key = recordKey(r);
+      const activeClass = key === state.selectedAgentId ? " bar-row-active" : "";
+      const tooltip = tooltipFn(r);
       return `
-        <div class="bar-row">
+        <div class="bar-row${activeClass}" data-bar-agent-id="${escapeHtml(key)}" data-tooltip="${escapeHtml(tooltip)}">
           <span class="bar-label" title="${escapeHtml(resultLabel(r))}">${escapeHtml(resultLabel(r))}</span>
           <div class="bar-track"><div class="bar-fill ${color}" style="width:${pct}%"></div></div>
           <span class="bar-value">${escapeHtml(formatFn(r))}</span>
@@ -2375,8 +2419,10 @@ function renderComparisonBars(run) {
     const passed = r.judgeResults.filter((j) => j.success).length;
     const pct = total > 0 ? Math.round((passed / total) * 100) : 0;
     const color = pct === 100 ? "success" : pct >= 50 ? "warning" : "danger";
+    const key = recordKey(r);
+    const activeClass = key === state.selectedAgentId ? " bar-row-active" : "";
     return `
-      <div class="bar-row">
+      <div class="bar-row${activeClass}" data-bar-agent-id="${escapeHtml(key)}" data-tooltip="${escapeHtml(resultLabel(r))}: ${passed}/${total} (${pct}%)">
         <span class="bar-label" title="${escapeHtml(resultLabel(r))}">${escapeHtml(resultLabel(r))}</span>
         <div class="bar-track"><div class="bar-fill ${color}" style="width:${pct}%"></div></div>
         <span class="bar-value">${passed}/${total}</span>
@@ -2388,14 +2434,16 @@ function renderComparisonBars(run) {
     (r) => r.durationMs || 0,
     maxDuration,
     (r) => formatDuration(r.durationMs),
-    statusColor
+    statusColor,
+    (r) => `${resultLabel(r)}: ${formatDuration(r.durationMs)}`
   );
 
   const costRows = barRows(
     (r) => r.costKnown ? r.estimatedCostUsd : 0,
     maxCost,
     (r) => formatCost(r),
-    statusColor
+    statusColor,
+    (r) => `${resultLabel(r)}: ${formatCost(r)}`
   );
 
   elements.comparisonBars.innerHTML = `
@@ -2442,6 +2490,39 @@ function renderFailures(run) {
     <div class="failures-section">
       <div class="failures-title">${escapeHtml(localText("失败与风险", "Failures & Risks"))}</div>
       ${items}
+    </div>
+  `;
+}
+
+function renderInlineAgentDetail(result) {
+  const passed = result.judgeResults.filter((j) => j.success);
+  const failed = result.judgeResults.filter((j) => !j.success);
+  const judgeChips = [
+    ...passed.map((j) => `<span class="judge-chip judge-chip-pass">${escapeHtml(j.label || j.judgeId)}</span>`),
+    ...failed.map((j) => `<span class="judge-chip judge-chip-fail">${escapeHtml(j.label || j.judgeId)}</span>`)
+  ].join("");
+
+  const maxFiles = 10;
+  const files = result.changedFiles.slice(0, maxFiles);
+  const moreCount = result.changedFiles.length - maxFiles;
+  const filesHtml = files.length > 0
+    ? `<ul class="files-list">${files.map((f) => `<li>${escapeHtml(f)}</li>`).join("")}${moreCount > 0 ? `<li class="muted">+${moreCount} more</li>` : ""}</ul>`
+    : `<span class="muted">${escapeHtml(localText("无改动", "No changes"))}</span>`;
+
+  return `
+    <div class="compare-detail-panel">
+      <div>
+        <h4>${escapeHtml(localText("Judge 概览", "Judges"))}</h4>
+        <div class="judge-summary">${judgeChips || `<span class="muted">${escapeHtml(localText("无", "None"))}</span>`}</div>
+      </div>
+      <div>
+        <h4>${escapeHtml(localText("改动文件", "Changed Files"))}</h4>
+        ${filesHtml}
+      </div>
+      <div class="agent-summary-text">
+        <span>${escapeHtml(result.summary || "")}</span>
+        <button type="button" class="view-full-link" data-role="view-full-details">${escapeHtml(localText("查看完整详情", "View Full Details"))}</button>
+      </div>
     </div>
   `;
 }
@@ -2523,6 +2604,7 @@ function renderCompareTableV2(run) {
                 <td>${result.changedFiles.length}</td>
                 <td>${tags.join(" ")}</td>
               </tr>
+              ${key === state.expandedCompareAgentId ? `<tr class="compare-detail-row"><td colspan="10">${renderInlineAgentDetail(result)}</td></tr>` : ""}
             `;
           })
           .join("")}
@@ -2883,6 +2965,39 @@ elements.languageSelect.addEventListener("change", (event) => {
 });
 
 elements.runList.addEventListener("click", (event) => {
+  const deleteBtn = event.target.closest("[data-role='delete-run']");
+  if (deleteBtn) {
+    event.stopPropagation();
+    const runId = deleteBtn.getAttribute("data-run-id");
+    const confirmMsg = localText("确定删除这个 run？此操作不可撤销。", "Delete this run? This cannot be undone.");
+    if (!confirm(confirmMsg)) return;
+    state.runs = state.runs.filter((r) => r.runId !== runId);
+    state.markdownByRunId.delete(runId);
+    if (state.selectedRunId === runId) {
+      state.selectedRunId = state.runs[0]?.runId ?? null;
+    }
+    updateCurrentRun();
+    render();
+    return;
+  }
+
+  const exportBtn = event.target.closest("[data-role='export-run']");
+  if (exportBtn) {
+    event.stopPropagation();
+    const runId = exportBtn.getAttribute("data-run-id");
+    const run = state.runs.find((r) => r.runId === runId);
+    if (run) {
+      const blob = new Blob([JSON.stringify(run, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `summary-${runId}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+    return;
+  }
+
   const button = event.target.closest("[data-run-id]");
   if (!button) {
     return;
@@ -2891,6 +3006,11 @@ elements.runList.addEventListener("click", (event) => {
   state.selectedRunId = button.getAttribute("data-run-id");
   updateCurrentRun();
   render();
+  if (window.innerWidth <= 768) {
+    state.sidebarOpen = false;
+    elements.sidebar.classList.remove("sidebar-open");
+    elements.sidebarBackdrop.classList.remove("active");
+  }
 });
 
 elements.agentList.addEventListener("click", (event) => {
@@ -2911,14 +3031,50 @@ elements.agentList.addEventListener("click", (event) => {
 });
 
 elements.compareTable.addEventListener("click", (event) => {
+  const viewFullLink = event.target.closest("[data-role='view-full-details']");
+  if (viewFullLink) {
+    event.preventDefault();
+    elements.advancedAnalysis.open = true;
+    elements.resultSummary.scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
+
   const row = event.target.closest("[data-compare-agent-id]");
   if (!row || !state.run) {
     return;
   }
 
-  state.selectedAgentId = row.getAttribute("data-compare-agent-id");
+  const clickedId = row.getAttribute("data-compare-agent-id");
+  if (clickedId === state.selectedAgentId) {
+    state.expandedCompareAgentId =
+      state.expandedCompareAgentId === clickedId ? null : clickedId;
+    renderCompareTableV2(state.run);
+    return;
+  }
+
+  state.selectedAgentId = clickedId;
+  state.expandedCompareAgentId = null;
   renderAgentList(state.run);
   renderCompareTableV2(state.run);
+  renderAgentTrendTableV2(state.run);
+  renderSelectedAgentV2();
+  setHidden(
+    elements.agentTrendSection,
+    !state.selectedAgentId || getAgentTrendRows(state.runs, state.run, state.selectedAgentId).length <= 1
+  );
+});
+
+elements.comparisonBars.addEventListener("click", (event) => {
+  const barRow = event.target.closest("[data-bar-agent-id]");
+  if (!barRow || !state.run) {
+    return;
+  }
+
+  state.selectedAgentId = barRow.getAttribute("data-bar-agent-id");
+  state.expandedCompareAgentId = null;
+  renderAgentList(state.run);
+  renderCompareTableV2(state.run);
+  renderComparisonBars(state.run);
   renderAgentTrendTableV2(state.run);
   renderSelectedAgentV2();
   setHidden(
@@ -3224,6 +3380,27 @@ function renderCrossRunCompareTable() {
 
   elements.crossRunCompareTable.innerHTML = header + body + "</tbody></table>";
 }
+
+// Feature 5: Sidebar toggle for mobile
+elements.sidebarToggle.addEventListener("click", () => {
+  state.sidebarOpen = !state.sidebarOpen;
+  elements.sidebar.classList.toggle("sidebar-open", state.sidebarOpen);
+  elements.sidebarBackdrop.classList.toggle("active", state.sidebarOpen);
+});
+
+elements.sidebarBackdrop.addEventListener("click", () => {
+  state.sidebarOpen = false;
+  elements.sidebar.classList.remove("sidebar-open");
+  elements.sidebarBackdrop.classList.remove("active");
+});
+
+// Feature 2: Live validation on task select and agent changes
+elements.launcherTaskSelect.addEventListener("change", () => {
+  renderLauncherValidation(validateLauncher());
+});
+elements.launcherAgents.addEventListener("change", () => {
+  renderLauncherValidation(validateLauncher());
+});
 
 detectService();
 render();

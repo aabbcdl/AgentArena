@@ -11,6 +11,8 @@
   </head>
   <body>
     <div class="shell">
+      <button id="sidebar-toggle" class="sidebar-toggle" type="button" aria-label="Toggle sidebar">&#9776;</button>
+      <div id="sidebar-backdrop" class="sidebar-backdrop"></div>
       <aside class="sidebar">
         <div class="brand">
           <p class="eyebrow">RepoArena</p>
@@ -110,6 +112,7 @@
               </label>
               <button id="launcher-run" type="button">Start Benchmark</button>
             </div>
+            <div id="launcher-validation" class="launcher-validation"></div>
           </div>
           <p id="launcher-status" class="muted"></p>
           <section id="launcher-progress" class="launcher-progress hidden">
