@@ -5,6 +5,8 @@
   findPreviousComparableRun,
   getAgentTrendRows,
   getCompareResults,
+  getCrossRunCompareRows,
+  getCrossRunRecommendation,
   getRunCompareRows,
   getRunToRunAgentDiff,
   getRunVerdict,
@@ -62,8 +64,6 @@ const elements = {
   launcherLogList: document.querySelector("#launcher-log-list"),
   taskBrief: document.querySelector("#task-brief"),
   runInfo: document.querySelector("#run-info"),
-  workflowList: document.querySelector("#workflow-list"),
-  nextStepsContent: document.querySelector("#next-steps-content"),
   runList: document.querySelector("#run-list"),
   runCount: document.querySelector("#run-count"),
   agentList: document.querySelector("#agent-list"),
@@ -72,8 +72,10 @@ const elements = {
   dashboard: document.querySelector("#dashboard"),
   taskTitle: document.querySelector("#task-title"),
   taskMeta: document.querySelector("#task-meta"),
-  metrics: document.querySelector("#metrics"),
-  runVerdicts: document.querySelector("#run-verdicts"),
+  verdictHero: document.querySelector("#verdict-hero"),
+  comparisonBars: document.querySelector("#comparison-bars"),
+  failuresSection: document.querySelector("#failures-section"),
+  advancedAnalysis: document.querySelector("#advanced-analysis"),
   runCompareScope: document.querySelector("#run-compare-scope"),
   runCompareSort: document.querySelector("#run-compare-sort"),
   runCompareTable: document.querySelector("#run-compare-table"),
@@ -101,11 +103,8 @@ const elements = {
   markdownContent: document.querySelector("#markdown-content"),
   copyShareCard: document.querySelector("#copy-share-card"),
   copyPrTable: document.querySelector("#copy-pr-table"),
-  copyShareSvg: document.querySelector("#copy-share-svg"),
   downloadShareSvg: document.querySelector("#download-share-svg"),
   clipboardStatus: document.querySelector("#clipboard-status"),
-  expandAll: document.querySelector("#expand-all"),
-  collapseAll: document.querySelector("#collapse-all"),
   crossRunCompareSection: document.querySelector("#cross-run-compare-section"),
   crossRunCompareTitle: document.querySelector("#cross-run-compare-title"),
   crossRunDescription: document.querySelector("#cross-run-description"),
@@ -683,10 +682,10 @@ function compareHighlights(run, result) {
   const key = recordKey(result);
 
   if (recordKey(verdict.bestAgent ?? {}) === key) {
-    highlights.push("Best");
+    highlights.push(localText("最佳", "Best"));
   }
   if (recordKey(verdict.fastest ?? {}) === key) {
-    highlights.push("Fastest");
+    highlights.push(localText("最快", "Fastest"));
   }
   if (recordKey(verdict.lowestKnownCost ?? {}) === key) {
     highlights.push(localText("最低成本", "Lowest Cost"));
@@ -736,6 +735,43 @@ function defaultCodexVariant() {
   };
 }
 
+function saveLauncherConfig() {
+  try {
+    const config = {
+      repoPath: elements.launcherRepoPath.value,
+      taskPath: elements.launcherTaskPath.value,
+      selectedTaskPackId: elements.launcherTaskSelect.value,
+      outputPath: elements.launcherOutputPath.value,
+      probeAuth: elements.launcherProbeAuth.checked,
+      selectedAgentIds: selectedLauncherAgents(),
+      codexVariants: state.launcherCodexVariants.map((v) => ({
+        enabled: v.enabled,
+        displayLabel: v.displayLabel,
+        model: v.model,
+        reasoningEffort: v.reasoningEffort
+      })),
+      claudeVariants: state.launcherClaudeVariants.map((v) => ({
+        profileId: v.profileId,
+        enabled: v.enabled,
+        displayLabel: v.displayLabel,
+        model: v.model
+      }))
+    };
+    localStorage.setItem("repoarena.webReport.launcherConfig", JSON.stringify(config));
+  } catch {
+    // ignore localStorage failures
+  }
+}
+
+function loadLauncherConfig() {
+  try {
+    const raw = localStorage.getItem("repoarena.webReport.launcherConfig");
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
 function renderStaticText() {
   if (elements.resultLoaderSummary) {
     elements.resultLoaderSummary.textContent =
@@ -750,8 +786,6 @@ function renderStaticText() {
   setText("summary-file-hint", t("summaryFileHint"));
   setText("markdown-file-title", t("markdownFileTitle"));
   setText("markdown-file-hint", t("markdownFileHint"));
-  setText("workflow-title", t("workflowTitle"));
-  setText("next-steps-title", t("nextStepsTitle"));
   setText("runs-heading", t("runsHeading"));
   setText("agents-heading", t("agentsHeading"));
   setText("hero-eyebrow", t("heroEyebrow"));
@@ -777,11 +811,8 @@ function renderStaticText() {
   setText("launcher-output-label", t("launcherOutputLabel"));
   setText("launcher-agents-label", t("launcherAgentsLabel"));
   setText("launcher-probe-auth-label", t("launcherProbeAuthLabel"));
-  setText("expand-all", t("expandLogs"));
-  setText("collapse-all", t("collapseLogs"));
   setText("copy-share-card", t("copySummary"));
   setText("copy-pr-table", t("copyPrTable"));
-  setText("copy-share-svg", t("copyShareSvg"));
   setText("download-share-svg", t("downloadShareSvg"));
   elements.judgeSearch.placeholder = t("judgeSearchPlaceholder");
   elements.languageSelect.value = state.language;
@@ -805,27 +836,7 @@ function renderStaticText() {
   elements.judgeStatusFilter.options[1].text = t("judgeStatusPass");
   elements.judgeStatusFilter.options[2].text = t("judgeStatusFail");
   elements.launcherRun.textContent = t("launcherRunButton");
-  renderList(elements.workflowList, t("workflowSteps"));
   renderList(document.querySelector("#hero-how-list"), t("heroHowSteps"));
-}
-
-function renderNextSteps() {
-  if (state.runInProgress && state.runStatus?.state === "running") {
-    elements.nextStepsContent.textContent = currentRunPhaseLabel() || t("launcherStatusRunning");
-    return;
-  }
-
-  if (state.notice) {
-    elements.nextStepsContent.textContent = state.notice;
-    return;
-  }
-
-  if (!state.run) {
-    elements.nextStepsContent.textContent = t("nextStepsEmpty");
-    return;
-  }
-
-  elements.nextStepsContent.textContent = t("nextStepsLoaded", state.run, state.runs.length);
 }
 
 function renderLauncherProgress() {
@@ -902,16 +913,59 @@ function renderLauncher() {
   }
 
   setHidden(elements.launcherPanel, false);
-  if (!state.run) {
+  if (!state.run && !state.runInProgress) {
     state.launcherExpanded = true;
   }
-  elements.launcherRepoPath.value = elements.launcherRepoPath.value || state.serviceInfo.repoPath || "";
-  elements.launcherOutputPath.value = elements.launcherOutputPath.value || state.serviceInfo.defaultOutputPath || "";
 
-  if (state.launcherCodexVariants.length === 0) {
-    state.launcherCodexVariants = [defaultCodexVariant()];
+  // Restore saved config once on first render
+  if (!state._launcherConfigRestored) {
+    state._launcherConfigRestored = true;
+    const saved = loadLauncherConfig();
+    if (saved) {
+      elements.launcherRepoPath.value = saved.repoPath || state.serviceInfo.repoPath || "";
+      elements.launcherOutputPath.value = saved.outputPath || state.serviceInfo.defaultOutputPath || "";
+      elements.launcherTaskPath.value = saved.taskPath || "";
+      elements.launcherProbeAuth.checked = Boolean(saved.probeAuth);
+      state.launcherSelectedAgentIds = saved.selectedAgentIds ?? [];
+
+      if (saved.codexVariants?.length) {
+        state.launcherCodexVariants = saved.codexVariants.map((sv) => ({
+          ...defaultCodexVariant(),
+          enabled: sv.enabled ?? true,
+          displayLabel: sv.displayLabel ?? "Codex CLI",
+          model: sv.model ?? "",
+          reasoningEffort: sv.reasoningEffort ?? ""
+        }));
+      } else {
+        state.launcherCodexVariants = [defaultCodexVariant()];
+      }
+
+      syncClaudeVariantsWithProfiles();
+
+      if (saved.claudeVariants?.length) {
+        for (const sv of saved.claudeVariants) {
+          const match = state.launcherClaudeVariants.find((v) => v.profileId === sv.profileId);
+          if (match) {
+            match.enabled = sv.enabled ?? false;
+            match.displayLabel = sv.displayLabel || match.displayLabel;
+            match.model = sv.model ?? match.model;
+          }
+        }
+      }
+    } else {
+      elements.launcherRepoPath.value = state.serviceInfo.repoPath || "";
+      elements.launcherOutputPath.value = state.serviceInfo.defaultOutputPath || "";
+      state.launcherCodexVariants = [defaultCodexVariant()];
+      syncClaudeVariantsWithProfiles();
+    }
+  } else {
+    elements.launcherRepoPath.value = elements.launcherRepoPath.value || state.serviceInfo.repoPath || "";
+    elements.launcherOutputPath.value = elements.launcherOutputPath.value || state.serviceInfo.defaultOutputPath || "";
+    if (state.launcherCodexVariants.length === 0) {
+      state.launcherCodexVariants = [defaultCodexVariant()];
+    }
+    syncClaudeVariantsWithProfiles();
   }
-  syncClaudeVariantsWithProfiles();
 
   const options = [
     `<option value="">${escapeHtml(t("taskPackCustom"))}</option>`,
@@ -944,10 +998,8 @@ function renderLauncher() {
 
   const taskSummary = selectedTaskPack
     ? `
-      <div class="launcher-section">
-        <h4>${escapeHtml(localText("任务说明", "Task Intent"))}</h4>
-        <p class="muted">${escapeHtml(selectedTaskPack.description ?? selectedTaskPack.objective ?? "")}</p>
-        ${selectedTaskPack.difficulty ? `<p class="muted"><strong>${escapeHtml(localText("难度", "Difficulty"))}:</strong> <span class="status-badge status-${escapeHtml(selectedTaskPack.difficulty)}">${escapeHtml(selectedTaskPack.difficulty)}</span></p>` : ""}
+      <details class="launcher-section">
+        <summary class="launcher-section-summary">${escapeHtml(localText("任务说明", "Task Info"))}${selectedTaskPack.difficulty ? ` · <span class="status-badge status-${escapeHtml(selectedTaskPack.difficulty)}">${escapeHtml(selectedTaskPack.difficulty.toUpperCase())}</span>` : ""} · ${escapeHtml(selectedTaskPack.description ?? selectedTaskPack.objective ?? "")}</summary>
         ${selectedTaskPack.differentiator ? `<p class="muted"><strong>${escapeHtml(localText("区分度", "Differentiator"))}:</strong> ${escapeHtml(selectedTaskPack.differentiator)}</p>` : ""}
         <p class="muted"><strong>${escapeHtml(localText("目标", "Objective"))}:</strong> ${escapeHtml(
             selectedTaskPack.objective ?? "n/a"
@@ -969,7 +1021,7 @@ function renderLauncher() {
             ? baselineTaskWarning({ id: selectedTaskPack.id })
             : localText("按任务目标解读这次 benchmark。", "Interpret this benchmark in the context of the task objective.")
         )}</p>
-      </div>
+      </details>
     `
     : "";
 
@@ -1015,13 +1067,13 @@ function renderLauncher() {
       const profile = state.availableProviderProfiles.find((entry) => entry.id === variant.profileId);
       const riskBadges = [];
       if (profile?.kind !== "official") {
-        riskBadges.push(localText("Third-party Provider", "Third-party Provider"));
-        riskBadges.push(localText("Compatibility Mode", "Compatibility Mode"));
-        riskBadges.push(localText("User-managed Secret", "User-managed Secret"));
+        riskBadges.push(localText("第三方 Provider", "Third-party Provider"));
+        riskBadges.push(localText("兼容模式", "Compatibility Mode"));
+        riskBadges.push(localText("用户管理密钥", "User-managed Secret"));
       }
 
       return `
-        <div class="variant-card" data-claude-variant-id="${escapeHtml(variant.id)}">
+        <div class="variant-card" data-claude-variant-id="${escapeHtml(variant.id)}" data-profile-id="${escapeHtml(variant.profileId ?? "claude-official")}">
           <label class="checkbox">
             <input type="checkbox" data-role="claude-variant-enabled" ${variant.enabled ? "checked" : ""} />
             <span>${escapeHtml(localText("启用这个 Claude Code variant", "Enable this Claude Code variant"))}</span>
@@ -1052,7 +1104,7 @@ function renderLauncher() {
           <div class="inline-actions">
             ${
               profile?.isBuiltIn
-                ? `<span class="muted">${escapeHtml(localText("瀹樻柟鍐呯疆 Provider", "Built-in official provider"))}</span>`
+                ? `<span class="muted">${escapeHtml(localText("官方内置 Provider", "Built-in official provider"))}</span>`
                 : `<button type="button" data-role="provider-edit" data-profile-id="${escapeHtml(profile?.id ?? "claude-official")}">${escapeHtml(localText("编辑 Provider", "Edit Provider"))}</button>
                    <button type="button" data-role="provider-delete" data-profile-id="${escapeHtml(profile?.id ?? "")}">${escapeHtml(localText("删除 Provider", "Delete Provider"))}</button>`
             }
@@ -1071,7 +1123,7 @@ function renderLauncher() {
         <p class="warning-text">${escapeHtml(
           localText(
             "第三方兼容层可能改变 Claude Code 行为。结果代表 Claude Code + 该 provider/profile 的表现，不是原生 RepoArena API agent。",
-            "Third-party compatibility layers can change Claude Code behavior. Results represent 鈥淐laude Code + this provider/profile鈥? not native RepoArena API agents."
+            "Third-party compatibility layers can change Claude Code behavior. Results represent \"Claude Code + this provider/profile\", not native RepoArena API agents."
           )
         )}</p>
         <div class="launcher-grid">
@@ -1139,7 +1191,7 @@ function renderLauncher() {
           <span>${escapeHtml(localText("写入通用 Claude Code 配置", "Write common Claude Code config"))}</span>
         </label>
         <div class="inline-actions">
-          <button type="button" data-role="provider-save">${escapeHtml(localText("淇濆瓨 Provider", "Save Provider"))}</button>
+          <button type="button" data-role="provider-save">${escapeHtml(localText("保存 Provider", "Save Provider"))}</button>
           <button type="button" data-role="provider-cancel">${escapeHtml(localText("取消", "Cancel"))}</button>
         </div>
       </div>
@@ -1149,8 +1201,8 @@ function renderLauncher() {
   elements.launcherAgents.innerHTML = `
     ${taskSummary}
     <div class="launcher-section">
-      <h4>${escapeHtml(localText("真实 Agents", "Real Agents"))}</h4>
-      <p class="muted">${escapeHtml(localText("这些是真实外部 agent，会直接进入主对比结果。", "These are real external agents. Their results count toward the main comparison."))}</p>
+      <h4>${escapeHtml(localText("选择 Agents", "Select Agents"))}</h4>
+      <p class="muted">${escapeHtml(localText("勾选要参与对比的 agent。", "Check the agents you want to compare."))}</p>
       <div class="checkbox-grid">
         ${realAdapters
           .map((adapter) => {
@@ -1158,37 +1210,28 @@ function renderLauncher() {
             return `
               <label class="checkbox">
                 <input type="checkbox" data-role="real-agent" value="${escapeHtml(adapter.id)}" ${checked} />
-                <span>${escapeHtml(adapter.title)} <span class="muted">(${escapeHtml(adapter.id)})</span></span>
+                <span>${escapeHtml(adapter.title)}</span>
               </label>
             `;
           })
           .join("")}
       </div>
     </div>
-    <div class="launcher-section">
-      <div class="panel-header">
-        <h4>${escapeHtml(localText("Claude Code Provider Profiles", "Claude Code Provider Profiles"))}</h4>
-        <button id="launcher-add-provider" type="button">${escapeHtml(localText("新增 Claude Provider", "Add Claude Provider"))}</button>
-      </div>
+    <details class="launcher-section">
+      <summary class="launcher-section-summary">${escapeHtml(localText("Claude Code Variants", "Claude Code Variants"))} · <span class="muted">${escapeHtml(localText(`${state.launcherClaudeVariants.filter(v => v.enabled).length} 个已启用`, `${state.launcherClaudeVariants.filter(v => v.enabled).length} enabled`))}</span></summary>
       <p class="muted">${escapeHtml(localText(
-        "这里比较的是同一套 Claude Code harness 下的不同 provider/profile 变体。",
-        "These are provider-switched Claude Code variants under the same Claude Code harness."
+        "同一套 Claude Code harness 下的不同 provider/profile 变体。",
+        "Provider-switched Claude Code variants under the same harness."
       ))}</p>
-      <p class="warning-text">${escapeHtml(state.serviceInfo.riskNotice ?? "")}</p>
+      ${state.serviceInfo.riskNotice ? `<p class="warning-text">${escapeHtml(state.serviceInfo.riskNotice)}</p>` : ""}
       ${claudeVariants || `<p class="empty-state">${escapeHtml(localText("还没有可用的 Claude Provider。", "No Claude provider profiles available yet."))}</p>`}
       ${providerEditor}
-    </div>
-    <div class="launcher-section">
-      <div class="panel-header">
-        <h4>${escapeHtml(localText("Codex Variants", "Codex Variants"))}</h4>
-        <button id="launcher-add-codex-variant" type="button">${escapeHtml(
-          localText("鏂板 Codex variant", "Add Codex variant")
-        )}</button>
+      <div class="inline-actions" style="margin-top:12px">
+        <button id="launcher-add-provider" type="button">${escapeHtml(localText("新增 Claude Provider", "Add Claude Provider"))}</button>
       </div>
-      <p class="muted">${escapeHtml(localText(
-        "用多个 Codex variant 比较具体模型和推理等级；当 CLI 不明确返回时，RepoArena 会把身份标记为 inferred。",
-        "Use multiple Codex variants to compare concrete model and reasoning configurations. When the CLI does not confirm them, RepoArena marks the identity as inferred."
-      ))}</p>
+    </details>
+    <details class="launcher-section">
+      <summary class="launcher-section-summary">${escapeHtml(localText("Codex Variants", "Codex Variants"))} · <span class="muted">${escapeHtml(localText(`${state.launcherCodexVariants.filter(v => v.enabled).length} 个已启用`, `${state.launcherCodexVariants.filter(v => v.enabled).length} enabled`))}</span></summary>
       <p class="muted">${escapeHtml(codexDefaultsText)}</p>
       <datalist id="reasoning-levels">
         <option value="low"></option>
@@ -1196,9 +1239,14 @@ function renderLauncher() {
         <option value="high"></option>
       </datalist>
       ${codexVariants}
-    </div>
+      <div class="inline-actions" style="margin-top:12px">
+        <button id="launcher-add-codex-variant" type="button">${escapeHtml(
+          localText("新增 Codex variant", "Add Codex variant")
+        )}</button>
+      </div>
+    </details>
     <details class="launcher-section">
-      <summary>${escapeHtml(localText("Debug Agents（默认不选）", "Debug Agents (not selected by default)"))}</summary>
+      <summary class="launcher-section-summary">${escapeHtml(localText("Debug Agents（默认不选）", "Debug Agents (not selected by default)"))}</summary>
       <p class="muted">${escapeHtml(localText(
         "Demo Fast / Thorough / Budget 只是内置的 synthetic adapter，用来验证流水线和 UI，不代表真实模型能力。",
         "Demo Fast / Thorough / Budget are built-in synthetic adapters for validating the pipeline and UI. They do not represent real model capability."
@@ -1210,7 +1258,7 @@ function renderLauncher() {
             return `
               <label class="checkbox">
                 <input type="checkbox" data-role="debug-agent" value="${escapeHtml(adapter.id)}" ${checked} />
-                <span>${escapeHtml(adapter.title)} <span class="muted">(${escapeHtml(adapter.id)})</span></span>
+                <span>${escapeHtml(adapter.title)}</span>
               </label>
             `;
           })
@@ -1220,7 +1268,16 @@ function renderLauncher() {
   `;
 
   elements.launcherRun.disabled = state.runInProgress;
-  elements.launcherCompactSummary.textContent = summarizeLauncherSelection(selectedTaskPack);
+  elements.launcherCompactSummary.textContent = state.runInProgress
+    ? (currentRunPhaseLabel() || t("launcherStatusRunning"))
+    : summarizeLauncherSelection(selectedTaskPack);
+  if (state.runInProgress) {
+    elements.launcherCompactSummary.style.color = "var(--accent)";
+    elements.launcherCompactSummary.style.fontWeight = "600";
+  } else {
+    elements.launcherCompactSummary.style.color = "";
+    elements.launcherCompactSummary.style.fontWeight = "";
+  }
   elements.launcherToggle.textContent = state.launcherExpanded
     ? localText("收起设置", "Hide Setup")
     : localText("展开设置", "Show Setup");
@@ -1308,7 +1365,7 @@ async function pollRunStatus() {
       render();
       return;
     }
-    if (state.runStatus?.state !== "running" && state.runStatusPollTimer) {
+    if (state.runStatus?.state !== "running" && state.runStatus?.state !== "idle" && state.runStatusPollTimer) {
       stopRunStatusPolling();
     }
   } catch {
@@ -1316,7 +1373,6 @@ async function pollRunStatus() {
   }
 
   renderLauncher();
-  renderNextSteps();
 }
 
 function stopRunStatusPolling() {
@@ -1407,6 +1463,7 @@ function syncLauncherStateFromDom() {
       isBuiltIn: Boolean(profile?.isBuiltIn)
     };
   });
+  saveLauncherConfig();
 }
 
 async function handleLauncherRun() {
@@ -1428,7 +1485,14 @@ async function handleLauncherRun() {
     return;
   }
 
+  // Immediate visual feedback before anything async
+  elements.launcherRun.disabled = true;
+  elements.launcherRun.textContent = state.language === "zh-CN" ? "正在启动..." : "Starting...";
+  elements.launcherStatus.textContent = state.language === "zh-CN" ? "正在提交跑分请求..." : "Submitting benchmark request...";
+  elements.launcherStatus.style.color = "var(--accent)";
+
   state.runInProgress = true;
+  state.launcherExpanded = false;
   state.runStatus = {
     state: "running",
     phase: "starting",
@@ -1436,8 +1500,8 @@ async function handleLauncherRun() {
     logs: []
   };
   state.notice = t("launcherStatusRunning");
-  startRunStatusPolling();
   render();
+  elements.launcherPanel.scrollIntoView({ behavior: "smooth", block: "start" });
 
   try {
     const response = await fetch("/api/run", {
@@ -1451,12 +1515,15 @@ async function handleLauncherRun() {
     if (!response.ok && response.status !== 202) {
       throw new Error(result.error || "Unknown error");
     }
+    // Start polling AFTER the server has accepted the run
+    startRunStatusPolling();
     render();
   } catch (error) {
     stopRunStatusPolling();
     state.runStatus = null;
     state.runInProgress = false;
     state.notice = t("launcherStatusError", error instanceof Error ? error.message : String(error));
+    elements.launcherStatus.style.color = "";
     render();
   }
 }
@@ -1584,21 +1651,21 @@ function formatSignedNumber(value, formatter, preferred = "lower") {
 function formatJudgeType(type) {
   switch (type) {
     case "file-exists":
-      return state.language === "zh-CN" ? "鏂囦欢瀛樺湪" : "File Exists";
+      return state.language === "zh-CN" ? "文件存在" : "File Exists";
     case "file-contains":
-      return state.language === "zh-CN" ? "鏂囦欢鍖呭惈鍐呭" : "File Contains";
+      return state.language === "zh-CN" ? "文件包含内容" : "File Contains";
     case "json-value":
-      return state.language === "zh-CN" ? "JSON 鍊兼柇瑷€" : "JSON Value";
+      return state.language === "zh-CN" ? "JSON 值断言" : "JSON Value";
     case "glob":
-      return state.language === "zh-CN" ? "Glob 鍖归厤" : "Glob";
+      return state.language === "zh-CN" ? "Glob 匹配" : "Glob";
     case "file-count":
-      return state.language === "zh-CN" ? "鏂囦欢鏁伴噺" : "File Count";
+      return state.language === "zh-CN" ? "文件数量" : "File Count";
     case "snapshot":
-      return state.language === "zh-CN" ? "蹇収" : "Snapshot";
+      return state.language === "zh-CN" ? "快照" : "Snapshot";
     case "json-schema":
       return state.language === "zh-CN" ? "JSON Schema" : "JSON Schema";
     default:
-      return state.language === "zh-CN" ? "鍛戒护" : "Command";
+      return state.language === "zh-CN" ? "命令" : "Command";
   }
 }
 
@@ -1728,33 +1795,6 @@ function renderRunList() {
     .join("");
 }
 
-function renderMetrics(run) {
-  const summary = summarizeRun(run);
-
-  elements.metrics.innerHTML = `
-    <article class="metric">
-      <p class="metric-label">${escapeHtml(t("metrics.agents"))}</p>
-      <p class="metric-value">${summary.totalAgents}</p>
-    </article>
-    <article class="metric">
-      <p class="metric-label">${escapeHtml(t("metrics.success"))}</p>
-      <p class="metric-value">${summary.successCount}</p>
-    </article>
-    <article class="metric">
-      <p class="metric-label">${escapeHtml(t("metrics.failed"))}</p>
-      <p class="metric-value">${summary.failedCount}</p>
-    </article>
-    <article class="metric">
-      <p class="metric-label">${escapeHtml(t("metrics.tokens"))}</p>
-      <p class="metric-value">${summary.totalTokens}</p>
-    </article>
-    <article class="metric">
-      <p class="metric-label">${escapeHtml(t("metrics.knownCost"))}</p>
-      <p class="metric-value">$${summary.knownCost.toFixed(2)}</p>
-    </article>
-  `;
-}
-
 function renderRunCompareTable() {
   if (state.runs.length === 0) {
     elements.runCompareTable.innerHTML = `<p class="empty-state">${escapeHtml(t("noRunsLoaded"))}</p>`;
@@ -1772,7 +1812,7 @@ function renderRunCompareTable() {
       <thead>
         <tr>
           <th>${escapeHtml(state.language === "zh-CN" ? "Run" : "Run")}</th>
-          <th>${escapeHtml(state.language === "zh-CN" ? "浠诲姟" : "Task")}</th>
+          <th>${escapeHtml(state.language === "zh-CN" ? "任务" : "Task")}</th>
           <th>${escapeHtml(state.language === "zh-CN" ? "创建时间" : "Created")}</th>
           <th>${escapeHtml(t("metrics.success"))}</th>
           <th>${escapeHtml(t("metrics.agents"))}</th>
@@ -1804,6 +1844,99 @@ function renderRunCompareTable() {
   `;
 }
 
+function renderRunDiffTableV2() {
+  if (!state.run) {
+    elements.runDiffTable.innerHTML = "";
+    return;
+  }
+
+  const { previousRun, rows } = getRunToRunAgentDiff(state.runs, state.run);
+  if (!previousRun || rows.length === 0) {
+    elements.runDiffTable.innerHTML = `<p class="empty-state">${escapeHtml(localText("没有可对比的历史 run。", "No previous comparable run found."))}</p>`;
+    return;
+  }
+
+  const formatDelta = (value, unit = "") => {
+    if (value === null || value === undefined) return "-";
+    const sign = value > 0 ? "+" : "";
+    return `${sign}${typeof value === "number" && unit === "$" ? value.toFixed(4) : value}${unit}`;
+  };
+
+  elements.runDiffTable.innerHTML = `
+    <p class="muted">${escapeHtml(localText("对比", "Compared to"))}: <code>${escapeHtml(previousRun.runId)}</code></p>
+    <table class="compare-table">
+      <thead>
+        <tr>
+          <th>${escapeHtml(localText("Agent", "Agent"))}</th>
+          <th>${escapeHtml(localText("状态变化", "Status Change"))}</th>
+          <th>${escapeHtml(localText("耗时变化", "Duration Δ"))}</th>
+          <th>${escapeHtml(localText("Token 变化", "Token Δ"))}</th>
+          <th>${escapeHtml(localText("成本变化", "Cost Δ"))}</th>
+          <th>${escapeHtml(localText("Judge 变化", "Judge Δ"))}</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.map((row) => `
+          <tr data-run-diff-agent-id="${escapeHtml(row.agentId)}" class="${row.agentId === state.selectedAgentId ? "active" : ""}">
+            <td>${escapeHtml(row.currentResult?.displayLabel ?? row.agentId)}</td>
+            <td>${escapeHtml(row.statusChange)}</td>
+            <td>${row.durationDeltaMs !== null ? escapeHtml(formatDelta(row.durationDeltaMs, "ms")) : "-"}</td>
+            <td>${row.tokenDelta !== null ? escapeHtml(formatDelta(row.tokenDelta)) : "-"}</td>
+            <td>${row.costDelta !== null ? escapeHtml(formatDelta(row.costDelta, "$")) : "-"}</td>
+            <td>${row.judgeDelta !== null ? escapeHtml(formatDelta(row.judgeDelta)) : "-"}</td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+function renderAgentTrendTableV2(run) {
+  if (!run || !state.selectedAgentId) {
+    elements.agentTrendTable.innerHTML = "";
+    return;
+  }
+
+  const rows = getAgentTrendRows(state.runs, run, state.selectedAgentId);
+  if (rows.length === 0) {
+    elements.agentTrendTable.innerHTML = `<p class="empty-state">${escapeHtml(localText("没有趋势数据。", "No trend data available."))}</p>`;
+    return;
+  }
+
+  const formatDelta = (value, unit = "") => {
+    if (value === null || value === undefined) return "-";
+    const sign = value > 0 ? "+" : "";
+    return `${sign}${typeof value === "number" && unit === "$" ? value.toFixed(4) : value}${unit}`;
+  };
+
+  elements.agentTrendTable.innerHTML = `
+    <table class="compare-table">
+      <thead>
+        <tr>
+          <th>${escapeHtml(localText("Run", "Run"))}</th>
+          <th>${escapeHtml(localText("状态", "Status"))}</th>
+          <th>${escapeHtml(localText("耗时", "Duration"))}</th>
+          <th>${escapeHtml(localText("Tokens", "Tokens"))}</th>
+          <th>${escapeHtml(localText("成本", "Cost"))}</th>
+          <th>${escapeHtml(localText("Judge 变化", "Judge Δ"))}</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.map((row) => `
+          <tr data-agent-trend-run-id="${escapeHtml(row.run.runId)}" class="${row.run.runId === state.selectedRunId ? "active" : ""}">
+            <td><code>${escapeHtml(row.run.runId.slice(0, 16))}</code></td>
+            <td><span class="status-badge ${row.result.status === "success" ? "status-success" : "status-failed"}">${escapeHtml(row.result.status)}</span></td>
+            <td>${escapeHtml(formatDuration(row.result.durationMs))}</td>
+            <td>${row.result.tokenUsage.toLocaleString()}</td>
+            <td>${row.result.costKnown ? "$" + row.result.estimatedCostUsd.toFixed(4) : "n/a"}</td>
+            <td>${row.judgeDelta !== null ? escapeHtml(formatDelta(row.judgeDelta)) : "-"}</td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>
+  `;
+}
+
 function renderPreflights(run) {
   elements.preflights.innerHTML = run.preflights
     .map(
@@ -1822,17 +1955,17 @@ function renderPreflights(run) {
             preflight.capability.traceRichness
           )}</p>
           <p class="muted">${escapeHtml(state.language === "zh-CN" ? "调用方式" : "Invocation")}: ${escapeHtml(preflight.capability.invocationMethod)}</p>
-          <p class="muted">${escapeHtml(t("metrics.tokens"))}: ${escapeHtml(preflight.capability.tokenAvailability)} | ${escapeHtml(state.language === "zh-CN" ? "鎴愭湰" : "Cost")}: ${escapeHtml(
+          <p class="muted">${escapeHtml(t("metrics.tokens"))}: ${escapeHtml(preflight.capability.tokenAvailability)} | ${escapeHtml(state.language === "zh-CN" ? "成本" : "Cost")}: ${escapeHtml(
             preflight.capability.costAvailability
           )}</p>
           ${
             preflight.capability.authPrerequisites.length > 0
-              ? `<p class="muted">${escapeHtml(state.language === "zh-CN" ? "閴存潈瑕佹眰" : "Auth")}: ${escapeHtml(preflight.capability.authPrerequisites.join("; "))}</p>`
+              ? `<p class="muted">${escapeHtml(state.language === "zh-CN" ? "鉴权要求" : "Auth")}: ${escapeHtml(preflight.capability.authPrerequisites.join("; "))}</p>`
               : ""
           }
           ${
             preflight.capability.knownLimitations.length > 0
-              ? `<p class="muted">${escapeHtml(state.language === "zh-CN" ? "闄愬埗" : "Limitations")}: ${escapeHtml(preflight.capability.knownLimitations.join("; "))}</p>`
+              ? `<p class="muted">${escapeHtml(state.language === "zh-CN" ? "限制" : "Limitations")}: ${escapeHtml(preflight.capability.knownLimitations.join("; "))}</p>`
               : ""
           }
           ${
@@ -1840,48 +1973,6 @@ function renderPreflights(run) {
               ? `<ul>${preflight.details.map((detail) => `<li>${escapeHtml(detail)}</li>`).join("")}</ul>`
               : ""
           }
-        </article>
-      `
-    )
-    .join("");
-}
-
-function renderVerdicts(run) {
-  const verdict = getRunVerdict(run);
-  const cards = [
-    {
-      label: t("verdicts.bestAgent"),
-      value: verdict.bestAgent ? resultLabel(verdict.bestAgent) : "n/a",
-      meta: verdict.bestAgent
-        ? `${runtimeIdentity(verdict.bestAgent).model} | ${runtimeIdentity(verdict.bestAgent).reasoning}`
-        : t("verdicts.noResult")
-    },
-    {
-      label: t("verdicts.fastest"),
-      value: verdict.fastest ? resultLabel(verdict.fastest) : "n/a",
-      meta: verdict.fastest ? formatDuration(verdict.fastest.durationMs) : t("verdicts.noResult")
-    },
-    {
-      label: t("verdicts.lowestKnownCost"),
-      value: verdict.lowestKnownCost ? resultLabel(verdict.lowestKnownCost) : "n/a",
-      meta: verdict.lowestKnownCost ? formatCost(verdict.lowestKnownCost) : t("verdicts.noKnownCost")
-    },
-    {
-      label: t("verdicts.highestJudgePassRate"),
-      value: verdict.highestJudgePassRate ? resultLabel(verdict.highestJudgePassRate) : "n/a",
-      meta: verdict.highestJudgePassRate
-        ? `${verdict.highestJudgePassRate.judgeResults.filter((judge) => judge.success).length}/${verdict.highestJudgePassRate.judgeResults.length}`
-        : t("verdicts.noResult")
-    }
-  ];
-
-  elements.runVerdicts.innerHTML = cards
-    .map(
-      (card) => `
-        <article class="metric verdict-card">
-          <p class="metric-label">${escapeHtml(card.label)}</p>
-          <p class="metric-value">${escapeHtml(card.value)}</p>
-          <p class="muted">${escapeHtml(card.meta)}</p>
         </article>
       `
     )
@@ -1927,7 +2018,7 @@ function renderStepCards(title, steps) {
                   }</span>
                   <span class="muted">${escapeHtml(formatDuration(step.durationMs))}</span>
                 </summary>
-                <div class="detail-row"><span>${escapeHtml(state.language === "zh-CN" ? "鍛戒护" : "Command")}</span><code>${escapeHtml(step.command)}</code></div>
+                <div class="detail-row"><span>${escapeHtml(state.language === "zh-CN" ? "命令" : "Command")}</span><code>${escapeHtml(step.command)}</code></div>
                 <div class="detail-row"><span>CWD</span><code>${escapeHtml(step.cwd)}</code></div>
                 ${
                   step.stdout
@@ -2012,7 +2103,7 @@ function renderJudgeCards(result) {
                 }
                 ${
                   judge.command
-                    ? `<div class="detail-row"><span>${escapeHtml(state.language === "zh-CN" ? "鍛戒护" : "Command")}</span><code>${escapeHtml(judge.command)}</code></div>`
+                    ? `<div class="detail-row"><span>${escapeHtml(state.language === "zh-CN" ? "命令" : "Command")}</span><code>${escapeHtml(judge.command)}</code></div>`
                     : ""
                 }
                 ${
@@ -2057,14 +2148,14 @@ function populateJudgeFilters(run) {
 
 function renderDiff(result) {
   const sections = [
-    [state.language === "zh-CN" ? "鏂板" : "Added", result.diff.added],
-    [state.language === "zh-CN" ? "淇敼" : "Changed", result.diff.changed],
+    [state.language === "zh-CN" ? "新增" : "Added", result.diff.added],
+    [state.language === "zh-CN" ? "修改" : "Changed", result.diff.changed],
     [state.language === "zh-CN" ? "删除" : "Removed", result.diff.removed]
   ];
 
   return `
     <section class="detail-card">
-      <h3>${escapeHtml(state.language === "zh-CN" ? "Diff 缁嗗垎" : "Diff Breakdown")}</h3>
+      <h3>${escapeHtml(state.language === "zh-CN" ? "Diff 细分" : "Diff Breakdown")}</h3>
       <div class="diff-grid">
         ${sections
           .map(
@@ -2106,16 +2197,253 @@ function renderMarkdownPanel() {
   setHidden(elements.markdownPanel, false);
   elements.markdownStatus.textContent = state.run && state.markdownByRunId.has(state.run.runId)
     ? (state.language === "zh-CN" ? "已关联当前 run" : "Linked to selected run")
-    : (state.language === "zh-CN" ? "鐙珛 markdown" : "Standalone markdown");
+    : (state.language === "zh-CN" ? "独立 markdown" : "Standalone markdown");
   elements.markdownHighlights.innerHTML = state.run
     ? `
         <section class="detail-card">
-          <h4>${escapeHtml(state.language === "zh-CN" ? "閲嶇偣鎽樿" : "Highlights")}</h4>
+          <h4>${escapeHtml(state.language === "zh-CN" ? "重点摘要" : "Highlights")}</h4>
           <pre>${escapeHtml(buildShareCard(state.run))}</pre>
         </section>
       `
     : `<p class="empty-state">${escapeHtml(state.language === "zh-CN" ? "先加载一个 run，才能看到摘要亮点。" : "Load a run to see summary highlights.")}</p>`;
   elements.markdownContent.innerHTML = renderMarkdownBlock(markdown);
+}
+
+function generateVerdictSummary(run) {
+  const summary = summarizeRun(run);
+  const verdict = getRunVerdict(run);
+  const best = verdict.bestAgent;
+  const fastest = verdict.fastest;
+  const cheapest = verdict.lowestKnownCost;
+
+  if (summary.successCount === 0) {
+    return localText(
+      `本次所有 ${summary.totalAgents} 个 agent 均未通过测试。`,
+      `All ${summary.totalAgents} agent(s) failed this benchmark.`
+    );
+  }
+
+  const bestName = best ? resultLabel(best) : "n/a";
+  const passedJudges = best ? best.judgeResults.filter((j) => j.success).length : 0;
+  const totalJudges = best ? best.judgeResults.length : 0;
+  const duration = best ? formatDuration(best.durationMs) : "n/a";
+
+  let extras = [];
+  if (fastest && recordKey(fastest) === recordKey(best)) {
+    extras.push(localText("最快", "fastest"));
+  }
+  if (cheapest && recordKey(cheapest) === recordKey(best)) {
+    extras.push(localText("最省", "cheapest"));
+  }
+  const extrasText = extras.length > 0 ? localText(`，同时也是${extras.join("、")}`, `, also ${extras.join(" & ")}`) : "";
+
+  if (summary.successCount === summary.totalAgents) {
+    return localText(
+      `本次结果：${bestName} 综合最佳，通过率 ${passedJudges}/${totalJudges}，耗时 ${duration}${extrasText}。全部 ${summary.totalAgents} 个 agent 通过。`,
+      `Result: ${bestName} is the overall best with ${passedJudges}/${totalJudges} judges passed in ${duration}${extrasText}. All ${summary.totalAgents} agent(s) passed.`
+    );
+  }
+
+  return localText(
+    `本次 ${summary.successCount}/${summary.totalAgents} 通过，${bestName} 表现最佳（${passedJudges}/${totalJudges}，${duration}）${extrasText}。`,
+    `${summary.successCount}/${summary.totalAgents} passed. ${bestName} performed best (${passedJudges}/${totalJudges}, ${duration})${extrasText}.`
+  );
+}
+
+function renderVerdictHero(run) {
+  const summary = summarizeRun(run);
+  const verdict = getRunVerdict(run);
+  const best = verdict.bestAgent;
+  const fastest = verdict.fastest;
+  const cheapest = verdict.lowestKnownCost;
+  const badges = taskMeaningBadges(run.task);
+  const verdictText = generateVerdictSummary(run);
+
+  const badgeHtml = badges.map((b) => `<span class="meaning-badge">${escapeHtml(b)}</span>`).join("");
+
+  let winnerHtml;
+  if (best && best.status === "success") {
+    const runtime = runtimeIdentity(best);
+    const passedJudges = best.judgeResults.filter((j) => j.success).length;
+    const totalJudges = best.judgeResults.length;
+    const tags = [];
+    tags.push(`<span class="compare-tag compare-tag-best">${escapeHtml(localText("综合最佳", "Overall Best"))}</span>`);
+    if (fastest && recordKey(fastest) === recordKey(best)) {
+      tags.push(`<span class="compare-tag compare-tag-fast">${escapeHtml(localText("最快", "Fastest"))}</span>`);
+    }
+    if (cheapest && recordKey(cheapest) === recordKey(best)) {
+      tags.push(`<span class="compare-tag compare-tag-cheap">${escapeHtml(localText("最省", "Cheapest"))}</span>`);
+    }
+
+    winnerHtml = `
+      <div class="winner-card">
+        <span class="winner-eyebrow">${escapeHtml(localText("综合最佳 Agent", "Overall Best Agent"))}</span>
+        <span class="winner-name">${escapeHtml(resultLabel(best))}</span>
+        <span class="winner-model">${escapeHtml(runtime.model)} · ${escapeHtml(runtime.reasoning)}</span>
+        <div class="winner-stats">
+          <div class="winner-stat">
+            <span class="winner-stat-label">${escapeHtml(localText("通过率", "Pass Rate"))}</span>
+            <span class="winner-stat-value">${passedJudges}/${totalJudges}</span>
+          </div>
+          <div class="winner-stat">
+            <span class="winner-stat-label">${escapeHtml(localText("耗时", "Duration"))}</span>
+            <span class="winner-stat-value">${escapeHtml(formatDuration(best.durationMs))}</span>
+          </div>
+          <div class="winner-stat">
+            <span class="winner-stat-label">${escapeHtml(localText("成本", "Cost"))}</span>
+            <span class="winner-stat-value">${escapeHtml(formatCost(best))}</span>
+          </div>
+          <div class="winner-stat">
+            <span class="winner-stat-label">Tokens</span>
+            <span class="winner-stat-value">${best.tokenUsage}</span>
+          </div>
+        </div>
+        <div class="winner-tags">${tags.join("")}</div>
+      </div>
+    `;
+  } else {
+    winnerHtml = `
+      <div class="no-winner-card">
+        <span>${escapeHtml(localText("无通过的 Agent", "No Passing Agent"))}</span>
+        <span class="muted" style="font-weight:400;font-size:0.85rem">${escapeHtml(localText("所有 agent 均未通过本次测试", "All agents failed this benchmark"))}</span>
+      </div>
+    `;
+  }
+
+  elements.verdictHero.innerHTML = `
+    <div class="verdict-hero">
+      <div class="verdict-summary">
+        <div class="verdict-badges">${badgeHtml}</div>
+        <p class="verdict-text">${escapeHtml(verdictText)}</p>
+        <div class="stats-row">
+          <div class="stat-item">
+            <span class="stat-label">${escapeHtml(t("metrics.agents"))}</span>
+            <span class="stat-value">${summary.totalAgents}</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">${escapeHtml(t("metrics.success"))}</span>
+            <span class="stat-value success">${summary.successCount}</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">${escapeHtml(t("metrics.failed"))}</span>
+            <span class="stat-value${summary.failedCount > 0 ? " danger" : ""}">${summary.failedCount}</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">Tokens</span>
+            <span class="stat-value">${summary.totalTokens.toLocaleString()}</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">${escapeHtml(t("metrics.knownCost"))}</span>
+            <span class="stat-value">$${summary.knownCost.toFixed(2)}</span>
+          </div>
+        </div>
+      </div>
+      ${winnerHtml}
+    </div>
+  `;
+}
+
+function renderComparisonBars(run) {
+  const results = getCompareResults(run, { sort: "status" });
+  if (results.length < 2) {
+    elements.comparisonBars.innerHTML = "";
+    return;
+  }
+
+  const maxDuration = Math.max(...results.map((r) => r.durationMs || 0), 1);
+  const maxCost = Math.max(...results.filter((r) => r.costKnown).map((r) => r.estimatedCostUsd), 0.01);
+
+  function barRows(getValue, maxVal, formatFn, colorFn) {
+    return results.map((r) => {
+      const val = getValue(r);
+      const pct = maxVal > 0 ? Math.round((val / maxVal) * 100) : 0;
+      const color = colorFn(r);
+      return `
+        <div class="bar-row">
+          <span class="bar-label" title="${escapeHtml(resultLabel(r))}">${escapeHtml(resultLabel(r))}</span>
+          <div class="bar-track"><div class="bar-fill ${color}" style="width:${pct}%"></div></div>
+          <span class="bar-value">${escapeHtml(formatFn(r))}</span>
+        </div>
+      `;
+    }).join("");
+  }
+
+  const statusColor = (r) => r.status === "success" ? "success" : "danger";
+
+  const passRateRows = results.map((r) => {
+    const total = r.judgeResults.length;
+    const passed = r.judgeResults.filter((j) => j.success).length;
+    const pct = total > 0 ? Math.round((passed / total) * 100) : 0;
+    const color = pct === 100 ? "success" : pct >= 50 ? "warning" : "danger";
+    return `
+      <div class="bar-row">
+        <span class="bar-label" title="${escapeHtml(resultLabel(r))}">${escapeHtml(resultLabel(r))}</span>
+        <div class="bar-track"><div class="bar-fill ${color}" style="width:${pct}%"></div></div>
+        <span class="bar-value">${passed}/${total}</span>
+      </div>
+    `;
+  }).join("");
+
+  const durationRows = barRows(
+    (r) => r.durationMs || 0,
+    maxDuration,
+    (r) => formatDuration(r.durationMs),
+    statusColor
+  );
+
+  const costRows = barRows(
+    (r) => r.costKnown ? r.estimatedCostUsd : 0,
+    maxCost,
+    (r) => formatCost(r),
+    statusColor
+  );
+
+  elements.comparisonBars.innerHTML = `
+    <div class="comparison-bars">
+      <div class="bar-chart">
+        <div class="bar-chart-title">${escapeHtml(localText("Judge 通过率", "Judge Pass Rate"))}</div>
+        ${passRateRows}
+      </div>
+      <div class="bar-chart">
+        <div class="bar-chart-title">${escapeHtml(localText("耗时", "Duration"))}</div>
+        ${durationRows}
+      </div>
+      <div class="bar-chart">
+        <div class="bar-chart-title">${escapeHtml(localText("成本", "Cost"))}</div>
+        ${costRows}
+      </div>
+    </div>
+  `;
+}
+
+function renderFailures(run) {
+  const failed = run.results.filter((r) => r.status === "failed");
+  if (failed.length === 0) {
+    setHidden(elements.failuresSection, true);
+    return;
+  }
+
+  setHidden(elements.failuresSection, false);
+  const items = failed.map((r) => {
+    const failedJudges = r.judgeResults.filter((j) => !j.success);
+    const judgeHtml = failedJudges.length > 0
+      ? `<div class="failure-judges">${failedJudges.map((j) => `<span class="failure-judge">${escapeHtml(j.label || j.id)}</span>`).join("")}</div>`
+      : "";
+    return `
+      <div class="failure-item">
+        <div class="failure-agent">${escapeHtml(resultLabel(r))}</div>
+        <div class="failure-reason">${escapeHtml(r.summary || localText("未知原因", "Unknown reason"))}</div>
+        ${judgeHtml}
+      </div>
+    `;
+  }).join("");
+
+  elements.failuresSection.innerHTML = `
+    <div class="failures-section">
+      <div class="failures-title">${escapeHtml(localText("失败与风险", "Failures & Risks"))}</div>
+      ${items}
+    </div>
+  `;
 }
 
 function renderCompareTableV2(run) {
@@ -2135,45 +2463,65 @@ function renderCompareTableV2(run) {
     return;
   }
 
+  const verdict = getRunVerdict(run);
+  const bestKey = verdict.bestAgent ? recordKey(verdict.bestAgent) : null;
+  const fastestKey = verdict.fastest ? recordKey(verdict.fastest) : null;
+  const cheapestKey = verdict.lowestKnownCost ? recordKey(verdict.lowestKnownCost) : null;
+  const medals = ["🥇", "🥈", "🥉"];
+
   elements.compareTable.innerHTML = `
     <table class="compare-table">
       <thead>
         <tr>
+          <th>#</th>
           <th>${escapeHtml("Variant")}</th>
-          <th>${escapeHtml(localText("Provider", "Provider"))}</th>
-          <th>${escapeHtml(localText("类型", "Kind"))}</th>
           <th>${escapeHtml(localText("模型", "Model"))}</th>
-          <th>${escapeHtml(localText("推理", "Reasoning"))}</th>
-          <th>${escapeHtml(localText("可信度", "Verification"))}</th>
           <th>${escapeHtml(localText("状态", "Status"))}</th>
+          <th>${escapeHtml(localText("Judge 通过率", "Judge Pass Rate"))}</th>
           <th>${escapeHtml(localText("耗时", "Duration"))}</th>
           <th>${escapeHtml(t("metrics.tokens"))}</th>
           <th>${escapeHtml(localText("成本", "Cost"))}</th>
           <th>${escapeHtml(localText("改动文件", "Changed"))}</th>
-          <th>${escapeHtml("Judges")}</th>
+          <th>${escapeHtml(localText("标签", "Tags"))}</th>
         </tr>
       </thead>
       <tbody>
         ${results
-          .map((result) => {
+          .map((result, index) => {
             const passedJudges = result.judgeResults.filter((judge) => judge.success).length;
+            const totalJudges = result.judgeResults.length;
+            const passRatio = totalJudges > 0 ? passedJudges / totalJudges : 0;
+            const passPercent = Math.round(passRatio * 100);
             const isActive = recordKey(result) === state.selectedAgentId ? "active" : "";
+            const key = recordKey(result);
             const runtime = runtimeIdentity(result);
+            const isBest = key === bestKey;
+            const rowClass = [isActive, isBest ? "compare-row-best" : "", result.status === "failed" ? "compare-row-failed" : ""].filter(Boolean).join(" ");
+            const medal = index < 3 && results.length > 1 ? medals[index] : "";
+            const tags = [];
+            if (key === bestKey) tags.push(`<span class="compare-tag compare-tag-best">${escapeHtml(localText("最佳", "Best"))}</span>`);
+            if (key === fastestKey) tags.push(`<span class="compare-tag compare-tag-fast">${escapeHtml(localText("最快", "Fastest"))}</span>`);
+            if (key === cheapestKey) tags.push(`<span class="compare-tag compare-tag-cheap">${escapeHtml(localText("最省", "Cheapest"))}</span>`);
+
+            const barColor = passPercent === 100 ? "var(--success)" : passPercent >= 50 ? "var(--warning)" : "var(--danger)";
 
             return `
-              <tr class="${isActive}" data-compare-agent-id="${escapeHtml(recordKey(result))}">
+              <tr class="${rowClass}" data-compare-agent-id="${escapeHtml(key)}">
+                <td class="compare-rank">${medal || index + 1}</td>
                 <td><strong>${escapeHtml(resultLabel(result))}</strong><br /><code>${escapeHtml(baseAgentLabel(result))}</code></td>
-                <td>${escapeHtml(runtime.provider)}</td>
-                <td>${escapeHtml(runtime.providerKind)}</td>
-                <td>${escapeHtml(runtime.model)}</td>
-                <td>${escapeHtml(runtime.reasoning)}</td>
-                <td>${escapeHtml(runtimeVerificationLabel(result))}</td>
+                <td><span class="compare-model">${escapeHtml(runtime.model)}</span><br /><span class="muted" style="font-size:0.75rem">${escapeHtml(runtime.reasoning)}</span></td>
                 <td><span class="status-badge ${statusClass(result.status)}">${escapeHtml(result.status)}</span></td>
+                <td>
+                  <div class="judge-bar-wrap">
+                    <div class="judge-bar" style="width:${passPercent}%;background:${barColor}"></div>
+                  </div>
+                  <span class="judge-bar-label">${passedJudges}/${totalJudges} (${passPercent}%)</span>
+                </td>
                 <td>${escapeHtml(formatDuration(result.durationMs))}</td>
                 <td>${result.tokenUsage}</td>
                 <td>${escapeHtml(formatCost(result))}</td>
                 <td>${result.changedFiles.length}</td>
-                <td>${passedJudges}/${result.judgeResults.length}</td>
+                <td>${tags.join(" ")}</td>
               </tr>
             `;
           })
@@ -2269,17 +2617,23 @@ function renderDashboard(run) {
   setHidden(elements.dashboard, false);
 
   elements.taskTitle.textContent = run.task.title;
-  elements.taskMeta.textContent = `${run.task.id} | ${run.task.schemaVersion} | ${run.createdAt}`;
+  elements.taskMeta.textContent = `${run.task.id} | ${run.createdAt}`;
 
+  // 首屏结论
+  renderVerdictHero(run);
+  // 核心对比表
+  renderCompareTableV2(run);
+  // 横向条形图
+  renderComparisonBars(run);
+  // 失败与风险
+  renderFailures(run);
+  // 高级分析内部
   renderTaskBrief(run);
   renderRunInfo(run);
-  renderMetrics(run);
-  renderVerdicts(run);
   renderRunCompareTable();
   renderRunDiffTableV2();
   renderPreflights(run);
   renderAgentList(run);
-  renderCompareTableV2(run);
   renderAgentTrendTableV2(run);
   populateJudgeFilters(run);
   renderSelectedAgentV2();
@@ -2290,7 +2644,13 @@ function renderDashboard(run) {
     elements.agentTrendSection,
     !state.selectedAgentId || getAgentTrendRows(state.runs, run, state.selectedAgentId).length <= 1
   );
-  renderNextSteps();
+  // 高级分析 summary 文案
+  if (elements.advancedAnalysis) {
+    const summaryEl = elements.advancedAnalysis.querySelector("summary");
+    if (summaryEl) {
+      summaryEl.textContent = localText("高级分析", "Advanced Analysis");
+    }
+  }
 }
 
 function render() {
@@ -2305,12 +2665,10 @@ function render() {
     elements.agentCount.textContent = "0";
     elements.agentList.className = "agent-list empty-state";
     elements.agentList.textContent = t("noReportLoaded");
-    elements.runVerdicts.innerHTML = "";
     elements.runCompareTable.innerHTML = "";
     elements.runDiffTable.innerHTML = "";
     elements.agentTrendTitle.textContent = t("agentTrendTitle");
     elements.agentTrendTable.innerHTML = "";
-    renderNextSteps();
     renderMarkdownPanel();
     return;
   }
@@ -2347,7 +2705,6 @@ async function handleMarkdownSelection(event) {
     state.language === "zh-CN"
       ? "Markdown 已加载。如果当前也有 run，分享摘要会自动出现。"
       : "Markdown loaded. If a run is also loaded, the share summary will appear automatically.";
-  renderNextSteps();
   renderMarkdownPanel();
 }
 
@@ -2390,7 +2747,6 @@ async function handleFolderSelection(event) {
       state.language === "zh-CN"
         ? "选中的目录里没有 summary.json。请改选一个 RepoArena 结果目录。"
         : "No summary.json file was found in the selected folder. Choose a RepoArena results folder.";
-    renderNextSteps();
     return;
   }
 
@@ -2425,8 +2781,13 @@ elements.launcherTaskSelect.addEventListener("change", (event) => {
   if (value) {
     elements.launcherTaskPath.value = value;
   }
+  saveLauncherConfig();
   renderLauncher();
 });
+elements.launcherRepoPath.addEventListener("input", () => saveLauncherConfig());
+elements.launcherTaskPath.addEventListener("input", () => saveLauncherConfig());
+elements.launcherOutputPath.addEventListener("input", () => saveLauncherConfig());
+elements.launcherProbeAuth.addEventListener("change", () => saveLauncherConfig());
 elements.launcherAgents.addEventListener("change", (event) => {
   if (event.target?.id === "launcher-add-codex-variant") {
     return;
@@ -2606,18 +2967,6 @@ elements.agentTrendTable.addEventListener("click", (event) => {
   render();
 });
 
-elements.expandAll.addEventListener("click", () => {
-  document.querySelectorAll("details").forEach((element) => {
-    element.open = true;
-  });
-});
-
-elements.collapseAll.addEventListener("click", () => {
-  document.querySelectorAll("details").forEach((element) => {
-    element.open = false;
-  });
-});
-
 elements.judgeSearch.addEventListener("input", (event) => {
   judgeFilters.search = String(event.target.value ?? "").trim().toLowerCase();
   renderSelectedAgentV2();
@@ -2671,14 +3020,6 @@ elements.copyPrTable.addEventListener("click", async () => {
   }
 
   await copyToClipboard(buildPrTable(state.run), "PR table");
-});
-
-elements.copyShareSvg.addEventListener("click", async () => {
-  if (!state.run) {
-    return;
-  }
-
-  await copyToClipboard(buildShareCardSvg(state.run), "Share SVG");
 });
 
 elements.downloadShareSvg.addEventListener("click", () => {

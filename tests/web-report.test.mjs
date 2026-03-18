@@ -7,6 +7,8 @@ import {
   findPreviousComparableRun,
   getAgentTrendRows,
   getCompareResults,
+  getCrossRunCompareRows,
+  getCrossRunRecommendation,
   getRunCompareRows,
   getRunToRunAgentDiff,
   getRunVerdict
@@ -236,4 +238,87 @@ test("getAgentTrendRows tracks one agent across same-task runs", () => {
   assert.equal(rows[1].durationDeltaMs, -500);
   assert.equal(rows[1].tokenDelta, 30);
   assert.equal(rows[1].judgeDelta, 1);
+});
+
+test("getCrossRunCompareRows aggregates agent results across multiple runs", () => {
+  const runs = [
+    createRun("run-a", "Task A", {
+      createdAt: "2026-03-14T09:00:00.000Z",
+      results: [
+        createResult("demo-fast", { durationMs: 2000, tokenUsage: 100, judgeResults: [{ success: true }] }),
+        createResult("codex", { status: "failed", durationMs: 3000, tokenUsage: 200, judgeResults: [{ success: false }] })
+      ]
+    }),
+    createRun("run-b", "Task A", {
+      createdAt: "2026-03-14T10:00:00.000Z",
+      results: [
+        createResult("demo-fast", { durationMs: 1500, tokenUsage: 120, judgeResults: [{ success: true }, { success: true }] }),
+        createResult("codex", { status: "success", durationMs: 2500, tokenUsage: 180, judgeResults: [{ success: true }] })
+      ]
+    })
+  ];
+
+  const data = getCrossRunCompareRows(runs);
+  assert.equal(data.runs.length, 2);
+  assert.equal(data.rows.length, 2);
+
+  // demo-fast has 2 successes, codex has 1 — demo-fast should be first
+  assert.equal(data.rows[0].agentId, "demo-fast");
+  assert.equal(data.rows[0].stats.successCount, 2);
+  assert.equal(data.rows[0].stats.totalRuns, 2);
+  assert.equal(data.rows[0].stats.totalTokens, 220);
+
+  assert.equal(data.rows[1].agentId, "codex");
+  assert.equal(data.rows[1].stats.successCount, 1);
+  assert.equal(data.rows[1].stats.totalRuns, 2);
+});
+
+test("getCrossRunCompareRows returns empty for no runs", () => {
+  const data = getCrossRunCompareRows([]);
+  assert.deepEqual(data, { runs: [], agents: [], rows: [] });
+});
+
+test("getCrossRunRecommendation picks the best agent by composite score", () => {
+  const runs = [
+    createRun("run-a", "Task A", {
+      results: [
+        createResult("fast-agent", {
+          durationMs: 1000,
+          tokenUsage: 50,
+          costKnown: true,
+          estimatedCostUsd: 0.1,
+          judgeResults: [{ success: true }]
+        }),
+        createResult("slow-agent", {
+          durationMs: 5000,
+          tokenUsage: 500,
+          costKnown: true,
+          estimatedCostUsd: 0.5,
+          judgeResults: [{ success: true }]
+        })
+      ]
+    })
+  ];
+
+  const data = getCrossRunCompareRows(runs);
+  const recommendation = getCrossRunRecommendation(data);
+
+  assert.ok(recommendation);
+  // fast-agent should win: same success rate but faster and cheaper
+  assert.equal(recommendation.agentId, "fast-agent");
+  assert.equal(recommendation.successRate, 1);
+});
+
+test("getCrossRunRecommendation returns null when all agents failed", () => {
+  const runs = [
+    createRun("run-a", "Task A", {
+      results: [
+        createResult("agent-a", { status: "failed", judgeResults: [{ success: false }] })
+      ]
+    })
+  ];
+
+  const data = getCrossRunCompareRows(runs);
+  const recommendation = getCrossRunRecommendation(data);
+  assert.equal(recommendation, null);
 });

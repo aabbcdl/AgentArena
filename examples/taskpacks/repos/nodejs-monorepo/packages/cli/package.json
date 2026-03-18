@@ -1,0 +1,11 @@
+{
+  "name": "@monorepo/cli",
+  "version": "1.0.0",
+  "main": "src/index.ts",
+  "scripts": {
+    "test": "echo \"cli tests passed\" && exit 0"
+  },
+  "dependencies": {
+    "@monorepo/core": "1.0.0"
+  }
+}

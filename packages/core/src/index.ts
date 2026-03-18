@@ -344,7 +344,7 @@ export interface FileSnapshotEntry {
   hash: string;
 }
 
-const INTERNAL_IGNORED_NAMES = new Set([".repoarena", ".git"]);
+const INTERNAL_IGNORED_NAMES = new Set([".repoarena", ".git", "node_modules"]);
 const BASELINE_ENV_NAMES = [
   "PATH",
   "Path",

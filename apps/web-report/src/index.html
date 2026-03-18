@@ -52,20 +52,6 @@
 
         <section class="panel">
           <div class="panel-header">
-            <h2 id="workflow-title">Recommended Flow</h2>
-          </div>
-          <ol id="workflow-list" class="workflow-list"></ol>
-        </section>
-
-        <section class="panel">
-          <div class="panel-header">
-            <h2 id="next-steps-title">Next Step</h2>
-          </div>
-          <div id="next-steps-content" class="muted"></div>
-        </section>
-
-        <section class="panel">
-          <div class="panel-header">
             <h2 id="runs-heading">Runs</h2>
             <span id="run-count" class="muted">0</span>
           </div>
@@ -115,7 +101,7 @@
             </div>
             <section class="field">
               <span id="launcher-agents-label">Agents</span>
-              <div id="launcher-agents" class="checkbox-grid"></div>
+              <div id="launcher-agents" class="launcher-agents-container"></div>
             </section>
             <div class="launcher-actions">
               <label class="checkbox">
@@ -124,15 +110,15 @@
               </label>
               <button id="launcher-run" type="button">Start Benchmark</button>
             </div>
-            <p id="launcher-status" class="muted"></p>
-            <section id="launcher-progress" class="launcher-progress hidden">
-              <div class="panel-header">
-                <h3 id="launcher-progress-title">Live Progress</h3>
-              </div>
-              <p id="launcher-current-agent" class="muted"></p>
-              <div id="launcher-log-list" class="launcher-log-list"></div>
-            </section>
           </div>
+          <p id="launcher-status" class="muted"></p>
+          <section id="launcher-progress" class="launcher-progress hidden">
+            <div class="panel-header">
+              <h3 id="launcher-progress-title">Live Progress</h3>
+            </div>
+            <p id="launcher-current-agent" class="muted"></p>
+            <div id="launcher-log-list" class="launcher-log-list"></div>
+          </section>
         </section>
 
         <section id="empty-state" class="hero">
@@ -161,69 +147,17 @@
               <p id="task-meta" class="muted"></p>
             </div>
             <div class="actions">
-              <button id="expand-all" type="button">Expand Logs</button>
-              <button id="collapse-all" type="button">Collapse Logs</button>
+              <button id="copy-share-card" type="button">Copy Summary</button>
+              <button id="copy-pr-table" type="button">Copy PR Table</button>
+              <button id="download-share-svg" type="button">Download SVG</button>
             </div>
           </div>
+          <p id="clipboard-status" class="muted"></p>
 
-          <section id="task-brief" class="detail-card"></section>
+          <!-- 首屏：结论区 -->
+          <section id="verdict-hero"></section>
 
-          <section id="metrics" class="metrics"></section>
-
-          <section id="run-verdicts" class="metrics"></section>
-
-          <section id="run-compare-section" class="detail-card">
-            <div class="panel-header">
-              <h3 id="run-compare-title">Run Compare</h3>
-            </div>
-            <div class="filter-bar">
-              <select id="run-compare-scope">
-                <option value="current-task">Current Task Only</option>
-                <option value="all">All Tasks</option>
-              </select>
-              <select id="run-compare-sort">
-                <option value="created">Created At (newest first)</option>
-                <option value="success">Success Rate (high to low)</option>
-                <option value="tokens">Tokens (high to low)</option>
-                <option value="cost">Known Cost (low to high)</option>
-              </select>
-            </div>
-            <div id="run-compare-table" class="compare-table-wrap"></div>
-          </section>
-
-          <section id="cross-run-compare-section" class="detail-card">
-            <div class="panel-header">
-              <h3 id="cross-run-compare-title">Cross-Run Compare</h3>
-              <button id="cross-run-toggle-select" type="button">Select Runs to Compare</button>
-            </div>
-            <p id="cross-run-description" class="muted">Select multiple runs to compare agent performance across different model configurations.</p>
-            <div id="cross-run-selection-panel" class="cross-run-selection hidden">
-              <div class="filter-bar">
-                <input id="cross-run-search" type="search" placeholder="Search by task or run ID" />
-              </div>
-              <div id="cross-run-selection-list" class="cross-run-selection-list"></div>
-              <div class="inline-actions">
-                <button id="cross-run-compare-btn" type="button" disabled>Compare Selected</button>
-                <button id="cross-run-clear-btn" type="button">Clear Selection</button>
-              </div>
-            </div>
-            <div id="cross-run-compare-view" class="cross-run-compare-view hidden">
-              <div class="panel-header">
-                <h4 id="cross-run-compare-summary"></h4>
-                <button id="cross-run-close-compare" type="button">Close Compare</button>
-              </div>
-              <div id="cross-run-compare-table" class="compare-table-wrap"></div>
-            </div>
-          </section>
-
-          <section id="run-diff-section" class="detail-card">
-            <div class="panel-header">
-              <h3 id="run-diff-title">Run-to-Run Agent Diff</h3>
-            </div>
-            <p id="run-diff-description" class="muted">Compare the selected run against the previous run with the same task title.</p>
-            <div id="run-diff-table" class="compare-table-wrap"></div>
-          </section>
-
+          <!-- 核心对比表 -->
           <section id="agent-compare-section" class="detail-card">
             <div class="panel-header">
               <h3 id="agent-compare-title">Agent Compare</h3>
@@ -247,60 +181,118 @@
             <div id="compare-table" class="compare-table-wrap"></div>
           </section>
 
-          <section id="agent-trend-section" class="detail-card">
-            <div class="panel-header">
-              <h3 id="agent-trend-title">Agent Trend</h3>
-            </div>
-            <p id="agent-trend-description" class="muted">Track the selected agent across runs for the current task title.</p>
-            <div id="agent-trend-table" class="compare-table-wrap"></div>
-          </section>
+          <!-- 横向条形对比图 -->
+          <section id="comparison-bars"></section>
 
-          <section class="result-layout">
-            <div id="result-summary" class="card result-summary"></div>
-            <div id="result-details" class="result-details"></div>
-          </section>
+          <!-- 失败与风险区 -->
+          <section id="failures-section" class="hidden"></section>
 
-          <section id="preflight-section" class="detail-card">
-            <div class="panel-header">
-              <h3 id="preflight-title">Adapter Preflight</h3>
-            </div>
-            <div id="preflights" class="preflights"></div>
-          </section>
+          <!-- 高级分析（折叠） -->
+          <details id="advanced-analysis" class="advanced-details">
+            <summary id="advanced-analysis-summary">Advanced Analysis</summary>
 
-          <section class="detail-card">
-            <div class="panel-header">
-              <h3 id="judge-filters-title">Judge Filters</h3>
-            </div>
-            <div class="filter-bar">
-              <input id="judge-search" type="search" placeholder="Search label, target, expectation" />
-              <select id="judge-type-filter">
-                <option value="all">All Types</option>
-              </select>
-              <select id="judge-status-filter">
-                <option value="all">All Statuses</option>
-                <option value="pass">Pass</option>
-                <option value="fail">Fail</option>
-              </select>
-            </div>
-          </section>
+            <section id="task-brief" class="detail-card"></section>
 
-          <section id="markdown-panel" class="detail-card hidden">
-            <div class="panel-header">
-              <h3 id="markdown-summary-title">Markdown Summary</h3>
-              <span id="markdown-status" class="muted">Not loaded</span>
-            </div>
-            <div class="actions">
-              <button id="copy-share-card" type="button">Copy Summary</button>
-              <button id="copy-pr-table" type="button">Copy PR Table</button>
-              <button id="copy-share-svg" type="button">Copy Share SVG</button>
-              <button id="download-share-svg" type="button">Download Share SVG</button>
-            </div>
-            <p id="clipboard-status" class="muted"></p>
-            <div class="markdown-grid">
-              <div id="markdown-highlights" class="markdown-highlights"></div>
-              <div id="markdown-content" class="markdown-render"></div>
-            </div>
-          </section>
+            <section id="run-compare-section" class="detail-card">
+              <div class="panel-header">
+                <h3 id="run-compare-title">Run Compare</h3>
+              </div>
+              <div class="filter-bar">
+                <select id="run-compare-scope">
+                  <option value="current-task">Current Task Only</option>
+                  <option value="all">All Tasks</option>
+                </select>
+                <select id="run-compare-sort">
+                  <option value="created">Created At (newest first)</option>
+                  <option value="success">Success Rate (high to low)</option>
+                  <option value="tokens">Tokens (high to low)</option>
+                  <option value="cost">Known Cost (low to high)</option>
+                </select>
+              </div>
+              <div id="run-compare-table" class="compare-table-wrap"></div>
+            </section>
+
+            <section id="cross-run-compare-section" class="detail-card">
+              <div class="panel-header">
+                <h3 id="cross-run-compare-title">Cross-Run Compare</h3>
+                <button id="cross-run-toggle-select" type="button">Select Runs to Compare</button>
+              </div>
+              <p id="cross-run-description" class="muted">Select multiple runs to compare agent performance across different model configurations.</p>
+              <div id="cross-run-selection-panel" class="cross-run-selection hidden">
+                <div class="filter-bar">
+                  <input id="cross-run-search" type="search" placeholder="Search by task or run ID" />
+                </div>
+                <div id="cross-run-selection-list" class="cross-run-selection-list"></div>
+                <div class="inline-actions">
+                  <button id="cross-run-compare-btn" type="button" disabled>Compare Selected</button>
+                  <button id="cross-run-clear-btn" type="button">Clear Selection</button>
+                </div>
+              </div>
+              <div id="cross-run-compare-view" class="cross-run-compare-view hidden">
+                <div class="panel-header">
+                  <h4 id="cross-run-compare-summary"></h4>
+                  <button id="cross-run-close-compare" type="button">Close Compare</button>
+                </div>
+                <div id="cross-run-compare-table" class="compare-table-wrap"></div>
+              </div>
+            </section>
+
+            <section id="run-diff-section" class="detail-card">
+              <div class="panel-header">
+                <h3 id="run-diff-title">Run-to-Run Agent Diff</h3>
+              </div>
+              <p id="run-diff-description" class="muted">Compare the selected run against the previous run with the same task title.</p>
+              <div id="run-diff-table" class="compare-table-wrap"></div>
+            </section>
+
+            <section id="agent-trend-section" class="detail-card">
+              <div class="panel-header">
+                <h3 id="agent-trend-title">Agent Trend</h3>
+              </div>
+              <p id="agent-trend-description" class="muted">Track the selected agent across runs for the current task title.</p>
+              <div id="agent-trend-table" class="compare-table-wrap"></div>
+            </section>
+
+            <section id="preflight-section" class="detail-card">
+              <div class="panel-header">
+                <h3 id="preflight-title">Adapter Preflight</h3>
+              </div>
+              <div id="preflights" class="preflights"></div>
+            </section>
+
+            <section class="detail-card">
+              <div class="panel-header">
+                <h3 id="judge-filters-title">Judge Filters</h3>
+              </div>
+              <div class="filter-bar">
+                <input id="judge-search" type="search" placeholder="Search label, target, expectation" />
+                <select id="judge-type-filter">
+                  <option value="all">All Types</option>
+                </select>
+                <select id="judge-status-filter">
+                  <option value="all">All Statuses</option>
+                  <option value="pass">Pass</option>
+                  <option value="fail">Fail</option>
+                </select>
+              </div>
+            </section>
+
+            <section class="result-layout">
+              <div id="result-summary" class="card result-summary"></div>
+              <div id="result-details" class="result-details"></div>
+            </section>
+
+            <section id="markdown-panel" class="detail-card hidden">
+              <div class="panel-header">
+                <h3 id="markdown-summary-title">Markdown Summary</h3>
+                <span id="markdown-status" class="muted">Not loaded</span>
+              </div>
+              <div class="markdown-grid">
+                <div id="markdown-highlights" class="markdown-highlights"></div>
+                <div id="markdown-content" class="markdown-render"></div>
+              </div>
+            </section>
+          </details>
         </section>
       </main>
     </div>
