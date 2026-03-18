@@ -24,7 +24,7 @@ export const MESSAGES = {
       `Loaded ${runCount} run(s). Current run is "${run.task.title}". Next: review the top verdict cards, then click an agent on the left or in Agent Compare.`,
     runsHeading: "Runs",
     agentsHeading: "Agents",
-    heroEyebrow: "Interactive Viewer",
+    heroEyebrow: "RepoArena",
     heroTitle: "Inspect one benchmark run without digging through raw files.",
     heroDescription:
       "RepoArena compares AI coding agents on the same repository task, then turns the result into a reviewable, shareable report.",
@@ -37,7 +37,7 @@ export const MESSAGES = {
       'Open that folder here with "Recommended: Load Run Folder".',
       "Once loaded, compare agents, inspect judge failures, and export summary text or a share card."
     ],
-    topbarEyebrow: "Run Overview",
+    topbarEyebrow: "RepoArena · Run Overview",
     expandLogs: "Expand Logs",
     collapseLogs: "Collapse Logs",
     runCompareTitle: "Run Compare",
@@ -163,7 +163,7 @@ export const MESSAGES = {
       `已加载 ${runCount} 个 run。当前报告是"${run.task.title}"。下一步先看顶部结论卡片，再点左侧或 Agent Compare 里的 agent 进入详情。`,
     runsHeading: "运行记录",
     agentsHeading: "Agents",
-    heroEyebrow: "交互查看器",
+    heroEyebrow: "RepoArena",
     heroTitle: "不用翻完整页静态报告，直接看一次 benchmark 的结论。",
     heroDescription:
       "RepoArena 会把多个 AI coding agent 放到同一个仓库任务里比较，然后把结果整理成可审查、可分享的报告。",
@@ -176,7 +176,7 @@ export const MESSAGES = {
       `在这里用\u201c推荐：打开结果文件夹\u201d加载结果。`,
       "加载后先看对比表，再看 judge 失败原因和单个 agent 详情。"
     ],
-    topbarEyebrow: "运行总览",
+    topbarEyebrow: "RepoArena · 运行总览",
     expandLogs: "展开日志",
     collapseLogs: "收起日志",
     runCompareTitle: "Run 对比",
