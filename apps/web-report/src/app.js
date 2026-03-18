@@ -231,9 +231,21 @@ function localText(zh, en) {
   return localizeText(state.language, zh, en);
 }
 
+function translateDifficulty(d) {
+  if (!d) return "";
+  const map = { easy: localText("简单", "Easy"), medium: localText("中等", "Medium"), hard: localText("困难", "Hard") };
+  return map[d] || d;
+}
+
+function translateStatus(s) {
+  if (s === "success") return localText("成功", "success");
+  if (s === "failed") return localText("失败", "failed");
+  return s;
+}
+
 function providerDisplayName(profile) {
   if (!profile) {
-    return localText("Official", "Official");
+    return localText("官方", "Official");
   }
   return profile.name;
 }
@@ -334,7 +346,7 @@ function currentRunPhaseLabel() {
 function taskMeaningBadges(task) {
   if (task.id === "official-repo-health" || task.id === "repo-health") {
     return [
-      "Baseline Sanity Check",
+      localText("基线健全性检查", "Baseline Sanity Check"),
       localText("不是代码审查", "Not a code review"),
       localText("不是 bugfix benchmark", "Not a bugfix benchmark")
     ];
@@ -633,7 +645,7 @@ function renderTaskPackDetail(taskPack) {
 
   const difficultyColors = { easy: "status-success", medium: "status-partial", hard: "status-fail" };
   const diffBadge = taskPack.difficulty
-    ? `<span class="task-pack-badge ${difficultyColors[taskPack.difficulty] || ""}">${escapeHtml(taskPack.difficulty)}</span>`
+    ? `<span class="task-pack-badge ${difficultyColors[taskPack.difficulty] || ""}">${escapeHtml(translateDifficulty(taskPack.difficulty))}</span>`
     : "";
   const tags = (taskPack.tags ?? []).map((tag) => `<span class="task-pack-tag">${escapeHtml(tag)}</span>`).join("");
   const judgeCount = Array.isArray(taskPack.judges) ? taskPack.judges.length : 0;
@@ -718,8 +730,10 @@ function renderLauncher() {
   const options = [
     `<option value="">${escapeHtml(t("taskPackCustom"))}</option>`,
     ...state.availableTaskPacks.map(
-      (taskPack) =>
-        `<option value="${escapeHtml(taskPack.path)}">${escapeHtml(taskPack.title)}</option>`
+      (taskPack) => {
+        const diff = taskPack.difficulty ? ` [${translateDifficulty(taskPack.difficulty)}]` : "";
+        return `<option value="${escapeHtml(taskPack.path)}">${escapeHtml(taskPack.title)}${escapeHtml(diff)}</option>`;
+      }
     )
   ];
   elements.launcherTaskSelect.innerHTML = options.join("");
@@ -750,7 +764,7 @@ function renderLauncher() {
   const taskSummary = selectedTaskPack
     ? `
       <details class="launcher-section">
-        <summary class="launcher-section-summary">${escapeHtml(localText("任务说明", "Task Info"))}${selectedTaskPack.difficulty ? ` · <span class="status-badge status-${escapeHtml(selectedTaskPack.difficulty)}">${escapeHtml(selectedTaskPack.difficulty.toUpperCase())}</span>` : ""} · ${escapeHtml(selectedTaskPack.description ?? selectedTaskPack.objective ?? "")}</summary>
+        <summary class="launcher-section-summary">${escapeHtml(localText("任务说明", "Task Info"))}${selectedTaskPack.difficulty ? ` · <span class="status-badge status-${escapeHtml(selectedTaskPack.difficulty)}">${escapeHtml(translateDifficulty(selectedTaskPack.difficulty))}</span>` : ""} · ${escapeHtml(selectedTaskPack.description ?? selectedTaskPack.objective ?? "")}</summary>
         ${selectedTaskPack.differentiator ? `<p class="muted"><strong>${escapeHtml(localText("区分度", "Differentiator"))}:</strong> ${escapeHtml(selectedTaskPack.differentiator)}</p>` : ""}
         <p class="muted"><strong>${escapeHtml(localText("目标", "Objective"))}:</strong> ${escapeHtml(
             selectedTaskPack.objective ?? "n/a"
@@ -969,7 +983,7 @@ function renderLauncher() {
       </div>
     </div>
     <details class="launcher-section">
-      <summary class="launcher-section-summary">${escapeHtml(localText("Claude Code Variants", "Claude Code Variants"))} · <span class="muted">${escapeHtml(localText(`${state.launcherClaudeVariants.filter(v => v.enabled).length} 个已启用`, `${state.launcherClaudeVariants.filter(v => v.enabled).length} enabled`))}</span></summary>
+      <summary class="launcher-section-summary">${escapeHtml(localText("Claude Code 变体", "Claude Code Variants"))} · <span class="muted">${escapeHtml(localText(`${state.launcherClaudeVariants.filter(v => v.enabled).length} 个已启用`, `${state.launcherClaudeVariants.filter(v => v.enabled).length} enabled`))}</span></summary>
       <p class="muted">${escapeHtml(localText(
         "同一套 Claude Code harness 下的不同 provider/profile 变体。",
         "Provider-switched Claude Code variants under the same harness."
@@ -982,7 +996,7 @@ function renderLauncher() {
       </div>
     </details>
     <details class="launcher-section">
-      <summary class="launcher-section-summary">${escapeHtml(localText("Codex Variants", "Codex Variants"))} · <span class="muted">${escapeHtml(localText(`${state.launcherCodexVariants.filter(v => v.enabled).length} 个已启用`, `${state.launcherCodexVariants.filter(v => v.enabled).length} enabled`))}</span></summary>
+      <summary class="launcher-section-summary">${escapeHtml(localText("Codex 变体", "Codex Variants"))} · <span class="muted">${escapeHtml(localText(`${state.launcherCodexVariants.filter(v => v.enabled).length} 个已启用`, `${state.launcherCodexVariants.filter(v => v.enabled).length} enabled`))}</span></summary>
       <p class="muted">${escapeHtml(codexDefaultsText)}</p>
       <datalist id="reasoning-levels">
         <option value="low"></option>
@@ -1109,7 +1123,7 @@ async function pollRunStatus() {
     }
     if (state.runStatus?.state === "error") {
       stopRunStatusPolling();
-      const errorMessage = state.runStatus.error || "Unknown error";
+      const errorMessage = state.runStatus.error || localText("未知错误", "Unknown error");
       state.runStatus = null;
       state.runInProgress = false;
       state.notice = t("launcherStatusError", errorMessage);
@@ -1295,7 +1309,7 @@ async function handleLauncherRun() {
     });
     const result = await response.json();
     if (!response.ok && response.status !== 202) {
-      throw new Error(result.error || "Unknown error");
+      throw new Error(result.error || localText("未知错误", "Unknown error"));
     }
     // Start polling AFTER the server has accepted the run
     startRunStatusPolling();
@@ -1313,7 +1327,7 @@ async function handleLauncherRun() {
 async function refreshProviderProfiles() {
   const response = await fetch("/api/provider-profiles", { cache: "no-store" });
   if (!response.ok) {
-    throw new Error("Failed to load provider profiles.");
+    throw new Error(localText("加载 Provider 配置失败。", "Failed to load provider profiles."));
   }
 
   state.availableProviderProfiles = await response.json();
@@ -1372,7 +1386,7 @@ async function saveProviderProfileFromEditor() {
 
   const result = await response.json();
   if (!response.ok) {
-    throw new Error(result.error || "Failed to save provider profile.");
+    throw new Error(result.error || localText("保存 Provider 配置失败。", "Failed to save provider profile."));
   }
 
   if (isEdit && secret.trim()) {
@@ -1385,7 +1399,7 @@ async function saveProviderProfileFromEditor() {
     });
     const secretResult = await secretResponse.json();
     if (!secretResponse.ok) {
-      throw new Error(secretResult.error || "Failed to store provider secret.");
+      throw new Error(secretResult.error || localText("保存 Provider 密钥失败。", "Failed to store provider secret."));
     }
     state.availableProviderProfiles = secretResult.profiles ?? state.availableProviderProfiles;
   } else {
@@ -1402,7 +1416,7 @@ async function deleteProviderProfileById(profileId) {
   });
   const result = await response.json();
   if (!response.ok) {
-    throw new Error(result.error || "Failed to delete provider profile.");
+    throw new Error(result.error || localText("删除 Provider 配置失败。", "Failed to delete provider profile."));
   }
 
   state.availableProviderProfiles = result.profiles ?? [];
@@ -1597,14 +1611,14 @@ function renderRunCompareTable() {
     <table class="compare-table">
       <thead>
         <tr>
-          <th>${escapeHtml(state.language === "zh-CN" ? "Run" : "Run")}</th>
-          <th>${escapeHtml(state.language === "zh-CN" ? "任务" : "Task")}</th>
-          <th>${escapeHtml(state.language === "zh-CN" ? "创建时间" : "Created")}</th>
+          <th>${escapeHtml(localText("运行", "Run"))}</th>
+          <th>${escapeHtml(localText("任务", "Task"))}</th>
+          <th>${escapeHtml(localText("创建时间", "Created"))}</th>
           <th>${escapeHtml(t("metrics.success"))}</th>
           <th>${escapeHtml(t("metrics.agents"))}</th>
           <th>${escapeHtml(t("metrics.tokens"))}</th>
           <th>${escapeHtml(t("metrics.knownCost"))}</th>
-          <th>${escapeHtml(state.language === "zh-CN" ? "Markdown" : "Markdown")}</th>
+          <th>${escapeHtml(localText("Markdown", "Markdown"))}</th>
         </tr>
       </thead>
       <tbody>
@@ -1702,7 +1716,7 @@ function renderAgentTrendTableV2(run) {
           <th>${escapeHtml(localText("Run", "Run"))}</th>
           <th>${escapeHtml(localText("状态", "Status"))}</th>
           <th>${escapeHtml(localText("耗时", "Duration"))}</th>
-          <th>${escapeHtml(localText("Tokens", "Tokens"))}</th>
+          <th>${escapeHtml(localText("令牌数", "Tokens"))}</th>
           <th>${escapeHtml(localText("成本", "Cost"))}</th>
           <th>${escapeHtml(localText("Judge 变化", "Judge Δ"))}</th>
         </tr>
@@ -1711,7 +1725,7 @@ function renderAgentTrendTableV2(run) {
         ${rows.map((row) => `
           <tr data-agent-trend-run-id="${escapeHtml(row.run.runId)}" class="${row.run.runId === state.selectedRunId ? "active" : ""}">
             <td><code>${escapeHtml(row.run.runId.slice(0, 16))}</code></td>
-            <td><span class="status-badge ${row.result.status === "success" ? "status-success" : "status-failed"}">${escapeHtml(row.result.status)}</span></td>
+            <td><span class="status-badge ${row.result.status === "success" ? "status-success" : "status-failed"}">${escapeHtml(translateStatus(row.result.status))}</span></td>
             <td>${escapeHtml(formatDuration(row.result.durationMs))}</td>
             <td>${row.result.tokenUsage.toLocaleString()}</td>
             <td>${row.result.costKnown ? "$" + row.result.estimatedCostUsd.toFixed(4) : "n/a"}</td>
@@ -1730,14 +1744,14 @@ function renderPreflights(run) {
         <article class="preflight-card ${escapeHtml(preflight.status)}">
           <div class="panel-header">
             <h3>${escapeHtml(resultLabel(preflight))}</h3>
-            <span class="status-badge ${statusClass(preflight.status)}">${escapeHtml(preflight.status)}</span>
+            <span class="status-badge ${statusClass(preflight.status)}">${escapeHtml(translateStatus(preflight.status))}</span>
           </div>
           <p>${escapeHtml(preflight.summary)}</p>
           <p class="muted">${escapeHtml(localText("基础 Agent", "Base Agent"))}: ${escapeHtml(baseAgentLabel(preflight))}</p>
           <p class="muted">${escapeHtml(localText("Provider", "Provider"))}: ${escapeHtml(runtimeIdentity(preflight).provider)} | ${escapeHtml(localText("类型", "Kind"))}: ${escapeHtml(runtimeIdentity(preflight).providerKind)}</p>
           <p class="muted">${escapeHtml(localText("模型 / 推理", "Model / Reasoning"))}: ${escapeHtml(runtimeIdentity(preflight).model)} / ${escapeHtml(runtimeIdentity(preflight).reasoning)}</p>
           <p class="muted">${escapeHtml(localText("可信度", "Verification"))}: ${escapeHtml(runtimeVerificationLabel(preflight))}</p>
-          <p class="muted">${escapeHtml(state.language === "zh-CN" ? "支持层级" : "Tier")}: ${escapeHtml(preflight.capability.supportTier)} | ${escapeHtml(state.language === "zh-CN" ? "Trace" : "Trace")}: ${escapeHtml(
+          <p class="muted">${escapeHtml(localText("支持层级", "Tier"))}: ${escapeHtml(preflight.capability.supportTier)} | ${escapeHtml(localText("Trace 路径", "Trace"))}: ${escapeHtml(
             preflight.capability.traceRichness
           )}</p>
           <p class="muted">${escapeHtml(state.language === "zh-CN" ? "调用方式" : "Invocation")}: ${escapeHtml(preflight.capability.invocationMethod)}</p>
@@ -1776,7 +1790,7 @@ function renderAgentList(run) {
         <button class="agent-button ${active}" type="button" data-agent-id="${escapeHtml(recordKey(result))}">
           <div class="row">
             <strong>${escapeHtml(resultLabel(result))}</strong>
-            <span class="status-badge ${statusClass(result.status)}">${escapeHtml(result.status)}</span>
+            <span class="status-badge ${statusClass(result.status)}">${escapeHtml(translateStatus(result.status))}</span>
           </div>
           <div class="meta">
             ${escapeHtml(runtime.provider)} | ${escapeHtml(runtime.model)} | ${escapeHtml(formatDuration(result.durationMs))} | ${escapeHtml(
@@ -1805,15 +1819,15 @@ function renderStepCards(title, steps) {
                   <span class="muted">${escapeHtml(formatDuration(step.durationMs))}</span>
                 </summary>
                 <div class="detail-row"><span>${escapeHtml(state.language === "zh-CN" ? "命令" : "Command")}</span><code>${escapeHtml(step.command)}</code></div>
-                <div class="detail-row"><span>CWD</span><code>${escapeHtml(step.cwd)}</code></div>
+                <div class="detail-row"><span>${escapeHtml(localText("工作目录", "CWD"))}</span><code>${escapeHtml(step.cwd)}</code></div>
                 ${
                   step.stdout
-                    ? `<p class="muted">stdout</p><pre>${escapeHtml(step.stdout)}</pre>`
+                    ? `<p class="muted">${escapeHtml(localText("标准输出", "stdout"))}</p><pre>${escapeHtml(step.stdout)}</pre>`
                     : ""
                 }
                 ${
                   step.stderr
-                    ? `<p class="muted">stderr</p><pre>${escapeHtml(step.stderr)}</pre>`
+                    ? `<p class="muted">${escapeHtml(localText("标准错误", "stderr"))}</p><pre>${escapeHtml(step.stderr)}</pre>`
                     : ""
                 }
               </details>
@@ -1894,17 +1908,17 @@ function renderJudgeCards(result) {
                 }
                 ${
                   judge.cwd
-                    ? `<div class="detail-row"><span>CWD</span><code>${escapeHtml(judge.cwd)}</code></div>`
+                    ? `<div class="detail-row"><span>${escapeHtml(localText("工作目录", "CWD"))}</span><code>${escapeHtml(judge.cwd)}</code></div>`
                     : ""
                 }
                 ${
                   judge.stdout
-                    ? `<p class="muted">stdout</p><pre>${escapeHtml(judge.stdout)}</pre>`
+                    ? `<p class="muted">${escapeHtml(localText("标准输出", "stdout"))}</p><pre>${escapeHtml(judge.stdout)}</pre>`
                     : ""
                 }
                 ${
                   judge.stderr
-                    ? `<p class="muted">stderr</p><pre>${escapeHtml(judge.stderr)}</pre>`
+                    ? `<p class="muted">${escapeHtml(localText("标准错误", "stderr"))}</p><pre>${escapeHtml(judge.stderr)}</pre>`
                     : ""
                 }
               </details>
@@ -1912,7 +1926,7 @@ function renderJudgeCards(result) {
           )
           .join("")}</div>`;
 
-  return `<section class="detail-card"><h3>${escapeHtml(state.language === "zh-CN" ? "Judges" : "Judges")}</h3>${overview}${
+  return `<section class="detail-card"><h3>${escapeHtml(localText("Judge 检查项", "Judges"))}</h3>${overview}${
     filteredJudges.length === 0 && judges.length > 0
       ? `<p class="empty-state">${escapeHtml(state.language === "zh-CN" ? "当前筛选下没有匹配的 judge。" : "No judges match the current filters.")}</p>`
       : content
@@ -2080,7 +2094,7 @@ function renderVerdictHero(run) {
             <span class="winner-stat-value">${escapeHtml(formatCost(best))}</span>
           </div>
           <div class="winner-stat">
-            <span class="winner-stat-label">Tokens</span>
+            <span class="winner-stat-label">${escapeHtml(localText("令牌数", "Tokens"))}</span>
             <span class="winner-stat-value">${best.tokenUsage}</span>
           </div>
         </div>
@@ -2115,7 +2129,7 @@ function renderVerdictHero(run) {
             <span class="stat-value${summary.failedCount > 0 ? " danger" : ""}">${summary.failedCount}</span>
           </div>
           <div class="stat-item">
-            <span class="stat-label">Tokens</span>
+            <span class="stat-label">${escapeHtml(localText("令牌数", "Tokens"))}</span>
             <span class="stat-value">${summary.totalTokens.toLocaleString()}</span>
           </div>
           <div class="stat-item">
@@ -2300,7 +2314,7 @@ function renderCompareTableV2(run) {
       <thead>
         <tr>
           <th>#</th>
-          <th>${escapeHtml("Variant")}</th>
+          <th>${escapeHtml(localText("配置名称", "Variant"))}</th>
           <th>${escapeHtml(localText("模型", "Model"))}</th>
           <th>${escapeHtml(localText("状态", "Status"))}</th>
           <th>${escapeHtml(localText("Judge 通过率", "Judge Pass Rate"))}</th>
@@ -2336,7 +2350,7 @@ function renderCompareTableV2(run) {
                 <td class="compare-rank">${medal || index + 1}</td>
                 <td><strong>${escapeHtml(resultLabel(result))}</strong><br /><code>${escapeHtml(baseAgentLabel(result))}</code></td>
                 <td><span class="compare-model">${escapeHtml(runtime.model)}</span><br /><span class="muted" style="font-size:0.75rem">${escapeHtml(runtime.reasoning)}</span></td>
-                <td><span class="status-badge ${statusClass(result.status)}">${escapeHtml(result.status)}</span></td>
+                <td><span class="status-badge ${statusClass(result.status)}">${escapeHtml(translateStatus(result.status))}</span></td>
                 <td>
                   <div class="judge-bar-wrap">
                     <div class="judge-bar" style="width:${passPercent}%;background:${barColor}"></div>
@@ -2382,14 +2396,14 @@ function renderSelectedAgentV2() {
       <div class="summary-row"><span>${escapeHtml(localText("模型", "Model"))}</span><strong>${escapeHtml(runtime.model)}</strong></div>
       <div class="summary-row"><span>${escapeHtml(localText("推理", "Reasoning"))}</span><strong>${escapeHtml(runtime.reasoning)}</strong></div>
       <div class="summary-row"><span>${escapeHtml(localText("可信度", "Verification"))}</span><strong>${escapeHtml(runtimeVerificationLabel(result))}</strong></div>
-      <div class="summary-row"><span>${escapeHtml(localText("状态", "Status"))}</span><strong>${escapeHtml(result.status)}</strong></div>
+      <div class="summary-row"><span>${escapeHtml(localText("状态", "Status"))}</span><strong>${escapeHtml(translateStatus(result.status))}</strong></div>
       <div class="summary-row"><span>${escapeHtml(localText("耗时", "Duration"))}</span><strong>${escapeHtml(formatDuration(result.durationMs))}</strong></div>
       <div class="summary-row"><span>${escapeHtml(t("metrics.tokens"))}</span><strong>${result.tokenUsage}</strong></div>
       <div class="summary-row"><span>${escapeHtml(localText("成本", "Cost"))}</span><strong>${escapeHtml(formatCost(result))}</strong></div>
       <div class="summary-row"><span>${escapeHtml(localText("改动文件", "Changed Files"))}</span><strong>${result.changedFiles.length}</strong></div>
       <div class="summary-row"><span>${escapeHtml(localText("Judge 类型", "Judge Types"))}</span><strong>${escapeHtml(judgeKinds)}</strong></div>
-      <div class="summary-row"><span>Trace</span><code>${escapeHtml(result.tracePath)}</code></div>
-      <div class="summary-row"><span>Workspace</span><code>${escapeHtml(result.workspacePath)}</code></div>
+      <div class="summary-row"><span>${escapeHtml(localText("Trace 路径", "Trace"))}</span><code>${escapeHtml(result.tracePath)}</code></div>
+      <div class="summary-row"><span>${escapeHtml(localText("工作区", "Workspace"))}</span><code>${escapeHtml(result.workspacePath)}</code></div>
     </div>
     <p class="muted">${escapeHtml(result.summary)}</p>
   `;
@@ -2397,27 +2411,27 @@ function renderSelectedAgentV2() {
   elements.resultDetails.innerHTML = [
     `
       <section class="detail-card">
-        <h3>Model Identity</h3>
+        <h3>${escapeHtml(localText("模型信息", "Model Identity"))}</h3>
         <div class="summary-grid">
-          <div class="summary-row"><span>Requested</span><strong>${escapeHtml(result.requestedConfig?.model ?? "default")} / ${escapeHtml(result.requestedConfig?.reasoningEffort ?? "default")}</strong></div>
-          <div class="summary-row"><span>Effective</span><strong>${escapeHtml(runtime.model)} / ${escapeHtml(runtime.reasoning)}</strong></div>
-          <div class="summary-row"><span>Source</span><strong>${escapeHtml(runtime.source)}</strong></div>
-          <div class="summary-row"><span>Verification</span><strong>${escapeHtml(runtime.verification)}</strong></div>
+          <div class="summary-row"><span>${escapeHtml(localText("请求配置", "Requested"))}</span><strong>${escapeHtml(result.requestedConfig?.model ?? "default")} / ${escapeHtml(result.requestedConfig?.reasoningEffort ?? "default")}</strong></div>
+          <div class="summary-row"><span>${escapeHtml(localText("实际使用", "Effective"))}</span><strong>${escapeHtml(runtime.model)} / ${escapeHtml(runtime.reasoning)}</strong></div>
+          <div class="summary-row"><span>${escapeHtml(localText("来源", "Source"))}</span><strong>${escapeHtml(runtime.source)}</strong></div>
+          <div class="summary-row"><span>${escapeHtml(localText("可信度", "Verification"))}</span><strong>${escapeHtml(runtime.verification)}</strong></div>
         </div>
       </section>
     `,
     `
       <section class="detail-card">
-        <h3>Provider Identity</h3>
+        <h3>${escapeHtml(localText("Provider 信息", "Provider Identity"))}</h3>
         <div class="summary-grid">
-          <div class="summary-row"><span>Requested Profile</span><strong>${escapeHtml(result.requestedConfig?.providerProfileId ?? "official")}</strong></div>
-          <div class="summary-row"><span>Effective Provider</span><strong>${escapeHtml(runtime.provider)}</strong></div>
-          <div class="summary-row"><span>Provider Kind</span><strong>${escapeHtml(runtime.providerKind)}</strong></div>
-          <div class="summary-row"><span>Provider Source</span><strong>${escapeHtml(runtime.providerSource)}</strong></div>
+          <div class="summary-row"><span>${escapeHtml(localText("请求 Profile", "Requested Profile"))}</span><strong>${escapeHtml(result.requestedConfig?.providerProfileId ?? "official")}</strong></div>
+          <div class="summary-row"><span>${escapeHtml(localText("实际 Provider", "Effective Provider"))}</span><strong>${escapeHtml(runtime.provider)}</strong></div>
+          <div class="summary-row"><span>${escapeHtml(localText("Provider 类型", "Provider Kind"))}</span><strong>${escapeHtml(runtime.providerKind)}</strong></div>
+          <div class="summary-row"><span>${escapeHtml(localText("Provider 来源", "Provider Source"))}</span><strong>${escapeHtml(runtime.providerSource)}</strong></div>
         </div>
         ${
           runtime.providerKind !== "official" && runtime.provider !== "official"
-            ? `<p class="warning-text">${escapeHtml("This result was produced through a provider-switched Claude Code configuration.")}</p>`
+            ? `<p class="warning-text">${escapeHtml(localText("此结果通过非官方 Provider 的 Claude Code 配置生成。", "This result was produced through a provider-switched Claude Code configuration."))}</p>`
             : ""
         }
       </section>
@@ -2928,7 +2942,7 @@ elements.copyShareCard.addEventListener("click", async () => {
     return;
   }
 
-  await copyToClipboard(buildShareCard(state.run), "Summary");
+  await copyToClipboard(buildShareCard(state.run), localText("摘要", "Summary"));
 });
 
 elements.copyPrTable.addEventListener("click", async () => {
@@ -2936,7 +2950,7 @@ elements.copyPrTable.addEventListener("click", async () => {
     return;
   }
 
-  await copyToClipboard(buildPrTable(state.run), "PR table");
+  await copyToClipboard(buildPrTable(state.run), localText("PR 表格", "PR table"));
 });
 
 elements.downloadShareSvg.addEventListener("click", () => {
