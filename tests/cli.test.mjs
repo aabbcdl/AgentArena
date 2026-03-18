@@ -250,6 +250,52 @@ test("repoarena run can update snapshots from the CLI", async () => {
   await rm(tempDir, { recursive: true, force: true });
 });
 
+test("repoarena run supports --cleanup-workspaces flag", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-cli-"));
+  const repoPath = path.join(tempDir, "repo");
+  const outputPath = path.join(tempDir, "output-cleanup");
+  const taskPath = path.join(tempDir, "task-cleanup.json");
+
+  await mkdir(repoPath, { recursive: true });
+  await writeFile(path.join(repoPath, "README.md"), "# Temp Repo\n", "utf8");
+
+  await writeJson(taskPath, {
+    schemaVersion: "repoarena.taskpack/v1",
+    id: "cli-cleanup",
+    title: "CLI Cleanup",
+    prompt: "Run with cleanup",
+    judges: [
+      {
+        id: "pass",
+        type: "command",
+        label: "Always pass",
+        command: "node -e \"process.exit(0)\""
+      }
+    ]
+  });
+
+  const result = await runCli(
+    [
+      "run",
+      "--repo",
+      repoPath,
+      "--task",
+      taskPath,
+      "--agents",
+      "demo-fast",
+      "--output",
+      outputPath,
+      "--cleanup-workspaces"
+    ],
+    path.resolve(".")
+  );
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /RepoArena run complete/);
+
+  await rm(tempDir, { recursive: true, force: true });
+});
+
 test("repoarena doctor supports JSON output", async () => {
   const result = await runCli(["doctor", "--agents", "demo-fast", "--json"], path.resolve("."));
 

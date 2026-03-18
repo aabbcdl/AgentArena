@@ -4,7 +4,13 @@ import {
   buildExecutionEnvironment,
   createAgentSelection,
   diffSnapshots,
-  uniqueSorted
+  formatDuration,
+  isPathInsideWorkspace,
+  normalizePath,
+  resolveRepoSource,
+  safePathJoin,
+  uniqueSorted,
+  validateTaskPackId
 } from "../packages/core/dist/index.js";
 
 test("uniqueSorted removes duplicates and sorts values", () => {
@@ -68,4 +74,61 @@ test("createAgentSelection derives a stable variant id from model config", () =>
   assert.equal(selection.displayLabel, "Codex CLI");
   assert.equal(selection.config.model, "gpt-5.4");
   assert.equal(selection.config.reasoningEffort, "high");
+});
+
+test("formatDuration formats milliseconds, seconds, and minutes", () => {
+  assert.equal(formatDuration(0), "0ms");
+  assert.equal(formatDuration(500), "500ms");
+  assert.equal(formatDuration(1500), "1.50s");
+  assert.equal(formatDuration(65000), "1m 5.0s");
+  assert.equal(formatDuration(-1), "0ms");
+  assert.equal(formatDuration(Infinity), "0ms");
+});
+
+test("validateTaskPackId accepts valid IDs and rejects invalid ones", () => {
+  assert.equal(validateTaskPackId("repo-health"), true);
+  assert.equal(validateTaskPackId("a"), true);
+  assert.equal(validateTaskPackId("abc"), true);
+  assert.equal(validateTaskPackId("a-b-c"), true);
+  assert.equal(validateTaskPackId(""), false);
+  assert.equal(validateTaskPackId("-bad"), false);
+  assert.equal(validateTaskPackId("BAD"), false);
+});
+
+test("normalizePath converts backslashes to forward slashes", () => {
+  assert.equal(normalizePath("src\\index.ts"), "src/index.ts");
+  assert.equal(normalizePath("src/index.ts"), "src/index.ts");
+});
+
+test("isPathInsideWorkspace detects path traversal", () => {
+  assert.equal(isPathInsideWorkspace("/workspace", "/workspace/src/file.ts"), true);
+  assert.equal(isPathInsideWorkspace("/workspace", "/workspace/../etc/passwd"), false);
+});
+
+test("safePathJoin throws on path traversal", () => {
+  assert.throws(() => safePathJoin("/workspace", "..", "etc", "passwd"), /Path traversal detected/);
+  assert.equal(safePathJoin("/workspace", "src", "file.ts").replace(/\\/g, "/"), "/workspace/src/file.ts");
+});
+
+test("resolveRepoSource returns user repo for undefined or 'user'", () => {
+  const result1 = resolveRepoSource(undefined, "/user/repo", "/builtin");
+  assert.equal(result1.kind, "user");
+  assert.equal(result1.repoPath, "/user/repo");
+
+  const result2 = resolveRepoSource("user", "/user/repo", "/builtin");
+  assert.equal(result2.kind, "user");
+  assert.equal(result2.repoPath, "/user/repo");
+});
+
+test("resolveRepoSource resolves builtin:// to builtin repos root", () => {
+  const result = resolveRepoSource("builtin://node-starter", "/user/repo", "/repos");
+  assert.equal(result.kind, "builtin");
+  assert.match(result.repoPath, /node-starter/);
+});
+
+test("resolveRepoSource rejects invalid builtin names and unsupported schemes", () => {
+  assert.throws(() => resolveRepoSource("builtin://", "/user/repo", "/repos"), /Invalid builtin repo name/);
+  assert.throws(() => resolveRepoSource("builtin://..", "/user/repo", "/repos"), /Invalid builtin repo name/);
+  assert.throws(() => resolveRepoSource("builtin://a/b", "/user/repo", "/repos"), /Invalid builtin repo name/);
+  assert.throws(() => resolveRepoSource("https://example.com/repo", "/user/repo", "/repos"), /Unsupported repoSource/);
 });

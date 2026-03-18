@@ -550,6 +550,39 @@ export function getPlatformInfo(): { platform: string; arch: string; nodeVersion
   };
 }
 
+const BUILTIN_PREFIX = "builtin://";
+
+export interface RepoSourceResolution {
+  kind: "user" | "builtin";
+  repoPath: string;
+}
+
+export function resolveRepoSource(
+  repoSource: string | undefined,
+  userRepoPath: string,
+  builtinReposRoot: string
+): RepoSourceResolution {
+  if (!repoSource || repoSource === "user") {
+    return { kind: "user", repoPath: userRepoPath };
+  }
+
+  if (repoSource.startsWith(BUILTIN_PREFIX)) {
+    const name = repoSource.slice(BUILTIN_PREFIX.length).trim();
+    if (!name || /[/\\]/.test(name) || name === ".." || name === ".") {
+      throw new Error(
+        `Invalid builtin repo name in repoSource: "${repoSource}". ` +
+        `Expected format: "builtin://repo-name".`
+      );
+    }
+    return { kind: "builtin", repoPath: path.join(builtinReposRoot, name) };
+  }
+
+  throw new Error(
+    `Unsupported repoSource: "${repoSource}". ` +
+    `Supported values: "user", "builtin://repo-name".`
+  );
+}
+
 export function validateTaskPackId(id: string): boolean {
   // Task pack IDs should be alphanumeric with hyphens, 3-64 characters
   return /^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$/.test(id) || /^[a-z0-9]{1,64}$/.test(id);

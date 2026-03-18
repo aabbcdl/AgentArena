@@ -34,6 +34,8 @@ This repository already contains a runnable prototype with:
 - static HTML and JSON report generation
 - Markdown summaries for CI, PR comments, and sharing
 - an interactive `apps/web-report` UI that can either run local benchmarks through `repoarena ui` or open existing reports
+- real-time benchmark progress feedback with live log streaming in the UI
+- task pack detail display including difficulty, differentiator, and judge checks
 - GitHub Actions smoke benchmarks that can comment results on pull requests
 - GitHub Actions CI with a smoke benchmark run
 - a browser-level web-report smoke test in CI

@@ -18,6 +18,8 @@ RepoArena 用来在同一个仓库、同一个任务、同一套 judge 规则下
 - command、file、glob、snapshot、json judges
 - `summary.json`、`summary.md`、`pr-comment.md`、`report.html`、`badge.json`
 - 可交互的 `apps/web-report`
+- 跑分实时进度反馈与日志流
+- 任务包详情展示（难度、区分度、Judge 检查项）
 - GitHub Actions smoke benchmark 和 PR comment
 
 ## 快速开始

@@ -38,6 +38,7 @@ interface ParsedArgs {
   probeAuth: boolean;
   strict: boolean;
   updateSnapshots: boolean;
+  cleanupWorkspaces: boolean;
   maxConcurrency?: number;
   json: boolean;
   templateName?: string;
@@ -68,6 +69,7 @@ interface UiRunPayload {
   outputPath?: string;
   probeAuth?: boolean;
   updateSnapshots?: boolean;
+  cleanupWorkspaces?: boolean;
   maxConcurrency?: number;
 }
 
@@ -297,6 +299,7 @@ Run Command:
     --output <path>            Output directory for results (default: .repoarena/runs/<run-id>)
     --probe-auth               Test adapter authentication before running
     --update-snapshots         Update snapshot files if they differ
+    --cleanup-workspaces       Remove agent workspace directories after run
     --max-concurrency <n>      Maximum number of agents to run in parallel (default: 1)
     --json                     Output results as JSON
 
@@ -394,6 +397,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     probeAuth: false,
     strict: false,
     updateSnapshots: false,
+    cleanupWorkspaces: false,
     json: false,
     force: false
   };
@@ -476,6 +480,9 @@ function parseArgs(argv: string[]): ParsedArgs {
         break;
       case "--update-snapshots":
         parsed.updateSnapshots = true;
+        break;
+      case "--cleanup-workspaces":
+        parsed.cleanupWorkspaces = true;
         break;
       case "--json":
         parsed.json = true;
@@ -923,6 +930,9 @@ async function listOfficialTaskPacks(): Promise<
     repoTypes: string[];
     tags: string[];
     prompt: string;
+    judges: Array<{ id: string; type: string; label: string }>;
+    difficulty?: string;
+    differentiator?: string;
   }>
 > {
   try {
@@ -945,7 +955,10 @@ async function listOfficialTaskPacks(): Promise<
           judgeRationale: taskPack.metadata?.judgeRationale,
           repoTypes: taskPack.metadata?.repoTypes ?? [],
           tags: taskPack.metadata?.tags ?? [],
-          prompt: taskPack.prompt
+          prompt: taskPack.prompt,
+          judges: taskPack.judges.map((j) => ({ id: j.id, type: j.type, label: j.label })),
+          difficulty: taskPack.metadata?.difficulty,
+          differentiator: taskPack.metadata?.differentiator
         };
       })
     );
@@ -1242,6 +1255,7 @@ async function runUi(parsed: ParsedArgs): Promise<void> {
               outputPath: runPayload.outputPath,
               probeAuth: runPayload.probeAuth,
               updateSnapshots: runPayload.updateSnapshots,
+              cleanupWorkspaces: runPayload.cleanupWorkspaces,
               maxConcurrency: runPayload.maxConcurrency,
               onProgress: (event) => {
                 const phase =
@@ -1465,6 +1479,7 @@ async function runBenchmarkCommand(parsed: ParsedArgs): Promise<void> {
     outputPath: parsed.outputPath ? path.resolve(parsed.outputPath) : undefined,
     probeAuth: parsed.probeAuth,
     updateSnapshots: parsed.updateSnapshots,
+    cleanupWorkspaces: parsed.cleanupWorkspaces,
     maxConcurrency: parsed.maxConcurrency
   });
 

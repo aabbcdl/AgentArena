@@ -369,3 +369,116 @@ test("official task pack library files all load with metadata", async () => {
     assert.equal(taskPack.judges.length > 0, true);
   }
 });
+
+test("loadTaskPack parses repoSource field", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-taskpack-"));
+  const taskPath = path.join(tempDir, "task.json");
+
+  await writeFile(
+    taskPath,
+    JSON.stringify({
+      schemaVersion: "repoarena.taskpack/v1",
+      id: "repo-source-demo",
+      title: "Repo Source Demo",
+      prompt: "Test repoSource parsing",
+      repoSource: "builtin://node-starter",
+      judges: []
+    }),
+    "utf8"
+  );
+
+  const taskPack = await loadTaskPack(taskPath);
+  assert.equal(taskPack.repoSource, "builtin://node-starter");
+
+  await rm(tempDir, { recursive: true, force: true });
+});
+
+test("loadTaskPack parses difficulty metadata field", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-taskpack-"));
+  const taskPath = path.join(tempDir, "task.json");
+
+  await writeFile(
+    taskPath,
+    JSON.stringify({
+      schemaVersion: "repoarena.taskpack/v1",
+      id: "difficulty-demo",
+      title: "Difficulty Demo",
+      prompt: "Test difficulty parsing",
+      metadata: {
+        source: "official",
+        owner: "RepoArena",
+        difficulty: "hard",
+        repoTypes: ["node"],
+        tags: ["test"],
+        dependencies: []
+      },
+      judges: []
+    }),
+    "utf8"
+  );
+
+  const taskPack = await loadTaskPack(taskPath);
+  assert.equal(taskPack.metadata?.difficulty, "hard");
+
+  await rm(tempDir, { recursive: true, force: true });
+});
+
+test("loadTaskPack rejects unsupported file extensions", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-taskpack-"));
+  const taskPath = path.join(tempDir, "task.txt");
+
+  await writeFile(taskPath, "id: bad", "utf8");
+
+  await assert.rejects(() => loadTaskPack(taskPath), /must use .json, .yaml, or .yml/);
+
+  await rm(tempDir, { recursive: true, force: true });
+});
+
+test("loadTaskPack rejects unsupported schema versions", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-taskpack-"));
+  const taskPath = path.join(tempDir, "task.json");
+
+  await writeFile(
+    taskPath,
+    JSON.stringify({
+      schemaVersion: "repoarena.taskpack/v99",
+      id: "bad-version",
+      title: "Bad Version",
+      prompt: "Test"
+    }),
+    "utf8"
+  );
+
+  await assert.rejects(() => loadTaskPack(taskPath), /Unsupported task pack schema version/);
+
+  await rm(tempDir, { recursive: true, force: true });
+});
+
+test("loadTaskPack rejects invalid difficulty values", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-taskpack-"));
+  const taskPath = path.join(tempDir, "task.json");
+
+  await writeFile(
+    taskPath,
+    JSON.stringify({
+      schemaVersion: "repoarena.taskpack/v1",
+      id: "bad-difficulty",
+      title: "Bad Difficulty",
+      prompt: "Test",
+      metadata: {
+        source: "official",
+        owner: "RepoArena",
+        difficulty: "extreme",
+        repoTypes: [],
+        tags: [],
+        dependencies: []
+      },
+      judges: []
+    }),
+    "utf8"
+  );
+
+  await assert.rejects(() => loadTaskPack(taskPath), /must be "easy", "medium", or "hard"/);
+
+  await rm(tempDir, { recursive: true, force: true });
+});

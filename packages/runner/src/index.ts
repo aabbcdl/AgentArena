@@ -15,6 +15,7 @@ import {
   createRunId,
   diffSnapshots,
   ensureDirectory,
+  resolveRepoSource,
   snapshotDirectory,
   uniqueSorted
 } from "@repoarena/core";
@@ -32,6 +33,7 @@ export interface BenchmarkOptions {
   maxConcurrency?: number;
   updateSnapshots?: boolean;
   cleanupWorkspaces?: boolean;
+  builtinReposRoot?: string;
   onProgress?: (event: BenchmarkProgressEvent) => void | Promise<void>;
 }
 
@@ -603,10 +605,31 @@ async function runAgent(
 }
 
 export async function runBenchmark(options: BenchmarkOptions): Promise<BenchmarkRun> {
-  const repoPath = path.resolve(options.repoPath);
+  const userRepoPath = path.resolve(options.repoPath);
   const task = await loadTaskPack(options.taskPath);
+  const builtinReposRoot = options.builtinReposRoot ?? path.join(path.dirname(options.taskPath), "..", "repos");
+  const repoResolution = resolveRepoSource(task.repoSource, userRepoPath, builtinReposRoot);
+  const repoPath = path.resolve(repoResolution.repoPath);
+
+  if (repoResolution.kind === "builtin") {
+    try {
+      const stat = await fs.stat(repoPath);
+      if (!stat.isDirectory()) {
+        throw new Error(`Builtin repo path is not a directory: "${repoPath}"`);
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        throw new Error(
+          `Builtin repo not found: "${repoPath}". ` +
+          `The task pack requires repoSource "${task.repoSource}" but the directory does not exist.`
+        );
+      }
+      throw error;
+    }
+  }
+
   const runId = createRunId();
-  const outputPath = options.outputPath ?? path.join(repoPath, ".repoarena", "runs", runId);
+  const outputPath = options.outputPath ?? path.join(userRepoPath, ".repoarena", "runs", runId);
   const workspaceRootPath = path.join(tmpdir(), "repoarena-workspaces", runId);
   const selections = normalizeSelections(options);
   const workspacePaths: string[] = [];

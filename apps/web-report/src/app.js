@@ -844,7 +844,8 @@ function renderLauncherProgress() {
 
   const logs = Array.isArray(state.runStatus?.logs) ? state.runStatus.logs : [];
   if (logs.length === 0) {
-    elements.launcherLogList.innerHTML = `<div class="muted">${escapeHtml(t("launcherLogEmpty"))}</div>`;
+    const startingText = localText("正在启动...", "Starting...");
+    elements.launcherLogList.innerHTML = `<div class="muted"><span class="status-badge status-starting">${escapeHtml(startingText)}</span></div>`;
     return;
   }
 
@@ -946,6 +947,8 @@ function renderLauncher() {
       <div class="launcher-section">
         <h4>${escapeHtml(localText("任务说明", "Task Intent"))}</h4>
         <p class="muted">${escapeHtml(selectedTaskPack.description ?? selectedTaskPack.objective ?? "")}</p>
+        ${selectedTaskPack.difficulty ? `<p class="muted"><strong>${escapeHtml(localText("难度", "Difficulty"))}:</strong> <span class="status-badge status-${escapeHtml(selectedTaskPack.difficulty)}">${escapeHtml(selectedTaskPack.difficulty)}</span></p>` : ""}
+        ${selectedTaskPack.differentiator ? `<p class="muted"><strong>${escapeHtml(localText("区分度", "Differentiator"))}:</strong> ${escapeHtml(selectedTaskPack.differentiator)}</p>` : ""}
         <p class="muted"><strong>${escapeHtml(localText("目标", "Objective"))}:</strong> ${escapeHtml(
             selectedTaskPack.objective ?? "n/a"
           )}</p>
@@ -1429,7 +1432,8 @@ async function handleLauncherRun() {
   state.runStatus = {
     state: "running",
     phase: "starting",
-    startedAt: new Date().toISOString()
+    startedAt: new Date().toISOString(),
+    logs: []
   };
   state.notice = t("launcherStatusRunning");
   startRunStatusPolling();
@@ -1447,6 +1451,7 @@ async function handleLauncherRun() {
     if (!response.ok && response.status !== 202) {
       throw new Error(result.error || "Unknown error");
     }
+    render();
   } catch (error) {
     stopRunStatusPolling();
     state.runStatus = null;

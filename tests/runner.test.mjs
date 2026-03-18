@@ -409,3 +409,185 @@ test("runBenchmark can update snapshot files when enabled", async () => {
 
   await rm(tempDir, { recursive: true, force: true });
 });
+
+test("runBenchmark cleans up workspaces when cleanupWorkspaces is enabled", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-runner-"));
+  const repoPath = path.join(tempDir, "repo");
+  const outputPath = path.join(tempDir, "output");
+  const taskPath = path.join(tempDir, "task.json");
+
+  await mkdir(repoPath, { recursive: true });
+  await writeFile(path.join(repoPath, "README.md"), "# Temp Repo\n", "utf8");
+  await writeJson(path.join(repoPath, "package.json"), { name: "temp-repo", version: "0.0.0" });
+
+  await writeJson(taskPath, {
+    schemaVersion: "repoarena.taskpack/v1",
+    id: "cleanup-demo",
+    title: "Cleanup Demo",
+    prompt: "Test workspace cleanup.",
+    judges: [
+      {
+        id: "pass",
+        type: "command",
+        label: "Always pass",
+        command: "node -e \"process.exit(0)\""
+      }
+    ]
+  });
+
+  const benchmark = await runBenchmark({
+    repoPath,
+    taskPath,
+    agentIds: ["demo-fast"],
+    outputPath,
+    cleanupWorkspaces: true
+  });
+
+  assert.equal(benchmark.results[0].status, "success");
+
+  // Workspace directory should have been cleaned up
+  const { stat } = await import("node:fs/promises");
+  let workspaceExists = true;
+  try {
+    await stat(benchmark.results[0].workspacePath);
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      workspaceExists = false;
+    }
+  }
+  assert.equal(workspaceExists, false, "Workspace should be cleaned up");
+
+  await rm(tempDir, { recursive: true, force: true });
+});
+
+test("runBenchmark preserves workspaces when cleanupWorkspaces is not set", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-runner-"));
+  const repoPath = path.join(tempDir, "repo");
+  const outputPath = path.join(tempDir, "output");
+  const taskPath = path.join(tempDir, "task.json");
+
+  await mkdir(repoPath, { recursive: true });
+  await writeFile(path.join(repoPath, "README.md"), "# Temp Repo\n", "utf8");
+  await writeJson(path.join(repoPath, "package.json"), { name: "temp-repo", version: "0.0.0" });
+
+  await writeJson(taskPath, {
+    schemaVersion: "repoarena.taskpack/v1",
+    id: "no-cleanup-demo",
+    title: "No Cleanup Demo",
+    prompt: "Test workspace preserved.",
+    judges: [
+      {
+        id: "pass",
+        type: "command",
+        label: "Always pass",
+        command: "node -e \"process.exit(0)\""
+      }
+    ]
+  });
+
+  const benchmark = await runBenchmark({
+    repoPath,
+    taskPath,
+    agentIds: ["demo-fast"],
+    outputPath
+  });
+
+  assert.equal(benchmark.results[0].status, "success");
+
+  // Workspace directory should still exist
+  const { stat } = await import("node:fs/promises");
+  const workspaceStat = await stat(benchmark.results[0].workspacePath);
+  assert.equal(workspaceStat.isDirectory(), true, "Workspace should be preserved");
+
+  await rm(tempDir, { recursive: true, force: true });
+});
+
+test("runBenchmark uses builtin repo when task has repoSource", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-runner-"));
+  const builtinRepoPath = path.join(tempDir, "builtin-repos", "node-starter");
+  const userRepoPath = path.join(tempDir, "user-repo");
+  const outputPath = path.join(tempDir, "output");
+  const taskPath = path.join(tempDir, "task.json");
+
+  await mkdir(builtinRepoPath, { recursive: true });
+  await mkdir(userRepoPath, { recursive: true });
+  await writeFile(path.join(builtinRepoPath, "README.md"), "# Builtin Repo\n", "utf8");
+  await writeJson(path.join(builtinRepoPath, "package.json"), { name: "builtin-repo", version: "0.0.0" });
+  await writeFile(path.join(userRepoPath, "README.md"), "# User Repo\n", "utf8");
+
+  await writeJson(taskPath, {
+    schemaVersion: "repoarena.taskpack/v1",
+    id: "builtin-repo-demo",
+    title: "Builtin Repo Demo",
+    prompt: "Test builtin repo source.",
+    repoSource: "builtin://node-starter",
+    judges: [
+      {
+        id: "check-builtin",
+        type: "file-contains",
+        label: "README is from builtin repo",
+        path: "README.md",
+        pattern: "Builtin Repo"
+      }
+    ]
+  });
+
+  const benchmark = await runBenchmark({
+    repoPath: userRepoPath,
+    taskPath,
+    agentIds: ["demo-fast"],
+    outputPath,
+    builtinReposRoot: path.join(tempDir, "builtin-repos")
+  });
+
+  assert.equal(benchmark.results[0].status, "success");
+  assert.equal(benchmark.results[0].judgeResults[0].success, true);
+
+  await rm(tempDir, { recursive: true, force: true });
+});
+
+test("runBenchmark emits onProgress events", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-runner-"));
+  const repoPath = path.join(tempDir, "repo");
+  const outputPath = path.join(tempDir, "output");
+  const taskPath = path.join(tempDir, "task.json");
+
+  await mkdir(repoPath, { recursive: true });
+  await writeFile(path.join(repoPath, "README.md"), "# Temp Repo\n", "utf8");
+  await writeJson(path.join(repoPath, "package.json"), { name: "temp-repo", version: "0.0.0" });
+
+  await writeJson(taskPath, {
+    schemaVersion: "repoarena.taskpack/v1",
+    id: "progress-demo",
+    title: "Progress Demo",
+    prompt: "Test progress events.",
+    judges: [
+      {
+        id: "pass",
+        type: "command",
+        label: "Always pass",
+        command: "node -e \"process.exit(0)\""
+      }
+    ]
+  });
+
+  const events = [];
+  await runBenchmark({
+    repoPath,
+    taskPath,
+    agentIds: ["demo-fast"],
+    outputPath,
+    onProgress: (event) => {
+      events.push(event);
+    }
+  });
+
+  const phases = events.map((e) => e.phase);
+  assert.ok(phases.includes("starting"), "Should have starting event");
+  assert.ok(phases.includes("preflight"), "Should have preflight event");
+  assert.ok(phases.includes("agent-start"), "Should have agent-start event");
+  assert.ok(phases.includes("agent-finish"), "Should have agent-finish event");
+  assert.ok(phases.includes("complete"), "Should have complete event");
+
+  await rm(tempDir, { recursive: true, force: true });
+});
