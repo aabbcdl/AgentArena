@@ -152,13 +152,13 @@ export const MESSAGES = {
     markdownFileHint: "加载后会补充分享文案、PR 表格和 Markdown 面板。",
     workflowTitle: "推荐流程",
     workflowSteps: [
-      "先点"推荐：打开结果文件夹"。",
+      `先点\u201c推荐：打开结果文件夹\u201d。`,
       "选择一个结果目录，例如 `.repoarena/manual-run`，或者更上层的结果目录。",
       "报告加载后，先看顶部结论卡片，再点左侧 agent 查看细节。"
     ],
     nextStepsTitle: "下一步",
     nextStepsEmpty:
-      "优先用"推荐：打开结果文件夹"。如果你手头只有一个文件，就加载 `summary.json`。`summary.md` 是可选增强项。",
+      `优先用\u201c推荐：打开结果文件夹\u201d。如果你手头只有一个文件，就加载 \`summary.json\`。\`summary.md\` 是可选增强项。`,
     nextStepsLoaded: (run, runCount) =>
       `已加载 ${runCount} 个 run。当前报告是"${run.task.title}"。下一步先看顶部结论卡片，再点左侧或 Agent Compare 里的 agent 进入详情。`,
     runsHeading: "运行记录",
@@ -173,7 +173,7 @@ export const MESSAGES = {
     heroHowTitle: "怎么开始",
     heroHowSteps: [
       "先用 CLI 跑一次 benchmark，生成包含 `summary.json` 的结果目录。",
-      "在这里用"推荐：打开结果文件夹"加载结果。",
+      `在这里用\u201c推荐：打开结果文件夹\u201d加载结果。`,
       "加载后先看对比表，再看 judge 失败原因和单个 agent 详情。"
     ],
     topbarEyebrow: "运行总览",
