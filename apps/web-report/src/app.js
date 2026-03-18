@@ -55,6 +55,7 @@ const elements = {
   launcherCompactSummary: document.querySelector("#launcher-compact-summary"),
   launcherRepoPath: document.querySelector("#launcher-repo-path"),
   launcherTaskSelect: document.querySelector("#launcher-task-select"),
+  taskPackDetail: document.querySelector("#task-pack-detail"),
   launcherTaskPath: document.querySelector("#launcher-task-path"),
   launcherOutputPath: document.querySelector("#launcher-output-path"),
   launcherAgents: document.querySelector("#launcher-agents"),
@@ -624,6 +625,35 @@ function openProviderEditor(profileId = null) {
   state.launcherProviderEditor = createProviderEditorState(profile);
 }
 
+function renderTaskPackDetail(taskPack) {
+  if (!taskPack) {
+    setHidden(elements.taskPackDetail, true);
+    return;
+  }
+
+  const difficultyColors = { easy: "status-success", medium: "status-partial", hard: "status-fail" };
+  const diffBadge = taskPack.difficulty
+    ? `<span class="task-pack-badge ${difficultyColors[taskPack.difficulty] || ""}">${escapeHtml(taskPack.difficulty)}</span>`
+    : "";
+  const tags = (taskPack.tags ?? []).map((tag) => `<span class="task-pack-tag">${escapeHtml(tag)}</span>`).join("");
+  const judgeCount = Array.isArray(taskPack.judges) ? taskPack.judges.length : 0;
+  const repoTypes = (taskPack.repoTypes ?? []).join(", ") || "generic";
+
+  elements.taskPackDetail.innerHTML = `
+    <div class="task-pack-header">
+      <strong>${escapeHtml(taskPack.title)}</strong>
+      <div class="task-pack-badges">${diffBadge}${tags}</div>
+    </div>
+    <p class="task-pack-desc">${escapeHtml(taskPack.description || taskPack.objective || "")}</p>
+    ${taskPack.differentiator ? `<p class="task-pack-diff"><span class="task-pack-label">${escapeHtml(localText("区分度", "Differentiator"))}</span> ${escapeHtml(taskPack.differentiator)}</p>` : ""}
+    <div class="task-pack-meta">
+      <span>${escapeHtml(localText("适用", "Repo"))}: ${escapeHtml(repoTypes)}</span>
+      <span>${escapeHtml(localText("检查项", "Judges"))}: ${judgeCount}</span>
+    </div>
+  `;
+  setHidden(elements.taskPackDetail, false);
+}
+
 function renderLauncher() {
   if (!state.serviceInfo) {
     setHidden(elements.launcherPanel, true);
@@ -704,6 +734,9 @@ function renderLauncher() {
 
   const selectedTaskPack =
     state.availableTaskPacks.find((taskPack) => taskPack.path === elements.launcherTaskPath.value) ?? null;
+
+  renderTaskPackDetail(selectedTaskPack);
+
   const realAdapters = state.availableAdapters.filter(
     (adapter) => adapter.kind !== "demo" && adapter.id !== "codex" && adapter.id !== "claude-code"
   );

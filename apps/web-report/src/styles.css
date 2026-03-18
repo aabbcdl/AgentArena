@@ -1078,6 +1078,75 @@ body::before {
   margin-top: 20px;
 }
 
+.task-pack-detail {
+  grid-column: 1 / -1;
+  padding: 12px 16px;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  animation: slideDown 0.2s ease;
+}
+
+.task-pack-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.task-pack-badges {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.task-pack-badge {
+  display: inline-flex;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.task-pack-tag {
+  display: inline-flex;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.65rem;
+  font-weight: 500;
+  background: var(--accent-soft);
+  color: var(--accent-light);
+}
+
+.task-pack-desc {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin-bottom: 6px;
+}
+
+.task-pack-diff {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+  margin-bottom: 6px;
+}
+
+.task-pack-label {
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.task-pack-meta {
+  display: flex;
+  gap: 16px;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
 .field {
   display: grid;
   gap: 8px;
