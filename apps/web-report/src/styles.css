@@ -1899,6 +1899,16 @@ details.launcher-section > *:not(summary) {
   font-weight: 600;
 }
 
+.bar-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.compare-table tbody tr:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
 .bar-row[data-tooltip]:hover::after {
   content: attr(data-tooltip);
   position: absolute;
