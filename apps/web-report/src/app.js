@@ -963,6 +963,14 @@ function renderLauncher() {
     `
     : "";
 
+  const openSections = new Set();
+  elements.launcherAgents.querySelectorAll("details.launcher-section").forEach((d) => {
+    if (d.open) {
+      const summary = d.querySelector("summary");
+      if (summary) openSections.add(summary.textContent.trim().split(" ·")[0]);
+    }
+  });
+
   elements.launcherAgents.innerHTML = `
     ${taskSummary}
     <div class="launcher-section">
@@ -1031,6 +1039,13 @@ function renderLauncher() {
       </div>
     </details>
   `;
+
+  elements.launcherAgents.querySelectorAll("details.launcher-section").forEach((d) => {
+    const summary = d.querySelector("summary");
+    if (summary && openSections.has(summary.textContent.trim().split(" ·")[0])) {
+      d.open = true;
+    }
+  });
 
   elements.launcherRun.disabled = state.runInProgress;
   elements.launcherCompactSummary.textContent = state.runInProgress
