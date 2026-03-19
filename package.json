@@ -5,10 +5,10 @@
   "description": "Open-source benchmark and replay tool for comparing AI coding agents in real repositories.",
   "repository": {
     "type": "git",
-    "url": "https://github.com/anthropics/repoarena.git"
+    "url": "https://github.com/aabbcdl/RepoArena.git"
   },
-  "homepage": "https://github.com/anthropics/repoarena#readme",
-  "bugs": "https://github.com/anthropics/repoarena/issues",
+  "homepage": "https://github.com/aabbcdl/RepoArena#readme",
+  "bugs": "https://github.com/aabbcdl/RepoArena/issues",
   "keywords": ["ai", "coding-agent", "benchmark", "evaluation", "arena", "llm"],
   "author": "RepoArena Contributors",
   "packageManager": "pnpm@10.6.1",
