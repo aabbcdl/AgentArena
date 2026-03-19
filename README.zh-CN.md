@@ -98,25 +98,96 @@ node packages/cli/dist/index.js run --repo . --task repoarena.taskpack.yaml --ag
 
 位于 [examples/taskpacks/official/README.md](./examples/taskpacks/official/README.md)，当前包括：
 
+**简单：**
 - `repo-health.yaml`
-- `failing-test-fix.yaml`
-- `snapshot-fix.yaml`
 - `config-repair.yaml`
-- `small-refactor.yaml`
+- `snapshot-fix.yaml`
+
+**中等：**
+- `failing-test-fix.yaml`
 - `json-contract-repair.yaml`
+- `small-refactor.yaml`
+
+**困难：**
+- `multi-file-rename.yaml`
+- `cross-module-refactor.yaml`
+- `performance-optimize.yaml`
 
 ## Badge 用法
 
-每次 run 都会生成：
-
-```text
-.repoarena/runs/<run-id>/badge.json
-```
-
-如果你把这个文件发布到任意静态地址，就可以直接接 Shields：
+每次 run 都会生成 `badge.json`。发布到任意静态地址后可以接 Shields：
 
 ```markdown
 ![RepoArena](https://img.shields.io/endpoint?url=https://your-host.example/repoarena/badge.json)
+```
+
+## 任务包 Schema
+
+当前支持 `repoarena.taskpack/v1`。
+
+支持的文件格式：
+- `.json`
+- `.yaml`
+- `.yml`
+
+内置 starter 模板：
+- `repo-health`
+- `json-api`
+- `snapshot`
+
+每个任务包定义：
+- 仓库任务元数据
+- 一条 benchmark prompt
+- 可选的 `envAllowList`
+- 可选的 `setupCommands`
+- 结构化的 `judges` 列表
+- 可选的 `teardownCommands`
+
+内置 judge 类型：
+- `command`
+- `file-exists`
+- `file-contains`
+- `glob`
+- `file-count`
+- `snapshot`
+- `json-value`
+- `json-schema`
+
+环境变量采用白名单机制。任务包通过 `envAllowList` 暴露特定宿主变量，每个 setup/judge/teardown 步骤可以进一步扩展白名单或注入 `env` 覆盖。Agent 执行时只能访问任务级过滤后的环境变量。
+
+## 设计原则
+
+### 默认公平
+每个 agent 在相同的仓库快照、相同的任务定义、相同的评测规则下运行。
+
+### 真实仓库
+Benchmark 应该对维护者有意义，而不只是在 demo 里好看。
+
+### 可回放结果
+如果结果出乎意料，你应该能检查 trace 并理解原因。
+
+### 诚实就绪
+如果 adapter 因为缺少鉴权或本地配置而无法运行，RepoArena 会在比较开始前明确告知。
+
+## 仓库结构
+
+```text
+apps/
+  web-report/          交互式 benchmark UI（原生 JS，PWA）
+packages/
+  cli/                 CLI 入口（ui, run, doctor, init-taskpack, init-ci）
+  core/                共享类型和工具
+  runner/              Benchmark 编排器
+  adapters/            Agent 适配器（demo, codex, claude-code, cursor）
+  judges/              Judge 实现（command, file, glob, snapshot, json）
+  taskpacks/           任务包加载器和校验器
+  trace/               执行 trace 记录器
+  report/              报告生成器（JSON, Markdown, HTML, badge）
+examples/
+  taskpacks/           Demo 和官方任务包
+fixtures/
+  nodejs-monorepo/     标准测试仓库
+docs/
 ```
 
 ## 文档
@@ -124,7 +195,12 @@ node packages/cli/dist/index.js run --repo . --task repoarena.taskpack.yaml --ag
 - [项目概览](./docs/overview.md)
 - [评测公平性](./docs/fairness.md)
 - [Adapter 能力矩阵](./docs/adapter-capabilities.md)
+- [任务包模式](./docs/taskpack-modes.md) - 标准仓库 vs 用户仓库
 - [Web Report 说明](./apps/web-report/README.md)
+- [Docker Runner](./docs/runner-docker.md)
+- [官方任务包](./examples/taskpacks/official/README.md)
+- [YAML 任务包示例](./examples/taskpacks/demo-repo-health.yaml)
+- [标准测试仓库](./fixtures/nodejs-monorepo/README.md)
 
 ## 许可证
 

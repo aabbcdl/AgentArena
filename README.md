@@ -138,42 +138,9 @@ npx playwright install --with-deps chromium
 REPOARENA_RUN_BROWSER_SMOKE=1 pnpm test:web-report:e2e
 ```
 
-## Example Workflow
+## Badge
 
-Recommended for manual use:
-
-```bash
-node packages/cli/dist/index.js ui
-```
-
-Or, from the CLI:
-
-```bash
-node packages/cli/dist/index.js run \
-  --repo . \
-  --task examples/taskpacks/demo-repo-health.yaml \
-  --agents codex,claude-code,cursor \
-  --output .repoarena/runs/manual-arena
-```
-
-The UI is the recommended path for manual use. The direct `run` command remains useful for CI, scripts, and automation.
-
-Each run writes:
-- `summary.json`
-- `summary.md`
-- `pr-comment.md`
-- `report.html`
-- `badge.json`
-
-Example badge payload path:
-
-```text
-.repoarena/runs/<run-id>/badge.json
-```
-
-If you publish that file through any static host, you can point a Shields endpoint badge at it.
-
-Example:
+Each run generates a `badge.json` in the output directory. Publish it to any static host and use a Shields endpoint badge:
 
 ```markdown
 ![RepoArena](https://img.shields.io/endpoint?url=https://your-host.example/repoarena/badge.json)
@@ -194,12 +161,21 @@ Built-in starter templates:
 - `snapshot`
 
 Official task pack library:
+
+**Easy:**
 - `examples/taskpacks/official/repo-health.yaml`
-- `examples/taskpacks/official/failing-test-fix.yaml`
-- `examples/taskpacks/official/snapshot-fix.yaml`
 - `examples/taskpacks/official/config-repair.yaml`
-- `examples/taskpacks/official/small-refactor.yaml`
+- `examples/taskpacks/official/snapshot-fix.yaml`
+
+**Medium:**
+- `examples/taskpacks/official/failing-test-fix.yaml`
 - `examples/taskpacks/official/json-contract-repair.yaml`
+- `examples/taskpacks/official/small-refactor.yaml`
+
+**Hard:**
+- `examples/taskpacks/official/multi-file-rename.yaml`
+- `examples/taskpacks/official/cross-module-refactor.yaml`
+- `examples/taskpacks/official/performance-optimize.yaml`
 
 Each task pack defines:
 - repository task metadata
@@ -260,18 +236,21 @@ If an adapter is blocked by missing auth or missing local setup, RepoArena shoul
 
 ```text
 apps/
-  web-report/
+  web-report/          Interactive benchmark UI (vanilla JS, PWA)
 packages/
-  cli/
-  core/
-  runner/
-  adapters/
-  judges/
-  taskpacks/
-  trace/
-  report/
+  cli/                 CLI entry point (ui, run, doctor, init-taskpack, init-ci)
+  core/                Shared types and utilities
+  runner/              Benchmark orchestrator
+  adapters/            Agent adapters (demo, codex, claude-code, cursor)
+  judges/              Judge implementations (command, file, glob, snapshot, json)
+  taskpacks/           Task pack loader and validator
+  trace/               Execution trace recorder
+  report/              Report generators (JSON, Markdown, HTML, badge)
+examples/
+  taskpacks/           Demo and official task packs
+fixtures/
+  nodejs-monorepo/     Standard test repository
 docs/
-  overview.md
 ```
 
 ## Documentation
