@@ -264,6 +264,8 @@ docs/
 - [Official task packs](./examples/taskpacks/official/README.md)
 - [YAML task pack example](./examples/taskpacks/demo-repo-health.yaml)
 - [Standard test repository](./fixtures/nodejs-monorepo/README.md)
+- [Contributing](./CONTRIBUTING.md)
+- [Changelog](./CHANGELOG.md)
 
 ## License
 

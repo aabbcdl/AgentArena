@@ -62,7 +62,7 @@ Different coding agents should plug into the same execution and reporting model.
 If an agent is blocked by missing authentication or local setup, RepoArena should report that clearly instead of pretending the benchmark was fair.
 
 ## Near-term Priorities
-- expand stable real-agent support
+- expand stable real-agent support (Devin, open-source agents)
+- add Python task packs and builtin Python test repositories
+- public leaderboard page for community-contributed results
 - improve capability transparency and fairness documentation
-- improve the `repoarena ui` launch flow and progress feedback
-- add stronger CI bootstrap and task-pack onboarding paths

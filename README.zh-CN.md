@@ -201,6 +201,8 @@ docs/
 - [官方任务包](./examples/taskpacks/official/README.md)
 - [YAML 任务包示例](./examples/taskpacks/demo-repo-health.yaml)
 - [标准测试仓库](./fixtures/nodejs-monorepo/README.md)
+- [贡献指南](./CONTRIBUTING.md)
+- [更新日志](./CHANGELOG.md)
 
 ## 许可证
 

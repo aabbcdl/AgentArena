@@ -5,8 +5,8 @@ Thanks for your interest in contributing!
 ## Setup
 
 ```bash
-git clone https://github.com/anthropics/repoarena.git
-cd repoarena
+git clone https://github.com/aabbcdl/RepoArena.git
+cd RepoArena
 pnpm install
 pnpm build
 ```
