@@ -3,3 +3,23 @@ dist/
 .agentarena/
 .repoarena/
 *.tsbuildinfo
+
+# Environment and secrets
+.env
+.env.*
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+
+# Editor configs
+.vscode/
+.idea/
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Test coverage
+coverage/
