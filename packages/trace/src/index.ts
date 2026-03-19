@@ -1,9 +1,8 @@
+import { createReadStream, promises as fs } from "node:fs";
 import path from "node:path";
-import { promises as fs } from "node:fs";
-import { createReadStream } from "node:fs";
-import { createGzip, createGunzip } from "node:zlib";
 import { pipeline } from "node:stream/promises";
-import { ensureDirectory, TraceEvent } from "@repoarena/core";
+import { createGunzip, createGzip } from "node:zlib";
+import { ensureDirectory, type TraceEvent } from "@repoarena/core";
 
 export interface TraceFilter {
   agentId?: string;

@@ -1,9 +1,9 @@
 import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
-import { ClaudeProviderProfile, ClaudeProviderRiskFlag } from "@repoarena/core";
+import type { ClaudeProviderProfile, ClaudeProviderRiskFlag } from "@repoarena/core";
 
 interface ProfileRegistryFile {
   schemaVersion: 1;
@@ -160,7 +160,7 @@ async function runPowerShellJson(script: string): Promise<unknown> {
 
         try {
           resolve(JSON.parse(trimmed));
-        } catch (parseError) {
+        } catch (_parseError) {
           reject(new Error(`Failed to parse PowerShell JSON output: ${trimmed}`));
         }
       }

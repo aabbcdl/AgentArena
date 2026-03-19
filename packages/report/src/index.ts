@@ -1,10 +1,10 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import {
-  AdapterPreflightResult,
-  AgentRequestedConfig,
-  AgentResolvedRuntime,
-  BenchmarkRun,
+  type AdapterPreflightResult,
+  type AgentRequestedConfig,
+  type AgentResolvedRuntime,
+  type BenchmarkRun,
   ensureDirectory,
   formatDuration,
   portableBasename,
@@ -222,7 +222,7 @@ const translations: Record<Locale, ReportTranslations> = {
   }
 };
 
-function getTranslations(locale: Locale = "en"): ReportTranslations {
+function _getTranslations(locale: Locale = "en"): ReportTranslations {
   return translations[locale] || translations.en;
 }
 

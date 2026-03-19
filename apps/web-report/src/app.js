@@ -1,4 +1,5 @@
-﻿import {
+﻿import { localizeText, translate } from "./i18n.js";
+import {
   buildPrTable,
   buildShareCard,
   buildShareCardSvg,
@@ -12,7 +13,6 @@
   getRunVerdict,
   summarizeRun
 } from "./view-model.js";
-import { translate, localizeText } from "./i18n.js";
 
 const state = {
   runs: [],
@@ -407,7 +407,7 @@ function summarizeLauncherSelection(selectedTaskPack) {
   );
 }
 
-function compareHighlights(run, result) {
+function _compareHighlights(run, result) {
   const verdict = getRunVerdict(run);
   const highlights = [];
   const key = recordKey(result);
@@ -1128,7 +1128,7 @@ async function pollRunStatus() {
       const result = state.runStatus.result;
       state.runStatus = null;
       state.runInProgress = false;
-      if (result && result.run) {
+      if (result?.run) {
         state.notice = t("launcherStatusDone", result.run.task.title);
         state.launcherExpanded = false;
         applySingleRun(result.run, result.markdown);
@@ -1339,7 +1339,7 @@ async function handleLauncherRun() {
   }
 }
 
-async function refreshProviderProfiles() {
+async function _refreshProviderProfiles() {
   const response = await fetch("/api/provider-profiles", { cache: "no-store" });
   if (!response.ok) {
     throw new Error(localText("加载 Provider 配置失败。", "Failed to load provider profiles."));
@@ -1447,7 +1447,7 @@ function deltaClass(value, preferred = "lower") {
   return improved ? "delta-positive" : "delta-negative";
 }
 
-function formatSignedNumber(value, formatter, preferred = "lower") {
+function _formatSignedNumber(value, formatter, preferred = "lower") {
   if (value === null) {
     return `<span class="muted">n/a</span>`;
   }
@@ -2043,7 +2043,7 @@ function generateVerdictSummary(run) {
   const totalJudges = best ? best.judgeResults.length : 0;
   const duration = best ? formatDuration(best.durationMs) : "n/a";
 
-  let extras = [];
+  const extras = [];
   if (fastest && recordKey(fastest) === recordKey(best)) {
     extras.push(localText("最快", "fastest"));
   }

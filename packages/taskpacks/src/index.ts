@@ -1,19 +1,19 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import {
-  CommandExecutionSpec,
-  CommandJudge,
-  FileContainsJudge,
-  FileCountJudge,
-  FileExistsJudge,
-  GlobJudge,
-  JsonSchemaJudge,
-  JsonValueJudge,
-  SnapshotJudge,
+  type CommandExecutionSpec,
+  type CommandJudge,
+  type FileContainsJudge,
+  type FileCountJudge,
+  type FileExistsJudge,
+  type GlobJudge,
+  type JsonSchemaJudge,
+  type JsonValueJudge,
+  type SnapshotJudge,
   TASK_PACK_SCHEMA_V1,
-  TaskJudge,
-  TaskPackMetadata,
-  TaskPack
+  type TaskJudge,
+  type TaskPack, 
+  type TaskPackMetadata
 } from "@repoarena/core";
 import { parse as parseYaml } from "yaml";
 
@@ -240,7 +240,7 @@ function normalizeJudge(
   }
 
   if (type === "json-value") {
-    if (!Object.prototype.hasOwnProperty.call(value, "expected")) {
+    if (!Object.hasOwn(value, "expected")) {
       throw new Error(
         `Task pack field "judges[${index}].expected" is required for type "json-value". ` +
         `Example: { "type": "json-value", "path": "data.json", "pointer": "/status", "expected": "ready" }`

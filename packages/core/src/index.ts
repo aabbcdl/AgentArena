@@ -445,10 +445,10 @@ export async function snapshotDirectory(rootPath: string): Promise<Map<string, F
   const snapshots = new Map<string, FileSnapshotEntry>();
 
   async function walk(currentPath: string): Promise<void> {
-    let entries;
+    let entries: import("node:fs").Dirent[];
     try {
       entries = await fs.readdir(currentPath, { withFileTypes: true });
-    } catch (error) {
+    } catch (_error) {
       // Skip directories that cannot be read (e.g., permission issues)
       return;
     }
@@ -475,9 +475,7 @@ export async function snapshotDirectory(rootPath: string): Promise<Map<string, F
         // Use SHA-256 for better security (SHA-1 is sufficient for file comparison but SHA-256 is more future-proof)
         const hash = createHash("sha256").update(fileBuffer).digest("hex");
         snapshots.set(relativePath, { relativePath, hash });
-      } catch (error) {
-        // Skip files that cannot be read
-        continue;
+      } catch (_error) {
       }
     }
   }

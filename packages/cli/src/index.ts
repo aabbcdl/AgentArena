@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-import http from "node:http";
 import { exec } from "node:child_process";
 import { promises as fs } from "node:fs";
+import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -14,10 +14,10 @@ import {
   setClaudeProviderProfileSecret
 } from "@repoarena/adapters";
 import {
-  AdapterPreflightResult,
-  AgentSelection,
-  BenchmarkRun,
-  ClaudeProviderProfile,
+  type AdapterPreflightResult,
+  type AgentSelection,
+  type BenchmarkRun,
+  type ClaudeProviderProfile,
   createAgentSelection,
   formatDuration
 } from "@repoarena/core";
@@ -425,7 +425,7 @@ function parseArgs(argv: string[]): ParsedArgs {
           throw new Error("--task requires a path argument. Example: --task taskpack.yaml");
         }
         break;
-      case "--agents":
+      case "--agents": {
         const agentsValue = args.shift();
         if (!agentsValue) {
           throw new Error("--agents requires a comma-separated list. Example: --agents demo-fast,codex");
@@ -438,6 +438,7 @@ function parseArgs(argv: string[]): ParsedArgs {
           throw new Error("--agents list cannot be empty. Example: --agents demo-fast,codex");
         }
         break;
+      }
       case "--output":
         parsed.outputPath = args.shift();
         if (!parsed.outputPath) {
@@ -450,7 +451,7 @@ function parseArgs(argv: string[]): ParsedArgs {
           throw new Error("--codex-model requires a model name. Example: --codex-model gpt-5.4");
         }
         break;
-      case "--codex-reasoning":
+      case "--codex-reasoning": {
         parsed.codexReasoning = args.shift();
         if (!parsed.codexReasoning) {
           throw new Error("--codex-reasoning requires a value. Example: --codex-reasoning high");
@@ -460,6 +461,7 @@ function parseArgs(argv: string[]): ParsedArgs {
           throw new Error(`--codex-reasoning must be one of: ${validReasoning.join(", ")}. Got: ${parsed.codexReasoning}`);
         }
         break;
+      }
       case "--claude-profile":
         parsed.claudeProfile = args.shift();
         if (!parsed.claudeProfile) {
@@ -496,7 +498,7 @@ function parseArgs(argv: string[]): ParsedArgs {
       case "--force":
         parsed.force = true;
         break;
-      case "--ci-template":
+      case "--ci-template": {
         parsed.ciTemplate = args.shift();
         if (!parsed.ciTemplate) {
           throw new Error("--ci-template requires a template type. Available: pull-request, smoke, nightly");
@@ -506,6 +508,7 @@ function parseArgs(argv: string[]): ParsedArgs {
           throw new Error(`--ci-template must be one of: ${validTemplates.join(", ")}. Got: ${parsed.ciTemplate}`);
         }
         break;
+      }
       case "--ci-output-dir":
         parsed.ciOutputDir = args.shift();
         if (!parsed.ciOutputDir) {
@@ -555,6 +558,7 @@ function parseArgs(argv: string[]): ParsedArgs {
       case "-h":
         printHelp();
         process.exit(0);
+        break; // eslint-disable-line no-fallthrough
       default:
         throw new Error(
           `Unknown argument: ${token}\n` +
@@ -1023,7 +1027,7 @@ async function runUi(parsed: ParsedArgs): Promise<void> {
     };
   };
 
-  const resetRunStatus = (): void => {
+  const _resetRunStatus = (): void => {
     activeRunStatus = {
       state: "idle",
       phase: "idle",

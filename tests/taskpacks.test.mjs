@@ -1,8 +1,8 @@
-import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import test from "node:test";
 import { loadTaskPack } from "../packages/taskpacks/dist/index.js";
 
 test("loadTaskPack parses schema v1 judges", async () => {

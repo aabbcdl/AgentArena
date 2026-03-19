@@ -1,8 +1,8 @@
-import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import http from "node:http";
 import path from "node:path";
+import test from "node:test";
 
 async function getAvailablePort() {
   return await new Promise((resolve, reject) => {
@@ -104,7 +104,7 @@ test("web-report browser smoke renders launcher and supports zh/en switching", {
     assert.equal(appTitleEn, "Web Report");
     assert.equal(launcherRunEn, "Start Benchmark");
     assert.equal(appTitleZhAgain, "交互报告");
-    assert.doesNotMatch(bodyZh, /杩|鍏|鏃\?|鏈|宸插|銆\?|锛|榛樿|妯\"|缂栬緫/);
+    assert.doesNotMatch(bodyZh, /杩|鍏|鏃\?|鏈|宸插|銆\?|锛|榛樿|妯"|缂栬緫/);
   } finally {
     await browser.close();
     await uiServer.stop();

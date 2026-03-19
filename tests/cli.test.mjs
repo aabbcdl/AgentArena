@@ -1,10 +1,10 @@
-import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
+import test from "node:test";
 
 async function writeJson(filePath, value) {
   await writeFile(filePath, JSON.stringify(value, null, 2), "utf8");
@@ -77,7 +77,7 @@ async function startUiServer(cwd, extraArgs = [], envOverrides = {}) {
     stderr += chunk.toString();
   });
 
-  const started = await new Promise((resolve, reject) => {
+  const _started = await new Promise((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error(`UI server did not start.\nstdout:\n${stdout}\nstderr:\n${stderr}`)), 10000);
     const onData = () => {
       if (stdout.includes("RepoArena UI server running")) {

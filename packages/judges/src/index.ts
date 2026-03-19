@@ -2,23 +2,23 @@ import { spawn } from "node:child_process";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import Ajv from "ajv";
 import {
-  CommandExecutionSpec,
-  CommandStepResult,
-  CommandJudge,
-  FileContainsJudge,
-  FileCountJudge,
-  FileExistsJudge,
-  GlobJudge,
-  JsonSchemaJudge,
-  JsonValueJudge,
-  JudgeResult,
-  SnapshotJudge,
-  TaskJudge,
   buildExecutionEnvironment,
+  type CommandExecutionSpec,
+  type CommandJudge,
+  type CommandStepResult,
+  type FileContainsJudge,
+  type FileCountJudge,
+  type FileExistsJudge,
+  type GlobJudge,
+  type JsonSchemaJudge,
+  type JsonValueJudge,
+  type JudgeResult,
+  type SnapshotJudge,
+  type TaskJudge,
   uniqueSorted
 } from "@repoarena/core";
+import Ajv from "ajv";
 
 const DEFAULT_JUDGE_TIMEOUT_MS = 5 * 60 * 1_000;
 const sharedAjv = new Ajv({ allErrors: true, strict: false });

@@ -3,26 +3,25 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
-  AdapterCapability,
-  AdapterExecutionContext,
-  AdapterExecutionResult,
-  AdapterPreflightOptions,
-  AdapterPreflightResult,
-  ClaudeProviderProfile,
-  AgentResolvedRuntime,
-  AgentAdapter,
+  type AdapterCapability,
+  type AdapterExecutionContext,
+  type AdapterExecutionResult,
+  type AdapterPreflightOptions,
+  type AdapterPreflightResult,
+  type AgentAdapter,
+  type AgentResolvedRuntime,
+  type ClaudeProviderProfile,
   ensureDirectory,
   normalizePath,
   portableRelativePath,
   uniqueSorted
 } from "@repoarena/core";
 import {
-  buildClaudeProviderEnvironment,
+  deleteClaudeProviderProfile,
   getClaudeProviderProfile,
   getClaudeProviderProfileSecret,
   listClaudeProviderProfiles,
   saveClaudeProviderProfile,
-  deleteClaudeProviderProfile,
   setClaudeProviderProfileSecret,
   writeClaudeWorkspaceSettings
 } from "./claude-provider-profiles.js";
@@ -1675,10 +1674,10 @@ export async function getCodexDefaultResolvedRuntime(): Promise<AgentResolvedRun
 }
 
 export {
-  listClaudeProviderProfiles,
-  getClaudeProviderProfile,
-  saveClaudeProviderProfile,
   deleteClaudeProviderProfile,
+  getClaudeProviderProfile,
+  listClaudeProviderProfiles,
+  saveClaudeProviderProfile,
   setClaudeProviderProfileSecret
 };
 
