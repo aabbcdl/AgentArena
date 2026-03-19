@@ -1,6 +1,7 @@
 {
   "name": "@repoarena/judges",
   "version": "0.1.0",
+  "description": "Judge implementations for RepoArena — command, file, glob, snapshot, json",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
