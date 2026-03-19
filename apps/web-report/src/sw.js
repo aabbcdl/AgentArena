@@ -1,4 +1,4 @@
-const CACHE_NAME = "repoarena-report-v1";
+const CACHE_NAME = "repoarena-report-v2";
 const STATIC_ASSETS = [
   "./",
   "./index.html",
@@ -6,7 +6,8 @@ const STATIC_ASSETS = [
   "./view-model.js",
   "./styles.css",
   "./i18n.js",
-  "./manifest.json"
+  "./manifest.json",
+  "./icon.svg"
 ];
 
 self.addEventListener("install", (event) => {
