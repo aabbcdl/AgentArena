@@ -5,6 +5,7 @@ RepoArena — local-first benchmark and replay tool for comparing AI coding agen
 ## Tech Stack
 
 - pnpm monorepo, Node >= 22, TypeScript
+- Linting: [Biome](https://biomejs.dev/) (linter only, formatter disabled) — config in `biome.json`
 - `apps/web-report`: vanilla JS SPA (no framework, no bundler), PWA with service worker
 - Build: `pnpm -r build` (TypeScript compilation + file copy for web-report)
 - i18n: `apps/web-report/src/i18n.js` exports `translate()` and `localizeText()`, app.js wraps them as `t()` and `localText()`

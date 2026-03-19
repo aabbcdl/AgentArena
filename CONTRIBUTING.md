@@ -58,6 +58,7 @@ CI will run lint, typecheck, unit tests, browser smoke tests, and a smoke benchm
 
 ## Code Style
 
+- Linting uses [Biome](https://biomejs.dev/) — run `pnpm lint` (config: `biome.json`, formatter disabled, linter only)
 - ES modules (`import`/`export`) throughout
 - `apps/web-report` is vanilla JS — no frameworks, no bundler
 - All user-facing strings in web-report use `t(key)` or `localText(zh, en)` for i18n
