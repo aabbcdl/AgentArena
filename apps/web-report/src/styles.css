@@ -2246,6 +2246,35 @@ details.launcher-section > *:not(summary) {
   color: var(--danger);
 }
 
+.run-info-actions {
+  margin: 10px 0 14px;
+}
+
+.archive-score-restore-btn {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-md);
+  background: var(--accent-soft);
+  color: var(--text-primary);
+  cursor: pointer;
+  display: block;
+  padding: 10px 14px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  line-height: 1.4;
+  text-align: center;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  transition: all var(--transition-fast);
+}
+
+.archive-score-restore-btn:hover {
+  background: rgba(99, 102, 241, 0.24);
+  border-color: var(--accent-light);
+  box-shadow: 0 0 0 1px rgba(129, 140, 248, 0.12);
+}
+
 /* ===== Feature 4: Bar chart interaction ===== */
 
 .bar-row {

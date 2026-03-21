@@ -283,10 +283,11 @@ test("buildShareCardSvg returns a shareable SVG card", () => {
     ]
   });
 
-  const svg = buildShareCardSvg(run);
+  const svg = buildShareCardSvg(run, { scoreModeLabel: "Correctness First" });
   assert.match(svg, /^<svg/);
   assert.match(svg, /Task SVG/);
   assert.match(svg, /Demo Fast/);
+  assert.match(svg, /Score mode: Correctness First/);
   assert.match(svg, /Run run-svg/);
 });
 

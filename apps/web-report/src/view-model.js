@@ -396,9 +396,11 @@ export function buildShareCard(run, options = {}) {
   return lines.join("\n");
 }
 
-export function buildShareCardSvg(run) {
+export function buildShareCardSvg(run, options = {}) {
   const summary = summarizeRun(run);
-  const verdict = getRunVerdict(run);
+  const scoreWeights = options.scoreWeights ?? DEFAULT_SCORE_WEIGHTS;
+  const scoreModeLabel = options.scoreModeLabel ?? null;
+  const verdict = getRunVerdict(run, { scoreWeights });
   const esc = (value) =>
     String(value)
       .replaceAll("&", "&amp;")
@@ -482,6 +484,7 @@ export function buildShareCardSvg(run) {
 
   <!-- Task title -->
   <text x="68" y="130" fill="#f1f5f9" font-family="${font}" font-size="36" font-weight="700">${esc(truncate(run.task.title, 50))}</text>
+  ${scoreModeLabel ? `<text x="68" y="152" fill="#94a3b8" font-family="${font}" font-size="16">Score mode: ${esc(scoreModeLabel)}</text>` : ""}
 
   <!-- Stats row -->
   <rect x="68" y="160" width="180" height="80" rx="12" fill="#1a1a2e" stroke="#2d2d44" />

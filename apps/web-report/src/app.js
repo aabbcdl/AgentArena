@@ -1793,6 +1793,10 @@ function renderRunInfo(run) {
     <p class="muted">${escapeHtml(t("taskSchema"))} ${escapeHtml(run.task.schemaVersion)}</p>
     <p class="muted"><strong>${escapeHtml(localText("归档评分模式", "Archived Score Mode"))}:</strong> ${escapeHtml(getArchivedScoreModeLabel(run))}</p>
     <p class="muted"><strong>${escapeHtml(localText("当前评分模式", "Active Score Mode"))}:</strong> ${escapeHtml(getScoreModeLabel())}</p>
+    ${getArchivedScoreModeLabel(run) !== getScoreModeLabel() ? `<p class="warning-text">${escapeHtml(localText("当前评分口径与归档结果不同；如需按原始口径复现排序，请恢复归档评分。", "Active scoring differs from the archived run; restore archived scoring to reproduce the original ranking lens."))}</p>` : ""}
+    <div class="run-info-actions">
+      <button type="button" class="archive-score-restore-btn" data-role="restore-archived-score" data-run-id="${escapeHtml(run.runId)}">${escapeHtml(localText("恢复归档评分口径", "Restore Archived Scoring"))}</button>
+    </div>
     <p class="muted"><strong>${escapeHtml(localText("目标", "Objective"))}:</strong> ${escapeHtml(intent.objective || "n/a")}</p>
     <p class="muted"><strong>${escapeHtml(localText("Judge 依据", "Judge Rationale"))}:</strong> ${escapeHtml(intent.rationale || "n/a")}</p>
     <p class="warning-text">${escapeHtml(baselineTaskWarning(run.task))}</p>
@@ -3219,6 +3223,19 @@ elements.runList.addEventListener("click", (event) => {
     state.sidebarOpen = false;
     elements.sidebar.classList.remove("sidebar-open");
     elements.sidebarBackdrop.classList.remove("active");
+  }
+});
+
+elements.runInfo.addEventListener("click", (event) => {
+  const button = event.target.closest('button[data-role="restore-archived-score"]');
+  if (!button || !state.run) {
+    return;
+  }
+
+  if (state.run.scoreWeights) {
+    state.scoreWeights = { ...DEFAULT_SCORE_WEIGHTS, ...state.run.scoreWeights };
+    saveScoreConfig();
+    render();
   }
 });
 

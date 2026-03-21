@@ -899,6 +899,7 @@ function renderHtml(run: BenchmarkRun): string {
         <p class="lede">${escapeHtml(run.task.title)} in ${escapeHtml(run.repoPath)}. Generated at ${escapeHtml(
           run.createdAt
         )} for run ${escapeHtml(run.runId)}.</p>
+        <p class="lede">Score mode: ${escapeHtml(getRunScoreMode(run))} | Score weights: ${escapeHtml(JSON.stringify((run as ScoredRun).scoreWeights ?? {}))}</p>
         ${
           run.task.metadata
             ? `<p class="lede">Objective: ${escapeHtml(run.task.metadata.objective ?? "n/a")} | Judge rationale: ${escapeHtml(
@@ -941,6 +942,7 @@ function renderMarkdown(run: BenchmarkRun): string {
     `- Created At: \`${run.createdAt}\``,
     `- Task: \`${run.task.title}\``,
     `- Score Mode: \`${getRunScoreMode(run)}\``,
+    `- Score Weights: \`${JSON.stringify((run as ScoredRun).scoreWeights ?? {})}\``,
     `- Repository: \`${run.repoPath}\``,
     ...(run.task.metadata
       ? [
@@ -1070,6 +1072,7 @@ function renderPrComment(run: BenchmarkRun): string {
     `Task: \`${run.task.title}\``,
     "",
     `Score mode: \`${getRunScoreMode(run)}\``,
+    `Score weights: \`${JSON.stringify((run as ScoredRun).scoreWeights ?? {})}\``,
     "",
     `Overview: \`${summary.successCount}/${summary.totalAgents}\` passing | Failed: \`${summary.failedCount}\` | Tokens: \`${summary.totalTokens}\` | Known Cost: \`$${summary.knownCostUsd.toFixed(2)}\``
   ];

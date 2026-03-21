@@ -142,6 +142,7 @@ test("writeReport sanitizes shareable output paths", async () => {
   assert.equal(summary.results[0].judgeResults[0].target, "README.md");
   assert.match(markdown, /# RepoArena Summary/);
   assert.match(markdown, /- Score Mode: `balanced`/);
+  assert.match(markdown, /- Score Weights: `\{"status":0\.3,"tests":0\.25/);
   assert.match(markdown, /- Success Rate: `1\/1`/);
   assert.match(markdown, /- Badge Endpoint: `badge\.json`/);
   assert.match(markdown, /## Capability Matrix/);
@@ -155,6 +156,7 @@ test("writeReport sanitizes shareable output paths", async () => {
   assert.equal(badge.message, "1/1 passing");
   assert.match(prComment, /## RepoArena Benchmark/);
   assert.match(prComment, /Score mode: `balanced`/);
+  assert.match(prComment, /Score weights: `\{"status":0\.3,"tests":0\.25/);
   assert.match(prComment, /Overview: `1\/1` passing \| Failed: `0` \| Tokens: `100` \| Known Cost: `\$0\.10`/);
   assert.match(prComment, /### Review Table/);
   assert.match(prComment, /\| Attention \| Variant \| Base Agent \| Provider \| Provider Kind \| Model \| Reasoning \| Verification \| Tier \| Preflight \| Run \| Score \| Duration \| Tokens \| Cost \| Judges \| Tests \| Lint \| Diff Precision \| Files \| Notes \|/);
@@ -163,6 +165,9 @@ test("writeReport sanitizes shareable output paths", async () => {
   assert.match(prComment, /- No warnings or failures in this run\./);
   assert.match(prComment, /### Artifacts/);
   assert.match(prComment, /`report\.html`/);
+
+  const html = await readFile(path.join(outputPath, "report.html"), "utf8");
+  assert.match(html, /Score mode: balanced \| Score weights: \{&quot;status&quot;:0\.3,&quot;tests&quot;:0\.25/);
 
   await rm(tempDir, { recursive: true, force: true });
 });
