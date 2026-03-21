@@ -16,7 +16,8 @@
     "@repoarena/core": "workspace:*",
     "@repoarena/report": "workspace:*",
     "@repoarena/runner": "workspace:*",
-    "@repoarena/taskpacks": "workspace:*"
+    "@repoarena/taskpacks": "workspace:*",
+    "yaml": "^2.8.2"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

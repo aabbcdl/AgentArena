@@ -1,16 +1,28 @@
-﻿import { localizeText, translate } from "./i18n.js";
+import { localizeText, translate } from "./i18n.js";
 import {
   buildPrTable,
   buildShareCard,
   buildShareCardSvg,
+  DEFAULT_SCORE_WEIGHTS,
+  diffPrecisionScore,
+  findJudgeByType,
   findPreviousComparableRun,
+  formatCompositeScore,
+  formatDiffPrecisionMetric,
+  formatLintMetric,
+  formatTestMetric,
   getAgentTrendRows,
   getCompareResults,
+  getCompositeScoreReasons,
   getCrossRunCompareRows,
   getCrossRunRecommendation,
+  getMatchingScorePresetId,
   getRunCompareRows,
   getRunToRunAgentDiff,
   getRunVerdict,
+  getScoreWeightPreset,
+  normalizeScoreWeights,
+  SCORE_WEIGHT_PRESETS,
   summarizeRun
 } from "./view-model.js";
 
@@ -39,7 +51,8 @@ const state = {
   crossRunSelectedIds: new Set(),
   crossRunCompareData: null,
   expandedCompareAgentId: null,
-  sidebarOpen: false
+  sidebarOpen: false,
+  scoreWeights: { ...DEFAULT_SCORE_WEIGHTS }
 };
 
 const elements = {
@@ -57,6 +70,10 @@ const elements = {
   launcherTaskSelect: document.querySelector("#launcher-task-select"),
   taskPackDetail: document.querySelector("#task-pack-detail"),
   launcherTaskPath: document.querySelector("#launcher-task-path"),
+  launcherAdhocPromptField: document.querySelector("#launcher-adhoc-prompt-field"),
+  launcherAdhocPrompt: document.querySelector("#launcher-adhoc-prompt"),
+  launcherAdhocPromptLabel: document.querySelector("#launcher-adhoc-prompt-label"),
+  launcherAdhocPromptHint: document.querySelector("#launcher-adhoc-prompt-hint"),
   launcherOutputPath: document.querySelector("#launcher-output-path"),
   launcherAgents: document.querySelector("#launcher-agents"),
   launcherProbeAuth: document.querySelector("#launcher-probe-auth"),
@@ -92,6 +109,17 @@ const elements = {
   compareStatusFilter: document.querySelector("#compare-status-filter"),
   compareSort: document.querySelector("#compare-sort"),
   compareSortHint: document.querySelector("#compare-sort-hint"),
+  scoreWeightsTitle: document.querySelector("#score-weights-title"),
+  scoreWeightsReset: document.querySelector("#score-weights-reset"),
+  scoreWeightsSummary: document.querySelector("#score-weights-summary"),
+  scoreWeightStatus: document.querySelector("#score-weight-status"),
+  scoreWeightTests: document.querySelector("#score-weight-tests"),
+  scoreWeightJudges: document.querySelector("#score-weight-judges"),
+  scoreWeightLint: document.querySelector("#score-weight-lint"),
+  scoreWeightPrecision: document.querySelector("#score-weight-precision"),
+  scoreWeightDuration: document.querySelector("#score-weight-duration"),
+  scoreWeightCost: document.querySelector("#score-weight-cost"),
+  scoreWeightPresets: document.querySelector("#score-weight-presets"),
   compareTable: document.querySelector("#compare-table"),
   agentCompareSection: document.querySelector("#agent-compare-section"),
   agentTrendTitle: document.querySelector("#agent-trend-title"),
@@ -144,6 +172,16 @@ const runCompareFilters = {
   scope: "current-task"
 };
 
+const scoreWeightElements = {
+  status: "scoreWeightStatus",
+  tests: "scoreWeightTests",
+  judges: "scoreWeightJudges",
+  lint: "scoreWeightLint",
+  precision: "scoreWeightPrecision",
+  duration: "scoreWeightDuration",
+  cost: "scoreWeightCost"
+};
+
 function t(key, ...args) {
   return translate(state.language, key, ...args);
 }
@@ -193,6 +231,126 @@ function formatElapsedDuration(durationMs) {
 
 function formatCost(result) {
   return result.costKnown ? `$${result.estimatedCostUsd.toFixed(2)}` : "n/a";
+}
+
+function getNormalizedScoreWeights() {
+  return normalizeScoreWeights(state.scoreWeights);
+}
+
+function saveScoreConfig() {
+  try {
+    localStorage.setItem(
+      "repoarena.webReport.scoreConfig",
+      JSON.stringify({
+        scoreWeights: state.scoreWeights
+      })
+    );
+  } catch {
+    // ignore localStorage failures
+  }
+}
+
+function loadScoreConfig() {
+  try {
+    const raw = localStorage.getItem("repoarena.webReport.scoreConfig");
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function getScoreModeLabel() {
+  const presetId = getMatchingScorePresetId(state.scoreWeights);
+  switch (presetId) {
+    case "balanced":
+      return t("scorePresetBalanced");
+    case "correctness-first":
+      return t("scorePresetCorrectness");
+    case "speed-first":
+      return t("scorePresetSpeed");
+    case "cost-first":
+      return t("scorePresetCost");
+    case "scope-discipline":
+      return t("scorePresetScope");
+    default:
+      return localText("自定义权重", "Custom Weights");
+  }
+}
+
+function getArchivedScoreModeLabel(run) {
+  const mode = run?.scoreMode ?? "balanced";
+  switch (mode) {
+    case "balanced":
+      return t("scorePresetBalanced");
+    case "correctness-first":
+      return t("scorePresetCorrectness");
+    case "speed-first":
+      return t("scorePresetSpeed");
+    case "cost-first":
+      return t("scorePresetCost");
+    case "scope-discipline":
+      return t("scorePresetScope");
+    default:
+      return mode;
+  }
+}
+
+function renderScoreWeightsControls() {
+  const normalized = getNormalizedScoreWeights();
+  for (const [key, elementName] of Object.entries(scoreWeightElements)) {
+    if (elements[elementName]) {
+      elements[elementName].value = String(state.scoreWeights[key]);
+    }
+  }
+
+  if (elements.scoreWeightsSummary) {
+    elements.scoreWeightsSummary.textContent = t(
+      "scoreWeightsSummary",
+      normalized.status.toFixed(2),
+      normalized.tests.toFixed(2),
+      normalized.judges.toFixed(2),
+      normalized.lint.toFixed(2),
+      normalized.precision.toFixed(2),
+      normalized.duration.toFixed(2),
+      normalized.cost.toFixed(2)
+    );
+  }
+
+  if (elements.scoreWeightPresets) {
+    const activePreset = getMatchingScorePresetId(state.scoreWeights);
+
+    for (const button of elements.scoreWeightPresets.querySelectorAll("button[data-score-preset]")) {
+      button.classList.toggle("active", button.dataset.scorePreset === activePreset);
+    }
+  }
+}
+
+function updateScoreWeight(key, value) {
+  state.scoreWeights[key] = Number.isFinite(value) && value >= 0 ? value : 0;
+  saveScoreConfig();
+  renderScoreWeightsControls();
+  if (state.run) {
+    renderVerdictHero(state.run);
+    renderComparisonBars(state.run);
+    renderCompareTableV2(state.run);
+    renderSelectedAgentV2();
+    renderRecommendationCard(state.run);
+    renderMarkdownPanel();
+  }
+}
+
+function applyScorePreset(presetId) {
+  state.scoreWeights = { ...getScoreWeightPreset(presetId) };
+  saveScoreConfig();
+  renderScoreWeightsControls();
+  if (state.run) {
+    renderVerdictHero(state.run);
+    renderComparisonBars(state.run);
+    renderCompareTableV2(state.run);
+    renderSelectedAgentV2();
+    renderRecommendationCard(state.run);
+    renderMarkdownPanel();
+  }
 }
 
 function runtimeIdentity(record) {
@@ -407,29 +565,9 @@ function summarizeLauncherSelection(selectedTaskPack) {
   );
 }
 
-function _compareHighlights(run, result) {
-  const verdict = getRunVerdict(run);
-  const highlights = [];
-  const key = recordKey(result);
-
-  if (recordKey(verdict.bestAgent ?? {}) === key) {
-    highlights.push(localText("最佳", "Best"));
-  }
-  if (recordKey(verdict.fastest ?? {}) === key) {
-    highlights.push(localText("最快", "Fastest"));
-  }
-  if (recordKey(verdict.lowestKnownCost ?? {}) === key) {
-    highlights.push(localText("最低成本", "Lowest Cost"));
-  }
-  if (recordKey(verdict.highestJudgePassRate ?? {}) === key) {
-    highlights.push(localText("Judge 最佳", "Top Judges"));
-  }
-
-  return highlights;
-}
 
 function runFocusLine(run) {
-  const verdict = getRunVerdict(run);
+  const verdict = getRunVerdict(run, { scoreWeights: state.scoreWeights });
   const best = verdict.bestAgent ? resultLabel(verdict.bestAgent) : "n/a";
   const fastest = verdict.fastest ? resultLabel(verdict.fastest) : "n/a";
 
@@ -530,6 +668,21 @@ function renderStaticText() {
   setText("run-diff-title", t("runDiffTitle"));
   setText("run-diff-description", t("runDiffDescription"));
   setText("agent-compare-title", t("agentCompareTitle"));
+  setText("score-weights-title", t("scoreWeightsTitle"));
+  setText("score-weights-reset", t("scoreWeightsReset"));
+  setText("score-weight-status-label", t("scoreWeightStatus"));
+  setText("score-weight-tests-label", t("scoreWeightTests"));
+  setText("score-weight-judges-label", t("scoreWeightJudges"));
+  setText("score-weight-lint-label", t("scoreWeightLint"));
+  setText("score-weight-precision-label", t("scoreWeightPrecision"));
+  setText("score-weight-duration-label", t("scoreWeightDuration"));
+  setText("score-weight-cost-label", t("scoreWeightCost"));
+  const presetButtons = elements.scoreWeightPresets?.querySelectorAll("button[data-score-preset]") ?? [];
+  if (presetButtons[0]) presetButtons[0].textContent = t("scorePresetBalanced");
+  if (presetButtons[1]) presetButtons[1].textContent = t("scorePresetCorrectness");
+  if (presetButtons[2]) presetButtons[2].textContent = t("scorePresetSpeed");
+  if (presetButtons[3]) presetButtons[3].textContent = t("scorePresetCost");
+  if (presetButtons[4]) presetButtons[4].textContent = t("scorePresetScope");
   setText("agent-trend-description", t("agentTrendDescription"));
   setText("judge-filters-title", t("judgeFiltersTitle"));
   setText("markdown-summary-title", t("markdownSummaryTitle"));
@@ -562,12 +715,36 @@ function renderStaticText() {
   elements.compareSort.options[3].text = t("compareSortCost");
   elements.compareSort.options[4].text = t("compareSortChanged");
   elements.compareSort.options[5].text = t("compareSortJudges");
+  if (elements.compareSort.options[6]) {
+    elements.compareSort.options[6].text = t("compareSortPrecision");
+  }
   elements.judgeTypeFilter.options[0].text = t("judgeTypeAll");
   elements.judgeStatusFilter.options[0].text = t("judgeStatusAll");
   elements.judgeStatusFilter.options[1].text = t("judgeStatusPass");
   elements.judgeStatusFilter.options[2].text = t("judgeStatusFail");
   elements.launcherRun.textContent = t("launcherRunButton");
   renderList(document.querySelector("#hero-how-list"), t("heroHowSteps"));
+  renderScoreWeightsControls();
+}
+
+function buildStepIndicatorHtml() {
+  const phase = state.runStatus?.phase ?? "starting";
+  const phaseOrder = ["starting", "preflight", "benchmark", "report"];
+  const phaseLabels = {
+    starting: localText("启动", "Start"),
+    preflight: localText("预检", "Preflight"),
+    benchmark: localText("运行", "Benchmark"),
+    report: localText("报告", "Report")
+  };
+  const currentIndex = phaseOrder.indexOf(phase);
+
+  return `<div class="launcher-steps">${phaseOrder.map((p, i) => {
+    const cls = i < currentIndex ? "done" : i === currentIndex ? "active" : "";
+    const connector = i < phaseOrder.length - 1
+      ? `<div class="launcher-step-connector${i < currentIndex ? " done" : ""}"></div>`
+      : "";
+    return `<div class="launcher-step ${cls}"><span class="launcher-step-dot"></span>${escapeHtml(phaseLabels[p])}</div>${connector}`;
+  }).join("")}</div>`;
 }
 
 function renderLauncherProgress() {
@@ -578,7 +755,7 @@ function renderLauncherProgress() {
     return;
   }
 
-  elements.launcherProgressTitle.textContent = t("launcherProgressTitle");
+  elements.launcherProgressTitle.innerHTML = `${escapeHtml(t("launcherProgressTitle"))}${state.runInProgress ? buildStepIndicatorHtml() : ""}`;
   const currentAgent = state.runStatus?.currentDisplayLabel || state.runStatus?.currentVariantId || state.runStatus?.currentAgentId;
   elements.launcherCurrentAgent.textContent = currentAgent
     ? t("launcherCurrentAgentLabel", currentAgent)
@@ -637,6 +814,13 @@ function openProviderEditor(profileId = null) {
   state.launcherProviderEditor = createProviderEditorState(profile);
 }
 
+function taskPackI18n(taskPack, field) {
+  const lang = state.language;
+  const i18nData = taskPack?.i18n?.[lang];
+  if (i18nData && i18nData[field]) return i18nData[field];
+  return taskPack?.[field] ?? taskPack?.metadata?.[field] ?? "";
+}
+
 function renderTaskPackDetail(taskPack) {
   if (!taskPack) {
     setHidden(elements.taskPackDetail, true);
@@ -650,14 +834,17 @@ function renderTaskPackDetail(taskPack) {
   const tags = (taskPack.tags ?? []).map((tag) => `<span class="task-pack-tag">${escapeHtml(tag)}</span>`).join("");
   const judgeCount = Array.isArray(taskPack.judges) ? taskPack.judges.length : 0;
   const repoTypes = (taskPack.repoTypes ?? []).join(", ") || "generic";
+  const title = taskPackI18n(taskPack, "title") || taskPack.title;
+  const desc = taskPackI18n(taskPack, "description") || taskPack.description || taskPack.objective || "";
+  const diff = taskPackI18n(taskPack, "differentiator") || taskPack.differentiator;
 
   elements.taskPackDetail.innerHTML = `
     <div class="task-pack-header">
-      <strong>${escapeHtml(taskPack.title)}</strong>
+      <strong>${escapeHtml(title)}</strong>
       <div class="task-pack-badges">${diffBadge}${tags}</div>
     </div>
-    <p class="task-pack-desc">${escapeHtml(taskPack.description || taskPack.objective || "")}</p>
-    ${taskPack.differentiator ? `<p class="task-pack-diff"><span class="task-pack-label">${escapeHtml(localText("区分度", "Differentiator"))}</span> ${escapeHtml(taskPack.differentiator)}</p>` : ""}
+    <p class="task-pack-desc">${escapeHtml(desc)}</p>
+    ${diff ? `<p class="task-pack-diff"><span class="task-pack-label">${escapeHtml(localText("区分度", "Differentiator"))}</span> ${escapeHtml(diff)}</p>` : ""}
     <div class="task-pack-meta">
       <span>${escapeHtml(localText("适用", "Repo"))}: ${escapeHtml(repoTypes)}</span>
       <span>${escapeHtml(localText("检查项", "Judges"))}: ${judgeCount}</span>
@@ -732,7 +919,8 @@ function renderLauncher() {
     ...state.availableTaskPacks.map(
       (taskPack) => {
         const diff = taskPack.difficulty ? ` [${translateDifficulty(taskPack.difficulty)}]` : "";
-        return `<option value="${escapeHtml(taskPack.path)}">${escapeHtml(taskPack.title)}${escapeHtml(diff)}</option>`;
+        const tpTitle = taskPackI18n(taskPack, "title") || taskPack.title;
+        return `<option value="${escapeHtml(taskPack.path)}">${escapeHtml(tpTitle)}${escapeHtml(diff)}</option>`;
       }
     )
   ];
@@ -762,16 +950,17 @@ function renderLauncher() {
   );
 
   const taskSummary = selectedTaskPack
-    ? `
+    ? (() => {
+        const tpDesc = taskPackI18n(selectedTaskPack, "description") || selectedTaskPack.description || selectedTaskPack.objective || "";
+        const tpObj = taskPackI18n(selectedTaskPack, "objective") || selectedTaskPack.objective || "n/a";
+        const tpJR = taskPackI18n(selectedTaskPack, "judgeRationale") || selectedTaskPack.judgeRationale || "n/a";
+        const tpDiff = taskPackI18n(selectedTaskPack, "differentiator") || selectedTaskPack.differentiator;
+        return `
       <details class="launcher-section">
-        <summary class="launcher-section-summary">${escapeHtml(localText("任务说明", "Task Info"))}${selectedTaskPack.difficulty ? ` · <span class="status-badge status-${escapeHtml(selectedTaskPack.difficulty)}">${escapeHtml(translateDifficulty(selectedTaskPack.difficulty))}</span>` : ""} · ${escapeHtml(selectedTaskPack.description ?? selectedTaskPack.objective ?? "")}</summary>
-        ${selectedTaskPack.differentiator ? `<p class="muted"><strong>${escapeHtml(localText("区分度", "Differentiator"))}:</strong> ${escapeHtml(selectedTaskPack.differentiator)}</p>` : ""}
-        <p class="muted"><strong>${escapeHtml(localText("目标", "Objective"))}:</strong> ${escapeHtml(
-            selectedTaskPack.objective ?? "n/a"
-          )}</p>
-        <p class="muted"><strong>${escapeHtml(localText("Judge 依据", "Judge Rationale"))}:</strong> ${escapeHtml(
-            selectedTaskPack.judgeRationale ?? "n/a"
-          )}</p>
+        <summary class="launcher-section-summary">${escapeHtml(localText("任务说明", "Task Info"))}${selectedTaskPack.difficulty ? ` · <span class="status-badge status-${escapeHtml(selectedTaskPack.difficulty)}">${escapeHtml(translateDifficulty(selectedTaskPack.difficulty))}</span>` : ""} · ${escapeHtml(tpDesc)}</summary>
+        ${tpDiff ? `<p class="muted"><strong>${escapeHtml(localText("区分度", "Differentiator"))}:</strong> ${escapeHtml(tpDiff)}</p>` : ""}
+        <p class="muted"><strong>${escapeHtml(localText("目标", "Objective"))}:</strong> ${escapeHtml(tpObj)}</p>
+        <p class="muted"><strong>${escapeHtml(localText("Judge 依据", "Judge Rationale"))}:</strong> ${escapeHtml(tpJR)}</p>
         <p class="muted"><strong>${escapeHtml(localText("适用仓库", "Repo Types"))}:</strong> ${escapeHtml(
             (selectedTaskPack.repoTypes ?? []).join(", ") || "generic"
           )}</p>
@@ -787,7 +976,8 @@ function renderLauncher() {
             : localText("按任务目标解读这次 benchmark。", "Interpret this benchmark in the context of the task objective.")
         )}</p>
       </details>
-    `
+    `;
+    })()
     : "";
 
   const codexVariants = state.launcherCodexVariants
@@ -893,61 +1083,61 @@ function renderLauncher() {
         )}</p>
         <div class="launcher-grid">
           <label class="field">
-            <span>${escapeHtml(localText("Provider 名称", "Provider Name"))}</span>
+            <span>${escapeHtml(localText("Provider 名称", "Provider Name"))} <span class="field-required">${escapeHtml(localText("必填", "required"))}</span></span>
             <input data-role="provider-name" type="text" value="${escapeHtml(state.launcherProviderEditor.name)}" />
           </label>
           <label class="field">
-            <span>${escapeHtml(localText("类型", "Kind"))}</span>
+            <span>${escapeHtml(localText("类型", "Kind"))} <span class="field-required">${escapeHtml(localText("必填", "required"))}</span></span>
             <select data-role="provider-kind">
               <option value="anthropic-compatible" ${state.launcherProviderEditor.kind === "anthropic-compatible" ? "selected" : ""}>Anthropic Compatible</option>
               <option value="openai-proxy" ${state.launcherProviderEditor.kind === "openai-proxy" ? "selected" : ""}>OpenAI Proxy</option>
             </select>
           </label>
           <label class="field">
-            <span>${escapeHtml(localText("官网链接", "Homepage"))}</span>
+            <span>${escapeHtml(localText("官网链接", "Homepage"))} <span class="field-optional">${escapeHtml(localText("选填", "optional"))}</span></span>
             <input data-role="provider-homepage" type="text" value="${escapeHtml(state.launcherProviderEditor.homepage)}" />
           </label>
           <label class="field">
-            <span>${escapeHtml(localText("Base URL", "Base URL"))}</span>
+            <span>${escapeHtml(localText("Base URL", "Base URL"))} <span class="field-optional">${escapeHtml(localText("选填", "optional"))}</span></span>
             <input data-role="provider-base-url" type="text" value="${escapeHtml(state.launcherProviderEditor.baseUrl)}" />
           </label>
           <label class="field">
-            <span>${escapeHtml(localText("API 格式", "API Format"))}</span>
+            <span>${escapeHtml(localText("API 格式", "API Format"))} <span class="field-required">${escapeHtml(localText("必填", "required"))}</span></span>
             <select data-role="provider-api-format">
               <option value="anthropic-messages" ${state.launcherProviderEditor.apiFormat === "anthropic-messages" ? "selected" : ""}>Anthropic Messages</option>
               <option value="openai-chat-via-proxy" ${state.launcherProviderEditor.apiFormat === "openai-chat-via-proxy" ? "selected" : ""}>OpenAI Chat via Proxy</option>
             </select>
           </label>
           <label class="field">
-            <span>${escapeHtml(localText("主模型", "Primary Model"))}</span>
+            <span>${escapeHtml(localText("主模型", "Primary Model"))} <span class="field-optional">${escapeHtml(localText("选填", "optional"))}</span></span>
             <input data-role="provider-primary-model" type="text" value="${escapeHtml(state.launcherProviderEditor.primaryModel)}" placeholder="gpt-5.4" />
           </label>
           <label class="field">
-            <span>${escapeHtml(localText("Thinking 模型", "Thinking Model"))}</span>
+            <span>${escapeHtml(localText("Thinking 模型", "Thinking Model"))} <span class="field-optional">${escapeHtml(localText("选填", "optional"))}</span></span>
             <input data-role="provider-thinking-model" type="text" value="${escapeHtml(state.launcherProviderEditor.thinkingModel)}" />
           </label>
           <label class="field">
-            <span>${escapeHtml(localText("默认 Haiku 模型", "Default Haiku Model"))}</span>
+            <span>${escapeHtml(localText("默认 Haiku 模型", "Default Haiku Model"))} <span class="field-optional">${escapeHtml(localText("选填", "optional"))}</span></span>
             <input data-role="provider-haiku-model" type="text" value="${escapeHtml(state.launcherProviderEditor.defaultHaikuModel)}" />
           </label>
           <label class="field">
-            <span>${escapeHtml(localText("默认 Sonnet 模型", "Default Sonnet Model"))}</span>
+            <span>${escapeHtml(localText("默认 Sonnet 模型", "Default Sonnet Model"))} <span class="field-optional">${escapeHtml(localText("选填", "optional"))}</span></span>
             <input data-role="provider-sonnet-model" type="text" value="${escapeHtml(state.launcherProviderEditor.defaultSonnetModel)}" />
           </label>
           <label class="field">
-            <span>${escapeHtml(localText("默认 Opus 模型", "Default Opus Model"))}</span>
+            <span>${escapeHtml(localText("默认 Opus 模型", "Default Opus Model"))} <span class="field-optional">${escapeHtml(localText("选填", "optional"))}</span></span>
             <input data-role="provider-opus-model" type="text" value="${escapeHtml(state.launcherProviderEditor.defaultOpusModel)}" />
           </label>
           <label class="field field-wide">
-            <span>${escapeHtml(localText("备注", "Notes"))}</span>
+            <span>${escapeHtml(localText("备注", "Notes"))} <span class="field-optional">${escapeHtml(localText("选填", "optional"))}</span></span>
             <input data-role="provider-notes" type="text" value="${escapeHtml(state.launcherProviderEditor.notes)}" />
           </label>
           <label class="field field-wide">
-            <span>${escapeHtml(localText("额外环境变量 JSON", "Extra Env JSON"))}</span>
+            <span>${escapeHtml(localText("额外环境变量 JSON", "Extra Env JSON"))} <span class="field-optional">${escapeHtml(localText("选填", "optional"))}</span></span>
             <textarea data-role="provider-extra-env" rows="6">${escapeHtml(state.launcherProviderEditor.extraEnv)}</textarea>
           </label>
           <label class="field field-wide">
-            <span>${escapeHtml(localText("API Key / Token", "API Key / Token"))}</span>
+            <span>${escapeHtml(localText("API Key / Token", "API Key / Token"))} <span class="field-optional">${escapeHtml(localText("选填，留空不修改", "optional"))}</span></span>
             <input data-role="provider-secret" type="password" value="" placeholder="${escapeHtml(localText("留空则不修改当前已保存的 secret", "Leave blank to keep the currently stored secret"))}" />
           </label>
         </div>
@@ -974,8 +1164,8 @@ function renderLauncher() {
   elements.launcherAgents.innerHTML = `
     ${taskSummary}
     <div class="launcher-section">
-      <h4>${escapeHtml(localText("选择 Agents", "Select Agents"))}</h4>
-      <p class="muted">${escapeHtml(localText("勾选要参与对比的 agent。", "Check the agents you want to compare."))}</p>
+      <h4>${escapeHtml(localText("选择参赛 Agent", "Select Agents"))}</h4>
+      <p class="muted">${escapeHtml(localText("勾选要参与对比的 Agent。", "Check the agents you want to compare."))}</p>
       <div class="checkbox-grid">
         ${realAdapters
           .map((adapter) => {
@@ -1019,9 +1209,9 @@ function renderLauncher() {
       </div>
     </details>
     <details class="launcher-section">
-      <summary class="launcher-section-summary">${escapeHtml(localText("Debug Agents（默认不选）", "Debug Agents (not selected by default)"))}</summary>
+      <summary class="launcher-section-summary">${escapeHtml(localText("调试用 Agent（默认不选）", "Debug Agents (not selected by default)"))}</summary>
       <p class="muted">${escapeHtml(localText(
-        "Demo Fast / Thorough / Budget 只是内置的 synthetic adapter，用来验证流水线和 UI，不代表真实模型能力。",
+        "Demo Fast / Thorough / Budget 只是内置的模拟 Agent，用来验证流水线和 UI，不代表真实模型能力。",
         "Demo Fast / Thorough / Budget are built-in synthetic adapters for validating the pipeline and UI. They do not represent real model capability."
       ))}</p>
       <div class="checkbox-grid">
@@ -1071,11 +1261,11 @@ function renderLauncher() {
 async function detectService() {
   try {
     const [infoResponse, adaptersResponse, taskPacksResponse, runStatusResponse, providerProfilesResponse] = await Promise.all([
-      fetch("/api/ui-info"),
-      fetch("/api/adapters"),
-      fetch("/api/taskpacks"),
-      fetch("/api/run-status", { cache: "no-store" }),
-      fetch("/api/provider-profiles")
+      fetchWithTimeout("/api/ui-info"),
+      fetchWithTimeout("/api/adapters"),
+      fetchWithTimeout("/api/taskpacks"),
+      fetchWithTimeout("/api/run-status", { cache: "no-store" }),
+      fetchWithTimeout("/api/provider-profiles")
     ]);
     if (!infoResponse.ok || !adaptersResponse.ok || !taskPacksResponse.ok || !runStatusResponse.ok || !providerProfilesResponse.ok) {
       return;
@@ -1251,8 +1441,9 @@ function validateLauncher() {
   if (!elements.launcherRepoPath.value.trim()) {
     messages.push({ level: "error", text: localText("仓库路径不能为空。", "Repository path is required.") });
   }
-  if (!elements.launcherTaskPath.value.trim()) {
-    messages.push({ level: "error", text: localText("任务包路径不能为空。", "Task pack path is required.") });
+  const hasAdhocPrompt = elements.launcherAdhocPrompt.value.trim().length > 0;
+  if (!elements.launcherTaskPath.value.trim() && !hasAdhocPrompt) {
+    messages.push({ level: "error", text: localText("请选择任务包或输入自定义提示词。", "Select a task pack or enter a custom prompt.") });
   }
   const agents = selectedLauncherVariants();
   if (agents.length === 0) {
@@ -1279,6 +1470,55 @@ function renderLauncherValidation(messages) {
     .join("");
 }
 
+async function handleQuickStart() {
+  if (state.runInProgress || !state.serviceInfo) return;
+
+  const repoPath = elements.launcherRepoPath.value.trim() || state.serviceInfo.repoPath || ".";
+  const taskPath = elements.launcherTaskPath.value.trim() || state.serviceInfo.defaultTaskPath || "";
+  if (!taskPath) {
+    state.notice = localText("没有找到默认任务包，请手动选择。", "No default task pack found. Please select manually.");
+    render();
+    return;
+  }
+
+  // Use currently selected variants; fall back to demo agents if nothing selected
+  let agents = selectedLauncherVariants();
+  if (agents.length === 0) {
+    agents = [
+      { baseAgentId: "demo-fast", displayLabel: "Demo Fast", config: {}, configSource: "ui" },
+      { baseAgentId: "demo-thorough", displayLabel: "Demo Thorough", config: {}, configSource: "ui" }
+    ];
+  }
+
+  elements.launcherRepoPath.value = repoPath;
+  elements.launcherTaskPath.value = taskPath;
+  state.runInProgress = true;
+  state.launcherExpanded = false;
+  state.runStatus = { state: "running", phase: "starting", startedAt: new Date().toISOString(), logs: [] };
+  state.notice = localText("快速体验已启动...", "Quick start running...");
+  render();
+
+  try {
+    const response = await fetch("/api/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ repoPath, taskPath, agents, probeAuth: false })
+    });
+    const result = await response.json();
+    if (!response.ok && response.status !== 202) {
+      throw new Error(result.error || "Unknown error");
+    }
+    startRunStatusPolling();
+    render();
+  } catch (error) {
+    stopRunStatusPolling();
+    state.runStatus = null;
+    state.runInProgress = false;
+    state.notice = localText(`快速体验失败: ${error.message}`, `Quick start failed: ${error.message}`);
+    render();
+  }
+}
+
 async function handleLauncherRun() {
   const messages = validateLauncher();
   renderLauncherValidation(messages);
@@ -1287,12 +1527,44 @@ async function handleLauncherRun() {
   }
 
   const agents = selectedLauncherVariants();
+  let taskPath = elements.launcherTaskPath.value.trim();
+
+  // If no task path but has adhoc prompt, create a temporary task pack first
+  const adhocPrompt = elements.launcherAdhocPrompt.value.trim();
+  if (!taskPath && adhocPrompt) {
+    elements.launcherRun.disabled = true;
+    elements.launcherRun.textContent = localText("正在创建任务包...", "Creating task pack...");
+    try {
+      const adhocResponse = await fetch("/api/create-adhoc-taskpack", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: adhocPrompt })
+      });
+      const adhocResult = await adhocResponse.json();
+      if (!adhocResponse.ok) {
+        throw new Error(adhocResult.error || localText("创建临时任务包失败", "Failed to create adhoc task pack"));
+      }
+      taskPath = adhocResult.path;
+      elements.launcherTaskPath.value = taskPath;
+    } catch (error) {
+      elements.launcherRun.disabled = false;
+      elements.launcherRun.textContent = t("launcherRunButton");
+      state.notice = error instanceof Error ? error.message : String(error);
+      render();
+      return;
+    }
+  }
+
+  const concurrencyValue = Number.parseInt(document.querySelector("#launcher-concurrency")?.value ?? "1", 10);
+  const maxConcurrency = Number.isFinite(concurrencyValue) && concurrencyValue > 0 ? concurrencyValue : 1;
+
   const payload = {
     repoPath: elements.launcherRepoPath.value.trim(),
-    taskPath: elements.launcherTaskPath.value.trim(),
+    taskPath,
     outputPath: elements.launcherOutputPath.value.trim() || undefined,
     agents,
-    probeAuth: elements.launcherProbeAuth.checked
+    probeAuth: elements.launcherProbeAuth.checked,
+    maxConcurrency
   };
 
   // Immediate visual feedback before anything async
@@ -1337,16 +1609,6 @@ async function handleLauncherRun() {
     elements.launcherStatus.style.color = "";
     render();
   }
-}
-
-async function _refreshProviderProfiles() {
-  const response = await fetch("/api/provider-profiles", { cache: "no-store" });
-  if (!response.ok) {
-    throw new Error(localText("加载 Provider 配置失败。", "Failed to load provider profiles."));
-  }
-
-  state.availableProviderProfiles = await response.json();
-  syncClaudeVariantsWithProfiles();
 }
 
 async function saveProviderProfileFromEditor() {
@@ -1447,20 +1709,19 @@ function deltaClass(value, preferred = "lower") {
   return improved ? "delta-positive" : "delta-negative";
 }
 
-function _formatSignedNumber(value, formatter, preferred = "lower") {
-  if (value === null) {
-    return `<span class="muted">n/a</span>`;
-  }
-
-  if (value === 0) {
-    return `<span class="delta-neutral">0</span>`;
-  }
-
-  return `<span class="${deltaClass(value, preferred)}">${formatter(value)}</span>`;
+/** Fetch with a timeout (default 15s). Returns the response or throws on timeout. */
+function fetchWithTimeout(url, options = {}, timeoutMs = 15_000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
 }
 
 function formatJudgeType(type) {
   switch (type) {
+    case "test-result":
+      return state.language === "zh-CN" ? "测试结果" : "Test Result";
+    case "lint-check":
+      return state.language === "zh-CN" ? "Lint 检查" : "Lint Check";
     case "file-exists":
       return state.language === "zh-CN" ? "文件存在" : "File Exists";
     case "file-contains":
@@ -1530,6 +1791,8 @@ function renderRunInfo(run) {
     </div>
     <p class="muted">${escapeHtml(t("createdAt"))} ${escapeHtml(run.createdAt)}</p>
     <p class="muted">${escapeHtml(t("taskSchema"))} ${escapeHtml(run.task.schemaVersion)}</p>
+    <p class="muted"><strong>${escapeHtml(localText("归档评分模式", "Archived Score Mode"))}:</strong> ${escapeHtml(getArchivedScoreModeLabel(run))}</p>
+    <p class="muted"><strong>${escapeHtml(localText("当前评分模式", "Active Score Mode"))}:</strong> ${escapeHtml(getScoreModeLabel())}</p>
     <p class="muted"><strong>${escapeHtml(localText("目标", "Objective"))}:</strong> ${escapeHtml(intent.objective || "n/a")}</p>
     <p class="muted"><strong>${escapeHtml(localText("Judge 依据", "Judge Rationale"))}:</strong> ${escapeHtml(intent.rationale || "n/a")}</p>
     <p class="warning-text">${escapeHtml(baselineTaskWarning(run.task))}</p>
@@ -1921,6 +2184,13 @@ function renderJudgeCards(result) {
                     ? `<div class="detail-row"><span>${escapeHtml(state.language === "zh-CN" ? "命令" : "Command")}</span><code>${escapeHtml(judge.command)}</code></div>`
                     : ""
                 }
+                ${typeof judge.totalCount === "number" ? `<div class="detail-row"><span>${escapeHtml(localText("总数", "Total"))}</span><strong>${judge.totalCount}</strong></div>` : ""}
+                ${typeof judge.passedCount === "number" ? `<div class="detail-row"><span>${escapeHtml(localText("通过", "Passed"))}</span><strong>${judge.passedCount}</strong></div>` : ""}
+                ${typeof judge.failedCount === "number" ? `<div class="detail-row"><span>${escapeHtml(localText("失败", "Failed"))}</span><strong>${judge.failedCount}</strong></div>` : ""}
+                ${typeof judge.skippedCount === "number" ? `<div class="detail-row"><span>${escapeHtml(localText("跳过", "Skipped"))}</span><strong>${judge.skippedCount}</strong></div>` : ""}
+                ${typeof judge.errorCount === "number" ? `<div class="detail-row"><span>${escapeHtml(localText("错误数", "Errors"))}</span><strong>${judge.errorCount}</strong></div>` : ""}
+                ${typeof judge.warningCount === "number" ? `<div class="detail-row"><span>${escapeHtml(localText("警告数", "Warnings"))}</span><strong>${judge.warningCount}</strong></div>` : ""}
+                ${judge.parser ? `<div class="detail-row"><span>${escapeHtml(localText("解析器", "Parser"))}</span><strong>${escapeHtml(judge.parser)}</strong></div>` : ""}
                 ${
                   judge.cwd
                     ? `<div class="detail-row"><span>${escapeHtml(localText("工作目录", "CWD"))}</span><code>${escapeHtml(judge.cwd)}</code></div>`
@@ -1971,6 +2241,13 @@ function renderDiff(result) {
   return `
     <section class="detail-card">
       <h3>${escapeHtml(state.language === "zh-CN" ? "Diff 细分" : "Diff Breakdown")}</h3>
+      ${typeof result.diffPrecision?.score === "number"
+        ? `<div class="summary-grid" style="margin-bottom:1rem">
+            <div class="summary-row"><span>${escapeHtml(localText("Diff 精准度", "Diff Precision"))}</span><strong>${escapeHtml(formatDiffPrecisionMetric(result))}</strong></div>
+            <div class="summary-row"><span>${escapeHtml(localText("命中预期范围", "Matched Scope"))}</span><strong>${result.diffPrecision.matchedFiles.length}</strong></div>
+            <div class="summary-row"><span>${escapeHtml(localText("范围外改动", "Unexpected Changes"))}</span><strong>${result.diffPrecision.unexpectedFiles.length}</strong></div>
+          </div>`
+        : ""}
       <div class="diff-grid">
         ${sections
           .map(
@@ -2017,7 +2294,7 @@ function renderMarkdownPanel() {
     ? `
         <section class="detail-card">
           <h4>${escapeHtml(state.language === "zh-CN" ? "重点摘要" : "Highlights")}</h4>
-          <pre>${escapeHtml(buildShareCard(state.run))}</pre>
+          <pre>${escapeHtml(buildShareCard(state.run, { scoreWeights: state.scoreWeights, scoreModeLabel: getScoreModeLabel() }))}</pre>
         </section>
       `
     : `<p class="empty-state">${escapeHtml(state.language === "zh-CN" ? "先加载一个 run，才能看到摘要亮点。" : "Load a run to see summary highlights.")}</p>`;
@@ -2026,7 +2303,7 @@ function renderMarkdownPanel() {
 
 function generateVerdictSummary(run) {
   const summary = summarizeRun(run);
-  const verdict = getRunVerdict(run);
+  const verdict = getRunVerdict(run, { scoreWeights: state.scoreWeights });
   const best = verdict.bestAgent;
   const fastest = verdict.fastest;
   const cheapest = verdict.lowestKnownCost;
@@ -2067,7 +2344,7 @@ function generateVerdictSummary(run) {
 
 function renderVerdictHero(run) {
   const summary = summarizeRun(run);
-  const verdict = getRunVerdict(run);
+  const verdict = getRunVerdict(run, { scoreWeights: state.scoreWeights });
   const best = verdict.bestAgent;
   const fastest = verdict.fastest;
   const cheapest = verdict.lowestKnownCost;
@@ -2081,6 +2358,26 @@ function renderVerdictHero(run) {
     const runtime = runtimeIdentity(best);
     const passedJudges = best.judgeResults.filter((j) => j.success).length;
     const totalJudges = best.judgeResults.length;
+    const scoreReasons = getCompositeScoreReasons(best, run, state.scoreWeights)
+      .map((reason) => {
+        switch (reason) {
+          case "tests":
+            return localText("测试最强", "Best tests");
+          case "lint":
+            return localText("Lint 最干净", "Cleanest lint");
+          case "precision":
+            return localText("改动最精准", "Most precise diff");
+          case "judges":
+            return localText("Judge 最稳", "Strongest judges");
+          case "duration":
+            return localText("速度最快", "Fastest");
+          case "cost":
+            return localText("成本最低", "Lowest cost");
+          default:
+            return reason;
+        }
+      })
+      .slice(0, 3);
     const tags = [];
     tags.push(`<span class="compare-tag compare-tag-best">${escapeHtml(localText("综合最佳", "Overall Best"))}</span>`);
     if (fastest && recordKey(fastest) === recordKey(best)) {
@@ -2097,8 +2394,16 @@ function renderVerdictHero(run) {
         <span class="winner-model">${escapeHtml(runtime.model)} · ${escapeHtml(runtime.reasoning)}</span>
         <div class="winner-stats">
           <div class="winner-stat">
+            <span class="winner-stat-label">${escapeHtml(localText("综合分", "Composite Score"))}</span>
+            <span class="winner-stat-value">${escapeHtml(formatCompositeScore(best, run, state.scoreWeights))}</span>
+          </div>
+          <div class="winner-stat">
             <span class="winner-stat-label">${escapeHtml(localText("通过率", "Pass Rate"))}</span>
             <span class="winner-stat-value">${passedJudges}/${totalJudges}</span>
+          </div>
+          <div class="winner-stat">
+            <span class="winner-stat-label">${escapeHtml(localText("测试", "Tests"))}</span>
+            <span class="winner-stat-value">${escapeHtml(formatTestMetric(best))}</span>
           </div>
           <div class="winner-stat">
             <span class="winner-stat-label">${escapeHtml(localText("耗时", "Duration"))}</span>
@@ -2113,6 +2418,7 @@ function renderVerdictHero(run) {
             <span class="winner-stat-value">${best.tokenUsage}</span>
           </div>
         </div>
+        ${scoreReasons.length > 0 ? `<p class="muted">${escapeHtml(localText("领先原因", "Why it leads"))}: ${escapeHtml(scoreReasons.join(" · "))}</p>` : ""}
         <div class="winner-tags">${tags.join("")}</div>
       </div>
     `;
@@ -2159,7 +2465,7 @@ function renderVerdictHero(run) {
 }
 
 function renderComparisonBars(run) {
-  const results = getCompareResults(run, { sort: "status" });
+  const results = getCompareResults(run, { sort: "status", scoreWeights: state.scoreWeights });
   if (results.length < 2) {
     elements.comparisonBars.innerHTML = "";
     return;
@@ -2167,6 +2473,7 @@ function renderComparisonBars(run) {
 
   const maxDuration = Math.max(...results.map((r) => r.durationMs || 0), 1);
   const maxCost = Math.max(...results.filter((r) => r.costKnown).map((r) => r.estimatedCostUsd), 0.01);
+  const maxPrecision = Math.max(...results.map((r) => Math.max(diffPrecisionScore(r), 0)), 0.01);
 
   function barRows(getValue, maxVal, formatFn, colorFn, tooltipFn) {
     return results.map((r) => {
@@ -2220,6 +2527,14 @@ function renderComparisonBars(run) {
     (r) => `${resultLabel(r)}: ${formatCost(r)}`
   );
 
+  const precisionRows = barRows(
+    (r) => Math.max(diffPrecisionScore(r), 0),
+    maxPrecision,
+    (r) => formatDiffPrecisionMetric(r),
+    statusColor,
+    (r) => `${resultLabel(r)}: ${formatDiffPrecisionMetric(r)}`
+  );
+
   elements.comparisonBars.innerHTML = `
     <div class="comparison-bars">
       <div class="bar-chart">
@@ -2233,6 +2548,10 @@ function renderComparisonBars(run) {
       <div class="bar-chart">
         <div class="bar-chart-title">${escapeHtml(localText("成本", "Cost"))}</div>
         ${costRows}
+      </div>
+      <div class="bar-chart">
+        <div class="bar-chart-title">${escapeHtml(localText("Diff 精准度", "Diff Precision"))}</div>
+        ${precisionRows}
       </div>
     </div>
   `;
@@ -2293,6 +2612,15 @@ function renderInlineAgentDetail(result) {
         <h4>${escapeHtml(localText("改动文件", "Changed Files"))}</h4>
         ${filesHtml}
       </div>
+      <div>
+        <h4>${escapeHtml(localText("硬指标", "Hard Metrics"))}</h4>
+        <div class="summary-grid">
+          <div class="summary-row"><span>${escapeHtml(localText("综合分", "Composite Score"))}</span><strong>${escapeHtml(formatCompositeScore(result, state.run, state.scoreWeights))}</strong></div>
+          <div class="summary-row"><span>${escapeHtml(localText("测试", "Tests"))}</span><strong>${escapeHtml(formatTestMetric(result))}</strong></div>
+          <div class="summary-row"><span>${escapeHtml(localText("Lint", "Lint"))}</span><strong>${escapeHtml(formatLintMetric(result))}</strong></div>
+          <div class="summary-row"><span>${escapeHtml(localText("Diff 精准度", "Diff Precision"))}</span><strong>${escapeHtml(formatDiffPrecisionMetric(result))}</strong></div>
+        </div>
+      </div>
       <div class="agent-summary-text">
         <span>${escapeHtml(result.summary || "")}</span>
         <button type="button" class="view-full-link" data-role="view-full-details">${escapeHtml(localText("查看完整详情", "View Full Details"))}</button>
@@ -2302,14 +2630,15 @@ function renderInlineAgentDetail(result) {
 }
 
 function renderCompareTableV2(run) {
-  const results = getCompareResults(run, compareFilters);
+  const results = getCompareResults(run, { ...compareFilters, scoreWeights: state.scoreWeights });
   const sortHintMap = {
     status: localText("先按状态分层，再把更快的结果排前面。", "Sorted by status first, then by fastest duration."),
     duration: localText("按耗时排序，越快越靠前。", "Sorted by fastest variants first."),
     tokens: localText("按 token 用量排序，越高越靠前。", "Sorted by highest token usage first."),
     cost: localText("按已知成本排序，越低越靠前。", "Sorted by lowest known cost first."),
     changed: localText("按改动文件数排序，越多越靠前。", "Sorted by most changed files first."),
-    judges: localText("按 judge 通过率排序，越高越靠前。", "Sorted by highest judge pass rate first.")
+    judges: localText("按 judge 通过率排序，越高越靠前。", "Sorted by highest judge pass rate first."),
+    precision: localText("按 diff 精准度排序，越高越靠前。", "Sorted by highest diff precision first.")
   };
   elements.compareSortHint.textContent = sortHintMap[compareFilters.sort] ?? sortHintMap.status;
 
@@ -2318,7 +2647,7 @@ function renderCompareTableV2(run) {
     return;
   }
 
-  const verdict = getRunVerdict(run);
+  const verdict = getRunVerdict(run, { scoreWeights: state.scoreWeights });
   const bestKey = verdict.bestAgent ? recordKey(verdict.bestAgent) : null;
   const fastestKey = verdict.fastest ? recordKey(verdict.fastest) : null;
   const cheapestKey = verdict.lowestKnownCost ? recordKey(verdict.lowestKnownCost) : null;
@@ -2332,10 +2661,14 @@ function renderCompareTableV2(run) {
           <th>${escapeHtml(localText("配置名称", "Variant"))}</th>
           <th>${escapeHtml(localText("模型", "Model"))}</th>
           <th>${escapeHtml(localText("状态", "Status"))}</th>
+          <th>${escapeHtml(localText("综合分", "Composite Score"))}</th>
           <th>${escapeHtml(localText("Judge 通过率", "Judge Pass Rate"))}</th>
           <th>${escapeHtml(localText("耗时", "Duration"))}</th>
           <th>${escapeHtml(t("metrics.tokens"))}</th>
           <th>${escapeHtml(localText("成本", "Cost"))}</th>
+          <th>${escapeHtml(localText("测试", "Tests"))}</th>
+          <th>${escapeHtml(localText("Lint", "Lint"))}</th>
+          <th>${escapeHtml(localText("Diff 精准度", "Diff Precision"))}</th>
           <th>${escapeHtml(localText("改动文件", "Changed"))}</th>
           <th>${escapeHtml(localText("标签", "Tags"))}</th>
         </tr>
@@ -2366,6 +2699,7 @@ function renderCompareTableV2(run) {
                 <td><strong>${escapeHtml(resultLabel(result))}</strong><br /><code>${escapeHtml(baseAgentLabel(result))}</code></td>
                 <td><span class="compare-model">${escapeHtml(runtime.model)}</span><br /><span class="muted" style="font-size:0.75rem">${escapeHtml(runtime.reasoning)}</span></td>
                 <td><span class="status-badge ${statusClass(result.status)}">${escapeHtml(translateStatus(result.status))}</span></td>
+                <td>${escapeHtml(formatCompositeScore(result, run, state.scoreWeights))}</td>
                 <td>
                   <div class="judge-bar-wrap">
                     <div class="judge-bar" style="width:${passPercent}%;background:${barColor}"></div>
@@ -2375,10 +2709,13 @@ function renderCompareTableV2(run) {
                 <td>${escapeHtml(formatDuration(result.durationMs))}</td>
                 <td>${result.tokenUsage}</td>
                 <td>${escapeHtml(formatCost(result))}</td>
+                <td>${escapeHtml(formatTestMetric(result))}</td>
+                <td>${escapeHtml(formatLintMetric(result))}</td>
+                <td>${escapeHtml(formatDiffPrecisionMetric(result))}</td>
                 <td>${result.changedFiles.length}</td>
                 <td>${tags.join(" ")}</td>
               </tr>
-              ${key === state.expandedCompareAgentId ? `<tr class="compare-detail-row"><td colspan="10">${renderInlineAgentDetail(result)}</td></tr>` : ""}
+              ${key === state.expandedCompareAgentId ? `<tr class="compare-detail-row"><td colspan="14">${renderInlineAgentDetail(result)}</td></tr>` : ""}
             `;
           })
           .join("")}
@@ -2398,6 +2735,8 @@ function renderSelectedAgentV2() {
   }
 
   const runtime = runtimeIdentity(result);
+  const testJudge = findJudgeByType(result, "test-result");
+  const lintJudge = findJudgeByType(result, "lint-check");
   const judgeKinds =
     Array.from(new Set(result.judgeResults.map((judge) => formatJudgeType(judge.type)))).join(", ") ||
     localText("无", "None");
@@ -2412,11 +2751,17 @@ function renderSelectedAgentV2() {
       <div class="summary-row"><span>${escapeHtml(localText("推理", "Reasoning"))}</span><strong>${escapeHtml(runtime.reasoning)}</strong></div>
       <div class="summary-row"><span>${escapeHtml(localText("可信度", "Verification"))}</span><strong>${escapeHtml(runtimeVerificationLabel(result))}</strong></div>
       <div class="summary-row"><span>${escapeHtml(localText("状态", "Status"))}</span><strong>${escapeHtml(translateStatus(result.status))}</strong></div>
+      <div class="summary-row"><span>${escapeHtml(localText("综合分", "Composite Score"))}</span><strong>${escapeHtml(formatCompositeScore(result, state.run, state.scoreWeights))}</strong></div>
       <div class="summary-row"><span>${escapeHtml(localText("耗时", "Duration"))}</span><strong>${escapeHtml(formatDuration(result.durationMs))}</strong></div>
       <div class="summary-row"><span>${escapeHtml(t("metrics.tokens"))}</span><strong>${result.tokenUsage}</strong></div>
       <div class="summary-row"><span>${escapeHtml(localText("成本", "Cost"))}</span><strong>${escapeHtml(formatCost(result))}</strong></div>
+      <div class="summary-row"><span>${escapeHtml(localText("测试结果", "Test Result"))}</span><strong>${escapeHtml(formatTestMetric(result))}</strong></div>
+      <div class="summary-row"><span>${escapeHtml(localText("Lint 结果", "Lint Result"))}</span><strong>${escapeHtml(formatLintMetric(result))}</strong></div>
+      <div class="summary-row"><span>${escapeHtml(localText("Diff 精准度", "Diff Precision"))}</span><strong>${escapeHtml(formatDiffPrecisionMetric(result))}</strong></div>
       <div class="summary-row"><span>${escapeHtml(localText("改动文件", "Changed Files"))}</span><strong>${result.changedFiles.length}</strong></div>
       <div class="summary-row"><span>${escapeHtml(localText("Judge 类型", "Judge Types"))}</span><strong>${escapeHtml(judgeKinds)}</strong></div>
+      ${testJudge ? `<div class="summary-row"><span>${escapeHtml(localText("测试解析器", "Test Parser"))}</span><strong>${escapeHtml(testJudge.parser ?? "auto")}</strong></div>` : ""}
+      ${lintJudge ? `<div class="summary-row"><span>${escapeHtml(localText("Lint 解析器", "Lint Parser"))}</span><strong>${escapeHtml(lintJudge.parser ?? "auto")}</strong></div>` : ""}
       <div class="summary-row"><span>${escapeHtml(localText("Trace 路径", "Trace"))}</span><code>${escapeHtml(result.tracePath)}</code></div>
       <div class="summary-row"><span>${escapeHtml(localText("工作区", "Workspace"))}</span><code>${escapeHtml(result.workspacePath)}</code></div>
     </div>
@@ -2468,6 +2813,66 @@ function renderSelectedAgentV2() {
   ].join("");
 }
 
+function renderRecommendationCard(run) {
+  // Clean up previous recommendation cards and cost projections
+  document.querySelectorAll(".recommendation-hero, .cost-projection").forEach((el) => el.remove());
+
+  const verdict = getRunVerdict(run, { scoreWeights: state.scoreWeights });
+  const best = verdict.bestAgent;
+  if (!best || best.status !== "success") return;
+
+  const runtime = runtimeIdentity(best);
+  const passed = best.judgeResults.filter((j) => j.success).length;
+  const total = best.judgeResults.length;
+  const reasons = [];
+  reasons.push(`${localText("综合分", "Composite Score")} ${formatCompositeScore(best, run, state.scoreWeights)}`);
+  if (passed === total) reasons.push(localText("全部 Judge 通过", "All judges passed"));
+  if (verdict.fastest && recordKey(verdict.fastest) === recordKey(best)) reasons.push(localText("速度最快", "Fastest"));
+  if (verdict.lowestKnownCost && recordKey(verdict.lowestKnownCost) === recordKey(best)) reasons.push(localText("成本最低", "Lowest cost"));
+  if (reasons.length === 0) reasons.push(localText("综合评分最高", "Highest overall score"));
+
+  const el = document.querySelector("#verdict-hero");
+  if (!el) return;
+  const card = document.createElement("div");
+  card.className = "recommendation-hero";
+  card.innerHTML = `
+    <span class="recommendation-eyebrow">💡 ${escapeHtml(localText("推荐", "Recommendation"))}</span>
+    <span class="recommendation-agent">${escapeHtml(localText("对于你的仓库，推荐使用", "For your repo, we recommend"))} <strong>${escapeHtml(resultLabel(best))}</strong></span>
+    <span class="recommendation-reason">${escapeHtml(localText("原因", "Because"))}: ${escapeHtml(reasons.join(" · "))} · ${escapeHtml(runtime.model)} · ${escapeHtml(formatDuration(best.durationMs))} · ${escapeHtml(formatCost(best))}</span>
+  `;
+  el.parentNode.insertBefore(card, el);
+}
+
+function renderCostProjection(run) {
+  const knownCostResults = run.results.filter((r) => r.costKnown && r.estimatedCostUsd > 0);
+  if (knownCostResults.length === 0) return;
+
+  const runsPerMonth = 100;
+  const rows = knownCostResults.map((r) => {
+    const monthly = r.estimatedCostUsd * runsPerMonth;
+    return `
+      <div class="cost-proj-row">
+        <span class="cost-proj-agent">${escapeHtml(resultLabel(r))}</span>
+        <span class="cost-proj-single">${escapeHtml(formatCost(r))}</span>
+        <span class="cost-proj-monthly">$${monthly.toFixed(2)}</span>
+      </div>
+    `;
+  }).join("");
+
+  const section = document.createElement("section");
+  section.className = "cost-projection";
+  section.innerHTML = `
+    <div class="cost-proj-title">${escapeHtml(localText("成本预测", "Cost Projection"))} <span class="muted">(${runsPerMonth} ${escapeHtml(localText("次/月", "runs/mo"))})</span></div>
+    <div class="cost-proj-header">
+      <span>${escapeHtml(localText("Agent", "Agent"))}</span>
+      <span>${escapeHtml(localText("单次", "Per Run"))}</span>
+      <span>${escapeHtml(localText("月度预估", "Monthly Est."))}</span>
+    </div>
+    ${rows}
+  `;
+  elements.verdictHero.after(section);
+}
+
 function renderDashboard(run) {
   setHidden(elements.emptyState, true);
   setHidden(elements.dashboard, false);
@@ -2475,8 +2880,12 @@ function renderDashboard(run) {
   elements.taskTitle.textContent = run.task.title;
   elements.taskMeta.textContent = `${run.task.id} | ${run.createdAt}`;
 
+  // 首屏推荐卡片
+  renderRecommendationCard(run);
   // 首屏结论
   renderVerdictHero(run);
+  // 成本预测
+  renderCostProjection(run);
   // 核心对比表
   renderCompareTableV2(run);
   // 横向条形图
@@ -2507,6 +2916,19 @@ function renderDashboard(run) {
       summaryEl.textContent = localText("高级分析", "Advanced Analysis");
     }
   }
+
+  // 免责声明
+  let disclaimer = document.querySelector(".repoarena-disclaimer");
+  if (!disclaimer) {
+    disclaimer = document.createElement("section");
+    disclaimer.className = "repoarena-disclaimer muted";
+    disclaimer.style.cssText = "margin-top:24px;padding:16px;border:1px solid var(--border);border-radius:8px;font-size:0.8rem;line-height:1.5;opacity:0.7";
+    elements.dashboard.appendChild(disclaimer);
+  }
+  disclaimer.innerHTML = escapeHtml(localText(
+    "免责声明：本报告由 RepoArena 自动生成，仅供技术参考。跑分结果受网络延迟、API 负载、硬件配置、任务包设计等多种因素影响，不构成对任何 AI 产品的官方评价或排名。第三方 Provider 的结果不代表原厂官方表现。成本估算基于 API 返回数据，可能与实际账单存在差异。使用本工具产生的 API 调用费用由用户自行承担。RepoArena 不对跑分结果的准确性、完整性或适用性做任何保证。",
+    "Disclaimer: This report is auto-generated by RepoArena for technical reference only. Benchmark results are influenced by network latency, API load, hardware, and task pack design, and do not constitute an official evaluation or ranking of any AI product. Third-party provider results do not represent the vendor's official performance. Cost estimates are based on API-reported data and may differ from actual billing. API usage costs incurred by this tool are the user's responsibility. RepoArena makes no warranties regarding the accuracy, completeness, or fitness of benchmark results."
+  ));
 }
 
 function render() {
@@ -2636,6 +3058,18 @@ elements.launcherTaskSelect.addEventListener("change", (event) => {
   const value = String(event.target.value ?? "");
   if (value) {
     elements.launcherTaskPath.value = value;
+    elements.launcherAdhocPromptField.style.display = "none";
+  } else {
+    elements.launcherAdhocPromptField.style.display = "";
+    elements.launcherAdhocPromptLabel.textContent = localText("自定义提示词", "Custom Prompt");
+    elements.launcherAdhocPromptHint.textContent = localText(
+      "输入提示词后，系统会自动生成临时任务包并下发给选中的 Agent 执行。",
+      "Enter your prompt and the system will create a temporary task pack and dispatch it to the selected agents."
+    );
+    elements.launcherAdhocPrompt.placeholder = localText(
+      "输入你想让 Agent 执行的任务描述...",
+      "Describe the task you want the agents to perform..."
+    );
   }
   saveLauncherConfig();
   renderLauncher();
@@ -2723,6 +3157,7 @@ elements.launcherAgents.addEventListener("click", (event) => {
     renderLauncher();
   }
 });
+document.querySelector("#launcher-quick-start")?.addEventListener("click", handleQuickStart);
 elements.launcherRun.addEventListener("click", handleLauncherRun);
 elements.launcherToggle.addEventListener("click", () => {
   state.launcherExpanded = !state.launcherExpanded;
@@ -2942,6 +3377,34 @@ elements.compareSort.addEventListener("change", (event) => {
   }
 });
 
+for (const [key, elementName] of Object.entries(scoreWeightElements)) {
+  elements[elementName]?.addEventListener("input", (event) => {
+    updateScoreWeight(key, Number(event.target.value ?? 0));
+  });
+}
+
+elements.scoreWeightsReset?.addEventListener("click", () => {
+  state.scoreWeights = { ...DEFAULT_SCORE_WEIGHTS };
+  renderScoreWeightsControls();
+  if (state.run) {
+    renderVerdictHero(state.run);
+    renderComparisonBars(state.run);
+    renderCompareTableV2(state.run);
+    renderSelectedAgentV2();
+    renderRecommendationCard(state.run);
+    renderMarkdownPanel();
+  }
+});
+
+elements.scoreWeightPresets?.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-score-preset]");
+  if (!button) {
+    return;
+  }
+
+  applyScorePreset(button.dataset.scorePreset);
+});
+
 elements.runCompareSort.addEventListener("change", (event) => {
   runCompareFilters.sort = String(event.target.value ?? "created");
   renderRunCompareTable();
@@ -2957,7 +3420,7 @@ elements.copyShareCard.addEventListener("click", async () => {
     return;
   }
 
-  await copyToClipboard(buildShareCard(state.run), localText("摘要", "Summary"));
+    await copyToClipboard(buildShareCard(state.run, { scoreWeights: state.scoreWeights, scoreModeLabel: getScoreModeLabel() }), localText("摘要", "Summary"));
 });
 
 elements.copyPrTable.addEventListener("click", async () => {
@@ -2965,7 +3428,7 @@ elements.copyPrTable.addEventListener("click", async () => {
     return;
   }
 
-  await copyToClipboard(buildPrTable(state.run), localText("PR 表格", "PR table"));
+    await copyToClipboard(buildPrTable(state.run, { scoreWeights: state.scoreWeights, scoreModeLabel: getScoreModeLabel() }), localText("PR 表格", "PR table"));
 });
 
 elements.downloadShareSvg.addEventListener("click", () => {
@@ -2982,6 +3445,11 @@ try {
   state.language = localStorage.getItem("repoarena.webReport.language") || "zh-CN";
 } catch {
   state.language = "zh-CN";
+}
+
+const savedScoreConfig = loadScoreConfig();
+if (savedScoreConfig?.scoreWeights) {
+  state.scoreWeights = { ...DEFAULT_SCORE_WEIGHTS, ...savedScoreConfig.scoreWeights };
 }
 
 // 跨运行对比功能
@@ -3194,5 +3662,3 @@ elements.launcherAgents.addEventListener("change", () => {
 
 detectService();
 render();
-
-

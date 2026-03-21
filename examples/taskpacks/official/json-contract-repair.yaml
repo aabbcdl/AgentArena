@@ -18,6 +18,13 @@ metadata:
   dependencies: []
   judgeRationale: Combined schema and pointer checks capture both payload shape and business-critical values.
   differentiator: Tests API contract understanding - weak agents may satisfy schema but miss business rules.
+  i18n:
+    zh-CN:
+      title: JSON 契约修复
+      description: 使用 schema 和值断言修复 JSON API 契约。
+      objective: 验证 Agent 在显式契约检查下修复结构化 JSON 输出的能力。
+      judgeRationale: 组合 schema 和指针检查同时捕获载荷结构和业务关键值。
+      differentiator: 测试 API 契约理解——弱 Agent 可能满足 schema 但遗漏业务规则。
 prompt: |
   ## Task | 任务
   
@@ -40,6 +47,8 @@ prompt: |
   ## Context | 上下文
   
   This is an API response that clients depend on. Breaking the contract will cause integration failures.
+expectedChangedPaths:
+  - fixtures/response.json
 judges:
   - id: payload-schema
     type: json-schema

@@ -18,6 +18,13 @@ metadata:
   dependencies: []
   judgeRationale: Cross-module checks verify the agent understands package dependencies.
   differentiator: Requires architectural understanding - weak agents break module boundaries or introduce circular deps.
+  i18n:
+    zh-CN:
+      title: 跨模块重构
+      description: 重构一个跨越多个模块/包的功能。
+      objective: 测试 Agent 理解和跨模块边界重构的能力。
+      judgeRationale: 跨模块检查验证 Agent 是否理解包依赖关系。
+      differentiator: 需要架构理解能力——弱 Agent 会破坏模块边界或引入循环依赖。
 # Use standard test repository for fair comparison | 使用标准测试仓库进行公平对比
 repoSource: "builtin://nodejs-monorepo"
 prompt: |
@@ -60,6 +67,12 @@ prompt: |
   - Creating circular dependencies
   - Breaking import paths in tests
   - Missing configuration options from duplicates
+expectedChangedPaths:
+  - packages/shared/src/logger.ts
+  - packages/core/src/**/*.ts
+  - packages/cli/src/**/*.ts
+  - packages/runner/src/**/*.ts
+  - packages/*/src/**/*.test.ts
 judges:
   - id: shared-logger-exists
     type: file-exists
@@ -68,20 +81,22 @@ judges:
   - id: no-core-duplicate
     type: command
     label: Core duplicate removed
-    command: test ! -f packages/core/src/logger.ts && echo "Removed" || echo "Still exists"
+    command: node -e "const fs=require('node:fs');process.exit(fs.existsSync('packages/core/src/logger.ts')?1:0)"
     timeoutMs: 5000
   - id: no-cli-duplicate
     type: command
     label: CLI duplicate removed
-    command: test ! -f packages/cli/src/logger.ts && echo "Removed" || echo "Still exists"
+    command: node -e "const fs=require('node:fs');process.exit(fs.existsSync('packages/cli/src/logger.ts')?1:0)"
     timeoutMs: 5000
   - id: no-circular-deps
     type: command
     label: No circular dependencies
-    command: npx madge --circular packages/ 2>&1 || echo "No circular deps or madge not installed"
+    command: npx madge --circular packages/
     timeoutMs: 30000
   - id: all-tests-pass
-    type: command
+    type: test-result
     label: All tests pass after refactor
-    command: pnpm test -- --runInBand 2>&1 || echo "Tests pass or no tests"
+    command: node -e "const fs=require('node:fs');const {spawnSync}=require('node:child_process');const report='.repoarena/cross-module-refactor-test-results.json';fs.mkdirSync('.repoarena',{recursive:true});for(const [cmd,args] of [['pnpm',['test','--','--runInBand','--json','--outputFile',report]],['pnpm',['test','--','--runInBand','--reporter=json','--outputFile',report]],['npm',['run','test','--','--runInBand','--json','--outputFile',report]],['npm',['run','test','--','--runInBand','--reporter=json','--outputFile',report]]]){fs.rmSync(report,{force:true});const r=spawnSync(cmd,args,{stdio:'inherit',shell:process.platform==='win32'});if(!r.error&&fs.existsSync(report)&&fs.statSync(report).size>0){process.exit(r.status??1)}}process.exit(1)"
+    format: auto
+    reportFile: .repoarena/cross-module-refactor-test-results.json
     timeoutMs: 120000

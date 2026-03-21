@@ -16,6 +16,13 @@ metadata:
   dependencies: []
   judgeRationale: Basic file and manifest checks catch the most common accidental breakages.
   differentiator: Baseline test - all competent agents should pass. Failure indicates basic capability issues.
+  i18n:
+    zh-CN:
+      title: 仓库健康检查
+      description: 在最小改进任务后验证仓库基线健康状态。
+      objective: 检查 Agent 是否能做一个小的有用改动，同时不破坏仓库结构。
+      judgeRationale: 基础文件和清单检查能捕获最常见的意外破坏。
+      differentiator: 基线测试——所有合格 Agent 都应通过。失败说明基础能力有问题。
 prompt: |
   ## Task | 任务
   

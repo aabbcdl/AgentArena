@@ -19,6 +19,13 @@ metadata:
     - node
   judgeRationale: Snapshot comparison is the clearest correctness signal when output must match a stored fixture.
   differentiator: Tests precision - weak agents may fix snapshot but break other functionality or over-modify.
+  i18n:
+    zh-CN:
+      title: 快照修复
+      description: 修复快照回归测试中的不一致。
+      objective: 验证 Agent 能否将生成的输出与存储的 fixture 重新同步。
+      judgeRationale: 快照一致性是 fixture 修复任务中精确输出匹配的强代理指标。
+      differentiator: 测试 fixture 修复能力——弱 Agent 可能修改快照而非修复实现。
 prompt: |
   ## Task | 任务
   
@@ -42,6 +49,10 @@ prompt: |
   2. Compare: `diff fixtures/actual.txt fixtures/expected.txt`
   3. Find and fix the bug in the generator
   4. Re-run and verify match
+expectedChangedPaths:
+  - scripts/**/*.{js,mjs,ts}
+  - src/**/*.{js,mjs,ts}
+  - packages/**/src/**/*.{js,mjs,ts}
 judges:
   - id: snapshot-check
     type: snapshot
@@ -51,5 +62,5 @@ judges:
   - id: generator-works
     type: command
     label: Generator runs without error
-    command: node scripts/generate.mjs 2>&1 || echo "No generator script"
+    command: node scripts/generate.mjs
     timeoutMs: 30000

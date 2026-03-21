@@ -226,7 +226,8 @@ test("parseClaudeEvents normalizes token, cost, and error data", () => {
   const parsed = __testUtils.parseClaudeEvents(stdout);
   assert.equal(parsed.sessionId, "session-1");
   assert.equal(parsed.summaryFromEvents, "Claude finished.");
-  assert.equal(parsed.tokenUsage, 28);
+  // The result event contains the final cumulative usage, replacing per-message totals to avoid double-counting.
+  assert.equal(parsed.tokenUsage, 11);
   assert.equal(parsed.estimatedCostUsd, 0.11);
   assert.equal(parsed.costKnown, false);
   assert.equal(parsed.error, "permission_error");

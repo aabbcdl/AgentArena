@@ -187,6 +187,8 @@ Each task pack defines:
 
 Built-in judge types:
 - `command`
+- `test-result`
+- `lint-check`
 - `file-exists`
 - `file-contains`
 - `glob`
@@ -205,6 +207,10 @@ Command judges can define:
 - optional step-level `envAllowList`
 - optional inline `env`
 
+Structured quality judges can define:
+- `type: "test-result"` with `command`, optional `format`, optional `reportFile`, optional `passOnNoTests`
+- `type: "lint-check"` with `command`, optional `format`, optional `reportFile`, optional `maxWarnings`
+
 File judges can define:
 - `type: "file-exists"` with `path`
 - `type: "file-contains"` with `path`, `pattern`, optional `regex`, optional `flags`
@@ -217,6 +223,8 @@ JSON judges can define:
 - `type: "json-schema"` with `path` and either inline `schema` or `schemaPath`
 
 Environment handling is allowlist-based. Task packs can expose specific host variables through `envAllowList`, and each setup/judge/teardown step can further extend that allowlist or inject inline `env` overrides. Agent execution still receives the task-level filtered environment.
+
+Task packs can also define optional `expectedChangedPaths` globs. RepoArena uses these to compute a `diffPrecision` signal so reports can distinguish targeted edits from scope creep.
 
 ## Design Principles
 

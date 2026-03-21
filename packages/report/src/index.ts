@@ -233,6 +233,25 @@ interface BadgePayload {
   color: string;
 }
 
+type ScoredResult = BenchmarkRun["results"][number] & {
+  compositeScore?: number;
+  scoreReasons?: string[];
+};
+
+type ScoredRun = BenchmarkRun & {
+  scoreMode?: string;
+  scoreWeights?: Record<string, number>;
+  results: ScoredResult[];
+};
+
+function hasScoreMetadata(run: BenchmarkRun): run is BenchmarkRun & { scoreMode?: string; scoreWeights?: Record<string, number> } {
+  return "scoreMode" in run || "scoreWeights" in run;
+}
+
+function getRunScoreMode(run: BenchmarkRun): string {
+  return hasScoreMetadata(run) ? (run.scoreMode ?? "balanced") : "balanced";
+}
+
 function formatSupportTier(value: AdapterPreflightResult["capability"]["supportTier"]): string {
   switch (value) {
     case "supported":
@@ -375,6 +394,128 @@ function summarizeRun(run: BenchmarkRun): {
     failedCount,
     totalTokens,
     knownCostUsd
+  };
+}
+
+function findJudgeByType(result: BenchmarkRun["results"][number], type: string) {
+  return result.judgeResults.find((judge) => judge.type === type);
+}
+
+function formatTestMetric(result: BenchmarkRun["results"][number]): string {
+  const judge = findJudgeByType(result, "test-result");
+  if (!judge || typeof judge.totalCount !== "number") {
+    return "n/a";
+  }
+
+  return `${judge.passedCount ?? 0}/${judge.totalCount}`;
+}
+
+function formatLintMetric(result: BenchmarkRun["results"][number]): string {
+  const judge = findJudgeByType(result, "lint-check");
+  if (!judge) {
+    return "n/a";
+  }
+
+  return `${judge.errorCount ?? 0}E/${judge.warningCount ?? 0}W`;
+}
+
+function formatDiffPrecisionMetric(result: BenchmarkRun["results"][number]): string {
+  return typeof result.diffPrecision?.score === "number"
+    ? `${Math.round(result.diffPrecision.score * 100)}%`
+    : "n/a";
+}
+
+function judgePassRatio(result: BenchmarkRun["results"][number]): number {
+  if (result.judgeResults.length === 0) {
+    return 0;
+  }
+
+  return result.judgeResults.filter((judge) => judge.success).length / result.judgeResults.length;
+}
+
+function testPassRatio(result: BenchmarkRun["results"][number]): number {
+  const judge = findJudgeByType(result, "test-result");
+  if (!judge || typeof judge.totalCount !== "number") {
+    return 0;
+  }
+
+  return judge.totalCount > 0 ? (judge.passedCount ?? 0) / judge.totalCount : judge.success ? 1 : 0;
+}
+
+function lintQualityScore(result: BenchmarkRun["results"][number]): number {
+  const judge = findJudgeByType(result, "lint-check");
+  if (!judge) {
+    return 0;
+  }
+
+  const errors = judge.errorCount ?? 0;
+  const warnings = judge.warningCount ?? 0;
+  return 1 / (1 + errors * 10 + warnings);
+}
+
+function durationEfficiencyScore(result: BenchmarkRun["results"][number], run: BenchmarkRun): number {
+  const durations = run.results.map((entry) => entry.durationMs).filter((value) => value > 0);
+  if (durations.length === 0) {
+    return 0;
+  }
+
+  const fastest = Math.min(...durations);
+  return fastest / Math.max(result.durationMs, fastest);
+}
+
+function costEfficiencyScore(result: BenchmarkRun["results"][number], run: BenchmarkRun): number {
+  const costs = run.results.filter((entry) => entry.costKnown && entry.estimatedCostUsd > 0).map((entry) => entry.estimatedCostUsd);
+  if (!result.costKnown || result.estimatedCostUsd <= 0 || costs.length === 0) {
+    return 0;
+  }
+
+  const cheapest = Math.min(...costs);
+  return cheapest / Math.max(result.estimatedCostUsd, cheapest);
+}
+
+function computeCompositeScore(result: BenchmarkRun["results"][number], run: BenchmarkRun): number {
+  const weightedScore =
+    (result.status === "success" ? 1 : 0) * 0.3 +
+    testPassRatio(result) * 0.25 +
+    Math.max(judgePassRatio(result), 0) * 0.15 +
+    lintQualityScore(result) * 0.1 +
+    Math.max(result.diffPrecision?.score ?? 0, 0) * 0.1 +
+    durationEfficiencyScore(result, run) * 0.06 +
+    costEfficiencyScore(result, run) * 0.04;
+
+  return Math.round(weightedScore * 1000) / 10;
+}
+
+function computeScoreReasons(result: BenchmarkRun["results"][number], run: BenchmarkRun): string[] {
+  const reasons: string[] = [];
+  if (testPassRatio(result) >= 0.999) reasons.push("tests");
+  if (lintQualityScore(result) >= 0.999) reasons.push("lint");
+  if ((result.diffPrecision?.score ?? 0) >= 0.999) reasons.push("precision");
+  if (judgePassRatio(result) >= 0.999) reasons.push("judges");
+  if (durationEfficiencyScore(result, run) >= 0.999) reasons.push("duration");
+  if (costEfficiencyScore(result, run) >= 0.999) reasons.push("cost");
+  return reasons;
+}
+
+function enrichRunWithScores(run: BenchmarkRun): ScoredRun {
+  const scoreWeights = (hasScoreMetadata(run) ? run.scoreWeights : undefined) ?? {
+    status: 0.3,
+    tests: 0.25,
+    judges: 0.15,
+    lint: 0.1,
+    precision: 0.1,
+    duration: 0.06,
+    cost: 0.04
+  };
+  return {
+    ...run,
+    scoreMode: hasScoreMetadata(run) ? (run.scoreMode ?? "balanced") : "balanced",
+    scoreWeights,
+    results: run.results.map((result) => ({
+      ...result,
+      compositeScore: computeCompositeScore(result, run),
+      scoreReasons: computeScoreReasons(result, run)
+    }))
   };
 }
 
@@ -547,7 +688,7 @@ function renderPreflights(run: BenchmarkRun): string {
 }
 
 function renderAgentCards(run: BenchmarkRun): string {
-  return run.results
+  return (run.results as ScoredResult[])
     .map((result) => {
       const runtime = formatRuntimeIdentity(result);
       const changedFiles = result.changedFiles;
@@ -576,12 +717,17 @@ function renderAgentCards(run: BenchmarkRun): string {
           )} | Verification: ${escapeHtml(runtime.verification)} | Source: ${escapeHtml(runtime.source)}</p>
           <div class="stats">
             <div><strong>Status</strong><span>${result.status}</span></div>
+            <div><strong>Composite Score</strong><span>${(result.compositeScore ?? 0).toFixed(1)}</span></div>
             <div><strong>Duration</strong><span>${escapeHtml(formatDuration(result.durationMs))}</span></div>
             <div><strong>Tokens</strong><span>${result.tokenUsage}</span></div>
             <div><strong>Cost</strong><span>${
               result.costKnown ? `$${result.estimatedCostUsd.toFixed(2)}` : "n/a"
             }</span></div>
+            <div><strong>Tests</strong><span>${escapeHtml(formatTestMetric(result))}</span></div>
+            <div><strong>Lint</strong><span>${escapeHtml(formatLintMetric(result))}</span></div>
+            <div><strong>Diff Precision</strong><span>${escapeHtml(formatDiffPrecisionMetric(result))}</span></div>
           </div>
+          ${result.scoreReasons && result.scoreReasons.length > 0 ? `<p class="meta">Score Reasons: ${escapeHtml(result.scoreReasons.join(", "))}</p>` : ""}
           ${renderCommandStepList("Setup", result.setupResults)}
           <h3>Model Identity</h3>
           <ul>
@@ -794,6 +940,7 @@ function renderMarkdown(run: BenchmarkRun): string {
     `- Run ID: \`${run.runId}\``,
     `- Created At: \`${run.createdAt}\``,
     `- Task: \`${run.task.title}\``,
+    `- Score Mode: \`${getRunScoreMode(run)}\``,
     `- Repository: \`${run.repoPath}\``,
     ...(run.task.metadata
       ? [
@@ -836,15 +983,16 @@ function renderMarkdown(run: BenchmarkRun): string {
   }
 
   lines.push("", "## Results", "");
-  lines.push("| Variant | Base Agent | Provider | Provider Kind | Model | Reasoning | Verification | Status | Duration | Tokens | Cost | Changed Files | Judges |");
-  lines.push("| --- | --- | --- | --- | --- | --- | --- | --- | --- | ---: | --- | ---: | --- |");
-  for (const result of run.results) {
+  const scoredResults = run.results as ScoredResult[];
+  lines.push("| Variant | Base Agent | Provider | Provider Kind | Model | Reasoning | Verification | Status | Score | Duration | Tokens | Cost | Changed Files | Judges | Tests | Lint | Diff Precision |");
+  lines.push("| --- | --- | --- | --- | --- | --- | --- | --- | ---: | --- | ---: | --- | ---: | --- | --- | --- | --- |");
+  for (const result of scoredResults) {
     const runtime = formatRuntimeIdentity(result);
     const passedJudgeCount = result.judgeResults.filter((judge) => judge.success).length;
     lines.push(
-      `| ${result.displayLabel} | ${result.baseAgentId} | ${runtime.provider} | ${runtime.providerKind} | ${runtime.model} | ${runtime.reasoning} | ${runtime.verification}/${runtime.source} | ${result.status} | ${formatDuration(result.durationMs)} | ${result.tokenUsage} | ${
+      `| ${result.displayLabel} | ${result.baseAgentId} | ${runtime.provider} | ${runtime.providerKind} | ${runtime.model} | ${runtime.reasoning} | ${runtime.verification}/${runtime.source} | ${result.status} | ${(result.compositeScore ?? 0).toFixed(1)} | ${formatDuration(result.durationMs)} | ${result.tokenUsage} | ${
         result.costKnown ? `$${result.estimatedCostUsd.toFixed(2)}` : "n/a"
-      } | ${result.changedFiles.length} | ${passedJudgeCount}/${result.judgeResults.length} |`
+      } | ${result.changedFiles.length} | ${passedJudgeCount}/${result.judgeResults.length} | ${formatTestMetric(result)} | ${formatLintMetric(result)} | ${formatDiffPrecisionMetric(result)} |`
     );
   }
 
@@ -863,7 +1011,7 @@ function renderMarkdown(run: BenchmarkRun): string {
     }
   }
 
-  for (const result of run.results) {
+  for (const result of scoredResults) {
     const runtime = formatRuntimeIdentity(result);
     lines.push("", `### ${result.displayLabel} (\`${result.variantId}\`)`, "");
     lines.push(`- Summary: ${result.summary}`);
@@ -887,6 +1035,14 @@ function renderMarkdown(run: BenchmarkRun): string {
       lines.push("- Changed Files: none");
     }
 
+    lines.push(`- Test Result: ${formatTestMetric(result)}`);
+    lines.push(`- Lint Result: ${formatLintMetric(result)}`);
+    lines.push(`- Diff Precision: ${formatDiffPrecisionMetric(result)}`);
+    lines.push(`- Composite Score: ${(result.compositeScore ?? 0).toFixed(1)}`);
+    if ((result.scoreReasons?.length ?? 0) > 0) {
+      lines.push(`- Score Reasons: ${result.scoreReasons?.join(", ")}`);
+    }
+
     if (result.judgeResults.length > 0) {
       lines.push("- Judges:");
       for (const judge of result.judgeResults) {
@@ -905,12 +1061,15 @@ function renderMarkdown(run: BenchmarkRun): string {
 
 function renderPrComment(run: BenchmarkRun): string {
   const summary = summarizeRun(run);
+  const scoredResults = run.results as ScoredResult[];
   const failedResults = run.results.filter((result) => result.status !== "success");
   const attentionPreflights = run.preflights.filter((preflight) => preflight.status !== "ready");
   const header = [
     "## RepoArena Benchmark",
     "",
     `Task: \`${run.task.title}\``,
+    "",
+    `Score mode: \`${getRunScoreMode(run)}\``,
     "",
     `Overview: \`${summary.successCount}/${summary.totalAgents}\` passing | Failed: \`${summary.failedCount}\` | Tokens: \`${summary.totalTokens}\` | Known Cost: \`$${summary.knownCostUsd.toFixed(2)}\``
   ];
@@ -919,11 +1078,11 @@ function renderPrComment(run: BenchmarkRun): string {
     "",
     "### Review Table",
     "",
-    "| Attention | Variant | Base Agent | Provider | Provider Kind | Model | Reasoning | Verification | Tier | Preflight | Run | Duration | Tokens | Cost | Judges | Files | Notes |",
-    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | ---: | --- | --- | ---: | --- |"
+    "| Attention | Variant | Base Agent | Provider | Provider Kind | Model | Reasoning | Verification | Tier | Preflight | Run | Score | Duration | Tokens | Cost | Judges | Tests | Lint | Diff Precision | Files | Notes |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | ---: | --- | ---: | --- | --- | --- | --- | --- | ---: | --- |"
   ];
 
-  for (const result of run.results) {
+  for (const result of scoredResults) {
     const runtime = formatRuntimeIdentity(result);
     const passedJudgeCount = result.judgeResults.filter((judge) => judge.success).length;
     const failedJudge = result.judgeResults.find((judge) => !judge.success);
@@ -942,9 +1101,9 @@ function renderPrComment(run: BenchmarkRun): string {
             ? result.preflight.summary
             : "ready";
     table.push(
-      `| ${attention} | ${result.displayLabel} | ${result.baseAgentId} | ${runtime.provider} | ${runtime.providerKind} | ${runtime.model} | ${runtime.reasoning} | ${runtime.verification}/${runtime.source} | ${formatSupportTier(result.preflight.capability.supportTier)} | ${result.preflight.status} | ${result.status} | ${formatDuration(result.durationMs)} | ${result.tokenUsage} | ${
+      `| ${attention} | ${result.displayLabel} | ${result.baseAgentId} | ${runtime.provider} | ${runtime.providerKind} | ${runtime.model} | ${runtime.reasoning} | ${runtime.verification}/${runtime.source} | ${formatSupportTier(result.preflight.capability.supportTier)} | ${result.preflight.status} | ${result.status} | ${(result.compositeScore ?? 0).toFixed(1)} | ${formatDuration(result.durationMs)} | ${result.tokenUsage} | ${
         result.costKnown ? `$${result.estimatedCostUsd.toFixed(2)}` : "n/a"
-      } | ${passedJudgeCount}/${result.judgeResults.length} | ${result.changedFiles.length} | ${note.replaceAll("\n", " ")} |`
+      } | ${passedJudgeCount}/${result.judgeResults.length} | ${formatTestMetric(result)} | ${formatLintMetric(result)} | ${formatDiffPrecisionMetric(result)} | ${result.changedFiles.length} | ${note.replaceAll("\n", " ")} |`
     );
   }
 
@@ -991,7 +1150,7 @@ export async function writeReport(
   run: BenchmarkRun
 ): Promise<{ htmlPath: string; jsonPath: string; markdownPath: string; badgePath: string; prCommentPath: string }> {
   await ensureDirectory(run.outputPath);
-  const publicRun = sanitizeRun(run);
+  const publicRun = sanitizeRun(enrichRunWithScores(run));
 
   const jsonPath = path.join(run.outputPath, "summary.json");
   const htmlPath = path.join(run.outputPath, "report.html");

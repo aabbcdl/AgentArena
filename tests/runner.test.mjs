@@ -360,6 +360,62 @@ test("runBenchmark supports snapshot and json-schema judges", async () => {
   await rm(tempDir, { recursive: true, force: true });
 });
 
+test("runBenchmark parses structured test/lint judges and computes diff precision", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-runner-"));
+  const repoPath = path.join(tempDir, "repo");
+  const outputPath = path.join(tempDir, "output");
+  const taskPath = path.join(tempDir, "task.json");
+
+  await mkdir(repoPath, { recursive: true });
+  await writeFile(path.join(repoPath, "README.md"), "# Temp Repo\n", "utf8");
+  await writeJson(path.join(repoPath, "package.json"), { name: "temp-repo", version: "0.0.0" });
+
+  await writeJson(taskPath, {
+    schemaVersion: "repoarena.taskpack/v1",
+    id: "structured-quality-signals",
+    title: "Structured Quality Signals",
+    prompt: "Produce a demo change and emit structured judge reports.",
+    expectedChangedPaths: ["**/*"],
+    judges: [
+      {
+        id: "tests-json",
+        type: "test-result",
+        label: "Structured test results",
+        command:
+          "node -e \"const fs=require('node:fs');fs.mkdirSync('.repoarena',{recursive:true});fs.writeFileSync('.repoarena/test-results.json', JSON.stringify({success:true,numTotalTests:3,numPassedTests:2,numFailedTests:0,numPendingTests:1,numTodoTests:0}));\"",
+        reportFile: ".repoarena/test-results.json"
+      },
+      {
+        id: "lint-json",
+        type: "lint-check",
+        label: "Structured lint results",
+        command:
+          "node -e \"const fs=require('node:fs');fs.mkdirSync('.repoarena',{recursive:true});fs.writeFileSync('.repoarena/lint-results.json', JSON.stringify([{filePath:'README.md',errorCount:0,warningCount:1,messages:[{severity:1,message:'warn'}]}]));\"",
+        reportFile: ".repoarena/lint-results.json",
+        maxWarnings: 1
+      }
+    ]
+  });
+
+  const benchmark = await runBenchmark({
+    repoPath,
+    taskPath,
+    agentIds: ["demo-fast"],
+    outputPath
+  });
+
+  assert.equal(benchmark.results[0].status, "success");
+  assert.equal(benchmark.results[0].judgeResults[0].type, "test-result");
+  assert.equal(benchmark.results[0].judgeResults[0].passedCount, 2);
+  assert.equal(benchmark.results[0].judgeResults[0].totalCount, 3);
+  assert.equal(benchmark.results[0].judgeResults[1].type, "lint-check");
+  assert.equal(benchmark.results[0].judgeResults[1].errorCount, 0);
+  assert.equal(benchmark.results[0].judgeResults[1].warningCount, 1);
+  assert.equal(benchmark.results[0].diffPrecision?.score, 1);
+
+  await rm(tempDir, { recursive: true, force: true });
+});
+
 test("runBenchmark can update snapshot files when enabled", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-runner-"));
   const repoPath = path.join(tempDir, "repo");

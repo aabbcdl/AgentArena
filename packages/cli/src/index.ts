@@ -24,6 +24,7 @@ import {
 import { writeReport } from "@repoarena/report";
 import { runBenchmark } from "@repoarena/runner";
 import { loadTaskPack } from "@repoarena/taskpacks";
+import { parse as parseYaml } from "yaml";
 
 interface ParsedArgs {
   command?: string;
@@ -122,8 +123,192 @@ const CLI_PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url
 const WORKSPACE_ROOT = path.resolve(CLI_PACKAGE_ROOT, "..", "..");
 const WEB_REPORT_DIST_ROOT = path.join(WORKSPACE_ROOT, "apps", "web-report", "dist");
 const OFFICIAL_TASKPACK_ROOT = path.join(WORKSPACE_ROOT, "examples", "taskpacks", "official");
-const DEFAULT_UI_PORT = 4317;
+const DEFAULT_UI_PORT = 4320;
 const MAX_REQUEST_BODY_BYTES = 1_048_576;
+
+function createNodeEvalCommand(source: string): string {
+  return `node -e ${JSON.stringify(source)}`;
+}
+
+function createPackageScriptCommand(scriptName: string): string {
+  return createNodeEvalCommand(`
+const { existsSync, readFileSync } = require("node:fs");
+const { spawnSync } = require("node:child_process");
+const pkgPath = "package.json";
+if (!existsSync(pkgPath)) {
+  console.error("Missing package.json");
+  process.exit(1);
+}
+const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
+if (!pkg.scripts || !pkg.scripts[${JSON.stringify(scriptName)}]) {
+  console.error(${JSON.stringify(`Missing ${scriptName} script in package.json`)});
+  process.exit(1);
+}
+for (const [cmd, args] of [["pnpm", [${JSON.stringify(scriptName)}]], ["npm", ["run", ${JSON.stringify(scriptName)}]]]) {
+  const result = spawnSync(cmd, args, { stdio: "inherit", shell: process.platform === "win32" });
+  if (!result.error) {
+    process.exit(result.status ?? 1);
+  }
+}
+console.error(${JSON.stringify(`Unable to execute ${scriptName} script with pnpm or npm`)});
+process.exit(1);
+`.trim());
+}
+
+function createAdhocTestCommand(reportFile: string): string {
+  return createNodeEvalCommand(`
+const { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } = require("node:fs");
+const { dirname } = require("node:path");
+const { spawnSync } = require("node:child_process");
+const pkgPath = "package.json";
+if (!existsSync(pkgPath)) {
+  console.error("Missing package.json");
+  process.exit(1);
+}
+const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
+if (!pkg.scripts || !pkg.scripts.test) {
+  console.error("Missing test script in package.json");
+  process.exit(1);
+}
+const reportFileValue = ${JSON.stringify(reportFile)};
+mkdirSync(dirname(reportFileValue), { recursive: true });
+const candidates = [
+  ["pnpm", ["test", "--", "--runInBand", "--json", "--outputFile", reportFileValue]],
+  ["pnpm", ["test", "--", "--runInBand", "--reporter=json", "--outputFile", reportFileValue]],
+  ["npm", ["run", "test", "--", "--runInBand", "--json", "--outputFile", reportFileValue]],
+  ["npm", ["run", "test", "--", "--runInBand", "--reporter=json", "--outputFile", reportFileValue]]
+];
+let lastStatus = 1;
+for (const [cmd, args] of candidates) {
+  rmSync(reportFileValue, { force: true });
+  const result = spawnSync(cmd, args, { stdio: "pipe", encoding: "utf8", shell: process.platform === "win32" });
+  if (result.stdout) process.stdout.write(result.stdout);
+  if (result.stderr) process.stderr.write(result.stderr);
+  if (!result.error && existsSync(reportFileValue) && statSync(reportFileValue).size > 0) {
+    process.exit(result.status ?? 1);
+  }
+  lastStatus = result.status ?? 1;
+}
+writeFileSync(reportFileValue, "");
+console.error("Unable to capture Jest/Vitest JSON output from the test script");
+process.exit(lastStatus || 1);
+`.trim());
+}
+
+function createTemplateTestCommand(reportFile: string): string {
+  return createNodeEvalCommand(`
+const { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } = require("node:fs");
+const { dirname } = require("node:path");
+const { spawnSync } = require("node:child_process");
+const pkgPath = "package.json";
+const reportFileValue = ${JSON.stringify(reportFile)};
+mkdirSync(dirname(reportFileValue), { recursive: true });
+if (!existsSync(pkgPath)) {
+  writeFileSync(reportFileValue, JSON.stringify({ success: true, numTotalTests: 0, numPassedTests: 0, numFailedTests: 0, numPendingTests: 0, numTodoTests: 0 }, null, 2));
+  process.exit(0);
+}
+const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
+if (!pkg.scripts || !pkg.scripts.test) {
+  writeFileSync(reportFileValue, JSON.stringify({ success: true, numTotalTests: 0, numPassedTests: 0, numFailedTests: 0, numPendingTests: 0, numTodoTests: 0 }, null, 2));
+  process.exit(0);
+}
+const candidates = [
+  ["pnpm", ["test", "--", "--runInBand", "--json", "--outputFile", reportFileValue]],
+  ["pnpm", ["test", "--", "--runInBand", "--reporter=json", "--outputFile", reportFileValue]],
+  ["npm", ["run", "test", "--", "--runInBand", "--json", "--outputFile", reportFileValue]],
+  ["npm", ["run", "test", "--", "--runInBand", "--reporter=json", "--outputFile", reportFileValue]]
+];
+let lastStatus = 1;
+for (const [cmd, args] of candidates) {
+  rmSync(reportFileValue, { force: true });
+  const result = spawnSync(cmd, args, { stdio: "pipe", encoding: "utf8", shell: process.platform === "win32" });
+  if (result.stdout) process.stdout.write(result.stdout);
+  if (result.stderr) process.stderr.write(result.stderr);
+  if (!result.error && existsSync(reportFileValue) && statSync(reportFileValue).size > 0) {
+    process.exit(result.status ?? 1);
+  }
+  lastStatus = result.status ?? 1;
+}
+console.error("Unable to capture Jest/Vitest JSON output from the test script");
+process.exit(lastStatus || 1);
+`.trim());
+}
+
+function createAdhocLintCommand(reportFile: string): string {
+  return createNodeEvalCommand(`
+const { existsSync, mkdirSync, statSync, writeFileSync } = require("node:fs");
+const { dirname } = require("node:path");
+const { spawnSync } = require("node:child_process");
+const reportFileValue = ${JSON.stringify(reportFile)};
+mkdirSync(dirname(reportFileValue), { recursive: true });
+const hasBiome = existsSync("biome.json");
+const eslintConfigs = ["eslint.config.js", "eslint.config.mjs", ".eslintrc", ".eslintrc.js", ".eslintrc.cjs", ".eslintrc.json"];
+const hasEslint = eslintConfigs.some((file) => existsSync(file));
+let candidates = [];
+if (hasBiome) {
+  candidates = [
+    ["pnpm", ["exec", "biome", "check", ".", "--reporter=json"]],
+    ["npx", ["@biomejs/biome", "check", ".", "--reporter=json"]]
+  ];
+} else if (hasEslint) {
+  candidates = [
+    ["pnpm", ["exec", "eslint", ".", "--format", "json"]],
+    ["npx", ["eslint", ".", "--format", "json"]]
+  ];
+} else {
+  console.error("Missing biome/eslint configuration for lint-check judge");
+  process.exit(1);
+}
+let lastStatus = 1;
+for (const [cmd, args] of candidates) {
+  const result = spawnSync(cmd, args, { stdio: "pipe", encoding: "utf8", shell: process.platform === "win32" });
+  if (!result.error) {
+    writeFileSync(reportFileValue, result.stdout || "");
+    if (result.stderr) process.stderr.write(result.stderr);
+    if (statSync(reportFileValue).size > 0 || result.status === 0) {
+      process.exit(result.status ?? 1);
+    }
+  }
+  lastStatus = result.status ?? 1;
+}
+console.error("Unable to execute structured lint check with Biome or ESLint");
+process.exit(lastStatus || 1);
+`.trim());
+}
+
+function createTemplateLintCommand(reportFile: string): string {
+  return createNodeEvalCommand(`
+const { existsSync, mkdirSync, statSync, writeFileSync } = require("node:fs");
+const { dirname } = require("node:path");
+const { spawnSync } = require("node:child_process");
+const reportFileValue = ${JSON.stringify(reportFile)};
+mkdirSync(dirname(reportFileValue), { recursive: true });
+const hasBiome = existsSync("biome.json");
+const eslintConfigs = ["eslint.config.js", "eslint.config.mjs", ".eslintrc", ".eslintrc.js", ".eslintrc.cjs", ".eslintrc.json"];
+const hasEslint = eslintConfigs.some((file) => existsSync(file));
+if (!hasBiome && !hasEslint) {
+  writeFileSync(reportFileValue, JSON.stringify([], null, 2));
+  process.exit(0);
+}
+const candidates = hasBiome
+  ? [["pnpm", ["exec", "biome", "check", ".", "--reporter=json"]], ["npx", ["@biomejs/biome", "check", ".", "--reporter=json"]]]
+  : [["pnpm", ["exec", "eslint", ".", "--format", "json"]], ["npx", ["eslint", ".", "--format", "json"]]];
+let lastStatus = 1;
+for (const [cmd, args] of candidates) {
+  const result = spawnSync(cmd, args, { stdio: "pipe", encoding: "utf8", shell: process.platform === "win32" });
+  if (!result.error) {
+    writeFileSync(reportFileValue, result.stdout || "[]");
+    if (result.stderr) process.stderr.write(result.stderr);
+    if (statSync(reportFileValue).size > 0 || result.status === 0) {
+      process.exit(result.status ?? 1);
+    }
+  }
+  lastStatus = result.status ?? 1;
+}
+console.error("Unable to execute structured lint check with Biome or ESLint");
+process.exit(lastStatus || 1);
+`.trim());
+}
 
 const TASKPACK_TEMPLATES: Record<string, string> = {
   "repo-health": `schemaVersion: repoarena.taskpack/v1
@@ -146,6 +331,11 @@ prompt: |
   Review the repository and make the smallest useful change that improves correctness,
   reliability, or maintainability. Keep changes scoped and preserve existing behavior
   unless a test or fixture shows otherwise.
+expectedChangedPaths:
+  - src/**/*.{js,mjs,ts,tsx}
+  - packages/**/src/**/*.{js,mjs,ts,tsx}
+  - lib/**/*.{js,mjs,ts,tsx}
+  - README.md
 envAllowList: []
 judges:
   - id: readme-exists
@@ -156,6 +346,22 @@ judges:
     type: file-exists
     label: package.json exists
     path: package.json
+  - id: tests-pass
+    type: test-result
+    label: Tests still pass when available
+    command: ${JSON.stringify(createTemplateTestCommand(".repoarena/repo-health-tests.json"))}
+    format: auto
+    reportFile: .repoarena/repo-health-tests.json
+    passOnNoTests: true
+    timeoutMs: 120000
+  - id: lint-clean
+    type: lint-check
+    label: Lint stays clean when configured
+    command: ${JSON.stringify(createTemplateLintCommand(".repoarena/repo-health-lint.json"))}
+    format: auto
+    reportFile: .repoarena/repo-health-lint.json
+    maxWarnings: 0
+    timeoutMs: 120000
 `,
   "json-api": `schemaVersion: repoarena.taskpack/v1
 id: json-api-contract
@@ -178,6 +384,8 @@ metadata:
 prompt: |
   Update the implementation so the generated JSON output matches the expected contract
   and values described by the task pack.
+expectedChangedPaths:
+  - fixtures/response.json
 judges:
   - id: api-schema
     type: json-schema
@@ -211,6 +419,10 @@ metadata:
   judgeRationale: Snapshot parity is a strong proxy for fixture repair tasks when exact output matters.
 prompt: |
   Update the implementation so the generated output matches the stored snapshot fixture.
+expectedChangedPaths:
+  - scripts/**/*.{js,mjs,ts,tsx}
+  - src/**/*.{js,mjs,ts,tsx}
+  - packages/**/src/**/*.{js,mjs,ts,tsx}
 setupCommands:
   - id: prepare-output
     label: Prepare output fixture
@@ -962,10 +1174,20 @@ async function listOfficialTaskPacks(): Promise<
           prompt: taskPack.prompt,
           judges: taskPack.judges.map((j) => ({ id: j.id, type: j.type, label: j.label })),
           difficulty: taskPack.metadata?.difficulty,
-          differentiator: taskPack.metadata?.differentiator
+          differentiator: taskPack.metadata?.differentiator,
+          i18n: await (async () => {
+            try {
+              const raw = await fs.readFile(filePath, "utf8");
+              const parsed = (filePath.endsWith(".json") ? JSON.parse(raw) : parseYaml(raw)) as any;
+              return parsed?.metadata?.i18n ?? undefined;
+            } catch { return undefined; }
+          })()
         };
       })
     );
+
+    const difficultyOrder: Record<string, number> = { easy: 0, medium: 1, hard: 2 };
+    taskPacks.sort((a, b) => (difficultyOrder[a.difficulty ?? ""] ?? 9) - (difficultyOrder[b.difficulty ?? ""] ?? 9));
 
     return taskPacks;
   } catch {
@@ -1023,15 +1245,6 @@ async function runUi(parsed: ParsedArgs): Promise<void> {
     activeRunStatus = {
       ...activeRunStatus,
       ...status,
-      updatedAt: new Date().toISOString()
-    };
-  };
-
-  const _resetRunStatus = (): void => {
-    activeRunStatus = {
-      state: "idle",
-      phase: "idle",
-      logs: [],
       updatedAt: new Date().toISOString()
     };
   };
@@ -1192,6 +1405,139 @@ async function runUi(parsed: ParsedArgs): Promise<void> {
         }
       }
 
+      if (request.method === "POST" && requestUrl.pathname === "/api/create-adhoc-taskpack") {
+        const rawBody = await readRequestBody(request);
+        let body: { prompt: string; title?: string };
+        try {
+          body = JSON.parse(rawBody) as { prompt: string; title?: string };
+        } catch {
+          const invalid = jsonResponse({ error: "Invalid JSON in request body." }, 400);
+          response.writeHead(invalid.statusCode, invalid.headers);
+          response.end(invalid.body);
+          return;
+        }
+        if (!body.prompt?.trim()) {
+          const invalid = jsonResponse({ error: "prompt is required." }, 400);
+          response.writeHead(invalid.statusCode, invalid.headers);
+          response.end(invalid.body);
+          return;
+        }
+        const adhocDir = path.join(process.cwd(), ".repoarena", "adhoc-taskpacks");
+        await fs.mkdir(adhocDir, { recursive: true });
+        const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+        const adhocTitle = body.title?.trim() || `Adhoc Task ${timestamp}`;
+        const adhocId = `adhoc-${timestamp}`;
+        const buildCommand = createPackageScriptCommand("build");
+        const testReportFile = `.repoarena/${adhocId}-test-results.json`;
+        const lintReportFile = `.repoarena/${adhocId}-lint-results.json`;
+        const testCommand = createAdhocTestCommand(testReportFile);
+        const lintCommand = createAdhocLintCommand(lintReportFile);
+        const yamlContent = `schemaVersion: repoarena.taskpack/v1
+id: ${adhocId}
+title: "${adhocTitle.replace(/"/g, '\\"')}"
+description: User-defined ad-hoc task from the web UI.
+metadata:
+  source: community
+  owner: user
+  difficulty: medium
+  objective: Execute the user-provided prompt and verify the result.
+  repoTypes:
+    - generic
+  tags:
+    - adhoc
+    - custom
+  dependencies: []
+  judgeRationale: Basic structural checks ensure the agent did not break the repository.
+prompt: |
+${body.prompt.split("\n").map((line: string) => `  ${line}`).join("\n")}
+judges:
+  - id: repo-not-broken
+    type: file-exists
+    label: Package manifest still exists
+    path: package.json
+  - id: readme-exists
+    type: file-exists
+    label: README still exists
+    path: README.md
+  - id: build-passes
+    type: command
+    label: Project still builds
+    command: ${JSON.stringify(buildCommand)}
+    timeoutMs: 120000
+  - id: tests-pass
+    type: test-result
+    label: Tests still pass with structured results
+    command: ${JSON.stringify(testCommand)}
+    format: auto
+    reportFile: ${JSON.stringify(testReportFile)}
+    timeoutMs: 120000
+  - id: lint-clean
+    type: lint-check
+    label: Lint stays clean
+    command: ${JSON.stringify(lintCommand)}
+    format: auto
+    reportFile: ${JSON.stringify(lintReportFile)}
+    maxWarnings: 0
+    timeoutMs: 120000
+`;
+        const adhocPath = path.join(adhocDir, `${adhocId}.yaml`);
+        await fs.writeFile(adhocPath, yamlContent, "utf8");
+        const payload = jsonResponse({ path: adhocPath, id: adhocId, title: adhocTitle });
+        response.writeHead(payload.statusCode, payload.headers);
+        response.end(payload.body);
+        return;
+      }
+
+      if (request.method === "GET" && requestUrl.pathname === "/api/adhoc-taskpacks") {
+        const adhocDir = path.join(process.cwd(), ".repoarena", "adhoc-taskpacks");
+        try {
+          const entries = await fs.readdir(adhocDir, { withFileTypes: true });
+          const items = await Promise.all(
+            entries
+              .filter((e) => e.isFile() && (e.name.endsWith(".yaml") || e.name.endsWith(".yml")))
+              .sort((a, b) => b.name.localeCompare(a.name))
+              .map(async (e) => {
+                const filePath = path.join(adhocDir, e.name);
+                const stat = await fs.stat(filePath);
+                const raw = await fs.readFile(filePath, "utf8");
+                const parsed = parseYaml(raw) as any;
+                return {
+                  id: parsed?.id ?? e.name,
+                  title: parsed?.title ?? e.name,
+                  path: filePath,
+                  createdAt: stat.birthtime.toISOString(),
+                  promptPreview: String(parsed?.prompt ?? "").slice(0, 200)
+                };
+              })
+          );
+          const payload = jsonResponse(items);
+          response.writeHead(payload.statusCode, payload.headers);
+          response.end(payload.body);
+        } catch {
+          const payload = jsonResponse([]);
+          response.writeHead(payload.statusCode, payload.headers);
+          response.end(payload.body);
+        }
+        return;
+      }
+
+      if (request.method === "DELETE" && requestUrl.pathname.startsWith("/api/adhoc-taskpacks/")) {
+        const adhocId = decodeURIComponent(requestUrl.pathname.slice("/api/adhoc-taskpacks/".length));
+        const adhocDir = path.join(process.cwd(), ".repoarena", "adhoc-taskpacks");
+        const filePath = path.join(adhocDir, `${adhocId}.yaml`);
+        try {
+          await fs.unlink(filePath);
+          const payload = jsonResponse({ deleted: true, id: adhocId });
+          response.writeHead(payload.statusCode, payload.headers);
+          response.end(payload.body);
+        } catch {
+          const payload = jsonResponse({ error: "Adhoc taskpack not found." }, 404);
+          response.writeHead(payload.statusCode, payload.headers);
+          response.end(payload.body);
+        }
+        return;
+      }
+
       if (request.method === "GET" && requestUrl.pathname === "/api/taskpacks") {
         const taskPacks = await listOfficialTaskPacks();
         const payload = jsonResponse(taskPacks);
@@ -1251,12 +1597,17 @@ async function runUi(parsed: ParsedArgs): Promise<void> {
 
         activeRun = (async () => {
           try {
+            // Do NOT pass outputPath from the UI payload directly.
+            // The runner generates a unique runId and creates a per-run
+            // subdirectory under .repoarena/runs/{runId} automatically.
+            // Passing a flat outputPath (e.g. .repoarena/ui-runs) caused
+            // summary.json to be overwritten and trace.jsonl to accumulate
+            // across runs, making later failed runs hide earlier successes.
             const benchmark = await runBenchmark({
               repoPath: runPayload.repoPath,
               taskPath: runPayload.taskPath,
               agentIds: selections.map((selection) => selection.baseAgentId),
               agents: selections,
-              outputPath: runPayload.outputPath,
               probeAuth: runPayload.probeAuth,
               updateSnapshots: runPayload.updateSnapshots,
               cleanupWorkspaces: runPayload.cleanupWorkspaces,

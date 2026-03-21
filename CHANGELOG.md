@@ -13,7 +13,7 @@ Initial public release.
 - `repoarena init-ci` — GitHub Actions workflow generator
 - `repoarena list-adapters` — adapter capability listing
 - Agent adapters: demo-fast, demo-thorough, demo-budget, codex, claude-code, cursor
-- 8 judge types: command, file-exists, file-contains, glob, file-count, snapshot, json-value, json-schema
+- 10 judge types: command, test-result, lint-check, file-exists, file-contains, glob, file-count, snapshot, json-value, json-schema
 - 9 official task packs across 3 difficulty tiers (easy, medium, hard)
 - Interactive web report with agent comparison, inline detail expansion, cross-run comparison, and trend tracking
 - Real-time benchmark progress with live log streaming

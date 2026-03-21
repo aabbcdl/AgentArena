@@ -19,6 +19,13 @@ metadata:
     - node
   judgeRationale: Performance metrics combined with correctness checks verify true optimization.
   differentiator: Requires performance analysis skills - weak agents may optimize wrong areas or break edge cases.
+  i18n:
+    zh-CN:
+      title: 性能优化
+      description: 对代码进行性能优化，同时保持正确性。
+      objective: 测试 Agent 在保持正确性的前提下优化性能的能力。
+      judgeRationale: 性能基准和正确性测试共同验证优化质量。
+      differentiator: 测试优化能力——弱 Agent 可能为了性能牺牲正确性，或优化效果不明显。
 prompt: |
   ## Task | 任务
   
@@ -58,25 +65,32 @@ prompt: |
   ```
   
   ## Success Criteria | 成功标准
-  
+
   - At least 20% improvement in execution time
   - All tests pass
   - No new bugs introduced
+expectedChangedPaths:
+  - src/**/*.{js,mjs,ts,tsx}
+  - packages/**/src/**/*.{js,mjs,ts,tsx}
+  - lib/**/*.{js,mjs,ts,tsx}
+  - scripts/**/*.{js,mjs,ts,tsx}
 judges:
   - id: tests-still-pass
-    type: command
+    type: test-result
     label: All tests pass after optimization
-    command: pnpm test -- --runInBand 2>&1 || echo "Tests pass"
+    command: node -e "const fs=require('node:fs');const {spawnSync}=require('node:child_process');const report='.repoarena/performance-optimize-test-results.json';fs.mkdirSync('.repoarena',{recursive:true});for(const [cmd,args] of [['pnpm',['test','--','--runInBand','--json','--outputFile',report]],['pnpm',['test','--','--runInBand','--reporter=json','--outputFile',report]],['npm',['run','test','--','--runInBand','--json','--outputFile',report]],['npm',['run','test','--','--runInBand','--reporter=json','--outputFile',report]]]){fs.rmSync(report,{force:true});const r=spawnSync(cmd,args,{stdio:'inherit',shell:process.platform==='win32'});if(!r.error&&fs.existsSync(report)&&fs.statSync(report).size>0){process.exit(r.status??1)}}process.exit(1)"
+    format: auto
+    reportFile: .repoarena/performance-optimize-test-results.json
     timeoutMs: 120000
   - id: no-unsafe-patterns
     type: command
     label: No unsafe optimization patterns
-    command: grep -r "any\|@ts-ignore\|eval\|Function(" --include="*.ts" packages/*/src/*.ts | grep -v ".d.ts" || echo "Clean"
+    command: node -e "const fs=require('node:fs');const path=require('node:path');const banned=[/\bany\b/,/@ts-ignore/,/\beval\s*\(/,/\bFunction\s*\(/];const hits=[];function walk(dir){if(!fs.existsSync(dir)) return;for(const entry of fs.readdirSync(dir,{withFileTypes:true})){if(['.git','node_modules','.repoarena'].includes(entry.name)) continue;const full=path.join(dir,entry.name);if(entry.isDirectory()) walk(full); else if(/\.[cm]?[jt]sx?$/.test(entry.name)&&!entry.name.endsWith('.d.ts')){const content=fs.readFileSync(full,'utf8');if(banned.some((rule)=>rule.test(content))) hits.push(full)}}}['packages','src','lib'].forEach(walk);if(hits.length>0){console.error(hits.join('\n'));process.exit(1)}"
     timeoutMs: 10000
   - id: performance-improved
     type: command
     label: Performance benchmark shows improvement
-    command: pnpm benchmark 2>&1 || echo "No benchmark - check manually"
+    command: pnpm benchmark
     timeoutMs: 60000
   - id: source-files-preserved
     type: glob

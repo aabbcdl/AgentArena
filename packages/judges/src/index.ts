@@ -14,22 +14,25 @@ import {
   type JsonSchemaJudge,
   type JsonValueJudge,
   type JudgeResult,
+  type LintCheckJudge,
+  resolveTimeoutMs,
   type SnapshotJudge,
   type TaskJudge,
+  type TestResultJudge,
   uniqueSorted
 } from "@repoarena/core";
 import Ajv from "ajv";
+import picomatch from "picomatch";
 
 const DEFAULT_JUDGE_TIMEOUT_MS = 5 * 60 * 1_000;
-const sharedAjv = new Ajv({ allErrors: true, strict: false });
+
+/** Create a fresh Ajv instance per validation to avoid accumulating compiled schemas in memory. */
+function createAjv(): InstanceType<typeof Ajv> {
+  return new Ajv({ allErrors: true, strict: false });
+}
 
 export interface JudgeExecutionOptions {
   updateSnapshots?: boolean;
-}
-
-function resolveTimeoutMs(value: string | undefined, fallbackMs: number): number {
-  const parsed = Number.parseInt(value ?? "", 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallbackMs;
 }
 
 function defaultJudgeTimeoutMs(): number {
@@ -46,7 +49,10 @@ function resolveWorkspacePath(workspacePath: string, relativeTargetPath: string,
   return candidatePath;
 }
 
-function resolveJudgeWorkingDirectory(workspacePath: string, judge: CommandJudge): string {
+function resolveJudgeWorkingDirectory(
+  workspacePath: string,
+  judge: Pick<CommandExecutionSpec, "id" | "cwd">
+): string {
   return resolveWorkspacePath(workspacePath, judge.cwd ?? ".", `Judge "${judge.id}" cwd`);
 }
 
@@ -62,110 +68,21 @@ function buildStepEnvironment(
   return buildExecutionEnvironment(effectiveAllowList, step.env ?? {});
 }
 
+interface CommandExecutionCapture {
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  durationMs: number;
+  cwd: string;
+}
+
 function stringifyExpectation(value: unknown): string {
   return typeof value === "string" ? value : JSON.stringify(value);
 }
 
-function escapeRegExp(value: string): string {
-  return value.replace(/[|\\{}()[\]^$+?.]/g, "\\$&");
-}
-
-function globToRegExp(pattern: string): RegExp {
-  let source = "^";
-  let inBraces = false;
-  let braceDepth = 0;
-
-  for (let index = 0; index < pattern.length; index += 1) {
-    const char = pattern[index];
-    const next = pattern[index + 1];
-    const nextNext = pattern[index + 2];
-
-    // Handle escape sequences
-    if (char === "\\") {
-      if (next) {
-        source += escapeRegExp(next);
-        index += 1;
-        continue;
-      }
-    }
-
-    // Handle character classes
-    if (char === "[") {
-      let classContent = "";
-      index += 1;
-      while (index < pattern.length && pattern[index] !== "]") {
-        if (pattern[index] === "\\") {
-          classContent += pattern[index];
-          index += 1;
-          if (index < pattern.length) {
-            classContent += pattern[index];
-          }
-        } else {
-          classContent += pattern[index];
-        }
-        index += 1;
-      }
-      source += `[${classContent}]`;
-      continue;
-    }
-
-    // Handle brace expansion (simplified)
-    if (char === "{") {
-      inBraces = true;
-      braceDepth++;
-      source += "(";
-      continue;
-    }
-
-    if (char === "}" && inBraces) {
-      braceDepth--;
-      if (braceDepth === 0) {
-        inBraces = false;
-      }
-      source += ")";
-      continue;
-    }
-
-    if (char === "," && inBraces) {
-      source += "|";
-      continue;
-    }
-
-    // Handle wildcards
-    if (char === "*") {
-      if (next === "*" && nextNext === "/") {
-        source += "(?:.*/)?";
-        index += 2;
-      } else if (next === "*") {
-        source += ".*";
-        index += 1;
-      } else {
-        source += "[^/]*";
-      }
-      continue;
-    }
-
-    if (char === "?") {
-      source += "[^/]";
-      continue;
-    }
-
-    // Handle path separators
-    if (char === "/") {
-      source += "/";
-      continue;
-    }
-
-    source += escapeRegExp(char);
-  }
-
-  source += "$";
-  
-  try {
-    return new RegExp(source);
-  } catch (error) {
-    throw new Error(`Invalid glob pattern "${pattern}": ${error instanceof Error ? error.message : String(error)}`);
-  }
+/** Create a picomatch matcher for glob patterns (replaces custom globToRegExp). */
+function createGlobMatcher(pattern: string): (value: string) => boolean {
+  return picomatch(pattern, { dot: true });
 }
 
 async function listWorkspaceFiles(rootPath: string): Promise<string[]> {
@@ -276,13 +193,37 @@ async function runCommandJudge(
   workspacePath: string,
   baseAllowedNames: string[]
 ): Promise<JudgeResult> {
-  const startedAt = Date.now();
   const timeoutMs = judge.timeoutMs ?? defaultJudgeTimeoutMs();
   const cwd = resolveJudgeWorkingDirectory(workspacePath, judge);
   const environment = buildStepEnvironment(baseAllowedNames, judge);
 
+  const result = await executeCommand(judge.command, cwd, environment, timeoutMs, "Judge");
+
+  return {
+    judgeId: judge.id,
+    label: judge.label,
+    type: "command",
+    command: judge.command,
+    exitCode: result.exitCode,
+    success: result.exitCode === 0,
+    stdout: result.stdout,
+    stderr: result.stderr,
+    durationMs: result.durationMs,
+    cwd: result.cwd
+  };
+}
+
+async function executeCommand(
+  command: string,
+  cwd: string,
+  environment: NodeJS.ProcessEnv,
+  timeoutMs: number,
+  timeoutLabel: string
+): Promise<CommandExecutionCapture> {
+  const startedAt = Date.now();
+
   return await new Promise((resolve) => {
-    const child = spawn(judge.command, {
+    const child = spawn(command, {
       cwd,
       env: environment,
       shell: true,
@@ -313,14 +254,9 @@ async function runCommandJudge(
     child.on("close", (exitCode) => {
       clearTimeout(timeoutHandle);
       resolve({
-        judgeId: judge.id,
-        label: judge.label,
-        type: "command",
-        command: judge.command,
         exitCode,
-        success: exitCode === 0 && !timedOut,
         stdout: stdout.trim(),
-        stderr: `${stderr}${timedOut ? `\nJudge timed out after ${timeoutMs}ms.` : ""}`.trim(),
+        stderr: `${stderr}${timedOut ? `\n${timeoutLabel} timed out after ${timeoutMs}ms.` : ""}`.trim(),
         durationMs: Date.now() - startedAt,
         cwd
       });
@@ -329,12 +265,7 @@ async function runCommandJudge(
     child.on("error", (error) => {
       clearTimeout(timeoutHandle);
       resolve({
-        judgeId: judge.id,
-        label: judge.label,
-        type: "command",
-        command: judge.command,
         exitCode: -1,
-        success: false,
         stdout,
         stderr: `${stderr}\n${error.message}`.trim(),
         durationMs: Date.now() - startedAt,
@@ -342,6 +273,278 @@ async function runCommandJudge(
       });
     });
   });
+}
+
+function parseJsonPayload(rawText: string): unknown {
+  const trimmed = rawText.trim();
+  if (!trimmed) {
+    throw new Error("Expected JSON output but received empty content.");
+  }
+
+  const candidates = [trimmed];
+  const objectStart = trimmed.indexOf("{");
+  const objectEnd = trimmed.lastIndexOf("}");
+  if (objectStart !== -1 && objectEnd > objectStart) {
+    candidates.push(trimmed.slice(objectStart, objectEnd + 1));
+  }
+  const arrayStart = trimmed.indexOf("[");
+  const arrayEnd = trimmed.lastIndexOf("]");
+  if (arrayStart !== -1 && arrayEnd > arrayStart) {
+    candidates.push(trimmed.slice(arrayStart, arrayEnd + 1));
+  }
+
+  for (const candidate of candidates) {
+    try {
+      return JSON.parse(candidate) as unknown;
+    } catch {
+      // Try next candidate.
+    }
+  }
+
+  throw new Error("Unable to parse JSON from judge output.");
+}
+
+async function readJsonJudgePayload(
+  workspacePath: string,
+  reportFile: string | undefined,
+  fallbackOutput: string,
+  label: string
+): Promise<unknown> {
+  if (reportFile) {
+    const reportPath = resolveWorkspacePath(workspacePath, reportFile, label);
+    return parseJsonPayload(await fs.readFile(reportPath, "utf8"));
+  }
+
+  return parseJsonPayload(fallbackOutput);
+}
+
+interface ParsedTestSummary {
+  parser: "jest" | "vitest";
+  passedCount: number;
+  failedCount: number;
+  skippedCount: number;
+  totalCount: number;
+  success: boolean;
+}
+
+function toNonNegativeNumber(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parseTestSummary(payload: unknown, format: TestResultJudge["format"]): ParsedTestSummary {
+  if (!isObjectRecord(payload)) {
+    throw new Error("Test result payload must be a JSON object.");
+  }
+
+  const totalCount = toNonNegativeNumber(payload.numTotalTests);
+  const passedCount = toNonNegativeNumber(payload.numPassedTests);
+  const failedCount = toNonNegativeNumber(payload.numFailedTests);
+  const skippedCount = toNonNegativeNumber(payload.numPendingTests) + toNonNegativeNumber(payload.numTodoTests);
+
+  if (totalCount === 0 && passedCount === 0 && failedCount === 0 && skippedCount === 0) {
+    throw new Error("Test result JSON did not contain Jest/Vitest aggregate counters.");
+  }
+
+  const parser = format === "jest" ? "jest" : format === "vitest" ? "vitest" : "vitest" in payload ? "vitest" : "jest";
+  const success = typeof payload.success === "boolean" ? payload.success : failedCount === 0;
+
+  return {
+    parser,
+    passedCount,
+    failedCount,
+    skippedCount,
+    totalCount,
+    success
+  };
+}
+
+interface ParsedLintSummary {
+  parser: "eslint" | "biome";
+  errorCount: number;
+  warningCount: number;
+  totalCount: number;
+}
+
+function parseEslintSummary(payload: unknown): ParsedLintSummary | null {
+  if (!Array.isArray(payload)) {
+    return null;
+  }
+
+  const totals = payload.reduce(
+    (summary, entry) => {
+      if (!isObjectRecord(entry)) {
+        return summary;
+      }
+
+      const entryErrors = toNonNegativeNumber(entry.errorCount);
+      const entryWarnings = toNonNegativeNumber(entry.warningCount);
+      return {
+        errorCount: summary.errorCount + entryErrors,
+        warningCount: summary.warningCount + entryWarnings,
+        totalCount: summary.totalCount + entryErrors + entryWarnings
+      };
+    },
+    { errorCount: 0, warningCount: 0, totalCount: 0 }
+  );
+
+  return {
+    parser: "eslint",
+    ...totals
+  };
+}
+
+function parseBiomeSummary(payload: unknown): ParsedLintSummary | null {
+  if (!isObjectRecord(payload) || !Array.isArray(payload.diagnostics)) {
+    return null;
+  }
+
+  const totals = payload.diagnostics.reduce(
+    (summary, entry) => {
+      if (!isObjectRecord(entry)) {
+        return summary;
+      }
+
+      const severity = entry.severity;
+      if (severity === "error") {
+        summary.errorCount += 1;
+      } else if (severity === "warning") {
+        summary.warningCount += 1;
+      }
+      summary.totalCount += 1;
+      return summary;
+    },
+    { errorCount: 0, warningCount: 0, totalCount: 0 }
+  );
+
+  return {
+    parser: "biome",
+    errorCount: Math.max(totals.errorCount, toNonNegativeNumber(payload.errors)),
+    warningCount: totals.warningCount,
+    totalCount: Math.max(totals.totalCount, toNonNegativeNumber(payload.errors) + totals.warningCount)
+  };
+}
+
+function parseLintSummary(payload: unknown, format: LintCheckJudge["format"]): ParsedLintSummary {
+  const eslintSummary = format !== "biome" ? parseEslintSummary(payload) : null;
+  if (eslintSummary) {
+    return eslintSummary;
+  }
+
+  const biomeSummary = format !== "eslint" ? parseBiomeSummary(payload) : null;
+  if (biomeSummary) {
+    return biomeSummary;
+  }
+
+  throw new Error("Lint result JSON did not match ESLint or Biome reporter output.");
+}
+
+async function runTestResultJudge(
+  judge: TestResultJudge,
+  workspacePath: string,
+  baseAllowedNames: string[]
+): Promise<JudgeResult> {
+  const timeoutMs = judge.timeoutMs ?? defaultJudgeTimeoutMs();
+  const cwd = resolveJudgeWorkingDirectory(workspacePath, judge);
+  const environment = buildStepEnvironment(baseAllowedNames, judge);
+  const result = await executeCommand(judge.command, cwd, environment, timeoutMs, "Judge");
+
+  try {
+    const payload = await readJsonJudgePayload(workspacePath, judge.reportFile, result.stdout, `Judge "${judge.id}" reportFile`);
+    const summary = parseTestSummary(payload, judge.format ?? "auto");
+    const passedWithNoTests = summary.totalCount === 0 && judge.passOnNoTests === true;
+    const success = (result.exitCode === 0 || passedWithNoTests) && (summary.success || passedWithNoTests);
+
+    return {
+      judgeId: judge.id,
+      label: judge.label,
+      type: "test-result",
+      command: judge.command,
+      parser: summary.parser,
+      target: judge.reportFile,
+      expectation: judge.passOnNoTests ? "failed=0 or no tests" : "failed=0",
+      exitCode: result.exitCode,
+      success,
+      stdout: `tests: ${summary.passedCount} passed, ${summary.failedCount} failed, ${summary.skippedCount} skipped, ${summary.totalCount} total`,
+      stderr: result.stderr,
+      durationMs: result.durationMs,
+      cwd: result.cwd,
+      passedCount: summary.passedCount,
+      failedCount: summary.failedCount,
+      skippedCount: summary.skippedCount,
+      totalCount: summary.totalCount
+    };
+  } catch (error) {
+    return {
+      judgeId: judge.id,
+      label: judge.label,
+      type: "test-result",
+      command: judge.command,
+      target: judge.reportFile,
+      expectation: judge.passOnNoTests ? "failed=0 or no tests" : "failed=0",
+      exitCode: result.exitCode,
+      success: false,
+      stdout: result.stdout,
+      stderr: `${result.stderr}\n${error instanceof Error ? error.message : String(error)}`.trim(),
+      durationMs: result.durationMs,
+      cwd: result.cwd
+    };
+  }
+}
+
+async function runLintCheckJudge(
+  judge: LintCheckJudge,
+  workspacePath: string,
+  baseAllowedNames: string[]
+): Promise<JudgeResult> {
+  const timeoutMs = judge.timeoutMs ?? defaultJudgeTimeoutMs();
+  const cwd = resolveJudgeWorkingDirectory(workspacePath, judge);
+  const environment = buildStepEnvironment(baseAllowedNames, judge);
+  const result = await executeCommand(judge.command, cwd, environment, timeoutMs, "Judge");
+  const maxWarnings = judge.maxWarnings ?? 0;
+
+  try {
+    const payload = await readJsonJudgePayload(workspacePath, judge.reportFile, result.stdout, `Judge "${judge.id}" reportFile`);
+    const summary = parseLintSummary(payload, judge.format ?? "auto");
+    const success = result.exitCode === 0 && summary.errorCount === 0 && summary.warningCount <= maxWarnings;
+
+    return {
+      judgeId: judge.id,
+      label: judge.label,
+      type: "lint-check",
+      command: judge.command,
+      parser: summary.parser,
+      target: judge.reportFile,
+      expectation: `errors=0, warnings<=${maxWarnings}`,
+      exitCode: result.exitCode,
+      success,
+      stdout: `lint: ${summary.errorCount} errors, ${summary.warningCount} warnings`,
+      stderr: result.stderr,
+      durationMs: result.durationMs,
+      cwd: result.cwd,
+      errorCount: summary.errorCount,
+      warningCount: summary.warningCount,
+      totalCount: summary.totalCount
+    };
+  } catch (error) {
+    return {
+      judgeId: judge.id,
+      label: judge.label,
+      type: "lint-check",
+      command: judge.command,
+      target: judge.reportFile,
+      expectation: `errors=0, warnings<=${maxWarnings}`,
+      exitCode: result.exitCode,
+      success: false,
+      stdout: result.stdout,
+      stderr: `${result.stderr}\n${error instanceof Error ? error.message : String(error)}`.trim(),
+      durationMs: result.durationMs,
+      cwd: result.cwd
+    };
+  }
 }
 
 async function runFileExistsJudge(judge: FileExistsJudge, workspacePath: string): Promise<JudgeResult> {
@@ -462,10 +665,10 @@ async function runJsonValueJudge(judge: JsonValueJudge, workspacePath: string): 
 
 async function runGlobJudge(judge: GlobJudge, workspacePath: string): Promise<JudgeResult> {
   const startedAt = Date.now();
-  const matcher = globToRegExp(judge.pattern);
+  const matcher = createGlobMatcher(judge.pattern);
 
   try {
-    const matches = (await listWorkspaceFiles(workspacePath)).filter((filePath) => matcher.test(filePath));
+    const matches = (await listWorkspaceFiles(workspacePath)).filter((filePath) => matcher(filePath));
     const minMatches = judge.minMatches ?? 1;
     const maxMatches = judge.maxMatches;
     const success = matches.length >= minMatches && (maxMatches === undefined || matches.length <= maxMatches);
@@ -508,10 +711,10 @@ async function runGlobJudge(judge: GlobJudge, workspacePath: string): Promise<Ju
 
 async function runFileCountJudge(judge: FileCountJudge, workspacePath: string): Promise<JudgeResult> {
   const startedAt = Date.now();
-  const matcher = globToRegExp(judge.pattern);
+  const matcher = createGlobMatcher(judge.pattern);
 
   try {
-    const matches = (await listWorkspaceFiles(workspacePath)).filter((filePath) => matcher.test(filePath));
+    const matches = (await listWorkspaceFiles(workspacePath)).filter((filePath) => matcher(filePath));
     const actual = matches.length;
     const success =
       (judge.equals === undefined || actual === judge.equals) &&
@@ -629,7 +832,8 @@ async function runJsonSchemaJudge(judge: JsonSchemaJudge, workspacePath: string)
         )
       ) as Record<string, unknown>);
     const payload = JSON.parse(await fs.readFile(targetPath, "utf8")) as unknown;
-    const validate = sharedAjv.compile(schema);
+    const ajv = createAjv();
+    const validate = ajv.compile(schema);
     const success = Boolean(validate(payload));
     const validationErrors =
       validate.errors?.map((error) => `${error.instancePath || "/"} ${error.message ?? "invalid"}`) ?? [];
@@ -671,6 +875,10 @@ export async function runJudge(
   switch (judge.type) {
     case "command":
       return await runCommandJudge(judge, workspacePath, baseAllowedNames);
+    case "test-result":
+      return await runTestResultJudge(judge, workspacePath, baseAllowedNames);
+    case "lint-check":
+      return await runLintCheckJudge(judge, workspacePath, baseAllowedNames);
     case "file-exists":
       return await runFileExistsJudge(judge, workspacePath);
     case "file-contains":
@@ -704,70 +912,22 @@ export async function runCommandStep(
   workspacePath: string,
   baseAllowedNames: string[]
 ): Promise<CommandStepResult> {
-  const startedAt = Date.now();
   const timeoutMs = step.timeoutMs ?? defaultJudgeTimeoutMs();
   const cwd = resolveCommandWorkingDirectory(workspacePath, step);
   const environment = buildStepEnvironment(baseAllowedNames, step);
+  const result = await executeCommand(step.command, cwd, environment, timeoutMs, "Command step");
 
-  return await new Promise((resolve) => {
-    const child = spawn(step.command, {
-      cwd,
-      env: environment,
-      shell: true,
-      stdio: ["ignore", "pipe", "pipe"]
-    });
-
-    let stdout = "";
-    let stderr = "";
-    let timedOut = false;
-    const timeoutHandle = setTimeout(() => {
-      timedOut = true;
-      child.kill();
-      setTimeout(() => {
-        if (!child.killed) {
-          child.kill("SIGKILL");
-        }
-      }, 5_000);
-    }, timeoutMs);
-
-    child.stdout.on("data", (chunk: Buffer) => {
-      stdout += chunk.toString();
-    });
-
-    child.stderr.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString();
-    });
-
-    child.on("close", (exitCode) => {
-      clearTimeout(timeoutHandle);
-      resolve({
-        stepId: step.id,
-        label: step.label,
-        command: step.command,
-        exitCode,
-        success: exitCode === 0 && !timedOut,
-        stdout: stdout.trim(),
-        stderr: `${stderr}${timedOut ? `\nCommand step timed out after ${timeoutMs}ms.` : ""}`.trim(),
-        durationMs: Date.now() - startedAt,
-        cwd
-      });
-    });
-
-    child.on("error", (error) => {
-      clearTimeout(timeoutHandle);
-      resolve({
-        stepId: step.id,
-        label: step.label,
-        command: step.command,
-        exitCode: -1,
-        success: false,
-        stdout,
-        stderr: `${stderr}\n${error.message}`.trim(),
-        durationMs: Date.now() - startedAt,
-        cwd
-      });
-    });
-  });
+  return {
+    stepId: step.id,
+    label: step.label,
+    command: step.command,
+    exitCode: result.exitCode,
+    success: result.exitCode === 0,
+    stdout: result.stdout,
+    stderr: result.stderr,
+    durationMs: result.durationMs,
+    cwd: result.cwd
+  };
 }
 
 export async function runCommandSteps(

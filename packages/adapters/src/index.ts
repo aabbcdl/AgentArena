@@ -14,6 +14,7 @@ import {
   ensureDirectory,
   normalizePath,
   portableRelativePath,
+  resolveTimeoutMs,
   uniqueSorted
 } from "@repoarena/core";
 import {
@@ -327,10 +328,8 @@ function safeNumber(value: number | undefined): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
-function resolveTimeoutMs(value: string | undefined, fallbackMs: number): number {
-  const parsed = Number.parseInt(value ?? "", 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallbackMs;
-}
+/** Maximum bytes to accumulate from stdout/stderr before truncating (50 MB). */
+const MAX_PROCESS_OUTPUT_BYTES = 50 * 1024 * 1024;
 
 function agentTimeoutMs(): number {
   return resolveTimeoutMs(process.env.REPOARENA_AGENT_TIMEOUT_MS, DEFAULT_AGENT_TIMEOUT_MS);
@@ -526,8 +525,9 @@ async function runProcess(
         cwd,
         env: environment,
         stdio: ["ignore", "pipe", "pipe"],
-        shell: process.platform === "win32", // Use shell on Windows for better compatibility
-        windowsHide: true
+        shell: false,
+        windowsHide: true,
+        windowsVerbatimArguments: false
       });
     } catch (error) {
       clearTimeout(timeoutHandle);
@@ -542,12 +542,33 @@ async function runProcess(
       return;
     }
 
+    let stdoutBytes = 0;
+    let stderrBytes = 0;
+    let stdoutTruncated = false;
+    let stderrTruncated = false;
+
     child.stdout?.on("data", (chunk: Buffer) => {
-      stdout += chunk.toString();
+      if (stdoutTruncated) return;
+      stdoutBytes += chunk.length;
+      if (stdoutBytes > MAX_PROCESS_OUTPUT_BYTES) {
+        stdout += chunk.toString().slice(0, MAX_PROCESS_OUTPUT_BYTES - (stdoutBytes - chunk.length));
+        stdout += `\n[stdout truncated at ${MAX_PROCESS_OUTPUT_BYTES} bytes]`;
+        stdoutTruncated = true;
+      } else {
+        stdout += chunk.toString();
+      }
     });
 
     child.stderr?.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString();
+      if (stderrTruncated) return;
+      stderrBytes += chunk.length;
+      if (stderrBytes > MAX_PROCESS_OUTPUT_BYTES) {
+        stderr += chunk.toString().slice(0, MAX_PROCESS_OUTPUT_BYTES - (stderrBytes - chunk.length));
+        stderr += `\n[stderr truncated at ${MAX_PROCESS_OUTPUT_BYTES} bytes]`;
+        stderrTruncated = true;
+      } else {
+        stderr += chunk.toString();
+      }
     });
 
     child.on("error", (error: ProcessError) => {
@@ -776,9 +797,11 @@ function parseClaudeEvents(stdout: string): {
     }
 
     if (parsed.type === "result") {
+      // The result event contains the final cumulative usage summary.
+      // Replace the running total to avoid double-counting with per-message usage.
       const usage = parsed.usage;
       if (usage) {
-        tokenUsage +=
+        tokenUsage =
           safeNumber(usage.input_tokens) +
           safeNumber(usage.output_tokens) +
           safeNumber(usage.cache_creation_input_tokens) +

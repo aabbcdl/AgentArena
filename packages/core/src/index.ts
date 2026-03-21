@@ -19,6 +19,20 @@ export interface CommandJudge extends CommandExecutionSpec {
   type: "command";
 }
 
+export interface TestResultJudge extends CommandExecutionSpec {
+  type: "test-result";
+  format?: "auto" | "jest" | "vitest";
+  reportFile?: string;
+  passOnNoTests?: boolean;
+}
+
+export interface LintCheckJudge extends CommandExecutionSpec {
+  type: "lint-check";
+  format?: "auto" | "eslint" | "biome";
+  reportFile?: string;
+  maxWarnings?: number;
+}
+
 export interface FileExistsJudge {
   id: string;
   label: string;
@@ -83,6 +97,8 @@ export interface JsonSchemaJudge {
 
 export type TaskJudge =
   | CommandJudge
+  | TestResultJudge
+  | LintCheckJudge
   | FileExistsJudge
   | FileContainsJudge
   | JsonValueJudge
@@ -120,6 +136,7 @@ export interface TaskPack {
   metadata?: TaskPackMetadata;
   /** Repository source - "user" for user repo, "builtin://name" for standard test repo */
   repoSource?: RepoSource;
+  expectedChangedPaths?: string[];
   envAllowList: string[];
   setupCommands: CommandExecutionSpec[];
   judges: TaskJudge[];
@@ -275,6 +292,7 @@ export interface JudgeResult {
   label: string;
   type: TaskJudge["type"];
   command?: string;
+  parser?: string;
   target?: string;
   expectation?: string;
   exitCode: number | null;
@@ -283,6 +301,20 @@ export interface JudgeResult {
   stderr: string;
   durationMs: number;
   cwd?: string;
+  passedCount?: number;
+  failedCount?: number;
+  skippedCount?: number;
+  totalCount?: number;
+  warningCount?: number;
+  errorCount?: number;
+}
+
+export interface DiffPrecisionSummary {
+  score: number | null;
+  expectedScopeCount: number;
+  totalChangedFiles: number;
+  matchedFiles: string[];
+  unexpectedFiles: string[];
 }
 
 export interface CommandStepResult {
@@ -327,6 +359,9 @@ export interface AgentRunResult {
   tracePath: string;
   workspacePath: string;
   diff: DiffSummary;
+  diffPrecision?: DiffPrecisionSummary;
+  compositeScore?: number;
+  scoreReasons?: string[];
 }
 
 export interface BenchmarkRun {
@@ -334,6 +369,8 @@ export interface BenchmarkRun {
   createdAt: string;
   repoPath: string;
   outputPath: string;
+  scoreMode?: string;
+  scoreWeights?: Record<string, number>;
   task: TaskPack;
   preflights: AdapterPreflightResult[];
   results: AgentRunResult[];
@@ -476,6 +513,8 @@ export async function snapshotDirectory(rootPath: string): Promise<Map<string, F
         const hash = createHash("sha256").update(fileBuffer).digest("hex");
         snapshots.set(relativePath, { relativePath, hash });
       } catch (_error) {
+        // Skip files that cannot be read (e.g., permission issues, broken symlinks).
+        // This is intentional — snapshot comparison should not fail due to inaccessible files.
       }
     }
   }
@@ -520,6 +559,11 @@ export function diffSnapshots(
 
 export function uniqueSorted(values: string[]): string[] {
   return Array.from(new Set(values)).sort();
+}
+
+export function resolveTimeoutMs(value: string | undefined, fallbackMs: number): number {
+  const parsed = Number.parseInt(value ?? "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallbackMs;
 }
 
 export function formatDuration(durationMs: number): string {

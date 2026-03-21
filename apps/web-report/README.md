@@ -7,9 +7,9 @@ Local browser UI for RepoArena.
 - launches benchmarks directly from the browser when opened through `repoarena ui`
 - loads `summary.json` files or whole run folders with automatic `summary.md` linking
 - cross-run compare table for browsing multiple benchmark runs
-- sortable agent compare table with inline detail expansion
+- sortable agent compare table with inline detail expansion, structured test/lint metrics, and diff precision
 - horizontal bar charts for visual agent comparison (click or keyboard to select)
-- highlights best agent, fastest run, lowest known cost, and highest judge pass rate
+- highlights best agent, fastest run, lowest known cost, highest judge pass rate, and diff precision
 - task pack detail display with difficulty, differentiator, tags, and judge count
 - real-time benchmark progress with live log streaming
 - judge search plus type and pass/fail filters

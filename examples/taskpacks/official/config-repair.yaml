@@ -18,6 +18,13 @@ metadata:
   dependencies: []
   judgeRationale: JSON schema and targeted value assertions provide a stronger signal than text matching.
   differentiator: Tests config handling skill - weak agents may add unnecessary fields or miss required ones.
+  i18n:
+    zh-CN:
+      title: 配置文件修复
+      description: 修复损坏的配置文件，同时保持预期的 schema 结构。
+      objective: 验证 Agent 能否在不引入无关更改的情况下恢复损坏的配置。
+      judgeRationale: JSON schema 和目标值断言比文本匹配提供更强的信号。
+      differentiator: 测试配置处理能力——弱 Agent 可能添加不必要的字段或遗漏必填字段。
 prompt: |
   ## Task | 任务
   
@@ -41,6 +48,8 @@ prompt: |
   - Do NOT add fields not in the schema
   - Do NOT change valid values
   - Do NOT remove required fields
+expectedChangedPaths:
+  - fixtures/config.json
 judges:
   - id: config-schema
     type: json-schema

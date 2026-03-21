@@ -9,11 +9,13 @@ import {
   type GlobJudge,
   type JsonSchemaJudge,
   type JsonValueJudge,
+  type LintCheckJudge,
   type SnapshotJudge,
   TASK_PACK_SCHEMA_V1,
   type TaskJudge,
   type TaskPack, 
-  type TaskPackMetadata
+  type TaskPackMetadata,
+  type TestResultJudge
 } from "@repoarena/core";
 import { parse as parseYaml } from "yaml";
 
@@ -216,6 +218,40 @@ function normalizeJudge(
     return judge;
   }
 
+  if (type === "test-result") {
+    const judge: TestResultJudge = {
+      id,
+      label,
+      type: "test-result",
+      command: assertString(value.command, `judges[${index}].command`),
+      cwd: assertOptionalString(value.cwd, `judges[${index}].cwd`),
+      timeoutMs: assertOptionalPositiveInteger(value.timeoutMs, `judges[${index}].timeoutMs`),
+      envAllowList: assertStringArray(value.envAllowList, `judges[${index}].envAllowList`),
+      env: assertStringRecord(value.env, `judges[${index}].env`),
+      format: (assertOptionalString(value.format, `judges[${index}].format`) as TestResultJudge["format"] | undefined) ?? "auto",
+      reportFile: assertOptionalString(value.reportFile, `judges[${index}].reportFile`),
+      passOnNoTests: assertOptionalBoolean(value.passOnNoTests, `judges[${index}].passOnNoTests`)
+    };
+    return judge;
+  }
+
+  if (type === "lint-check") {
+    const judge: LintCheckJudge = {
+      id,
+      label,
+      type: "lint-check",
+      command: assertString(value.command, `judges[${index}].command`),
+      cwd: assertOptionalString(value.cwd, `judges[${index}].cwd`),
+      timeoutMs: assertOptionalPositiveInteger(value.timeoutMs, `judges[${index}].timeoutMs`),
+      envAllowList: assertStringArray(value.envAllowList, `judges[${index}].envAllowList`),
+      env: assertStringRecord(value.env, `judges[${index}].env`),
+      format: (assertOptionalString(value.format, `judges[${index}].format`) as LintCheckJudge["format"] | undefined) ?? "auto",
+      reportFile: assertOptionalString(value.reportFile, `judges[${index}].reportFile`),
+      maxWarnings: assertOptionalNonNegativeInteger(value.maxWarnings, `judges[${index}].maxWarnings`)
+    };
+    return judge;
+  }
+
   if (type === "file-exists") {
     const judge: FileExistsJudge = {
       id,
@@ -326,6 +362,8 @@ function normalizeJudge(
 
   const supportedTypes = [
     "command",
+    "test-result",
+    "lint-check",
     "file-exists",
     "file-contains",
     "json-value",
@@ -441,6 +479,7 @@ export async function loadTaskPack(taskPath: string): Promise<TaskPack> {
     prompt: assertString(parsed.prompt, "prompt"),
     metadata: normalizeMetadata(parsed.metadata),
     repoSource,
+    expectedChangedPaths: assertStringArray(parsed.expectedChangedPaths, "expectedChangedPaths"),
     envAllowList: assertStringArray(parsed.envAllowList, "envAllowList"),
     setupCommands: setupCommandsInput.map((value, index) => {
       if (!value || typeof value !== "object") {

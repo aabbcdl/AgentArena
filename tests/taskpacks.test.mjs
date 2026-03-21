@@ -79,6 +79,61 @@ test("loadTaskPack parses schema v1 judges", async () => {
   await rm(tempDir, { recursive: true, force: true });
 });
 
+test("loadTaskPack parses structured quality judges and expectedChangedPaths", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-taskpack-"));
+  const taskPath = path.join(tempDir, "task.json");
+
+  await writeFile(
+    taskPath,
+    JSON.stringify(
+      {
+        schemaVersion: "repoarena.taskpack/v1",
+        id: "quality-demo",
+        title: "Quality Demo",
+        prompt: "Run structured quality checks",
+        expectedChangedPaths: ["src/**/*.ts", "README.md"],
+        judges: [
+          {
+            id: "tests-json",
+            type: "test-result",
+            label: "Tests emit JSON",
+            command: "node test-runner.js",
+            format: "vitest",
+            reportFile: ".repoarena/tests.json",
+            passOnNoTests: true
+          },
+          {
+            id: "lint-json",
+            type: "lint-check",
+            label: "Lint emits JSON",
+            command: "node lint-runner.js",
+            format: "eslint",
+            reportFile: ".repoarena/lint.json",
+            maxWarnings: 2
+          }
+        ]
+      },
+      null,
+      2
+    ),
+    "utf8"
+  );
+
+  const taskPack = await loadTaskPack(taskPath);
+
+  assert.deepEqual(taskPack.expectedChangedPaths, ["src/**/*.ts", "README.md"]);
+  assert.equal(taskPack.judges[0].type, "test-result");
+  assert.equal(taskPack.judges[0].format, "vitest");
+  assert.equal(taskPack.judges[0].reportFile, ".repoarena/tests.json");
+  assert.equal(taskPack.judges[0].passOnNoTests, true);
+  assert.equal(taskPack.judges[1].type, "lint-check");
+  assert.equal(taskPack.judges[1].format, "eslint");
+  assert.equal(taskPack.judges[1].reportFile, ".repoarena/lint.json");
+  assert.equal(taskPack.judges[1].maxWarnings, 2);
+
+  await rm(tempDir, { recursive: true, force: true });
+});
+
 test("loadTaskPack keeps backward compatibility with successCommands", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-taskpack-"));
   const taskPath = path.join(tempDir, "task.json");

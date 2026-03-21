@@ -111,6 +111,11 @@
                 <span id="launcher-task-path-label">Task Pack Path</span>
                 <input id="launcher-task-path" type="text" />
               </label>
+              <label class="field field-wide" id="launcher-adhoc-prompt-field" style="display:none">
+                <span id="launcher-adhoc-prompt-label">自定义提示词</span>
+                <textarea id="launcher-adhoc-prompt" rows="6" placeholder="输入你想让 Agent 执行的任务描述..."></textarea>
+                <span class="muted" id="launcher-adhoc-prompt-hint">输入提示词后，系统会自动生成临时任务包并下发给选中的 Agent 执行。</span>
+              </label>
               <label class="field">
                 <span id="launcher-output-label">Output Folder</span>
                 <input id="launcher-output-path" type="text" />
@@ -125,6 +130,11 @@
                 <input id="launcher-probe-auth" type="checkbox" checked />
                 <span id="launcher-probe-auth-label">Probe auth before run</span>
               </label>
+              <label class="field" style="display:inline-flex;align-items:center;gap:6px;min-width:auto">
+                <span id="launcher-concurrency-label" style="white-space:nowrap">并发数</span>
+                <input id="launcher-concurrency" type="number" min="1" max="10" value="1" style="width:60px" />
+              </label>
+              <button id="launcher-quick-start" class="launcher-quick-start-btn" type="button">⚡ Quick Start</button>
               <button id="launcher-run" type="button">Start Benchmark</button>
             </div>
             <div id="launcher-validation" class="launcher-validation"></div>
@@ -180,6 +190,50 @@
             <div class="panel-header">
               <h3 id="agent-compare-title">Agent Compare</h3>
             </div>
+            <section class="detail-card" style="margin-bottom:1rem">
+              <div class="panel-header">
+                <h4 id="score-weights-title">Score Weights</h4>
+                <button id="score-weights-reset" type="button">Reset</button>
+              </div>
+              <div class="filter-bar" id="score-weight-presets">
+                <button type="button" data-score-preset="balanced">Balanced</button>
+                <button type="button" data-score-preset="correctness-first">Correctness First</button>
+                <button type="button" data-score-preset="speed-first">Speed First</button>
+                <button type="button" data-score-preset="cost-first">Cost First</button>
+                <button type="button" data-score-preset="scope-discipline">Scope Discipline</button>
+              </div>
+              <p id="score-weights-summary" class="muted"></p>
+              <div class="launcher-grid">
+                <label class="field">
+                  <span id="score-weight-status-label">Status</span>
+                  <input id="score-weight-status" type="number" min="0" step="0.01" />
+                </label>
+                <label class="field">
+                  <span id="score-weight-tests-label">Tests</span>
+                  <input id="score-weight-tests" type="number" min="0" step="0.01" />
+                </label>
+                <label class="field">
+                  <span id="score-weight-judges-label">Judges</span>
+                  <input id="score-weight-judges" type="number" min="0" step="0.01" />
+                </label>
+                <label class="field">
+                  <span id="score-weight-lint-label">Lint</span>
+                  <input id="score-weight-lint" type="number" min="0" step="0.01" />
+                </label>
+                <label class="field">
+                  <span id="score-weight-precision-label">Diff Precision</span>
+                  <input id="score-weight-precision" type="number" min="0" step="0.01" />
+                </label>
+                <label class="field">
+                  <span id="score-weight-duration-label">Duration</span>
+                  <input id="score-weight-duration" type="number" min="0" step="0.01" />
+                </label>
+                <label class="field">
+                  <span id="score-weight-cost-label">Cost</span>
+                  <input id="score-weight-cost" type="number" min="0" step="0.01" />
+                </label>
+              </div>
+            </section>
             <div class="filter-bar">
               <select id="compare-status-filter">
                 <option value="all">All Statuses</option>
@@ -193,6 +247,7 @@
                 <option value="cost">Cost (low to high)</option>
                 <option value="changed">Changed Files (high to low)</option>
                 <option value="judges">Judge Pass Rate (high to low)</option>
+                <option value="precision">Diff Precision (high to low)</option>
               </select>
             </div>
             <p id="compare-sort-hint" class="muted"></p>

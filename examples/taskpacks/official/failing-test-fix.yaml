@@ -18,6 +18,13 @@ metadata:
     - node
   judgeRationale: Test commands and targeted fixture checks validate the actual bugfix path.
   differentiator: Tests debugging skill - weak agents may "fix" tests by making them pass incorrectly, or break other tests.
+  i18n:
+    zh-CN:
+      title: 失败测试修复
+      description: 修复一个失败的测试，同时保持其余测试套件正常运行。
+      objective: 衡量 Agent 能否定位并修复一个失败的测试用例。
+      judgeRationale: 测试命令和目标 fixture 检查验证了实际的 bugfix 路径。
+      differentiator: 测试调试能力——弱 Agent 可能通过错误方式让测试通过，或破坏其他测试。
 prompt: |
   ## Task | 任务
   
@@ -41,11 +48,17 @@ prompt: |
   2. Read the test code to understand expected behavior
   3. Find and fix the bug in the source code
   4. Run tests again to verify all pass
+expectedChangedPaths:
+  - src/**/*.{js,mjs,ts,tsx}
+  - packages/**/src/**/*.{js,mjs,ts,tsx}
+  - lib/**/*.{js,mjs,ts,tsx}
 judges:
   - id: all-tests-pass
-    type: command
+    type: test-result
     label: All tests pass
-    command: pnpm test -- --runInBand
+    command: node -e "const fs=require('node:fs');const {spawnSync}=require('node:child_process');const report='.repoarena/failing-test-fix-results.json';fs.mkdirSync('.repoarena',{recursive:true});for(const [cmd,args] of [['pnpm',['test','--','--runInBand','--json','--outputFile',report]],['pnpm',['test','--','--runInBand','--reporter=json','--outputFile',report]],['npm',['run','test','--','--runInBand','--json','--outputFile',report]],['npm',['run','test','--','--runInBand','--reporter=json','--outputFile',report]]]){fs.rmSync(report,{force:true});const r=spawnSync(cmd,args,{stdio:'inherit',shell:process.platform==='win32'});if(!r.error&&fs.existsSync(report)&&fs.statSync(report).size>0){process.exit(r.status??1)}}process.exit(1)"
+    format: auto
+    reportFile: .repoarena/failing-test-fix-results.json
     timeoutMs: 120000
   - id: package-manifest-exists
     type: file-exists
@@ -54,5 +67,5 @@ judges:
   - id: test-file-unchanged
     type: command
     label: Test file was not modified
-    command: git diff --name-only | grep -v "\.test\." || true
+    command: node -e "const {execFileSync}=require('node:child_process');const out=execFileSync('git',['diff','--name-only'],{encoding:'utf8'});const changed=out.split(/\r?\n/).filter(Boolean);const touchedTests=changed.filter((file)=>/\.(test|spec)\.[cm]?[jt]sx?$/.test(file));if(touchedTests.length>0){console.error(touchedTests.join('\n'));process.exit(1)}"
     timeoutMs: 10000

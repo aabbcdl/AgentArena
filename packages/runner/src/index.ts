@@ -12,9 +12,11 @@ import {
   copyRepository,
   createAgentSelection,
   createRunId,
+  type DiffPrecisionSummary,
   type DiffSummary,
   diffSnapshots,
   ensureDirectory,
+  normalizePath,
   resolveRepoSource,
   snapshotDirectory,
   uniqueSorted
@@ -127,6 +129,79 @@ async function mapWithConcurrency<T, R>(
 
 function buildChangedFiles(diff: DiffSummary, hints: string[]): string[] {
   return uniqueSorted([...diff.added, ...diff.changed, ...diff.removed, ...hints]);
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[|\\{}()[\]^$+?.]/g, "\\$&");
+}
+
+function globPatternToRegExp(pattern: string): RegExp {
+  const normalizedPattern = normalizePath(pattern);
+  let regex = "^";
+
+  for (let index = 0; index < normalizedPattern.length; index += 1) {
+    const char = normalizedPattern[index];
+    const next = normalizedPattern[index + 1];
+
+    if (char === "*") {
+      if (next === "*") {
+        const afterNext = normalizedPattern[index + 2];
+        if (afterNext === "/") {
+          regex += "(?:.*/)?";
+          index += 2;
+        } else {
+          regex += ".*";
+          index += 1;
+        }
+      } else {
+        regex += "[^/]*";
+      }
+      continue;
+    }
+
+    if (char === "?") {
+      regex += "[^/]";
+      continue;
+    }
+
+    if (char === "{") {
+      const closingIndex = normalizedPattern.indexOf("}", index);
+      if (closingIndex > index) {
+        const segment = normalizedPattern.slice(index + 1, closingIndex);
+        regex += `(?:${segment.split(",").map(escapeRegExp).join("|")})`;
+        index = closingIndex;
+        continue;
+      }
+    }
+
+    regex += escapeRegExp(char);
+  }
+
+  return new RegExp(`${regex}$`);
+}
+
+function buildDiffPrecision(
+  expectedChangedPaths: string[] | undefined,
+  changedFiles: string[]
+): DiffPrecisionSummary | undefined {
+  if (!expectedChangedPaths || expectedChangedPaths.length === 0) {
+    return undefined;
+  }
+
+  const matchers = expectedChangedPaths.map((pattern) => ({
+    pattern,
+    matches: globPatternToRegExp(pattern)
+  }));
+  const matchedFiles = changedFiles.filter((filePath) => matchers.some((entry) => entry.matches.test(filePath)));
+  const unexpectedFiles = changedFiles.filter((filePath) => !matchers.some((entry) => entry.matches.test(filePath)));
+
+  return {
+    score: changedFiles.length > 0 ? matchedFiles.length / changedFiles.length : 0,
+    expectedScopeCount: expectedChangedPaths.length,
+    totalChangedFiles: changedFiles.length,
+    matchedFiles: uniqueSorted(matchedFiles),
+    unexpectedFiles: uniqueSorted(unexpectedFiles)
+  };
 }
 
 function summarizeCommandStepFailure(stage: "setup" | "teardown", result: CommandStepResult): string {
@@ -453,6 +528,8 @@ async function runAgent(
   }
 
   const diff = diffSnapshots(beforeSnapshot, afterSnapshot);
+  const changedFiles = buildChangedFiles(diff, adapterResult?.changedFilesHint ?? []);
+  const diffPrecision = buildDiffPrecision(task.expectedChangedPaths, changedFiles);
 
   let teardownResults: CommandStepResult[] = [];
   let teardownError: unknown;
@@ -538,14 +615,15 @@ async function runAgent(
       tokenUsage: 0,
       estimatedCostUsd: 0,
       costKnown: false,
-      changedFiles: buildChangedFiles(diff, []),
+      changedFiles,
       changedFilesHint: [],
       setupResults,
       judgeResults: [],
       teardownResults: [],
       tracePath,
       workspacePath,
-      diff
+      diff,
+      diffPrecision
     };
   }
 
@@ -566,14 +644,15 @@ async function runAgent(
       tokenUsage: 0,
       estimatedCostUsd: 0,
       costKnown: false,
-      changedFiles: buildChangedFiles(diff, []),
+      changedFiles,
       changedFilesHint: [],
       setupResults,
       judgeResults: [],
       teardownResults: [],
       tracePath,
       workspacePath,
-      diff
+      diff,
+      diffPrecision
     };
   }
 
@@ -593,14 +672,15 @@ async function runAgent(
     tokenUsage: adapterResult.tokenUsage,
     estimatedCostUsd: adapterResult.estimatedCostUsd,
     costKnown: adapterResult.costKnown,
-    changedFiles: buildChangedFiles(diff, adapterResult.changedFilesHint),
+    changedFiles,
     changedFilesHint: adapterResult.changedFilesHint,
     setupResults,
     judgeResults,
     teardownResults,
     tracePath,
     workspacePath,
-    diff
+    diff,
+    diffPrecision
   };
 }
 

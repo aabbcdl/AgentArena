@@ -4,14 +4,19 @@ import {
   buildPrTable,
   buildShareCard,
   buildShareCardSvg,
+  DEFAULT_SCORE_WEIGHTS,
   findPreviousComparableRun,
+  formatCompositeScore,
+  formatDiffPrecisionMetric,
   getAgentTrendRows,
   getCompareResults,
+  getCompositeScoreDetails,
   getCrossRunCompareRows,
   getCrossRunRecommendation,
   getRunCompareRows,
   getRunToRunAgentDiff,
-  getRunVerdict
+  getRunVerdict, 
+  getScoreWeightPreset
 } from "../apps/web-report/src/view-model.js";
 
 function createRun(runId, taskTitle, overrides = {}) {
@@ -40,7 +45,8 @@ function createResult(agentId, overrides = {}) {
     estimatedCostUsd: overrides.estimatedCostUsd ?? 0,
     costKnown: overrides.costKnown ?? false,
     changedFiles: overrides.changedFiles ?? [],
-    judgeResults: overrides.judgeResults ?? []
+    judgeResults: overrides.judgeResults ?? [],
+    diffPrecision: overrides.diffPrecision
   };
 }
 
@@ -112,6 +118,122 @@ test("getRunVerdict returns best and fastest agents", () => {
   assert.equal(verdict.lowestKnownCost.agentId, "fast-success");
 });
 
+test("getRunVerdict prefers structured test and lint quality over softer metrics", () => {
+  const run = createRun("run-hard-metrics", "Task HM", {
+    results: [
+      createResult("soft-winner", {
+        durationMs: 800,
+        judgeResults: [{ success: true }, { success: true }],
+        diffPrecision: { score: 1, matchedFiles: ["README.md"], unexpectedFiles: [], totalChangedFiles: 1, expectedScopeCount: 1 }
+      }),
+      createResult("hard-winner", {
+        durationMs: 1200,
+        judgeResults: [
+          { success: true },
+          { success: true, type: "test-result", totalCount: 4, passedCount: 4, failedCount: 0, warningCount: 0, errorCount: 0 },
+          { success: true, type: "lint-check", errorCount: 0, warningCount: 0 }
+        ],
+        diffPrecision: { score: 0.7, matchedFiles: ["src/a.ts"], unexpectedFiles: [], totalChangedFiles: 1, expectedScopeCount: 1 }
+      })
+    ]
+  });
+
+  const verdict = getRunVerdict(run);
+  assert.equal(verdict.bestAgent.agentId, "hard-winner");
+  assert.match(formatCompositeScore(verdict.bestAgent, run), /^\d+\.\d$/);
+  assert.ok(getCompositeScoreDetails(verdict.bestAgent, run).total > getCompositeScoreDetails(run.results[0], run).total);
+});
+
+test("getRunVerdict changes winner when custom weights favor speed", () => {
+  const run = createRun("run-weight-shift", "Task WS", {
+    results: [
+      createResult("quality", {
+        durationMs: 1500,
+        costKnown: true,
+        estimatedCostUsd: 0.2,
+        judgeResults: [
+          { success: true },
+          { success: true, type: "test-result", totalCount: 4, passedCount: 4, failedCount: 0 },
+          { success: true, type: "lint-check", errorCount: 0, warningCount: 0 }
+        ],
+        diffPrecision: { score: 0.8, matchedFiles: ["src/a.ts"], unexpectedFiles: [], totalChangedFiles: 1, expectedScopeCount: 1 }
+      }),
+      createResult("speed", {
+        durationMs: 500,
+        costKnown: true,
+        estimatedCostUsd: 0.05,
+        judgeResults: [{ success: true }, { success: false, type: "test-result", totalCount: 4, passedCount: 2, failedCount: 2 }],
+        diffPrecision: { score: 0.4, matchedFiles: ["README.md"], unexpectedFiles: ["extra.ts"], totalChangedFiles: 2, expectedScopeCount: 1 }
+      })
+    ]
+  });
+
+  const defaultVerdict = getRunVerdict(run, { scoreWeights: DEFAULT_SCORE_WEIGHTS });
+  const speedVerdict = getRunVerdict(run, {
+    scoreWeights: { status: 0.1, tests: 0.05, judges: 0.05, lint: 0, precision: 0, duration: 0.5, cost: 0.3 }
+  });
+
+  assert.equal(defaultVerdict.bestAgent.agentId, "quality");
+  assert.equal(speedVerdict.bestAgent.agentId, "speed");
+});
+
+test("score presets produce distinct winners for different benchmark goals", () => {
+  const run = createRun("run-presets", "Task Presets", {
+    results: [
+      createResult("correct", {
+        durationMs: 1800,
+        estimatedCostUsd: 0.3,
+        costKnown: true,
+        judgeResults: [
+          { success: true },
+          { success: true, type: "test-result", totalCount: 5, passedCount: 5, failedCount: 0 },
+          { success: true, type: "lint-check", errorCount: 0, warningCount: 0 }
+        ],
+        diffPrecision: { score: 0.7, matchedFiles: ["src/a.ts"], unexpectedFiles: [], totalChangedFiles: 1, expectedScopeCount: 1 }
+      }),
+      createResult("cheap", {
+        durationMs: 700,
+        estimatedCostUsd: 0.02,
+        costKnown: true,
+        judgeResults: [{ success: true }, { success: false, type: "test-result", totalCount: 5, passedCount: 2, failedCount: 3 }],
+        diffPrecision: { score: 0.4, matchedFiles: ["README.md"], unexpectedFiles: ["extra.ts"], totalChangedFiles: 2, expectedScopeCount: 1 }
+      }),
+      createResult("scoped", {
+        durationMs: 1000,
+        estimatedCostUsd: 0.08,
+        costKnown: true,
+        judgeResults: [{ success: true }, { success: true, type: "test-result", totalCount: 5, passedCount: 4, failedCount: 1 }],
+        diffPrecision: { score: 1, matchedFiles: ["src/a.ts"], unexpectedFiles: [], totalChangedFiles: 1, expectedScopeCount: 1 }
+      })
+    ]
+  });
+
+  assert.equal(getRunVerdict(run, { scoreWeights: getScoreWeightPreset("correctness-first") }).bestAgent.agentId, "correct");
+  assert.equal(getRunVerdict(run, { scoreWeights: getScoreWeightPreset("cost-first") }).bestAgent.agentId, "cheap");
+  assert.equal(getRunVerdict(run, { scoreWeights: getScoreWeightPreset("scope-discipline") }).bestAgent.agentId, "scoped");
+});
+
+test("getCompareResults sorts by diff precision when requested", () => {
+  const run = createRun("run-precision", "Task P", {
+    results: [
+      createResult("precise", {
+        diffPrecision: { score: 1, matchedFiles: ["README.md"], unexpectedFiles: [], totalChangedFiles: 1, expectedScopeCount: 1 },
+        changedFiles: ["README.md"],
+        judgeResults: [{ success: true }]
+      }),
+      createResult("sloppy", {
+        diffPrecision: { score: 0.25, matchedFiles: ["README.md"], unexpectedFiles: ["a", "b", "c"], totalChangedFiles: 4, expectedScopeCount: 1 },
+        changedFiles: ["README.md", "a", "b", "c"],
+        judgeResults: [{ success: true }]
+      })
+    ]
+  });
+
+  const rows = getCompareResults(run, { sort: "precision" });
+  assert.deepEqual(rows.map((row) => row.agentId), ["precise", "sloppy"]);
+  assert.equal(formatDiffPrecisionMetric(rows[0]), "100%");
+});
+
 test("share helpers produce shareable summary text and PR tables", () => {
   const run = createRun("run-1", "Task A", {
     results: [
@@ -128,9 +250,22 @@ test("share helpers produce shareable summary text and PR tables", () => {
   const prTable = buildPrTable(run);
 
   assert.match(shareCard, /RepoArena \| Task A/);
-  assert.match(shareCard, /Best variant: demo-fast/);
-  assert.match(prTable, /\| Variant \| Base Agent \| Provider \| Provider Kind \| Model \| Reasoning \| Verification \| Status \| Duration \| Tokens \| Cost \| Judges \| Files \|/);
-  assert.match(prTable, /\| demo-fast \| demo-fast \| official \| unknown \| unknown \| default \| unknown\/unknown \| success \| 1000ms \| 100 \| \$0\.10 \| 2\/2 \| 1 \|/);
+  assert.match(shareCard, /Best variant: demo-fast .*score \d+\.\d/);
+  assert.match(prTable, /\| Variant \| Base Agent \| Provider \| Provider Kind \| Model \| Reasoning \| Verification \| Status \| Score \| Duration \| Tokens \| Cost \| Judges \| Tests \| Lint \| Diff Precision \| Files \|/);
+  assert.match(prTable, /\| demo-fast \| demo-fast \| official \| unknown \| unknown \| default \| unknown\/unknown \| success \| \d+\.\d \| 1000ms \| 100 \| \$0\.10 \| 2\/2 \| n\/a \| n\/a \| n\/a \| 1 \|/);
+
+  const weightedShareCard = buildShareCard(run, {
+    scoreWeights: { status: 0.1, tests: 0.1, judges: 0.1, lint: 0.1, precision: 0.1, duration: 0.3, cost: 0.2 },
+    scoreModeLabel: "Speed First"
+  });
+  assert.match(weightedShareCard, /score \d+\.\d/);
+  assert.match(weightedShareCard, /Score mode: Speed First/);
+
+  const weightedPrTable = buildPrTable(run, {
+    scoreWeights: { status: 0.1, tests: 0.1, judges: 0.1, lint: 0.1, precision: 0.1, duration: 0.3, cost: 0.2 },
+    scoreModeLabel: "Speed First"
+  });
+  assert.match(weightedPrTable, /^Score mode: Speed First/m);
 });
 
 test("buildShareCardSvg returns a shareable SVG card", () => {

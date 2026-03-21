@@ -296,6 +296,34 @@ test("repoarena run supports --cleanup-workspaces flag", async () => {
   await rm(tempDir, { recursive: true, force: true });
 });
 
+test("repoarena ui creates stricter adhoc taskpacks without fallback echo judges", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-cli-"));
+  const server = await startUiServer(tempDir);
+
+  try {
+    const response = await fetch(`http://127.0.0.1:${server.port}/api/create-adhoc-taskpack`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({ prompt: "Make one useful change." })
+    });
+
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    const yaml = await readFile(payload.path, "utf8");
+
+    assert.match(yaml, /type: test-result/);
+    assert.match(yaml, /type: lint-check/);
+    assert.match(yaml, /source: community/);
+    assert.doesNotMatch(yaml, /No build script/);
+    assert.doesNotMatch(yaml, /No test script/);
+  } finally {
+    await server.stop();
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("repoarena doctor supports JSON output", async () => {
   const result = await runCli(["doctor", "--agents", "demo-fast", "--json"], path.resolve("."));
 
@@ -355,6 +383,26 @@ test("repoarena init-taskpack writes a starter YAML file", async () => {
   const content = await readFile(outputPath, "utf8");
   assert.match(content, /schemaVersion: repoarena\.taskpack\/v1/);
   assert.match(content, /type: snapshot/);
+  assert.match(content, /expectedChangedPaths:/);
+
+  await rm(tempDir, { recursive: true, force: true });
+});
+
+test("repoarena init-taskpack repo-health template includes structured quality judges", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-cli-"));
+  const outputPath = path.join(tempDir, "repoarena.taskpack.yaml");
+
+  const result = await runCli(
+    ["init-taskpack", "--template", "repo-health", "--output", outputPath],
+    path.resolve(".")
+  );
+
+  assert.equal(result.code, 0);
+  const content = await readFile(outputPath, "utf8");
+  assert.match(content, /type: test-result/);
+  assert.match(content, /type: lint-check/);
+  assert.match(content, /passOnNoTests: true/);
+  assert.match(content, /expectedChangedPaths:/);
 
   await rm(tempDir, { recursive: true, force: true });
 });
@@ -410,6 +458,12 @@ test("repoarena run supports JSON output", async () => {
   assert.match(payload.report.jsonPath, /summary\.json$/);
   assert.match(payload.report.badgePath, /badge\.json$/);
   assert.match(payload.report.prCommentPath, /pr-comment\.md$/);
+
+  const summary = JSON.parse(await readFile(payload.report.jsonPath, "utf8"));
+  assert.equal(summary.scoreMode, "balanced");
+  assert.equal(summary.scoreWeights.status, 0.3);
+  assert.equal(typeof summary.results[0].compositeScore, "number");
+  assert.equal(Array.isArray(summary.results[0].scoreReasons), true);
 
   await rm(tempDir, { recursive: true, force: true });
 });

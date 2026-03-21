@@ -16,6 +16,13 @@ metadata:
   dependencies: []
   judgeRationale: File-presence, source-tree, and manifest checks help detect accidental damage during small refactors.
   differentiator: Tests refactoring discipline - weak agents may break behavior or introduce bugs during refactoring.
+  i18n:
+    zh-CN:
+      title: 小型重构
+      description: 执行低风险重构，同时保持核心仓库结构完整。
+      objective: 衡量 Agent 能否在不破坏代码库的前提下进行受限重构。
+      judgeRationale: 文件存在性、源码树和清单检查有助于检测小型重构中的意外损坏。
+      differentiator: 测试重构纪律——弱 Agent 可能在重构过程中破坏行为或引入 bug。
 prompt: |
   ## Task | 任务
   
@@ -40,6 +47,10 @@ prompt: |
   - Code still compiles/runs
   - Tests still pass (if any)
   - No new lint errors introduced
+expectedChangedPaths:
+  - src/**/*.{js,mjs,ts,tsx}
+  - packages/**/src/**/*.{js,mjs,ts,tsx}
+  - lib/**/*.{js,mjs,ts,tsx}
 judges:
   - id: source-tree-present
     type: glob
@@ -53,5 +64,5 @@ judges:
   - id: no-package-changes
     type: command
     label: package.json dependencies unchanged
-    command: git diff package.json | grep -E "^[+-].*dependencies" || echo "No dependency changes"
+    command: node -e "const {execFileSync}=require('node:child_process');const diff=execFileSync('git',['diff','--','package.json'],{encoding:'utf8'});if(/^[+-].*dependencies/m.test(diff)){console.error(diff);process.exit(1)}"
     timeoutMs: 10000
