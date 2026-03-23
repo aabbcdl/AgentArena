@@ -1,5 +1,6 @@
 import { localizeText, translate } from "./i18n.js";
 import {
+  baseAgentLabel,
   buildPrTable,
   buildShareCard,
   buildShareCardSvg,
@@ -22,7 +23,8 @@ import {
   getRunVerdict,
   getScoreWeightPreset,
   normalizeScoreWeights,
-  SCORE_WEIGHT_PRESETS,
+  resultLabel,
+  runtimeIdentity,
   summarizeRun
 } from "./view-model.js";
 
@@ -171,6 +173,14 @@ const runCompareFilters = {
   sort: "created",
   scope: "current-task"
 };
+
+function debounce(fn, delayMs) {
+  let timer;
+  return (...args) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), delayMs);
+  };
+}
 
 const scoreWeightElements = {
   status: "scoreWeightStatus",
@@ -351,29 +361,6 @@ function applyScorePreset(presetId) {
     renderRecommendationCard(state.run);
     renderMarkdownPanel();
   }
-}
-
-function runtimeIdentity(record) {
-  return {
-    provider: record.resolvedRuntime?.providerProfileName ?? record.requestedConfig?.providerProfileId ?? "official",
-    providerKind: record.resolvedRuntime?.providerKind ?? "unknown",
-    providerSource: record.resolvedRuntime?.providerSource ?? "unknown",
-    model: record.resolvedRuntime?.effectiveModel ?? record.requestedConfig?.model ?? "unknown",
-    reasoning:
-      record.resolvedRuntime?.effectiveReasoningEffort ??
-      record.requestedConfig?.reasoningEffort ??
-      "default",
-    source: record.resolvedRuntime?.source ?? "unknown",
-    verification: record.resolvedRuntime?.verification ?? "unknown"
-  };
-}
-
-function resultLabel(record) {
-  return record.displayLabel ?? record.agentTitle ?? record.variantId ?? record.agentId;
-}
-
-function baseAgentLabel(record) {
-  return record.baseAgentId ?? record.agentId;
 }
 
 function recordKey(record) {
@@ -817,7 +804,7 @@ function openProviderEditor(profileId = null) {
 function taskPackI18n(taskPack, field) {
   const lang = state.language;
   const i18nData = taskPack?.i18n?.[lang];
-  if (i18nData && i18nData[field]) return i18nData[field];
+  if (i18nData?.[field]) return i18nData[field];
   return taskPack?.[field] ?? taskPack?.metadata?.[field] ?? "";
 }
 
@@ -1700,15 +1687,6 @@ async function deleteProviderProfileById(profileId) {
   syncClaudeVariantsWithProfiles();
 }
 
-function deltaClass(value, preferred = "lower") {
-  if (value === null || value === 0) {
-    return "delta-neutral";
-  }
-
-  const improved = preferred === "lower" ? value < 0 : value > 0;
-  return improved ? "delta-positive" : "delta-negative";
-}
-
 /** Fetch with a timeout (default 15s). Returns the response or throws on timeout. */
 function fetchWithTimeout(url, options = {}, timeoutMs = 15_000) {
   const controller = new AbortController();
@@ -1814,7 +1792,7 @@ function renderTaskBrief(run) {
   elements.taskBrief.innerHTML = `
     <div class="panel-header">
       <h3>${escapeHtml(localText("这次 benchmark 在测什么", "What this run actually measures"))}</h3>
-      <span class="muted">${escapeHtml(resultCount)} ${escapeHtml(localText("涓?variant", "variants"))}</span>
+      <span class="muted">${escapeHtml(resultCount)} ${escapeHtml(localText("个 variant", "variants"))}</span>
     </div>
     <div class="badge-row">
       ${badges.map((badge) => `<span class="meaning-badge">${escapeHtml(badge)}</span>`).join("")}
@@ -1868,8 +1846,8 @@ function renderRunList() {
           <div class="meta">${successCount}/${run.results.length} ${localText("成功", "success")} | ${escapeHtml(run.runId)}</div>
           <div class="meta">${hasMarkdown ? escapeHtml(t("linkedMarkdown")) : escapeHtml(t("jsonOnly"))}</div>
           <div class="run-actions">
-            <button type="button" class="run-action-btn" data-role="export-run" data-run-id="${escapeHtml(run.runId)}" title="${escapeHtml(localText("导出 JSON", "Export JSON"))}">⬇</button>
-            <button type="button" class="run-action-btn" data-role="delete-run" data-run-id="${escapeHtml(run.runId)}" title="${escapeHtml(localText("删除", "Delete"))}">✕</button>
+            <button type="button" class="run-action-btn" data-role="export-run" data-run-id="${escapeHtml(run.runId)}" title="${escapeHtml(localText("导出 JSON", "Export JSON"))}" aria-label="${escapeHtml(localText("导出 JSON", "Export JSON"))}">⬇</button>
+            <button type="button" class="run-action-btn" data-role="delete-run" data-run-id="${escapeHtml(run.runId)}" title="${escapeHtml(localText("删除", "Delete"))}" aria-label="${escapeHtml(localText("删除", "Delete"))}">✕</button>
           </div>
         </button>
       `;
@@ -2819,7 +2797,7 @@ function renderSelectedAgentV2() {
 
 function renderRecommendationCard(run) {
   // Clean up previous recommendation cards and cost projections
-  document.querySelectorAll(".recommendation-hero, .cost-projection").forEach((el) => el.remove());
+  document.querySelectorAll(".recommendation-hero, .cost-projection").forEach((el) => { el.remove(); });
 
   const verdict = getRunVerdict(run, { scoreWeights: state.scoreWeights });
   const best = verdict.bestAgent;
@@ -2959,7 +2937,16 @@ function render() {
 }
 
 async function readRunFromFile(file) {
-  return JSON.parse(await file.text());
+  try {
+    return JSON.parse(await file.text());
+  } catch {
+    throw new Error(
+      localText(
+        `无法解析文件 "${file.name}"，请确认是有效的 summary.json。`,
+        `Failed to parse "${file.name}". Make sure it is a valid summary.json file.`
+      )
+    );
+  }
 }
 
 async function handleFileSelection(event) {
@@ -2968,12 +2955,17 @@ async function handleFileSelection(event) {
     return;
   }
 
-  const run = await readRunFromFile(file);
-  state.notice =
-    state.language === "zh-CN"
-      ? "已加载单个 summary.json。现在可以直接查看结果，或者继续加载 summary.md。"
-      : "Loaded one summary.json file. You can inspect the run now or optionally load summary.md.";
-  applySingleRun(run);
+  try {
+    const run = await readRunFromFile(file);
+    state.notice =
+      state.language === "zh-CN"
+        ? "已加载单个 summary.json。现在可以直接查看结果，或者继续加载 summary.md。"
+        : "Loaded one summary.json file. You can inspect the run now or optionally load summary.md.";
+    applySingleRun(run);
+  } catch (error) {
+    state.notice = error instanceof Error ? error.message : String(error);
+    render();
+  }
 }
 
 async function handleMarkdownSelection(event) {
@@ -2982,12 +2974,17 @@ async function handleMarkdownSelection(event) {
     return;
   }
 
-  state.standaloneMarkdown = await file.text();
-  state.notice =
-    state.language === "zh-CN"
-      ? "Markdown 已加载。如果当前也有 run，分享摘要会自动出现。"
-      : "Markdown loaded. If a run is also loaded, the share summary will appear automatically.";
-  renderMarkdownPanel();
+  try {
+    state.standaloneMarkdown = await file.text();
+    state.notice =
+      state.language === "zh-CN"
+        ? "Markdown 已加载。如果当前也有 run，分享摘要会自动出现。"
+        : "Markdown loaded. If a run is also loaded, the share summary will appear automatically.";
+    renderMarkdownPanel();
+  } catch (error) {
+    state.notice = error instanceof Error ? error.message : String(error);
+    render();
+  }
 }
 
 async function copyToClipboard(value, label) {
@@ -3040,11 +3037,15 @@ async function handleFolderSelection(event) {
   const runs = [];
   const markdownByRunId = new Map();
   for (const file of summaryFiles) {
-    const run = await readRunFromFile(file);
-    runs.push(run);
-    const markdown = markdownByFolder.get(folderOf(file));
-    if (markdown) {
-      markdownByRunId.set(run.runId, markdown);
+    try {
+      const run = await readRunFromFile(file);
+      runs.push(run);
+      const markdown = markdownByFolder.get(folderOf(file));
+      if (markdown) {
+        markdownByRunId.set(run.runId, markdown);
+      }
+    } catch (error) {
+      console.warn(`Skipping invalid summary file: ${file.name}`, error);
     }
   }
 
@@ -3169,6 +3170,7 @@ elements.launcherToggle.addEventListener("click", () => {
 });
 elements.languageSelect.addEventListener("change", (event) => {
   state.language = String(event.target.value ?? "en");
+  document.documentElement.lang = state.language === "zh-CN" ? "zh-CN" : "en";
   try {
     localStorage.setItem("repoarena.webReport.language", state.language);
   } catch {
@@ -3395,8 +3397,9 @@ elements.compareSort.addEventListener("change", (event) => {
 });
 
 for (const [key, elementName] of Object.entries(scoreWeightElements)) {
+  const debouncedUpdate = debounce((value) => updateScoreWeight(key, value), 150);
   elements[elementName]?.addEventListener("input", (event) => {
-    updateScoreWeight(key, Number(event.target.value ?? 0));
+    debouncedUpdate(Number(event.target.value ?? 0));
   });
 }
 
@@ -3463,6 +3466,7 @@ try {
 } catch {
   state.language = "zh-CN";
 }
+document.documentElement.lang = state.language === "zh-CN" ? "zh-CN" : "en";
 
 const savedScoreConfig = loadScoreConfig();
 if (savedScoreConfig?.scoreWeights) {

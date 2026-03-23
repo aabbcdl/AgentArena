@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { exec } from "node:child_process";
+import { spawn } from "node:child_process";
 import { promises as fs } from "node:fs";
 import http from "node:http";
 import path from "node:path";
@@ -19,12 +19,14 @@ import {
   type BenchmarkRun,
   type ClaudeProviderProfile,
   createAgentSelection,
-  formatDuration
+  createCancellation,
+  formatDuration,
+  isAbortError
 } from "@repoarena/core";
 import { writeReport } from "@repoarena/report";
-import { runBenchmark } from "@repoarena/runner";
+import { type BenchmarkProgressEvent, runBenchmark } from "@repoarena/runner";
 import { loadTaskPack } from "@repoarena/taskpacks";
-import { parse as parseYaml } from "yaml";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
 interface ParsedArgs {
   command?: string;
@@ -92,7 +94,12 @@ interface UiProviderProfilePayload {
   secret?: string;
 }
 
-type UiRunPhase = "idle" | "starting" | "preflight" | "benchmark" | "report";
+interface ActiveUiRun {
+  promise: Promise<unknown>;
+  cancel: () => void;
+}
+
+type UiRunPhase = BenchmarkProgressEvent["phase"] | "idle" | "benchmark";
 
 interface UiRunLogEntry {
   timestamp: string;
@@ -104,7 +111,7 @@ interface UiRunLogEntry {
 }
 
 interface UiRunStatus {
-  state: "idle" | "running" | "done" | "error";
+  state: "idle" | "running" | "done" | "error" | "cancelled";
   phase: UiRunPhase;
   startedAt?: string;
   repoPath?: string;
@@ -559,7 +566,7 @@ UI Command:
 
   Options:
     --host <host>              Server host (default: 127.0.0.1)
-    --port <port>              Server port (default: 4317)
+    --port <port>              Server port (default: 4320)
     --no-open                  Don't open browser automatically
 
 Examples:
@@ -597,7 +604,7 @@ Examples:
   repoarena init-ci --ci-template nightly --task examples/taskpacks/official/repo-health.yaml --agents demo-fast
 
   # Start the web UI
-  repoarena ui --host 127.0.0.1 --port 4317
+  repoarena ui --host 127.0.0.1 --port 4320
 
 For more information, visit: https://github.com/aabbcdl/RepoArena
 `);
@@ -742,7 +749,7 @@ function parseArgs(argv: string[]): ParsedArgs {
       case "--port": {
         const portValue = args.shift();
         if (!portValue) {
-          throw new Error("--port requires a port number. Example: --port 4317");
+          throw new Error("--port requires a port number. Example: --port 4320");
         }
         const value = Number.parseInt(portValue, 10);
         if (!Number.isInteger(value) || value <= 0 || value > 65535) {
@@ -771,6 +778,10 @@ function parseArgs(argv: string[]): ParsedArgs {
         printHelp();
         process.exit(0);
         break; // eslint-disable-line no-fallthrough
+      case "--version":
+      case "-v":
+        parsed.command = "version";
+        return parsed;
       default:
         throw new Error(
           `Unknown argument: ${token}\n` +
@@ -1217,22 +1228,32 @@ async function maybeOpenBrowser(url: string): Promise<void> {
   const platform = process.platform;
   const command =
     platform === "win32"
-      ? `start "" "${url}"`
+      ? "cmd.exe"
       : platform === "darwin"
-        ? `open "${url}"`
-        : `xdg-open "${url}"`;
+        ? "open"
+        : "xdg-open";
+  const args =
+    platform === "win32"
+      ? ["/c", "start", "", url]
+      : [url];
 
   await new Promise<void>((resolve) => {
-    exec(command, { shell: platform === "win32" ? "cmd.exe" : process.env.SHELL ?? "/bin/sh" }, () =>
-      resolve()
-    );
+    const child = spawn(command, args, {
+      stdio: "ignore",
+      detached: true,
+      windowsHide: true,
+      shell: false
+    });
+    child.on("error", () => resolve());
+    child.unref();
+    resolve();
   });
 }
 
 async function runUi(parsed: ParsedArgs): Promise<void> {
   const host = parsed.host ?? "127.0.0.1";
   const port = parsed.port ?? DEFAULT_UI_PORT;
-  let activeRun: Promise<unknown> | null = null;
+  let activeRun: ActiveUiRun | null = null;
   const codexDefaults = await getCodexDefaultResolvedRuntime();
   let activeRunStatus: UiRunStatus = {
     state: "idle",
@@ -1264,6 +1285,18 @@ async function runUi(parsed: ParsedArgs): Promise<void> {
   const server = http.createServer(async (request, response) => {
     try {
       const requestUrl = new URL(request.url ?? "/", `http://${host}:${port}`);
+
+      // CORS protection: reject cross-origin requests
+      const origin = request.headers.origin;
+      if (origin) {
+        const serverOrigin = `http://${host}:${port}`;
+        if (origin !== serverOrigin && origin !== `http://localhost:${port}` && origin !== `http://127.0.0.1:${port}`) {
+          const forbidden = jsonResponse({ error: "Cross-origin requests are not allowed." }, 403);
+          response.writeHead(forbidden.statusCode, forbidden.headers);
+          response.end(forbidden.body);
+          return;
+        }
+      }
 
       if (request.method === "GET" && requestUrl.pathname === "/api/ui-info") {
         const providerProfiles = await listClaudeProviderProfiles();
@@ -1432,54 +1465,63 @@ async function runUi(parsed: ParsedArgs): Promise<void> {
         const lintReportFile = `.repoarena/${adhocId}-lint-results.json`;
         const testCommand = createAdhocTestCommand(testReportFile);
         const lintCommand = createAdhocLintCommand(lintReportFile);
-        const yamlContent = `schemaVersion: repoarena.taskpack/v1
-id: ${adhocId}
-title: "${adhocTitle.replace(/"/g, '\\"')}"
-description: User-defined ad-hoc task from the web UI.
-metadata:
-  source: community
-  owner: user
-  difficulty: medium
-  objective: Execute the user-provided prompt and verify the result.
-  repoTypes:
-    - generic
-  tags:
-    - adhoc
-    - custom
-  dependencies: []
-  judgeRationale: Basic structural checks ensure the agent did not break the repository.
-prompt: |
-${body.prompt.split("\n").map((line: string) => `  ${line}`).join("\n")}
-judges:
-  - id: repo-not-broken
-    type: file-exists
-    label: Package manifest still exists
-    path: package.json
-  - id: readme-exists
-    type: file-exists
-    label: README still exists
-    path: README.md
-  - id: build-passes
-    type: command
-    label: Project still builds
-    command: ${JSON.stringify(buildCommand)}
-    timeoutMs: 120000
-  - id: tests-pass
-    type: test-result
-    label: Tests still pass with structured results
-    command: ${JSON.stringify(testCommand)}
-    format: auto
-    reportFile: ${JSON.stringify(testReportFile)}
-    timeoutMs: 120000
-  - id: lint-clean
-    type: lint-check
-    label: Lint stays clean
-    command: ${JSON.stringify(lintCommand)}
-    format: auto
-    reportFile: ${JSON.stringify(lintReportFile)}
-    maxWarnings: 0
-    timeoutMs: 120000
-`;
+        const yamlContent = stringifyYaml({
+          schemaVersion: "repoarena.taskpack/v1",
+          id: adhocId,
+          title: adhocTitle,
+          description: "User-defined ad-hoc task from the web UI.",
+          metadata: {
+            source: "community",
+            owner: "user",
+            difficulty: "medium",
+            objective: "Execute the user-provided prompt and verify the result.",
+            repoTypes: ["generic"],
+            tags: ["adhoc", "custom"],
+            dependencies: [],
+            judgeRationale: "Basic structural checks ensure the agent did not break the repository."
+          },
+          prompt: body.prompt,
+          judges: [
+            {
+              id: "repo-not-broken",
+              type: "file-exists",
+              label: "Package manifest still exists",
+              path: "package.json"
+            },
+            {
+              id: "readme-exists",
+              type: "file-exists",
+              label: "README still exists",
+              path: "README.md"
+            },
+            {
+              id: "build-passes",
+              type: "command",
+              label: "Project still builds",
+              command: buildCommand,
+              timeoutMs: 120000
+            },
+            {
+              id: "tests-pass",
+              type: "test-result",
+              label: "Tests still pass with structured results",
+              command: testCommand,
+              format: "auto",
+              reportFile: testReportFile,
+              timeoutMs: 120000
+            },
+            {
+              id: "lint-clean",
+              type: "lint-check",
+              label: "Lint stays clean",
+              command: lintCommand,
+              format: "auto",
+              reportFile: lintReportFile,
+              maxWarnings: 0,
+              timeoutMs: 120000
+            }
+          ]
+        }, { lineWidth: 0 });
         const adhocPath = path.join(adhocDir, `${adhocId}.yaml`);
         await fs.writeFile(adhocPath, yamlContent, "utf8");
         const payload = jsonResponse({ path: adhocPath, id: adhocId, title: adhocTitle });
@@ -1524,7 +1566,13 @@ judges:
       if (request.method === "DELETE" && requestUrl.pathname.startsWith("/api/adhoc-taskpacks/")) {
         const adhocId = decodeURIComponent(requestUrl.pathname.slice("/api/adhoc-taskpacks/".length));
         const adhocDir = path.join(process.cwd(), ".repoarena", "adhoc-taskpacks");
-        const filePath = path.join(adhocDir, `${adhocId}.yaml`);
+        const filePath = path.normalize(path.join(adhocDir, `${adhocId}.yaml`));
+        if (!filePath.startsWith(adhocDir)) {
+          const forbidden = jsonResponse({ error: "Invalid adhoc taskpack ID." }, 400);
+          response.writeHead(forbidden.statusCode, forbidden.headers);
+          response.end(forbidden.body);
+          return;
+        }
         try {
           await fs.unlink(filePath);
           const payload = jsonResponse({ deleted: true, id: adhocId });
@@ -1582,6 +1630,14 @@ judges:
           return;
         }
 
+        // Reset status to clean state before starting a new run
+        activeRunStatus = {
+          state: "idle",
+          phase: "idle",
+          logs: [],
+          updatedAt: new Date().toISOString()
+        };
+
         setRunStatus({
           state: "running",
           phase: "starting",
@@ -1595,7 +1651,12 @@ judges:
           message: `Starting benchmark for ${selections.length} selection(s).`
         });
 
-        activeRun = (async () => {
+        const cancellationController = new AbortController();
+        const cancellation = createCancellation(cancellationController.signal);
+
+        activeRun = {
+          cancel: () => cancellationController.abort(),
+          promise: (async () => {
           try {
             // Do NOT pass outputPath from the UI payload directly.
             // The runner generates a unique runId and creates a per-run
@@ -1612,6 +1673,7 @@ judges:
               updateSnapshots: runPayload.updateSnapshots,
               cleanupWorkspaces: runPayload.cleanupWorkspaces,
               maxConcurrency: runPayload.maxConcurrency,
+              cancellation,
               onProgress: (event) => {
                 const phase =
                   event.phase === "starting" || event.phase === "preflight"
@@ -1643,6 +1705,26 @@ judges:
                 });
               }
             });
+
+            const runCancelled =
+              cancellationController.signal.aborted || benchmark.results.some((result) => result.status === "cancelled");
+            if (runCancelled) {
+              appendRunLog({
+                phase: activeRunStatus.phase,
+                message: "Run cancelled."
+              });
+              setRunStatus({
+                state: "cancelled",
+                phase: "idle",
+                error: undefined,
+                currentAgentId: undefined,
+                currentVariantId: undefined,
+                currentDisplayLabel: undefined,
+                result: undefined
+              });
+              return;
+            }
+
             setRunStatus({
               phase: "report",
               currentAgentId: undefined,
@@ -1669,20 +1751,47 @@ judges:
             const errorMessage = runError instanceof Error ? runError.message : String(runError);
             appendRunLog({
               phase: activeRunStatus.phase,
-              message: `Run failed: ${errorMessage}`
+              message: isAbortError(runError) ? "Run cancelled." : `Run failed: ${errorMessage}`
             });
-            setRunStatus({
-              state: "error",
-              error: errorMessage
-            });
+            setRunStatus(
+              isAbortError(runError)
+                ? {
+                    state: "cancelled",
+                    phase: "idle",
+                    error: undefined,
+                    currentAgentId: undefined,
+                    currentVariantId: undefined,
+                    currentDisplayLabel: undefined
+                  }
+                : {
+                    state: "error",
+                    error: errorMessage
+                  }
+            );
           } finally {
             activeRun = null;
           }
-        })();
+        })()
+        };
 
         const accepted = jsonResponse({ accepted: true }, 202);
         response.writeHead(accepted.statusCode, accepted.headers);
         response.end(accepted.body);
+        return;
+      }
+
+      if (request.method === "POST" && requestUrl.pathname === "/api/run/cancel") {
+        if (!activeRun) {
+          const payload = jsonResponse({ error: "No benchmark run in progress." }, 409);
+          response.writeHead(payload.statusCode, payload.headers);
+          response.end(payload.body);
+          return;
+        }
+        activeRun.cancel();
+        appendRunLog({ phase: activeRunStatus.phase, message: "Cancellation requested by user." });
+        const payload = jsonResponse({ cancelled: true });
+        response.writeHead(payload.statusCode, payload.headers);
+        response.end(payload.body);
         return;
       }
 
@@ -1826,17 +1935,42 @@ async function runBenchmarkCommand(parsed: ParsedArgs): Promise<void> {
     console.log("");
   }
 
-  const benchmark = await runBenchmark({
-    repoPath: parsed.repoPath,
-    taskPath: parsed.taskPath,
-    agentIds: selections.map((selection) => selection.baseAgentId),
-    agents: selections,
-    outputPath: parsed.outputPath ? path.resolve(parsed.outputPath) : undefined,
-    probeAuth: parsed.probeAuth,
-    updateSnapshots: parsed.updateSnapshots,
-    cleanupWorkspaces: parsed.cleanupWorkspaces,
-    maxConcurrency: parsed.maxConcurrency
-  });
+  let cancelled = false;
+  const cancellationController = new AbortController();
+  const cancellation = createCancellation(cancellationController.signal);
+  const sigintHandler = () => {
+    if (cancelled) {
+      process.exit(1);
+    }
+    cancelled = true;
+    cancellationController.abort();
+    console.error("\nCancelling benchmark... (press Ctrl+C again to force quit)");
+  };
+  process.on("SIGINT", sigintHandler);
+
+  let benchmark: BenchmarkRun;
+  try {
+    benchmark = await runBenchmark({
+      repoPath: parsed.repoPath,
+      taskPath: parsed.taskPath,
+      agentIds: selections.map((selection) => selection.baseAgentId),
+      agents: selections,
+      outputPath: parsed.outputPath ? path.resolve(parsed.outputPath) : undefined,
+      probeAuth: parsed.probeAuth,
+      updateSnapshots: parsed.updateSnapshots,
+      cleanupWorkspaces: parsed.cleanupWorkspaces,
+      maxConcurrency: parsed.maxConcurrency,
+      cancellation,
+      onProgress: parsed.json
+        ? undefined
+        : (event) => {
+            const prefix = event.displayLabel ? `[${event.displayLabel}] ` : "";
+            process.stderr.write(`  ${prefix}${event.message}\n`);
+          }
+    });
+  } finally {
+    process.removeListener("SIGINT", sigintHandler);
+  }
 
   const report = await writeReport(benchmark);
 
@@ -1971,6 +2105,18 @@ async function main(): Promise<void> {
       case "-h":
         printHelp();
         break;
+      case "version":
+      case "--version":
+      case "-v": {
+        const cliPkgPath = path.join(CLI_PACKAGE_ROOT, "package.json");
+        try {
+          const pkg = JSON.parse(await fs.readFile(cliPkgPath, "utf8"));
+          console.log(pkg.version ?? "unknown");
+        } catch {
+          console.log("unknown");
+        }
+        break;
+      }
       default:
         throw new Error(
           `Unknown command: ${parsed.command}\n` +

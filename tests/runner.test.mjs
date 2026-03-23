@@ -647,3 +647,71 @@ test("runBenchmark emits onProgress events", async () => {
 
   await rm(tempDir, { recursive: true, force: true });
 });
+
+test("runBenchmark returns cancelled results and still runs teardown after abort", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-runner-"));
+  const repoPath = path.join(tempDir, "repo");
+  const outputPath = path.join(tempDir, "output");
+  const taskPath = path.join(tempDir, "task-cancel.json");
+
+  await mkdir(repoPath, { recursive: true });
+  await writeFile(path.join(repoPath, "README.md"), "# Temp Repo\n", "utf8");
+  await writeJson(path.join(repoPath, "package.json"), { name: "temp-repo", version: "0.0.0" });
+
+  await writeJson(taskPath, {
+    schemaVersion: "repoarena.taskpack/v1",
+    id: "cancel-demo",
+    title: "Cancel Demo",
+    prompt: "Cancel a benchmark while the agent is running.",
+    teardownCommands: [
+      {
+        id: "teardown-marker",
+        label: "Write teardown marker",
+        command: "node -e \"require('node:fs').writeFileSync('teardown-marker.txt','done')\""
+      }
+    ],
+    judges: [
+      {
+        id: "pass",
+        type: "command",
+        label: "Always pass",
+        command: "node -e \"process.exit(0)\""
+      }
+    ]
+  });
+
+  const controller = new AbortController();
+  const events = [];
+  const benchmarkPromise = runBenchmark({
+    repoPath,
+    taskPath,
+    agentIds: ["demo-thorough"],
+    outputPath,
+    cancellation: {
+      signal: controller.signal,
+      throwIfCancelled: () => {
+        if (controller.signal.aborted) {
+          throw new Error("cancelled");
+        }
+      }
+    },
+    onProgress: (event) => {
+      events.push(event);
+      if (event.phase === "agent-start") {
+        setTimeout(() => controller.abort(), 100);
+      }
+    }
+  });
+
+  const benchmark = await benchmarkPromise;
+  const result = benchmark.results[0];
+
+  assert.equal(result.status, "cancelled");
+  assert.equal(result.teardownResults.length, 1);
+  assert.equal(result.teardownResults[0].success, true);
+  const teardownMarker = await readFile(path.join(result.workspacePath, "teardown-marker.txt"), "utf8");
+  assert.equal(teardownMarker, "done");
+  assert.ok(events.some((event) => event.phase === "complete" && /cancelled/i.test(event.message)));
+
+  await rm(tempDir, { recursive: true, force: true });
+});

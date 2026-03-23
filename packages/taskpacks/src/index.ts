@@ -13,9 +13,10 @@ import {
   type SnapshotJudge,
   TASK_PACK_SCHEMA_V1,
   type TaskJudge,
-  type TaskPack, 
+  type TaskPack,
   type TaskPackMetadata,
-  type TestResultJudge
+  type TestResultJudge,
+  validateTaskPackId
 } from "@repoarena/core";
 import { parse as parseYaml } from "yaml";
 
@@ -303,6 +304,11 @@ function normalizeJudge(
       minMatches: assertOptionalNonNegativeInteger(value.minMatches, `judges[${index}].minMatches`),
       maxMatches: assertOptionalNonNegativeInteger(value.maxMatches, `judges[${index}].maxMatches`)
     };
+    if (judge.minMatches !== undefined && judge.maxMatches !== undefined && judge.minMatches > judge.maxMatches) {
+      throw new Error(
+        `Task pack judge at index ${index}: minMatches (${judge.minMatches}) must be <= maxMatches (${judge.maxMatches}).`
+      );
+    }
     return judge;
   }
 
@@ -321,6 +327,11 @@ function normalizeJudge(
       throw new Error(
         `Task pack field "judges[${index}]" for type "file-count" must define equals, min, or max. ` +
         `Example: { "type": "file-count", "pattern": "*.ts", "min": 1, "max": 10 }`
+      );
+    }
+    if (judge.min !== undefined && judge.max !== undefined && judge.min > judge.max) {
+      throw new Error(
+        `Task pack judge at index ${index}: min (${judge.min}) must be <= max (${judge.max}).`
       );
     }
 
@@ -448,6 +459,14 @@ export async function loadTaskPack(taskPath: string): Promise<TaskPack> {
   }
 
   const taskId = assertString(parsed.id, "id");
+  if (!validateTaskPackId(taskId)) {
+    throw new Error(
+      `Task pack ID "${taskId}" is invalid. ` +
+      `IDs must be 1-64 lowercase alphanumeric characters with optional hyphens, ` +
+      `starting and ending with an alphanumeric character. ` +
+      `Example: "my-task-pack"`
+    );
+  }
   const schemaVersion =
     parsed.schemaVersion === undefined
       ? TASK_PACK_SCHEMA_V1
@@ -461,6 +480,13 @@ export async function loadTaskPack(taskPath: string): Promise<TaskPack> {
     );
   }
 
+  if (parsed.judges !== undefined && parsed.judges !== null && !Array.isArray(parsed.judges)) {
+    throw new Error(
+      `Task pack field "judges" must be an array. ` +
+      `Received type: ${typeof parsed.judges}. ` +
+      `Example: "judges": [{ "type": "file-exists", "label": "README", "path": "README.md" }]`
+    );
+  }
   const judgesInput = Array.isArray(parsed.judges)
     ? parsed.judges
     : Array.isArray(parsed.successCommands)

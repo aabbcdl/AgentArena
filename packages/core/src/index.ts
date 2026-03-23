@@ -224,6 +224,7 @@ export interface AdapterExecutionContext {
   workspacePath: string;
   environment: NodeJS.ProcessEnv;
   task: TaskPack;
+  signal?: AbortSignal;
   trace: (event: Omit<TraceEvent, "agentId" | "timestamp">) => Promise<void>;
 }
 
@@ -343,7 +344,7 @@ export interface AgentRunResult {
   requestedConfig: AgentRequestedConfig;
   resolvedRuntime?: AgentResolvedRuntime;
   agentTitle: string;
-  status: "success" | "failed";
+  status: "success" | "failed" | "cancelled";
   adapterKind: "demo" | "external";
   preflight: AdapterPreflightResult;
   summary: string;
@@ -362,6 +363,11 @@ export interface AgentRunResult {
   diffPrecision?: DiffPrecisionSummary;
   compositeScore?: number;
   scoreReasons?: string[];
+}
+
+export interface BenchmarkCancellation {
+  signal: AbortSignal;
+  throwIfCancelled: () => void;
 }
 
 export interface BenchmarkRun {
@@ -399,6 +405,33 @@ const BASELINE_ENV_NAMES = [
   "TERM",
   "PWD"
 ];
+
+export class BenchmarkCancelledError extends Error {
+  constructor(message = "Benchmark run cancelled.") {
+    super(message);
+    this.name = "BenchmarkCancelledError";
+  }
+}
+
+export function isAbortError(error: unknown): boolean {
+  return error instanceof BenchmarkCancelledError;
+}
+
+export function throwIfAborted(signal: AbortSignal | undefined, message = "Benchmark run cancelled."): void {
+  if (signal?.aborted) {
+    throw new BenchmarkCancelledError(message);
+  }
+}
+
+export function createCancellation(signal?: AbortSignal): BenchmarkCancellation {
+  const effectiveSignal = signal ?? new AbortController().signal;
+  return {
+    signal: effectiveSignal,
+    throwIfCancelled: () => {
+      throwIfAborted(effectiveSignal);
+    }
+  };
+}
 
 export function createRunId(date = new Date()): string {
   const stamp = date.toISOString().replace(/[:.]/g, "-");

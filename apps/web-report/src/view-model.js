@@ -63,7 +63,7 @@ export function summarizeRun(run) {
   };
 }
 
-function runtimeIdentity(result) {
+export function runtimeIdentity(result) {
   return {
     provider: result.resolvedRuntime?.providerProfileName ?? result.requestedConfig?.providerProfileId ?? "official",
     providerKind: result.resolvedRuntime?.providerKind ?? "unknown",
@@ -82,11 +82,11 @@ function resultKey(result) {
   return result.variantId ?? result.agentId;
 }
 
-function resultLabel(result) {
+export function resultLabel(result) {
   return result.displayLabel ?? result.agentTitle ?? result.variantId ?? result.agentId;
 }
 
-function baseAgentLabel(result) {
+export function baseAgentLabel(result) {
   return result.baseAgentId ?? result.agentId;
 }
 
@@ -318,17 +318,6 @@ export function getRunCompareRows(runs, options = {}) {
 
     return rightValue > leftValue ? 1 : -1;
   });
-}
-
-function compareStatusRank(status) {
-  switch (status) {
-    case "success":
-      return 0;
-    case "failed":
-      return 1;
-    default:
-      return 2;
-  }
 }
 
 export function getCompareResults(run, options = {}) {

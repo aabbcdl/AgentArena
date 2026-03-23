@@ -83,147 +83,8 @@ export interface ReportTranslations {
   baselineRepoHealthNote: string;
 }
 
-const translations: Record<Locale, ReportTranslations> = {
-  en: {
-    title: "RepoArena Report",
-    summary: "RepoArena Summary",
-    adapterPreflight: "Adapter Preflight",
-    benchmarkResults: "Benchmark Results",
-    setup: "Setup",
-    teardown: "Teardown",
-    judges: "Judges",
-    changedFiles: "Changed Files",
-    diffBreakdown: "Diff Breakdown",
-    added: "Added",
-    changed: "Changed",
-    removed: "Removed",
-    noCommandsExecuted: "No commands executed.",
-    noJudgesExecuted: "No judges executed.",
-    noDiffDetected: "No diff detected.",
-    none: "None",
-    pass: "pass",
-    fail: "fail",
-    debugOutput: "Debug output",
-    stdout: "stdout",
-    stderr: "stderr",
-    cwd: "cwd",
-    successRate: "Success Rate",
-    failed: "Failed",
-    totalTokens: "Total Tokens",
-    knownCost: "Known Cost",
-    badgeEndpoint: "Badge Endpoint",
-    note: "Note",
-    taskLibrary: "Task Library",
-    repoTypes: "Repo Types",
-    objective: "Objective",
-    judgeRationale: "Judge Rationale",
-    provider: "Provider",
-    providerKind: "Provider Kind",
-    providerSource: "Provider Source",
-    model: "Model",
-    reasoning: "Reasoning",
-    verification: "Verification",
-    source: "Source",
-    supportTier: "Support Tier",
-    invocation: "Invocation",
-    tokens: "Tokens",
-    cost: "Cost",
-    trace: "Trace",
-    authPrerequisites: "Auth Prerequisites",
-    knownLimitations: "Known Limitations",
-    variant: "Variant",
-    baseAgent: "Base Agent",
-    status: "Status",
-    duration: "Duration",
-    judgesPassed: "Judges",
-    filesChanged: "Files",
-    preflight: "Preflight",
-    run: "Run",
-    attention: "Attention",
-    reviewTable: "Review Table",
-    reviewFocus: "Review Focus",
-    artifacts: "Artifacts",
-    artifactsNote: "Use `report.html` for drill-down, `summary.md` for share text, and `badge.json` for Shields endpoint output.",
-    noWarningsOrFailures: "No warnings or failures in this run.",
-    riskNote: "This result was produced through a provider-switched Claude Code configuration.",
-    prompt: "Prompt",
-    generatedAt: "Generated at",
-    forRun: "for run",
-    comparesModelConfigurations: "This report compares specific model configurations, not just adapter names.",
-    baselineRepoHealthNote: "For baseline repo-health tasks, success only means the agent completed a small improvement without breaking baseline repository structure."
-  },
-  "zh-CN": {
-    title: "RepoArena 报告",
-    summary: "RepoArena 摘要",
-    adapterPreflight: "适配器预检",
-    benchmarkResults: "基准测试结果",
-    setup: "设置",
-    teardown: "清理",
-    judges: "评判器",
-    changedFiles: "变更文件",
-    diffBreakdown: "差异分解",
-    added: "新增",
-    changed: "修改",
-    removed: "删除",
-    noCommandsExecuted: "未执行任何命令。",
-    noJudgesExecuted: "未执行任何评判器。",
-    noDiffDetected: "未检测到差异。",
-    none: "无",
-    pass: "通过",
-    fail: "失败",
-    debugOutput: "调试输出",
-    stdout: "标准输出",
-    stderr: "标准错误",
-    cwd: "工作目录",
-    successRate: "成功率",
-    failed: "失败",
-    totalTokens: "总令牌数",
-    knownCost: "已知成本",
-    badgeEndpoint: "徽章端点",
-    note: "注意",
-    taskLibrary: "任务库",
-    repoTypes: "仓库类型",
-    objective: "目标",
-    judgeRationale: "评判依据",
-    provider: "提供商",
-    providerKind: "提供商类型",
-    providerSource: "提供商来源",
-    model: "模型",
-    reasoning: "推理",
-    verification: "验证",
-    source: "来源",
-    supportTier: "支持级别",
-    invocation: "调用方式",
-    tokens: "令牌",
-    cost: "成本",
-    trace: "追踪",
-    authPrerequisites: "认证前提",
-    knownLimitations: "已知限制",
-    variant: "变体",
-    baseAgent: "基础代理",
-    status: "状态",
-    duration: "耗时",
-    judgesPassed: "评判器",
-    filesChanged: "文件",
-    preflight: "预检",
-    run: "运行",
-    attention: "关注",
-    reviewTable: "审查表",
-    reviewFocus: "审查重点",
-    artifacts: "产物",
-    artifactsNote: "使用 `report.html` 进行详细查看，`summary.md` 用于分享文本，`badge.json` 用于 Shields 端点输出。",
-    noWarningsOrFailures: "本次运行没有警告或失败。",
-    riskNote: "此结果是通过提供商切换的 Claude Code 配置生成的。",
-    prompt: "提示词",
-    generatedAt: "生成于",
-    forRun: "运行",
-    comparesModelConfigurations: "此报告比较特定的模型配置，而不仅仅是适配器名称。",
-    baselineRepoHealthNote: "对于基线仓库健康任务，成功仅意味着代理完成了小幅改进而没有破坏基线仓库结构。"
-  }
-};
-
-function _getTranslations(locale: Locale = "en"): ReportTranslations {
-  return translations[locale] || translations.en;
+function escapeMdCell(value: string): string {
+  return value.replaceAll("|", "\\|").replaceAll("\n", " ");
 }
 
 interface BadgePayload {
@@ -356,16 +217,19 @@ function sanitizeRun(run: BenchmarkRun): BenchmarkRun {
       },
       setupResults: result.setupResults.map((step) => ({
         ...step,
+        command: "[redacted]",
         cwd: sanitizeWorkspaceScopedPath(step.cwd, result.workspacePath, result.agentId)
       })),
       judgeResults: result.judgeResults.map((judge) => ({
         ...judge,
+        command: judge.command ? "[redacted]" : undefined,
         cwd: judge.cwd
           ? sanitizeWorkspaceScopedPath(judge.cwd, result.workspacePath, result.agentId)
           : undefined
       })),
       teardownResults: result.teardownResults.map((step) => ({
         ...step,
+        command: "[redacted]",
         cwd: sanitizeWorkspaceScopedPath(step.cwd, result.workspacePath, result.agentId)
       })),
       tracePath: sanitizePath(result.tracePath, run.outputPath, "run"),
@@ -473,15 +337,33 @@ function costEfficiencyScore(result: BenchmarkRun["results"][number], run: Bench
   return cheapest / Math.max(result.estimatedCostUsd, cheapest);
 }
 
-function computeCompositeScore(result: BenchmarkRun["results"][number], run: BenchmarkRun): number {
+function computeCompositeScore(
+  result: BenchmarkRun["results"][number],
+  run: BenchmarkRun,
+  scoreWeights?: Record<string, number>
+): number {
+  const w = scoreWeights ?? {
+    status: 0.3,
+    tests: 0.25,
+    judges: 0.15,
+    lint: 0.1,
+    precision: 0.1,
+    duration: 0.06,
+    cost: 0.04
+  };
+  const total = Object.values(w).reduce((sum, v) => sum + v, 0);
+  const n = total > 0
+    ? Object.fromEntries(Object.entries(w).map(([k, v]) => [k, v / total]))
+    : w;
+
   const weightedScore =
-    (result.status === "success" ? 1 : 0) * 0.3 +
-    testPassRatio(result) * 0.25 +
-    Math.max(judgePassRatio(result), 0) * 0.15 +
-    lintQualityScore(result) * 0.1 +
-    Math.max(result.diffPrecision?.score ?? 0, 0) * 0.1 +
-    durationEfficiencyScore(result, run) * 0.06 +
-    costEfficiencyScore(result, run) * 0.04;
+    (result.status === "success" ? 1 : 0) * (n.status ?? 0) +
+    testPassRatio(result) * (n.tests ?? 0) +
+    Math.max(judgePassRatio(result), 0) * (n.judges ?? 0) +
+    lintQualityScore(result) * (n.lint ?? 0) +
+    Math.max(result.diffPrecision?.score ?? 0, 0) * (n.precision ?? 0) +
+    durationEfficiencyScore(result, run) * (n.duration ?? 0) +
+    costEfficiencyScore(result, run) * (n.cost ?? 0);
 
   return Math.round(weightedScore * 1000) / 10;
 }
@@ -513,7 +395,7 @@ function enrichRunWithScores(run: BenchmarkRun): ScoredRun {
     scoreWeights,
     results: run.results.map((result) => ({
       ...result,
-      compositeScore: computeCompositeScore(result, run),
+      compositeScore: computeCompositeScore(result, run, scoreWeights),
       scoreReasons: computeScoreReasons(result, run)
     }))
   };
@@ -716,12 +598,12 @@ function renderAgentCards(run: BenchmarkRun): string {
             runtime.reasoning
           )} | Verification: ${escapeHtml(runtime.verification)} | Source: ${escapeHtml(runtime.source)}</p>
           <div class="stats">
-            <div><strong>Status</strong><span>${result.status}</span></div>
-            <div><strong>Composite Score</strong><span>${(result.compositeScore ?? 0).toFixed(1)}</span></div>
+            <div><strong>Status</strong><span>${escapeHtml(result.status)}</span></div>
+            <div><strong>Composite Score</strong><span>${escapeHtml(String((result.compositeScore ?? 0).toFixed(1)))}</span></div>
             <div><strong>Duration</strong><span>${escapeHtml(formatDuration(result.durationMs))}</span></div>
-            <div><strong>Tokens</strong><span>${result.tokenUsage}</span></div>
+            <div><strong>Tokens</strong><span>${escapeHtml(String(result.tokenUsage))}</span></div>
             <div><strong>Cost</strong><span>${
-              result.costKnown ? `$${result.estimatedCostUsd.toFixed(2)}` : "n/a"
+              result.costKnown ? escapeHtml(`$${result.estimatedCostUsd.toFixed(2)}`) : "n/a"
             }</span></div>
             <div><strong>Tests</strong><span>${escapeHtml(formatTestMetric(result))}</span></div>
             <div><strong>Lint</strong><span>${escapeHtml(formatLintMetric(result))}</span></div>
@@ -966,7 +848,7 @@ function renderMarkdown(run: BenchmarkRun): string {
   for (const preflight of run.preflights) {
     const runtime = formatRuntimeIdentity(preflight);
     lines.push(
-      `| ${preflight.displayLabel} | ${preflight.baseAgentId} | ${runtime.provider} | ${runtime.providerKind} | ${runtime.model} | ${runtime.reasoning} | ${runtime.verification}/${runtime.source} | ${preflight.status} | ${preflight.summary.replaceAll("\n", " ")} |`
+      `| ${escapeMdCell(preflight.displayLabel)} | ${escapeMdCell(preflight.baseAgentId)} | ${escapeMdCell(runtime.provider)} | ${escapeMdCell(runtime.providerKind)} | ${escapeMdCell(runtime.model)} | ${escapeMdCell(runtime.reasoning)} | ${escapeMdCell(runtime.verification)}/${escapeMdCell(runtime.source)} | ${escapeMdCell(preflight.status)} | ${escapeMdCell(preflight.summary)} |`
     );
   }
 
@@ -975,11 +857,11 @@ function renderMarkdown(run: BenchmarkRun): string {
   lines.push("| --- | --- | --- | --- | --- | --- | --- |");
   for (const preflight of run.preflights) {
     lines.push(
-      `| ${preflight.displayLabel} | ${preflight.baseAgentId} | ${formatSupportTier(preflight.capability.supportTier)} | ${preflight.capability.invocationMethod.replaceAll("\n", " ")} | ${formatAvailability(preflight.capability.tokenAvailability)} | ${formatAvailability(preflight.capability.costAvailability)} | ${formatTraceRichness(preflight.capability.traceRichness)} |`
+      `| ${escapeMdCell(preflight.displayLabel)} | ${escapeMdCell(preflight.baseAgentId)} | ${formatSupportTier(preflight.capability.supportTier)} | ${escapeMdCell(preflight.capability.invocationMethod)} | ${formatAvailability(preflight.capability.tokenAvailability)} | ${formatAvailability(preflight.capability.costAvailability)} | ${formatTraceRichness(preflight.capability.traceRichness)} |`
     );
     if (preflight.capability.knownLimitations.length > 0) {
       lines.push(
-        `|  | limitations | ${preflight.capability.knownLimitations.join("; ").replaceAll("\n", " ")} |  |  |  |`
+        `|  | limitations | ${escapeMdCell(preflight.capability.knownLimitations.join("; "))} |  |  |  |`
       );
     }
   }
@@ -992,9 +874,9 @@ function renderMarkdown(run: BenchmarkRun): string {
     const runtime = formatRuntimeIdentity(result);
     const passedJudgeCount = result.judgeResults.filter((judge) => judge.success).length;
     lines.push(
-      `| ${result.displayLabel} | ${result.baseAgentId} | ${runtime.provider} | ${runtime.providerKind} | ${runtime.model} | ${runtime.reasoning} | ${runtime.verification}/${runtime.source} | ${result.status} | ${(result.compositeScore ?? 0).toFixed(1)} | ${formatDuration(result.durationMs)} | ${result.tokenUsage} | ${
+      `| ${escapeMdCell(result.displayLabel ?? result.agentId)} | ${escapeMdCell(result.baseAgentId)} | ${escapeMdCell(runtime.provider)} | ${escapeMdCell(runtime.providerKind)} | ${escapeMdCell(runtime.model)} | ${escapeMdCell(runtime.reasoning)} | ${escapeMdCell(runtime.verification)}/${escapeMdCell(runtime.source)} | ${result.status} | ${(result.compositeScore ?? 0).toFixed(1)} | ${formatDuration(result.durationMs)} | ${result.tokenUsage} | ${
         result.costKnown ? `$${result.estimatedCostUsd.toFixed(2)}` : "n/a"
-      } | ${result.changedFiles.length} | ${passedJudgeCount}/${result.judgeResults.length} | ${formatTestMetric(result)} | ${formatLintMetric(result)} | ${formatDiffPrecisionMetric(result)} |`
+      } | ${result.changedFiles.length} | ${passedJudgeCount}/${result.judgeResults.length} | ${escapeMdCell(formatTestMetric(result))} | ${escapeMdCell(formatLintMetric(result))} | ${escapeMdCell(formatDiffPrecisionMetric(result))} |`
     );
   }
 
@@ -1104,9 +986,9 @@ function renderPrComment(run: BenchmarkRun): string {
             ? result.preflight.summary
             : "ready";
     table.push(
-      `| ${attention} | ${result.displayLabel} | ${result.baseAgentId} | ${runtime.provider} | ${runtime.providerKind} | ${runtime.model} | ${runtime.reasoning} | ${runtime.verification}/${runtime.source} | ${formatSupportTier(result.preflight.capability.supportTier)} | ${result.preflight.status} | ${result.status} | ${(result.compositeScore ?? 0).toFixed(1)} | ${formatDuration(result.durationMs)} | ${result.tokenUsage} | ${
+      `| ${attention} | ${escapeMdCell(result.displayLabel ?? result.agentId)} | ${escapeMdCell(result.baseAgentId)} | ${escapeMdCell(runtime.provider)} | ${escapeMdCell(runtime.providerKind)} | ${escapeMdCell(runtime.model)} | ${escapeMdCell(runtime.reasoning)} | ${escapeMdCell(runtime.verification)}/${escapeMdCell(runtime.source)} | ${formatSupportTier(result.preflight.capability.supportTier)} | ${result.preflight.status} | ${result.status} | ${(result.compositeScore ?? 0).toFixed(1)} | ${formatDuration(result.durationMs)} | ${result.tokenUsage} | ${
         result.costKnown ? `$${result.estimatedCostUsd.toFixed(2)}` : "n/a"
-      } | ${passedJudgeCount}/${result.judgeResults.length} | ${formatTestMetric(result)} | ${formatLintMetric(result)} | ${formatDiffPrecisionMetric(result)} | ${result.changedFiles.length} | ${note.replaceAll("\n", " ")} |`
+      } | ${passedJudgeCount}/${result.judgeResults.length} | ${escapeMdCell(formatTestMetric(result))} | ${escapeMdCell(formatLintMetric(result))} | ${escapeMdCell(formatDiffPrecisionMetric(result))} | ${result.changedFiles.length} | ${escapeMdCell(note)} |`
     );
   }
 

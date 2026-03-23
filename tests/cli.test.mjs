@@ -5,13 +5,17 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
+
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const CLI_ENTRY = path.join(REPO_ROOT, "packages", "cli", "dist", "index.js");
 
 async function writeJson(filePath, value) {
   await writeFile(filePath, JSON.stringify(value, null, 2), "utf8");
 }
 
 async function runCli(args, cwd, envOverrides = {}) {
-  const cliPath = path.resolve("packages/cli/dist/index.js");
+  const cliPath = CLI_ENTRY;
 
   return await new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [cliPath, ...args], {
@@ -57,7 +61,7 @@ async function getAvailablePort() {
 }
 
 async function startUiServer(cwd, extraArgs = [], envOverrides = {}) {
-  const cliPath = path.resolve("packages/cli/dist/index.js");
+  const cliPath = CLI_ENTRY;
   const port = await getAvailablePort();
   const child = spawn(process.execPath, [cliPath, "ui", "--host", "127.0.0.1", "--port", String(port), "--no-open", ...extraArgs], {
     cwd,
@@ -661,6 +665,102 @@ test("repoarena ui rejects oversized request bodies with 413", async () => {
     assert.equal(payload.error, "Request body too large.");
   } finally {
     await server.stop();
+  }
+});
+
+test("repoarena ui cancels an active benchmark via API", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-ui-cancel-"));
+  const repoPath = path.join(tempDir, "repo");
+  const outputPath = path.join(tempDir, "output");
+  const taskPath = path.join(tempDir, "task-cancel.json");
+
+  await mkdir(repoPath, { recursive: true });
+  await writeFile(path.join(repoPath, "README.md"), "# UI Repo\n", "utf8");
+
+  await writeJson(taskPath, {
+    schemaVersion: "repoarena.taskpack/v1",
+    id: "ui-cancel",
+    title: "UI Cancel",
+    prompt: "Cancel a UI run.",
+    teardownCommands: [
+      {
+        id: "cleanup",
+        label: "cleanup marker",
+        command: "node -e \"require('node:fs').writeFileSync('teardown-marker.txt','done')\""
+      }
+    ],
+    judges: [
+      {
+        id: "pass",
+        type: "command",
+        label: "Always pass",
+        command: "node -e \"process.exit(0)\""
+      }
+    ]
+  });
+
+  const server = await startUiServer(path.resolve("."));
+
+  try {
+    const response = await fetch(`http://127.0.0.1:${server.port}/api/run`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        repoPath,
+        taskPath,
+        outputPath,
+        agents: [
+          {
+            baseAgentId: "demo-thorough",
+            displayLabel: "Demo Thorough"
+          }
+        ],
+        probeAuth: false,
+        maxConcurrency: 1,
+        cleanupWorkspaces: false
+      })
+    });
+
+    assert.equal(response.status, 202);
+
+    let runningStatus;
+    for (let i = 0; i < 30; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      const statusResponse = await fetch(`http://127.0.0.1:${server.port}/api/run-status`);
+      runningStatus = await statusResponse.json();
+      if (runningStatus.state === "running") {
+        break;
+      }
+    }
+
+    assert.equal(runningStatus.state, "running");
+
+    const cancelResponse = await fetch(`http://127.0.0.1:${server.port}/api/run/cancel`, {
+      method: "POST"
+    });
+    assert.equal(cancelResponse.status, 200);
+    const cancelPayload = await cancelResponse.json();
+    assert.equal(cancelPayload.cancelled, true);
+
+    let finalStatus;
+    for (let i = 0; i < 30; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      const statusResponse = await fetch(`http://127.0.0.1:${server.port}/api/run-status`);
+      finalStatus = await statusResponse.json();
+      if (finalStatus.state === "cancelled") {
+        break;
+      }
+    }
+
+    assert.equal(finalStatus.state, "cancelled");
+    assert.equal(finalStatus.phase, "idle");
+    assert.ok(finalStatus.logs.some((entry) => /Cancellation requested by user/.test(entry.message)));
+    assert.ok(finalStatus.logs.some((entry) => /Run cancelled/.test(entry.message)));
+  } finally {
+    await server.stop();
+    await rm(tempDir, { recursive: true, force: true });
   }
 });
 

@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execSync, spawn } from "node:child_process";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -10,6 +10,7 @@ import {
   type AdapterPreflightResult,
   type AgentAdapter,
   type AgentResolvedRuntime,
+  BenchmarkCancelledError,
   type ClaudeProviderProfile,
   ensureDirectory,
   normalizePath,
@@ -200,8 +201,29 @@ const CURSOR_CAPABILITY: AdapterCapability = {
   ]
 };
 
-async function sleep(durationMs: number): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, durationMs));
+async function sleep(durationMs: number, signal?: AbortSignal): Promise<void> {
+  if (!signal) {
+    await new Promise((resolve) => setTimeout(resolve, durationMs));
+    return;
+  }
+
+  if (signal.aborted) {
+    throw new BenchmarkCancelledError();
+  }
+
+  await new Promise((resolve, reject) => {
+    const timeoutHandle = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve(undefined);
+    }, durationMs);
+
+    const onAbort = () => {
+      clearTimeout(timeoutHandle);
+      reject(new BenchmarkCancelledError());
+    };
+
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 function computeTokenUsage(prompt: string, profile: DemoProfile): number {
@@ -471,7 +493,8 @@ async function runProcess(
   args: string[],
   cwd: string,
   timeoutMs = agentTimeoutMs(),
-  environment?: NodeJS.ProcessEnv
+  environment?: NodeJS.ProcessEnv,
+  signal?: AbortSignal
 ): Promise<ProcessResult> {
   return await new Promise((resolve) => {
     let child: ReturnType<typeof spawn> | null = null;
@@ -479,19 +502,35 @@ async function runProcess(
     let stderr = "";
     let timedOut = false;
     let resolved = false;
-    let signal: NodeJS.Signals | undefined;
+    let closeSignal: NodeJS.Signals | undefined;
     let processError: string | undefined;
 
     const cleanup = () => {
-      if (child && !child.killed) {
+      if (child && !child.killed && child.pid) {
+        const pid = child.pid;
         try {
-          child.kill("SIGTERM");
-          // Give process time to terminate gracefully
-          setTimeout(() => {
-            if (child && !child.killed) {
-              child.kill("SIGKILL");
+          if (process.platform !== "win32") {
+            // Kill the entire process group on Unix
+            try {
+              process.kill(-pid, "SIGTERM");
+            } catch {
+              child.kill("SIGTERM");
             }
-          }, 2000);
+            setTimeout(() => {
+              try {
+                process.kill(-pid, "SIGKILL");
+              } catch {
+                if (child && !child.killed) child.kill("SIGKILL");
+              }
+            }, 2000);
+          } else {
+            // Use taskkill to kill the process tree on Windows
+            try {
+              execSync(`taskkill /F /T /PID ${pid}`, { stdio: "ignore" });
+            } catch {
+              child.kill("SIGTERM");
+            }
+          }
         } catch {
           // Ignore kill errors
         }
@@ -502,7 +541,20 @@ async function runProcess(
       if (resolved) return;
       resolved = true;
       clearTimeout(timeoutHandle);
+      signal?.removeEventListener("abort", onAbort);
       resolve(result);
+    };
+
+    const onAbort = () => {
+      cleanup();
+      finish({
+        exitCode: null,
+        stdout,
+        stderr: `${stderr}\nProcess cancelled.`.trim(),
+        timedOut: false,
+        signal: "SIGTERM",
+        error: "cancelled"
+      });
     };
 
     const timeoutHandle = setTimeout(() => {
@@ -527,8 +579,14 @@ async function runProcess(
         stdio: ["ignore", "pipe", "pipe"],
         shell: false,
         windowsHide: true,
-        windowsVerbatimArguments: false
+        windowsVerbatimArguments: false,
+        ...(process.platform !== "win32" ? { detached: true } : {})
       });
+      if (signal?.aborted) {
+        onAbort();
+        return;
+      }
+      signal?.addEventListener("abort", onAbort, { once: true });
     } catch (error) {
       clearTimeout(timeoutHandle);
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -584,9 +642,9 @@ async function runProcess(
       });
     });
 
-    child.on("close", (exitCode, closeSignal) => {
+    child.on("close", (exitCode, closeSignalValue) => {
       clearTimeout(timeoutHandle);
-      signal = closeSignal ?? undefined;
+      closeSignal = closeSignalValue ?? undefined;
       const timeoutSuffix = timedOut ? `\n${formatTimeoutMessage(timeoutMs)}` : "";
       const errorSuffix = processError ? `\nProcess error: ${processError}` : "";
       finish({
@@ -594,7 +652,7 @@ async function runProcess(
         stdout,
         stderr: `${stderr}${timeoutSuffix}${errorSuffix}`.trim(),
         timedOut,
-        signal
+        signal: closeSignal
       });
     });
 
@@ -1046,7 +1104,7 @@ class DemoAdapter implements AgentAdapter {
       }
     });
 
-    await sleep(this.profile.delayMs);
+    await sleep(this.profile.delayMs, context.signal);
 
     const changedFilesHint = await writeDemoArtifacts(context, this.profile);
     const summary = buildDemoSummary(context, this.profile);
@@ -1229,7 +1287,8 @@ class CodexCliAdapter implements AgentAdapter {
         args,
         context.workspacePath,
         agentTimeoutMs(),
-        context.environment
+        context.environment,
+        context.signal
       );
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -1421,7 +1480,8 @@ abstract class ClaudeLikeAdapter implements AgentAdapter {
         {
           ...context.environment,
           ...options?.extraEnvironment
-        }
+        },
+        context.signal
       );
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);

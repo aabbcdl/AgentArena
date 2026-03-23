@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -235,12 +235,12 @@
               </div>
             </section>
             <div class="filter-bar">
-              <select id="compare-status-filter">
+              <select id="compare-status-filter" aria-label="Filter by status">
                 <option value="all">All Statuses</option>
                 <option value="success">Success</option>
                 <option value="failed">Failed</option>
               </select>
-              <select id="compare-sort">
+              <select id="compare-sort" aria-label="Sort agents">
                 <option value="status">Status</option>
                 <option value="duration">Duration (fastest first)</option>
                 <option value="tokens">Tokens (high to low)</option>
@@ -271,11 +271,11 @@
                 <h3 id="run-compare-title">Run Compare</h3>
               </div>
               <div class="filter-bar">
-                <select id="run-compare-scope">
+                <select id="run-compare-scope" aria-label="Run compare scope">
                   <option value="current-task">Current Task Only</option>
                   <option value="all">All Tasks</option>
                 </select>
-                <select id="run-compare-sort">
+                <select id="run-compare-sort" aria-label="Sort runs">
                   <option value="created">Created At (newest first)</option>
                   <option value="success">Success Rate (high to low)</option>
                   <option value="tokens">Tokens (high to low)</option>
@@ -339,10 +339,10 @@
               </div>
               <div class="filter-bar">
                 <input id="judge-search" type="search" placeholder="Search label, target, expectation" />
-                <select id="judge-type-filter">
+                <select id="judge-type-filter" aria-label="Filter by judge type">
                   <option value="all">All Types</option>
                 </select>
-                <select id="judge-status-filter">
+                <select id="judge-status-filter" aria-label="Filter by judge status">
                   <option value="all">All Statuses</option>
                   <option value="pass">Pass</option>
                   <option value="fail">Fail</option>

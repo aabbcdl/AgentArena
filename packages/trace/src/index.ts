@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { createReadStream, promises as fs } from "node:fs";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
@@ -17,6 +18,28 @@ export interface TraceQueryOptions {
   offset?: number;
   filter?: TraceFilter;
   reverse?: boolean;
+}
+
+function matchesFilter(event: TraceEvent, filter: TraceFilter): boolean {
+  if (filter.agentId && event.agentId !== filter.agentId) {
+    return false;
+  }
+  if (filter.type) {
+    const types = Array.isArray(filter.type) ? filter.type : [filter.type];
+    if (!types.includes(event.type)) {
+      return false;
+    }
+  }
+  if (filter.startTime && event.timestamp < filter.startTime) {
+    return false;
+  }
+  if (filter.endTime && event.timestamp > filter.endTime) {
+    return false;
+  }
+  if (filter.messageContains && !event.message.toLowerCase().includes(filter.messageContains.toLowerCase())) {
+    return false;
+  }
+  return true;
 }
 
 export class JsonlTraceRecorder {
@@ -110,30 +133,7 @@ export class JsonlTraceRecorder {
   }
 
   private matchesFilter(event: TraceEvent, filter: TraceFilter): boolean {
-    if (filter.agentId && event.agentId !== filter.agentId) {
-      return false;
-    }
-
-    if (filter.type) {
-      const types = Array.isArray(filter.type) ? filter.type : [filter.type];
-      if (!types.includes(event.type)) {
-        return false;
-      }
-    }
-
-    if (filter.startTime && event.timestamp < filter.startTime) {
-      return false;
-    }
-
-    if (filter.endTime && event.timestamp > filter.endTime) {
-      return false;
-    }
-
-    if (filter.messageContains && !event.message.toLowerCase().includes(filter.messageContains.toLowerCase())) {
-      return false;
-    }
-
-    return true;
+    return matchesFilter(event, filter);
   }
 
   async getEventCount(): Promise<number> {
@@ -174,23 +174,31 @@ export class JsonlTraceRecorder {
     const compressedPath = `${this.filePath}.gz`;
     const sourceStream = createReadStream(this.filePath);
     const gzipStream = createGzip();
-    const destinationStream = (await fs.open(compressedPath, "w")).createWriteStream();
-
-    await pipeline(sourceStream, gzipStream, destinationStream);
+    const fileHandle = await fs.open(compressedPath, "w");
+    try {
+      const destinationStream = fileHandle.createWriteStream();
+      await pipeline(sourceStream, gzipStream, destinationStream);
+    } finally {
+      await fileHandle.close();
+    }
     return compressedPath;
   }
 
   static async decompress(compressedPath: string, outputPath: string): Promise<void> {
     const sourceStream = createReadStream(compressedPath);
     const gunzipStream = createGunzip();
-    const destinationStream = (await fs.open(outputPath, "w")).createWriteStream();
-
-    await pipeline(sourceStream, gunzipStream, destinationStream);
+    const fileHandle = await fs.open(outputPath, "w");
+    try {
+      const destinationStream = fileHandle.createWriteStream();
+      await pipeline(sourceStream, gunzipStream, destinationStream);
+    } finally {
+      await fileHandle.close();
+    }
   }
 
   static async readCompressed(compressedPath: string): Promise<TraceEvent[]> {
     const events: TraceEvent[] = [];
-    const tempOutputPath = `${compressedPath}.${Date.now()}.tmp.jsonl`;
+    const tempOutputPath = `${compressedPath}.${randomUUID()}.tmp.jsonl`;
 
     try {
       await JsonlTraceRecorder.decompress(compressedPath, tempOutputPath);
@@ -244,30 +252,7 @@ export class InMemoryTraceRecorder {
   }
 
   private matchesFilter(event: TraceEvent, filter: TraceFilter): boolean {
-    if (filter.agentId && event.agentId !== filter.agentId) {
-      return false;
-    }
-
-    if (filter.type) {
-      const types = Array.isArray(filter.type) ? filter.type : [filter.type];
-      if (!types.includes(event.type)) {
-        return false;
-      }
-    }
-
-    if (filter.startTime && event.timestamp < filter.startTime) {
-      return false;
-    }
-
-    if (filter.endTime && event.timestamp > filter.endTime) {
-      return false;
-    }
-
-    if (filter.messageContains && !event.message.toLowerCase().includes(filter.messageContains.toLowerCase())) {
-      return false;
-    }
-
-    return true;
+    return matchesFilter(event, filter);
   }
 
   clear(): void {

@@ -6,6 +6,7 @@ import {
   type AdapterPreflightResult,
   type AgentRunResult,
   type AgentSelection,
+  type BenchmarkCancellation,
   type BenchmarkRun,
   buildExecutionEnvironment,
   type CommandStepResult,
@@ -16,9 +17,11 @@ import {
   type DiffSummary,
   diffSnapshots,
   ensureDirectory,
+  isAbortError,
   normalizePath,
   resolveRepoSource,
   snapshotDirectory,
+  throwIfAborted,
   uniqueSorted
 } from "@repoarena/core";
 import { runCommandSteps, runJudges } from "@repoarena/judges";
@@ -36,6 +39,7 @@ export interface BenchmarkOptions {
   updateSnapshots?: boolean;
   cleanupWorkspaces?: boolean;
   builtinReposRoot?: string;
+  cancellation?: BenchmarkCancellation;
   onProgress?: (event: BenchmarkProgressEvent) => void | Promise<void>;
 }
 
@@ -94,25 +98,39 @@ function agentConcurrency(options: BenchmarkOptions): number {
   return options.maxConcurrency ?? resolvePositiveInt(process.env.REPOARENA_MAX_CONCURRENCY, DEFAULT_AGENT_CONCURRENCY);
 }
 
+interface MapWithConcurrencyResult<R> {
+  results: R[];
+  aborted: boolean;
+}
+
 async function mapWithConcurrency<T, R>(
   items: T[],
   limit: number,
-  mapper: (item: T, index: number) => Promise<R>
-): Promise<R[]> {
-  const safeLimit = Math.max(1, Math.min(limit, items.length));
+  mapper: (item: T, index: number) => Promise<R>,
+  options: { signal?: AbortSignal } = {}
+): Promise<MapWithConcurrencyResult<R>> {
+  const safeLimit = Math.max(1, Math.min(limit, items.length || 1));
   const results = new Array<R>(items.length);
   let nextIndex = 0;
-  const errors: Array<{ index: number; error: unknown }> = [];
+  let aborted = false;
 
   async function worker(): Promise<void> {
     while (nextIndex < items.length) {
+      if (options.signal?.aborted) {
+        aborted = true;
+        return;
+      }
+
       const currentIndex = nextIndex;
       nextIndex += 1;
+
       try {
         results[currentIndex] = await mapper(items[currentIndex], currentIndex);
       } catch (error) {
-        errors.push({ index: currentIndex, error });
-        // Re-throw to maintain original behavior
+        if (isAbortError(error)) {
+          aborted = true;
+          return;
+        }
         throw error;
       }
     }
@@ -124,7 +142,10 @@ async function mapWithConcurrency<T, R>(
 
   await Promise.all(workers);
 
-  return results;
+  return {
+    results: results.filter((value) => value !== undefined),
+    aborted
+  };
 }
 
 function buildChangedFiles(diff: DiffSummary, hints: string[]): string[] {
@@ -206,6 +227,49 @@ function buildDiffPrecision(
 
 function summarizeCommandStepFailure(stage: "setup" | "teardown", result: CommandStepResult): string {
   return `${stage} command "${result.label}" failed with exit code ${result.exitCode}.`;
+}
+
+function createCancellationSummary(stage: string): string {
+  return `Benchmark cancelled during ${stage}.`;
+}
+
+function createCancelledRunResult(
+  preflight: AdapterPreflightResult,
+  tracePath: string,
+  workspacePath: string,
+  summary: string,
+  setupResults: CommandStepResult[] = [],
+  judgeResults: Awaited<ReturnType<typeof runJudges>> = [],
+  teardownResults: CommandStepResult[] = [],
+  diff: DiffSummary = { added: [], changed: [], removed: [] },
+  diffPrecision?: DiffPrecisionSummary
+): AgentRunResult {
+  return {
+    agentId: preflight.agentId,
+    baseAgentId: preflight.baseAgentId,
+    variantId: preflight.variantId,
+    displayLabel: preflight.displayLabel,
+    requestedConfig: preflight.requestedConfig,
+    resolvedRuntime: preflight.resolvedRuntime,
+    agentTitle: preflight.agentTitle,
+    adapterKind: preflight.adapterKind,
+    preflight,
+    status: "cancelled",
+    summary,
+    durationMs: 0,
+    tokenUsage: 0,
+    estimatedCostUsd: 0,
+    costKnown: false,
+    changedFiles: uniqueSorted([...diff.added, ...diff.changed, ...diff.removed]),
+    changedFilesHint: [],
+    setupResults,
+    judgeResults,
+    teardownResults,
+    tracePath,
+    workspacePath,
+    diff,
+    diffPrecision
+  };
 }
 
 function normalizeSelections(options: BenchmarkOptions): AgentSelection[] {
@@ -299,7 +363,7 @@ async function runAgent(
   workspaceRootPath: string,
   taskPath: string,
   preflight: AdapterPreflightResult,
-  options: Pick<BenchmarkOptions, "updateSnapshots">
+  options: Pick<BenchmarkOptions, "updateSnapshots" | "cancellation">
 ): Promise<AgentRunResult> {
   const task = await loadTaskPack(taskPath);
   const adapter = getAdapter(preflight.baseAgentId);
@@ -308,6 +372,17 @@ async function runAgent(
   const tracePath = path.join(agentOutputPath, "trace.jsonl");
   const traceRecorder = new JsonlTraceRecorder(tracePath);
   const executionEnvironment = buildExecutionEnvironment(task.envAllowList);
+  const cancellation = options.cancellation;
+  const throwIfCancelled = (stage: string) => {
+    try {
+      throwIfAborted(cancellation?.signal, createCancellationSummary(stage));
+    } catch (error) {
+      if (isAbortError(error)) {
+        throw error;
+      }
+      throw error;
+    }
+  };
 
   if (preflight.status === "missing" || preflight.status === "blocked") {
     await ensureDirectory(agentOutputPath);
@@ -335,7 +410,9 @@ async function runAgent(
   }
 
   await ensureDirectory(agentOutputPath);
-  
+
+  throwIfCancelled("workspace setup");
+
   try {
     await copyRepository(repoPath, workspacePath);
   } catch (error) {
@@ -367,8 +444,12 @@ async function runAgent(
 
   let setupResults: CommandStepResult[] = [];
   try {
-    setupResults = await runCommandSteps(task.setupCommands, workspacePath, task.envAllowList);
+    throwIfCancelled("setup");
+    setupResults = await runCommandSteps(task.setupCommands, workspacePath, task.envAllowList, cancellation?.signal);
   } catch (error) {
+    if (isAbortError(error)) {
+      return createCancelledRunResult(preflight, tracePath, workspacePath, formatErrorMessage(error));
+    }
     const errorDetails = formatErrorDetails(error);
     await traceRecorder.record({
       agentId: preflight.agentId,
@@ -471,6 +552,7 @@ async function runAgent(
       workspacePath,
       environment: executionEnvironment,
       task,
+      signal: cancellation?.signal,
       trace: async (event) => {
         await traceRecorder.record({
           ...event,
@@ -496,19 +578,23 @@ async function runAgent(
 
   if (adapterResult && adapterResult.status === "success") {
     try {
+      throwIfCancelled("judges");
       judgeResults = await runJudges(task.judges, workspacePath, task.envAllowList, {
-        updateSnapshots: options.updateSnapshots
+        updateSnapshots: options.updateSnapshots,
+        signal: cancellation?.signal
       });
     } catch (error) {
       judgeError = error;
-      const errorDetails = formatErrorDetails(error);
-      await traceRecorder.record({
-        agentId: preflight.agentId,
-        timestamp: new Date().toISOString(),
-        type: "judge.error",
-        message: "Judges execution failed.",
-        metadata: errorDetails
-      });
+      if (!isAbortError(error)) {
+        const errorDetails = formatErrorDetails(error);
+        await traceRecorder.record({
+          agentId: preflight.agentId,
+          timestamp: new Date().toISOString(),
+          type: "judge.error",
+          message: "Judges execution failed.",
+          metadata: errorDetails
+        });
+      }
     }
   }
 
@@ -533,27 +619,38 @@ async function runAgent(
 
   let teardownResults: CommandStepResult[] = [];
   let teardownError: unknown;
+  const teardownShouldIgnoreCancellation =
+    cancellation?.signal?.aborted === true || isAbortError(adapterError) || isAbortError(judgeError);
 
   try {
     teardownResults = await runCommandSteps(
       task.teardownCommands,
       workspacePath,
-      task.envAllowList
+      task.envAllowList,
+      teardownShouldIgnoreCancellation ? undefined : cancellation?.signal
     );
   } catch (error) {
-    teardownError = error;
-    const errorDetails = formatErrorDetails(error);
-    await traceRecorder.record({
-      agentId: preflight.agentId,
-      timestamp: new Date().toISOString(),
-      type: "teardown.error",
-      message: "Teardown commands execution failed.",
-      metadata: errorDetails
-    });
+    if (!isAbortError(error)) {
+      teardownError = error;
+      const errorDetails = formatErrorDetails(error);
+      await traceRecorder.record({
+        agentId: preflight.agentId,
+        timestamp: new Date().toISOString(),
+        type: "teardown.error",
+        message: "Teardown commands execution failed.",
+        metadata: errorDetails
+      });
+    }
   }
 
   const durationMs = Date.now() - startedAt;
+  const cancelled =
+    isAbortError(adapterError) ||
+    isAbortError(judgeError) ||
+    isAbortError(teardownError) ||
+    cancellation?.signal?.aborted === true;
   const success =
+    !cancelled &&
     adapterResult?.status === "success" &&
     !adapterError &&
     !judgeError &&
@@ -596,6 +693,25 @@ async function runAgent(
       teardownError: teardownError ? formatErrorMessage(teardownError) : undefined
     }
   });
+
+  if (cancelled) {
+    return {
+      ...createCancelledRunResult(
+        preflight,
+        tracePath,
+        workspacePath,
+        createCancellationSummary("agent execution"),
+        setupResults,
+        judgeResults,
+        teardownResults,
+        diff,
+        diffPrecision
+      ),
+      durationMs,
+      changedFiles,
+      changedFilesHint: adapterResult?.changedFilesHint ?? []
+    };
+  }
 
   if (adapterError) {
     const errorMessage = formatErrorMessage(adapterError);
@@ -685,6 +801,15 @@ async function runAgent(
 }
 
 export async function runBenchmark(options: BenchmarkOptions): Promise<BenchmarkRun> {
+  const cancellation = options.cancellation;
+  const safeProgress = async (event: BenchmarkProgressEvent): Promise<void> => {
+    try {
+      await options.onProgress?.(event);
+    } catch {
+      // Ignore progress callback errors
+    }
+  };
+
   const userRepoPath = path.resolve(options.repoPath);
   const task = await loadTaskPack(options.taskPath);
   const builtinReposRoot = options.builtinReposRoot ?? path.join(path.dirname(options.taskPath), "..", "repos");
@@ -714,9 +839,11 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
   const selections = normalizeSelections(options);
   const workspacePaths: string[] = [];
 
+  throwIfAborted(cancellation?.signal, createCancellationSummary("startup"));
+
   await ensureDirectory(outputPath);
   await ensureDirectory(workspaceRootPath);
-  await options.onProgress?.({
+  await safeProgress({
     phase: "starting",
     message: `Created run ${runId}.`,
     metadata: {
@@ -725,7 +852,7 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
     }
   });
 
-  await options.onProgress?.({
+  await safeProgress({
     phase: "preflight",
     message: `Running preflight for ${selections.length} agent selection(s).`,
     metadata: {
@@ -735,13 +862,17 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
 
   let preflights: AdapterPreflightResult[];
   try {
+    throwIfAborted(cancellation?.signal, createCancellationSummary("preflight"));
     preflights = await preflightAdapters(selections, { probeAuth: options.probeAuth });
   } catch (error) {
+    if (isAbortError(error)) {
+      throw error;
+    }
     const errorDetails = formatErrorDetails(error);
     throw new Error(`Preflight failed: ${errorDetails.message}`);
   }
 
-  await options.onProgress?.({
+  await safeProgress({
     phase: "preflight",
     message: `Preflight finished. ${preflights.filter((value) => value.status === "ready").length}/${preflights.length} ready.`,
     metadata: {
@@ -750,14 +881,15 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
     }
   });
 
-  const results = await mapWithConcurrency(
+  const { results, aborted } = await mapWithConcurrency(
     preflights,
     agentConcurrency(options),
     async (preflight) => {
+      throwIfAborted(cancellation?.signal, createCancellationSummary("agent scheduling"));
       const workspacePath = path.join(workspaceRootPath, preflight.variantId);
       workspacePaths.push(workspacePath);
 
-      await options.onProgress?.({
+      await safeProgress({
         phase: "agent-start",
         agentId: preflight.agentId,
         variantId: preflight.variantId,
@@ -771,15 +903,25 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
       let result: AgentRunResult;
       try {
         result = await runAgent(repoPath, outputPath, workspaceRootPath, options.taskPath, preflight, {
-          updateSnapshots: options.updateSnapshots
+          updateSnapshots: options.updateSnapshots,
+          cancellation
         });
       } catch (error) {
-        const errorDetails = formatErrorDetails(error);
-        result = createSkippedRunResult(preflight, path.join(outputPath, "agents", preflight.variantId, "trace.jsonl"), workspacePath);
-        result.summary = `Agent execution failed: ${errorDetails.message}`;
+        if (isAbortError(error)) {
+          result = createCancelledRunResult(
+            preflight,
+            path.join(outputPath, "agents", preflight.variantId, "trace.jsonl"),
+            workspacePath,
+            formatErrorMessage(error)
+          );
+        } else {
+          const errorDetails = formatErrorDetails(error);
+          result = createSkippedRunResult(preflight, path.join(outputPath, "agents", preflight.variantId, "trace.jsonl"), workspacePath);
+          result.summary = `Agent execution failed: ${errorDetails.message}`;
+        }
       }
 
-      await options.onProgress?.({
+      await safeProgress({
         phase: "agent-finish",
         agentId: result.agentId,
         variantId: result.variantId,
@@ -806,14 +948,19 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
         console.warn(`Warning: Failed to cleanup workspace ${workspacePath}: ${cleanupResult.error}`);
       }
     }
+    // Clean up the parent workspace root directory
+    await fs.rm(workspaceRootPath, { recursive: true, force: true }).catch(() => {});
   }
 
-  await options.onProgress?.({
+  const completedWithCancellation = aborted || results.some((value) => value.status === "cancelled");
+
+  await safeProgress({
     phase: "complete",
-    message: `Benchmark run finished for ${results.length} result(s).`,
+    message: `${completedWithCancellation ? "Benchmark cancelled" : "Benchmark run finished"} for ${results.length} result(s).`,
     metadata: {
       total: results.length,
       success: results.filter((value) => value.status === "success").length,
+      cancelled: results.filter((value) => value.status === "cancelled").length,
       cleanupFailures: cleanupResults.filter((r) => !r.success).length
     }
   });

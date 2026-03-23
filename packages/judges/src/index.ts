@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import {
+  BenchmarkCancelledError,
   buildExecutionEnvironment,
   type CommandExecutionSpec,
   type CommandJudge,
@@ -33,6 +34,7 @@ function createAjv(): InstanceType<typeof Ajv> {
 
 export interface JudgeExecutionOptions {
   updateSnapshots?: boolean;
+  signal?: AbortSignal;
 }
 
 function defaultJudgeTimeoutMs(): number {
@@ -76,6 +78,12 @@ interface CommandExecutionCapture {
   cwd: string;
 }
 
+function throwIfCancelled(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw new BenchmarkCancelledError();
+  }
+}
+
 function stringifyExpectation(value: unknown): string {
   return typeof value === "string" ? value : JSON.stringify(value);
 }
@@ -84,6 +92,8 @@ function stringifyExpectation(value: unknown): string {
 function createGlobMatcher(pattern: string): (value: string) => boolean {
   return picomatch(pattern, { dot: true });
 }
+
+const IGNORED_DIRS = new Set(["node_modules", ".git", ".repoarena"]);
 
 async function listWorkspaceFiles(rootPath: string): Promise<string[]> {
   const files: string[] = [];
@@ -94,6 +104,7 @@ async function listWorkspaceFiles(rootPath: string): Promise<string[]> {
     for (const entry of entries) {
       const absolutePath = path.join(currentPath, entry.name);
       if (entry.isDirectory()) {
+        if (IGNORED_DIRS.has(entry.name)) continue;
         await walk(absolutePath);
         continue;
       }
@@ -191,13 +202,14 @@ function resolveJsonPointer(root: unknown, pointer: string): unknown {
 async function runCommandJudge(
   judge: CommandJudge,
   workspacePath: string,
-  baseAllowedNames: string[]
+  baseAllowedNames: string[],
+  options: JudgeExecutionOptions = {}
 ): Promise<JudgeResult> {
   const timeoutMs = judge.timeoutMs ?? defaultJudgeTimeoutMs();
   const cwd = resolveJudgeWorkingDirectory(workspacePath, judge);
   const environment = buildStepEnvironment(baseAllowedNames, judge);
 
-  const result = await executeCommand(judge.command, cwd, environment, timeoutMs, "Judge");
+  const result = await executeCommand(judge.command, cwd, environment, timeoutMs, "Judge", options.signal);
 
   return {
     judgeId: judge.id,
@@ -218,11 +230,13 @@ async function executeCommand(
   cwd: string,
   environment: NodeJS.ProcessEnv,
   timeoutMs: number,
-  timeoutLabel: string
+  timeoutLabel: string,
+  signal?: AbortSignal
 ): Promise<CommandExecutionCapture> {
   const startedAt = Date.now();
+  throwIfCancelled(signal);
 
-  return await new Promise((resolve) => {
+  return await new Promise((resolve, reject) => {
     const child = spawn(command, {
       cwd,
       env: environment,
@@ -233,6 +247,13 @@ async function executeCommand(
     let stdout = "";
     let stderr = "";
     let timedOut = false;
+    let cancelled = false;
+
+    const cancelExecution = () => {
+      cancelled = true;
+      child.kill();
+    };
+
     const timeoutHandle = setTimeout(() => {
       timedOut = true;
       child.kill();
@@ -242,6 +263,8 @@ async function executeCommand(
         }
       }, 5_000);
     }, timeoutMs);
+
+    signal?.addEventListener("abort", cancelExecution, { once: true });
 
     child.stdout.on("data", (chunk: Buffer) => {
       stdout += chunk.toString();
@@ -253,6 +276,11 @@ async function executeCommand(
 
     child.on("close", (exitCode) => {
       clearTimeout(timeoutHandle);
+      signal?.removeEventListener("abort", cancelExecution);
+      if (cancelled) {
+        reject(new BenchmarkCancelledError());
+        return;
+      }
       resolve({
         exitCode,
         stdout: stdout.trim(),
@@ -264,6 +292,11 @@ async function executeCommand(
 
     child.on("error", (error) => {
       clearTimeout(timeoutHandle);
+      signal?.removeEventListener("abort", cancelExecution);
+      if (cancelled) {
+        reject(new BenchmarkCancelledError());
+        return;
+      }
       resolve({
         exitCode: -1,
         stdout,
@@ -445,12 +478,13 @@ function parseLintSummary(payload: unknown, format: LintCheckJudge["format"]): P
 async function runTestResultJudge(
   judge: TestResultJudge,
   workspacePath: string,
-  baseAllowedNames: string[]
+  baseAllowedNames: string[],
+  options: JudgeExecutionOptions = {}
 ): Promise<JudgeResult> {
   const timeoutMs = judge.timeoutMs ?? defaultJudgeTimeoutMs();
   const cwd = resolveJudgeWorkingDirectory(workspacePath, judge);
   const environment = buildStepEnvironment(baseAllowedNames, judge);
-  const result = await executeCommand(judge.command, cwd, environment, timeoutMs, "Judge");
+  const result = await executeCommand(judge.command, cwd, environment, timeoutMs, "Judge", options.signal);
 
   try {
     const payload = await readJsonJudgePayload(workspacePath, judge.reportFile, result.stdout, `Judge "${judge.id}" reportFile`);
@@ -498,12 +532,13 @@ async function runTestResultJudge(
 async function runLintCheckJudge(
   judge: LintCheckJudge,
   workspacePath: string,
-  baseAllowedNames: string[]
+  baseAllowedNames: string[],
+  options: JudgeExecutionOptions = {}
 ): Promise<JudgeResult> {
   const timeoutMs = judge.timeoutMs ?? defaultJudgeTimeoutMs();
   const cwd = resolveJudgeWorkingDirectory(workspacePath, judge);
   const environment = buildStepEnvironment(baseAllowedNames, judge);
-  const result = await executeCommand(judge.command, cwd, environment, timeoutMs, "Judge");
+  const result = await executeCommand(judge.command, cwd, environment, timeoutMs, "Judge", options.signal);
   const maxWarnings = judge.maxWarnings ?? 0;
 
   try {
@@ -874,11 +909,11 @@ export async function runJudge(
 ): Promise<JudgeResult> {
   switch (judge.type) {
     case "command":
-      return await runCommandJudge(judge, workspacePath, baseAllowedNames);
+      return await runCommandJudge(judge, workspacePath, baseAllowedNames, options);
     case "test-result":
-      return await runTestResultJudge(judge, workspacePath, baseAllowedNames);
+      return await runTestResultJudge(judge, workspacePath, baseAllowedNames, options);
     case "lint-check":
-      return await runLintCheckJudge(judge, workspacePath, baseAllowedNames);
+      return await runLintCheckJudge(judge, workspacePath, baseAllowedNames, options);
     case "file-exists":
       return await runFileExistsJudge(judge, workspacePath);
     case "file-contains":
@@ -910,12 +945,13 @@ export async function runJudges(
 export async function runCommandStep(
   step: CommandExecutionSpec,
   workspacePath: string,
-  baseAllowedNames: string[]
+  baseAllowedNames: string[],
+  signal?: AbortSignal
 ): Promise<CommandStepResult> {
   const timeoutMs = step.timeoutMs ?? defaultJudgeTimeoutMs();
   const cwd = resolveCommandWorkingDirectory(workspacePath, step);
   const environment = buildStepEnvironment(baseAllowedNames, step);
-  const result = await executeCommand(step.command, cwd, environment, timeoutMs, "Command step");
+  const result = await executeCommand(step.command, cwd, environment, timeoutMs, "Command step", signal);
 
   return {
     stepId: step.id,
@@ -933,12 +969,14 @@ export async function runCommandStep(
 export async function runCommandSteps(
   steps: CommandExecutionSpec[],
   workspacePath: string,
-  baseAllowedNames: string[]
+  baseAllowedNames: string[],
+  signal?: AbortSignal
 ): Promise<CommandStepResult[]> {
   const results: CommandStepResult[] = [];
 
   for (const step of steps) {
-    results.push(await runCommandStep(step, workspacePath, baseAllowedNames));
+    throwIfCancelled(signal);
+    results.push(await runCommandStep(step, workspacePath, baseAllowedNames, signal));
   }
 
   return results;
