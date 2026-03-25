@@ -1,4 +1,5 @@
 import { localizeText, translate } from "./i18n.js";
+import { createResultLoaders } from "./results/loaders.js";
 import {
   baseAgentLabel,
   buildPrTable,
@@ -27,6 +28,8 @@ import {
   runtimeIdentity,
   summarizeRun
 } from "./view-model.js";
+import { createCrossRunRenders } from "./report/cross-run.js";
+import { createDetailFragments } from "./report/detail-fragments.js";
 
 const state = {
   runs: [],
@@ -76,6 +79,8 @@ const elements = {
   launcherAdhocPrompt: document.querySelector("#launcher-adhoc-prompt"),
   launcherAdhocPromptLabel: document.querySelector("#launcher-adhoc-prompt-label"),
   launcherAdhocPromptHint: document.querySelector("#launcher-adhoc-prompt-hint"),
+  launcherConcurrencyLabel: document.querySelector("#launcher-concurrency-label"),
+  launcherQuickStart: document.querySelector("#launcher-quick-start"),
   launcherOutputPath: document.querySelector("#launcher-output-path"),
   launcherAgents: document.querySelector("#launcher-agents"),
   launcherProbeAuth: document.querySelector("#launcher-probe-auth"),
@@ -127,6 +132,7 @@ const elements = {
   agentTrendTitle: document.querySelector("#agent-trend-title"),
   agentTrendTable: document.querySelector("#agent-trend-table"),
   agentTrendSection: document.querySelector("#agent-trend-section"),
+  preflightTitle: document.querySelector("#preflight-title"),
   resultSummary: document.querySelector("#result-summary"),
   resultDetails: document.querySelector("#result-details"),
   judgeSearch: document.querySelector("#judge-search"),
@@ -153,6 +159,7 @@ const elements = {
   crossRunCompareSummary: document.querySelector("#cross-run-compare-summary"),
   crossRunCloseCompare: document.querySelector("#cross-run-close-compare"),
   crossRunCompareTable: document.querySelector("#cross-run-compare-table"),
+  advancedAnalysisSummary: document.querySelector("#advanced-analysis-summary"),
   sidebarToggle: document.querySelector("#sidebar-toggle"),
   sidebarBackdrop: document.querySelector("#sidebar-backdrop"),
   sidebar: document.querySelector(".sidebar")
@@ -628,14 +635,82 @@ function loadLauncherConfig() {
   }
 }
 
+const resultLoaders = createResultLoaders({
+  state,
+  localText,
+  render,
+  renderMarkdownPanel,
+  applySingleRun,
+  applyRuns
+});
+
+const crossRunRenders = createCrossRunRenders({
+  state,
+  elements,
+  t,
+  localText,
+  setHidden,
+  summarizeRun,
+  runtimeIdentity,
+  formatDuration,
+  getCrossRunCompareRows,
+  getCrossRunRecommendation,
+  escapeHtml
+});
+
+const detailFragments = createDetailFragments({
+  state,
+  judgeFilters,
+  localText,
+  escapeHtml,
+  formatDuration,
+  statusClass,
+  translateStatus,
+  formatJudgeType,
+  findJudgeByType,
+  formatDiffPrecisionMetric,
+  formatCompositeScore,
+  formatTestMetric,
+  formatLintMetric,
+  resultLabel,
+  baseAgentLabel
+});
+
+const {
+  fetchWithTimeout: fetchWithTimeoutImpl,
+  downloadTextFile: downloadTextFileImpl,
+  folderOf: folderOfImpl,
+  readRunFromFile: readRunFromFileImpl,
+  handleFileSelection: handleFileSelectionImpl,
+  handleMarkdownSelection: handleMarkdownSelectionImpl,
+  handleFolderSelection: handleFolderSelectionImpl
+} = resultLoaders;
+
+const {
+  renderCrossRunCompare: renderCrossRunCompareImpl,
+  renderCrossRunSelectionList: renderCrossRunSelectionListImpl,
+  renderCrossRunCompareTable: renderCrossRunCompareTableImpl
+} = crossRunRenders;
+
+const {
+  renderStepCards: renderStepCardsImpl,
+  renderJudgeCards: renderJudgeCardsImpl,
+  renderDiff: renderDiffImpl,
+  renderMarkdownBlock: renderMarkdownBlockImpl,
+  renderInlineAgentDetail: renderInlineAgentDetailImpl
+} = detailFragments;
+
 function renderStaticText() {
-  if (elements.resultLoaderSummary) {
-    elements.resultLoaderSummary.textContent =
-      state.language === "zh-CN" ? "打开已有结果（备用入口）" : "Open Existing Results (Fallback)";
-  }
+  setText("result-loader-summary", t("existingResultsFallback"));
   setText("app-title", t("appTitle"));
   setText("app-description", t("appDescription"));
   setText("language-label", t("languageLabel"));
+  if (elements.languageSelect.options[0]) {
+    elements.languageSelect.options[0].text = "English";
+  }
+  if (elements.languageSelect.options[1]) {
+    elements.languageSelect.options[1].text = t("languageChineseLabel");
+  }
   setText("runs-folder-title", t("runsFolderTitle"));
   setText("runs-folder-hint", t("runsFolderHint"));
   setText("summary-file-title", t("summaryFileTitle"));
@@ -679,9 +754,41 @@ function renderStaticText() {
   setText("launcher-repo-label", t("launcherRepoLabel"));
   setText("launcher-task-select-label", t("launcherTaskSelectLabel"));
   setText("launcher-task-path-label", t("launcherTaskPathLabel"));
+  setText("launcher-adhoc-prompt-label", t("launcherAdhocPromptLabel"));
+  setText("launcher-adhoc-prompt-hint", t("launcherAdhocPromptHint"));
+  if (elements.launcherAdhocPrompt) {
+    elements.launcherAdhocPrompt.placeholder = t("launcherAdhocPromptHint");
+  }
   setText("launcher-output-label", t("launcherOutputLabel"));
   setText("launcher-agents-label", t("launcherAgentsLabel"));
   setText("launcher-probe-auth-label", t("launcherProbeAuthLabel"));
+  setText("launcher-concurrency-label", t("launcherConcurrencyLabel"));
+  if (elements.launcherQuickStart) {
+    elements.launcherQuickStart.textContent = t("launcherQuickStart");
+  }
+  if (elements.preflightTitle) {
+    elements.preflightTitle.textContent = t("preflightTitle");
+  }
+  if (elements.advancedAnalysisSummary) {
+    elements.advancedAnalysisSummary.textContent = t("advancedAnalysisSummary");
+  }
+  setText("cross-run-compare-title", t("crossRunCompareTitle"));
+  setText("cross-run-description", t("crossRunDescription"));
+  if (elements.crossRunToggleSelect) {
+    elements.crossRunToggleSelect.textContent = t("crossRunToggleSelect");
+  }
+  if (elements.crossRunSearch) {
+    elements.crossRunSearch.placeholder = t("crossRunSearchPlaceholder");
+  }
+  if (elements.crossRunCompareBtn) {
+    elements.crossRunCompareBtn.textContent = t("crossRunCompareBtn");
+  }
+  if (elements.crossRunClearBtn) {
+    elements.crossRunClearBtn.textContent = t("crossRunClearBtn");
+  }
+  if (elements.crossRunCloseCompare) {
+    elements.crossRunCloseCompare.textContent = t("crossRunCloseCompare");
+  }
   setText("copy-share-card", t("copySummary"));
   setText("copy-pr-table", t("copyPrTable"));
   setText("download-share-svg", t("downloadShareSvg"));
@@ -712,6 +819,10 @@ function renderStaticText() {
   elements.launcherRun.textContent = t("launcherRunButton");
   renderList(document.querySelector("#hero-how-list"), t("heroHowSteps"));
   renderScoreWeightsControls();
+}
+
+function fetchWithTimeout(url, options = {}, timeoutMs = 15_000) {
+  return fetchWithTimeoutImpl(url, options, timeoutMs);
 }
 
 function buildStepIndicatorHtml() {
@@ -1687,13 +1798,6 @@ async function deleteProviderProfileById(profileId) {
   syncClaudeVariantsWithProfiles();
 }
 
-/** Fetch with a timeout (default 15s). Returns the response or throws on timeout. */
-function fetchWithTimeout(url, options = {}, timeoutMs = 15_000) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
-}
-
 function formatJudgeType(type) {
   switch (type) {
     case "test-result":
@@ -2064,140 +2168,11 @@ function renderAgentList(run) {
 }
 
 function renderStepCards(title, steps) {
-  const content =
-    steps.length === 0
-      ? `<p class="empty-state">${escapeHtml(state.language === "zh-CN" ? "没有执行任何命令。" : "No commands executed.")}</p>`
-      : `<div class="step-list">${steps
-          .map(
-            (step) => `
-              <details class="step-card">
-                <summary>
-                  <strong>${escapeHtml(step.label)}</strong>
-                  <span class="status-badge ${statusClass(step.success ? "success" : "failed")}">${
-                    step.success ? (state.language === "zh-CN" ? "通过" : "pass") : (state.language === "zh-CN" ? "失败" : "fail")
-                  }</span>
-                  <span class="muted">${escapeHtml(formatDuration(step.durationMs))}</span>
-                </summary>
-                <div class="detail-row"><span>${escapeHtml(state.language === "zh-CN" ? "命令" : "Command")}</span><code>${escapeHtml(step.command)}</code></div>
-                <div class="detail-row"><span>${escapeHtml(localText("工作目录", "CWD"))}</span><code>${escapeHtml(step.cwd)}</code></div>
-                ${
-                  step.stdout
-                    ? `<p class="muted">${escapeHtml(localText("标准输出", "stdout"))}</p><pre>${escapeHtml(step.stdout)}</pre>`
-                    : ""
-                }
-                ${
-                  step.stderr
-                    ? `<p class="muted">${escapeHtml(localText("标准错误", "stderr"))}</p><pre>${escapeHtml(step.stderr)}</pre>`
-                    : ""
-                }
-              </details>
-            `
-          )
-          .join("")}</div>`;
-
-  return `<section class="detail-card"><h3>${escapeHtml(title)}</h3>${content}</section>`;
+  return renderStepCardsImpl(title, steps);
 }
 
 function renderJudgeCards(result) {
-  const judges = result.judgeResults;
-  const filteredJudges = judges.filter((judge) => {
-    const matchesType = judgeFilters.type === "all" || judge.type === judgeFilters.type;
-    const matchesStatus =
-      judgeFilters.status === "all" ||
-      (judgeFilters.status === "pass" ? judge.success : !judge.success);
-    const haystack = [judge.label, judge.target ?? "", judge.expectation ?? "", judge.command ?? ""]
-      .join(" ")
-      .toLowerCase();
-    const matchesSearch = judgeFilters.search === "" || haystack.includes(judgeFilters.search);
-
-    return matchesType && matchesStatus && matchesSearch;
-  });
-
-  const byType = judges.reduce((map, judge) => {
-    map.set(judge.type, (map.get(judge.type) ?? 0) + 1);
-    return map;
-  }, new Map());
-
-  const overview =
-    judges.length === 0
-      ? `<p class="empty-state">${escapeHtml(state.language === "zh-CN" ? "没有执行任何 judge。" : "No judges executed.")}</p>`
-      : `
-        <div class="judge-overview">
-          ${Array.from(byType.entries())
-            .map(
-              ([type, count]) => `
-                <div class="judge-chip">
-                  <span>${escapeHtml(formatJudgeType(type))}</span>
-                  <strong>${count}</strong>
-                </div>
-              `
-            )
-            .join("")}
-        </div>
-      `;
-
-  const content =
-    filteredJudges.length === 0
-      ? ""
-      : `<div class="step-list">${filteredJudges
-          .map(
-            (judge) => `
-              <details class="step-card judge-card">
-                <summary>
-                  <strong>${escapeHtml(judge.label)}</strong>
-                  <span class="judge-kind">${escapeHtml(formatJudgeType(judge.type))}</span>
-                  <span class="status-badge ${statusClass(judge.success ? "success" : "failed")}">${
-                    judge.success ? (state.language === "zh-CN" ? "通过" : "pass") : (state.language === "zh-CN" ? "失败" : "fail")
-                  }</span>
-                  <span class="muted">${escapeHtml(formatDuration(judge.durationMs))}</span>
-                </summary>
-                ${
-                  judge.target
-                    ? `<div class="detail-row"><span>${escapeHtml(state.language === "zh-CN" ? "目标" : "Target")}</span><code>${escapeHtml(judge.target)}</code></div>`
-                    : ""
-                }
-                ${
-                  judge.expectation
-                    ? `<div class="detail-row"><span>${escapeHtml(state.language === "zh-CN" ? "期望" : "Expectation")}</span><code>${escapeHtml(judge.expectation)}</code></div>`
-                    : ""
-                }
-                ${
-                  judge.command
-                    ? `<div class="detail-row"><span>${escapeHtml(state.language === "zh-CN" ? "命令" : "Command")}</span><code>${escapeHtml(judge.command)}</code></div>`
-                    : ""
-                }
-                ${typeof judge.totalCount === "number" ? `<div class="detail-row"><span>${escapeHtml(localText("总数", "Total"))}</span><strong>${judge.totalCount}</strong></div>` : ""}
-                ${typeof judge.passedCount === "number" ? `<div class="detail-row"><span>${escapeHtml(localText("通过", "Passed"))}</span><strong>${judge.passedCount}</strong></div>` : ""}
-                ${typeof judge.failedCount === "number" ? `<div class="detail-row"><span>${escapeHtml(localText("失败", "Failed"))}</span><strong>${judge.failedCount}</strong></div>` : ""}
-                ${typeof judge.skippedCount === "number" ? `<div class="detail-row"><span>${escapeHtml(localText("跳过", "Skipped"))}</span><strong>${judge.skippedCount}</strong></div>` : ""}
-                ${typeof judge.errorCount === "number" ? `<div class="detail-row"><span>${escapeHtml(localText("错误数", "Errors"))}</span><strong>${judge.errorCount}</strong></div>` : ""}
-                ${typeof judge.warningCount === "number" ? `<div class="detail-row"><span>${escapeHtml(localText("警告数", "Warnings"))}</span><strong>${judge.warningCount}</strong></div>` : ""}
-                ${judge.parser ? `<div class="detail-row"><span>${escapeHtml(localText("解析器", "Parser"))}</span><strong>${escapeHtml(judge.parser)}</strong></div>` : ""}
-                ${
-                  judge.cwd
-                    ? `<div class="detail-row"><span>${escapeHtml(localText("工作目录", "CWD"))}</span><code>${escapeHtml(judge.cwd)}</code></div>`
-                    : ""
-                }
-                ${
-                  judge.stdout
-                    ? `<p class="muted">${escapeHtml(localText("标准输出", "stdout"))}</p><pre>${escapeHtml(judge.stdout)}</pre>`
-                    : ""
-                }
-                ${
-                  judge.stderr
-                    ? `<p class="muted">${escapeHtml(localText("标准错误", "stderr"))}</p><pre>${escapeHtml(judge.stderr)}</pre>`
-                    : ""
-                }
-              </details>
-            `
-          )
-          .join("")}</div>`;
-
-  return `<section class="detail-card"><h3>${escapeHtml(localText("Judge 检查项", "Judges"))}</h3>${overview}${
-    filteredJudges.length === 0 && judges.length > 0
-      ? `<p class="empty-state">${escapeHtml(state.language === "zh-CN" ? "当前筛选下没有匹配的 judge。" : "No judges match the current filters.")}</p>`
-      : content
-  }</section>`;
+  return renderJudgeCardsImpl(result);
 }
 
 function populateJudgeFilters(run) {
@@ -2214,45 +2189,11 @@ function populateJudgeFilters(run) {
 }
 
 function renderDiff(result) {
-  const sections = [
-    [state.language === "zh-CN" ? "新增" : "Added", result.diff.added],
-    [state.language === "zh-CN" ? "修改" : "Changed", result.diff.changed],
-    [state.language === "zh-CN" ? "删除" : "Removed", result.diff.removed]
-  ];
-
-  return `
-    <section class="detail-card">
-      <h3>${escapeHtml(state.language === "zh-CN" ? "Diff 细分" : "Diff Breakdown")}</h3>
-      ${typeof result.diffPrecision?.score === "number"
-        ? `<div class="summary-grid" style="margin-bottom:1rem">
-            <div class="summary-row"><span>${escapeHtml(localText("Diff 精准度", "Diff Precision"))}</span><strong>${escapeHtml(formatDiffPrecisionMetric(result))}</strong></div>
-            <div class="summary-row"><span>${escapeHtml(localText("命中预期范围", "Matched Scope"))}</span><strong>${result.diffPrecision.matchedFiles.length}</strong></div>
-            <div class="summary-row"><span>${escapeHtml(localText("范围外改动", "Unexpected Changes"))}</span><strong>${result.diffPrecision.unexpectedFiles.length}</strong></div>
-          </div>`
-        : ""}
-      <div class="diff-grid">
-        ${sections
-          .map(
-            ([label, files]) => `
-              <div class="diff-column">
-                <h4>${escapeHtml(label)}</h4>
-                ${
-                  files.length === 0
-                    ? `<p class="empty-state">${escapeHtml(state.language === "zh-CN" ? "无" : "None")}</p>`
-                    : `<ul>${files.map((file) => `<li>${escapeHtml(file)}</li>`).join("")}</ul>`
-                }
-              </div>
-            `
-          )
-          .join("")}
-      </div>
-    </section>
-  `;
+  return renderDiffImpl(result);
 }
 
 function renderMarkdownBlock(markdown) {
-  const escaped = escapeHtml(markdown);
-  return `<pre>${escaped}</pre>`;
+  return renderMarkdownBlockImpl(markdown);
 }
 
 function renderMarkdownPanel() {
@@ -2570,45 +2511,7 @@ function renderFailures(run) {
 }
 
 function renderInlineAgentDetail(result) {
-  const passed = result.judgeResults.filter((j) => j.success);
-  const failed = result.judgeResults.filter((j) => !j.success);
-  const judgeChips = [
-    ...passed.map((j) => `<span class="judge-chip judge-chip-pass">${escapeHtml(j.label || j.judgeId)}</span>`),
-    ...failed.map((j) => `<span class="judge-chip judge-chip-fail">${escapeHtml(j.label || j.judgeId)}</span>`)
-  ].join("");
-
-  const maxFiles = 10;
-  const files = result.changedFiles.slice(0, maxFiles);
-  const moreCount = result.changedFiles.length - maxFiles;
-  const filesHtml = files.length > 0
-    ? `<ul class="files-list">${files.map((f) => `<li>${escapeHtml(f)}</li>`).join("")}${moreCount > 0 ? `<li class="muted">+${moreCount} ${localText("更多", "more")}</li>` : ""}</ul>`
-    : `<span class="muted">${escapeHtml(localText("无改动", "No changes"))}</span>`;
-
-  return `
-    <div class="compare-detail-panel">
-      <div>
-        <h4>${escapeHtml(localText("Judge 概览", "Judges"))}</h4>
-        <div class="judge-summary">${judgeChips || `<span class="muted">${escapeHtml(localText("无", "None"))}</span>`}</div>
-      </div>
-      <div>
-        <h4>${escapeHtml(localText("改动文件", "Changed Files"))}</h4>
-        ${filesHtml}
-      </div>
-      <div>
-        <h4>${escapeHtml(localText("硬指标", "Hard Metrics"))}</h4>
-        <div class="summary-grid">
-          <div class="summary-row"><span>${escapeHtml(localText("综合分", "Composite Score"))}</span><strong>${escapeHtml(formatCompositeScore(result, state.run, state.scoreWeights))}</strong></div>
-          <div class="summary-row"><span>${escapeHtml(localText("测试", "Tests"))}</span><strong>${escapeHtml(formatTestMetric(result))}</strong></div>
-          <div class="summary-row"><span>${escapeHtml(localText("Lint", "Lint"))}</span><strong>${escapeHtml(formatLintMetric(result))}</strong></div>
-          <div class="summary-row"><span>${escapeHtml(localText("Diff 精准度", "Diff Precision"))}</span><strong>${escapeHtml(formatDiffPrecisionMetric(result))}</strong></div>
-        </div>
-      </div>
-      <div class="agent-summary-text">
-        <span>${escapeHtml(result.summary || "")}</span>
-        <button type="button" class="view-full-link" data-role="view-full-details">${escapeHtml(localText("查看完整详情", "View Full Details"))}</button>
-      </div>
-    </div>
-  `;
+  return renderInlineAgentDetailImpl(result);
 }
 
 function renderCompareTableV2(run) {
@@ -2937,54 +2840,15 @@ function render() {
 }
 
 async function readRunFromFile(file) {
-  try {
-    return JSON.parse(await file.text());
-  } catch {
-    throw new Error(
-      localText(
-        `无法解析文件 "${file.name}"，请确认是有效的 summary.json。`,
-        `Failed to parse "${file.name}". Make sure it is a valid summary.json file.`
-      )
-    );
-  }
+  return readRunFromFileImpl(file, { localText });
 }
 
 async function handleFileSelection(event) {
-  const file = event.target.files?.[0];
-  if (!file) {
-    return;
-  }
-
-  try {
-    const run = await readRunFromFile(file);
-    state.notice =
-      state.language === "zh-CN"
-        ? "已加载单个 summary.json。现在可以直接查看结果，或者继续加载 summary.md。"
-        : "Loaded one summary.json file. You can inspect the run now or optionally load summary.md.";
-    applySingleRun(run);
-  } catch (error) {
-    state.notice = error instanceof Error ? error.message : String(error);
-    render();
-  }
+  return handleFileSelectionImpl(event);
 }
 
 async function handleMarkdownSelection(event) {
-  const file = event.target.files?.[0];
-  if (!file) {
-    return;
-  }
-
-  try {
-    state.standaloneMarkdown = await file.text();
-    state.notice =
-      state.language === "zh-CN"
-        ? "Markdown 已加载。如果当前也有 run，分享摘要会自动出现。"
-        : "Markdown loaded. If a run is also loaded, the share summary will appear automatically.";
-    renderMarkdownPanel();
-  } catch (error) {
-    state.notice = error instanceof Error ? error.message : String(error);
-    render();
-  }
+  return handleMarkdownSelectionImpl(event);
 }
 
 async function copyToClipboard(value, label) {
@@ -3000,60 +2864,15 @@ async function copyToClipboard(value, label) {
 }
 
 function downloadTextFile(filename, contents, mimeType) {
-  const blob = new Blob([contents], { type: mimeType });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(url);
+  return downloadTextFileImpl(filename, contents, mimeType);
 }
 
 function folderOf(file) {
-  const relativePath = file.webkitRelativePath || file.name;
-  const segments = relativePath.split("/");
-  segments.pop();
-  return segments.join("/");
+  return folderOfImpl(file);
 }
 
 async function handleFolderSelection(event) {
-  const files = Array.from(event.target.files ?? []);
-  const summaryFiles = files.filter((file) => file.name.toLowerCase() === "summary.json");
-  if (summaryFiles.length === 0) {
-    state.notice =
-      state.language === "zh-CN"
-        ? "选中的目录里没有 summary.json。请改选一个 RepoArena 结果目录。"
-        : "No summary.json file was found in the selected folder. Choose a RepoArena results folder.";
-    return;
-  }
-
-  const markdownByFolder = new Map();
-  for (const file of files.filter((entry) => entry.name.toLowerCase() === "summary.md")) {
-    markdownByFolder.set(folderOf(file), await file.text());
-  }
-
-  const runs = [];
-  const markdownByRunId = new Map();
-  for (const file of summaryFiles) {
-    try {
-      const run = await readRunFromFile(file);
-      runs.push(run);
-      const markdown = markdownByFolder.get(folderOf(file));
-      if (markdown) {
-        markdownByRunId.set(run.runId, markdown);
-      }
-    } catch (error) {
-      console.warn(`Skipping invalid summary file: ${file.name}`, error);
-    }
-  }
-
-  state.notice =
-    state.language === "zh-CN"
-      ? `已从目录中识别到 ${runs.length} 个 run。`
-      : `Loaded ${runs.length} run(s) from the selected folder.`;
-  applyRuns(runs, markdownByRunId);
+  return handleFolderSelectionImpl(event);
 }
 
 elements.fileInput.addEventListener("change", handleFileSelection);
@@ -3527,137 +3346,15 @@ elements.crossRunCloseCompare.addEventListener("click", () => {
 });
 
 function renderCrossRunCompare() {
-  if (state.runs.length < 2) {
-    setHidden(elements.crossRunCompareSection, true);
-    return;
-  }
-
-  setHidden(elements.crossRunCompareSection, false);
-  elements.crossRunCompareTitle.textContent = t("crossRunCompareTitle");
-  elements.crossRunDescription.textContent = t("crossRunDescription");
-  elements.crossRunCompareBtn.textContent = t("crossRunCompareBtn");
-  elements.crossRunClearBtn.textContent = t("crossRunClearBtn");
-  elements.crossRunCloseCompare.textContent = t("crossRunCloseCompare");
-  elements.crossRunSearch.placeholder = t("crossRunSearchPlaceholder");
-
-  const isSelectedMode = state.crossRunSelectMode;
-  elements.crossRunToggleSelect.textContent = isSelectedMode 
-    ? localText("取消选择", "Cancel Selection") 
-    : t("crossRunToggleSelect");
-  setHidden(elements.crossRunSelectionPanel, !isSelectedMode);
-  setHidden(elements.crossRunCompareView, !state.crossRunCompareData);
-
-  if (isSelectedMode) {
-    renderCrossRunSelectionList();
-    elements.crossRunCompareBtn.disabled = state.crossRunSelectedIds.size < 2;
-  }
-
-  if (state.crossRunCompareData) {
-    renderCrossRunCompareTable();
-  }
+  return renderCrossRunCompareImpl();
 }
 
 function renderCrossRunSelectionList() {
-  const searchTerm = (elements.crossRunSearch?.value || "").toLowerCase();
-  const filteredRuns = state.runs.filter(run => 
-    !searchTerm || 
-    run.task.title.toLowerCase().includes(searchTerm) ||
-    run.runId.toLowerCase().includes(searchTerm)
-  );
-
-  if (filteredRuns.length === 0) {
-    elements.crossRunSelectionList.innerHTML = `<p class="empty-state">${escapeHtml(t("crossRunNoRuns"))}</p>`;
-    return;
-  }
-
-  elements.crossRunSelectionList.innerHTML = filteredRuns.map(run => {
-    const summary = summarizeRun(run);
-    const isSelected = state.crossRunSelectedIds.has(run.runId);
-    const runtime = run.results[0] ? runtimeIdentity(run.results[0]) : {};
-    
-    return `
-      <label class="cross-run-item ${isSelected ? "selected" : ""}">
-        <input type="checkbox" data-run-id="${escapeHtml(run.runId)}" ${isSelected ? "checked" : ""} />
-        <div class="cross-run-item-content">
-          <strong>${escapeHtml(run.task.title)}</strong>
-          <p class="muted">
-            ${escapeHtml(run.runId.slice(0, 16))}... | 
-            ${escapeHtml(run.createdAt.slice(0, 10))} |
-            ${summary.successCount}/${summary.totalAgents} ${localText("成功", "passed")} |
-            ${localText("模型", "Model")}: ${escapeHtml(runtime.model || "unknown")} |
-            ${localText("Provider", "Provider")}: ${escapeHtml(runtime.provider || "official")}
-          </p>
-        </div>
-      </label>
-    `;
-  }).join("");
+  return renderCrossRunSelectionListImpl();
 }
 
 function renderCrossRunCompareTable() {
-  if (!state.crossRunCompareData || state.crossRunCompareData.rows.length === 0) {
-    elements.crossRunCompareTable.innerHTML = `<p class="empty-state">${escapeHtml(t("crossRunEmptySelection"))}</p>`;
-    return;
-  }
-
-  const { runs, rows } = state.crossRunCompareData;
-  elements.crossRunCompareSummary.textContent = localText(
-    `对比 ${runs.length} 个运行，共 ${rows.length} 个 Agent 配置`,
-    `Comparing ${runs.length} runs with ${rows.length} agent configurations`
-  );
-
-  const recommendation = getCrossRunRecommendation(state.crossRunCompareData);
-
-  const header = `
-    <table class="compare-table">
-      <thead>
-        <tr>
-          <th>${escapeHtml(localText("配置名称", "Variant"))}</th>
-          <th>${escapeHtml(localText("基础 Agent", "Base Agent"))}</th>
-          <th>${escapeHtml(t("crossRunRuns"))}</th>
-          <th>${escapeHtml(t("crossRunSuccessRate"))}</th>
-          <th>${escapeHtml(t("crossRunAvgDuration"))}</th>
-          <th>${escapeHtml(t("crossRunAvgTokens"))}</th>
-          <th>${escapeHtml(t("crossRunAvgCost"))}</th>
-          <th>${escapeHtml(localText("最佳模型", "Best Model"))}</th>
-          <th>${escapeHtml(localText("最佳 Provider", "Best Provider"))}</th>
-        </tr>
-      </thead>
-      <tbody>
-  `;
-
-  const body = rows.map(row => {
-    const avgDuration = Math.round(row.stats.totalDurationMs / row.stats.totalRuns);
-    const avgTokens = Math.round(row.stats.totalTokens / row.stats.totalRuns);
-    const avgCost = row.stats.costKnownCount > 0 
-      ? (row.stats.totalCost / row.stats.costKnownCount).toFixed(4)
-      : null;
-    const successRate = ((row.stats.successCount / row.stats.totalRuns) * 100).toFixed(1);
-    const isRecommended = recommendation && recommendation.agentId === row.agentId;
-
-    return `
-      <tr class="${isRecommended ? "recommended-row" : ""}">
-        <td>
-          <strong>${escapeHtml(row.displayLabel)}</strong>
-          ${isRecommended ? `<span class="badge">${escapeHtml(t("crossRunBestConfig"))}</span>` : ""}
-        </td>
-        <td>${escapeHtml(row.baseAgent)}</td>
-        <td>${row.stats.totalRuns}</td>
-        <td>
-          <span class="status-badge ${row.stats.successCount === row.stats.totalRuns ? "status-success" : row.stats.successCount > 0 ? "status-partial" : "status-fail"}">
-            ${successRate}%
-          </span>
-          (${row.stats.successCount}/${row.stats.totalRuns})
-        </td>
-        <td>${escapeHtml(formatDuration(avgDuration))}</td>
-        <td>${avgTokens.toLocaleString()}</td>
-        <td>${avgCost !== null ? `$${avgCost}` : "n/a"}</td>
-        <td>${escapeHtml(row.bestRuntime?.runtime?.model || "n/a")}</td>
-        <td>${escapeHtml(row.bestRuntime?.runtime?.provider || "n/a")}</td>
-      </tr>
-    `;
-  }).join("");
-
-  elements.crossRunCompareTable.innerHTML = header + body + "</tbody></table>";
+  return renderCrossRunCompareTableImpl();
 }
 
 // Feature 5: Sidebar toggle for mobile

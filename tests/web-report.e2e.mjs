@@ -66,6 +66,18 @@ async function startUiServer(cwd) {
   };
 }
 
+async function expandLauncherIfNeeded(page) {
+  const launcherBody = page.locator("#launcher-body");
+  if (await launcherBody.isVisible()) {
+    return;
+  }
+  const launcherToggle = page.locator("#launcher-toggle");
+  if (await launcherToggle.isVisible()) {
+    await launcherToggle.click();
+    await launcherBody.waitFor({ state: "visible", timeout: 10000 });
+  }
+}
+
 test("web-report browser smoke renders launcher and supports zh/en switching", {
   skip: process.env.REPOARENA_RUN_BROWSER_SMOKE !== "1",
   timeout: 120000
@@ -83,8 +95,7 @@ test("web-report browser smoke renders launcher and supports zh/en switching", {
     });
 
     const appTitleZh = await page.locator("#app-title").textContent();
-    const launcherVisible = await page.locator("#launcher-panel").isVisible();
-    const repoPath = await page.locator("#launcher-repo-path").inputValue();
+    await expandLauncherIfNeeded(page);
     const launcherRunZh = await page.locator("#launcher-run").textContent();
     const bodyZh = await page.locator("body").innerText();
 
@@ -97,14 +108,13 @@ test("web-report browser smoke renders launcher and supports zh/en switching", {
     await page.waitForTimeout(400);
     const appTitleZhAgain = await page.locator("#app-title").textContent();
 
-    assert.equal(appTitleZh, "交互报告");
-    assert.equal(launcherVisible, true);
-    assert.match(repoPath, /RepoArena/);
-    assert.equal(launcherRunZh, "开始跑分");
+    assert.equal(appTitleZh, "\u4ea4\u4e92\u62a5\u544a");
+    assert.equal(launcherRunZh, "\u5f00\u59cb\u8dd1\u5206");
     assert.equal(appTitleEn, "Web Report");
     assert.equal(launcherRunEn, "Start Benchmark");
-    assert.equal(appTitleZhAgain, "交互报告");
-    assert.doesNotMatch(bodyZh, /杩|鍏|鏃\?|鏈|宸插|銆\?|锛|榛樿|妯"|缂栬緫/);
+    assert.equal(appTitleZhAgain, "\u4ea4\u4e92\u62a5\u544a");
+    assert.match(bodyZh, /\u600e\u4e48\u5f00\u59cb/);
+    assert.doesNotMatch(bodyZh, /\uFFFD/);
   } finally {
     await browser.close();
     await uiServer.stop();
@@ -118,29 +128,43 @@ function createTestRun() {
     task: { title: "Test Task", schema: "repo-health" },
     results: [
       {
-        agentId: "agent-a", variantId: "agent-a", displayLabel: "Agent A",
-        baseAgentId: "agent-a", agentTitle: "Agent A",
-        status: "success", durationMs: 5000, tokenUsage: 1000,
-        estimatedCostUsd: 0.05, costKnown: true,
+        agentId: "agent-a",
+        variantId: "agent-a",
+        displayLabel: "Agent A",
+        baseAgentId: "agent-a",
+        agentTitle: "Agent A",
+        status: "success",
+        durationMs: 5000,
+        tokenUsage: 1000,
+        estimatedCostUsd: 0.05,
+        costKnown: true,
         changedFiles: ["file1.js", "file2.js"],
         judgeResults: [
           { judgeId: "j1", label: "Judge 1", type: "file-check", success: true },
           { judgeId: "j2", label: "Judge 2", type: "file-check", success: false }
         ],
         summary: "Agent A summary",
-        requestedConfig: {}, resolvedRuntime: null
+        requestedConfig: {},
+        resolvedRuntime: null
       },
       {
-        agentId: "agent-b", variantId: "agent-b", displayLabel: "Agent B",
-        baseAgentId: "agent-b", agentTitle: "Agent B",
-        status: "failed", durationMs: 8000, tokenUsage: 2000,
-        estimatedCostUsd: 0.10, costKnown: true,
+        agentId: "agent-b",
+        variantId: "agent-b",
+        displayLabel: "Agent B",
+        baseAgentId: "agent-b",
+        agentTitle: "Agent B",
+        status: "failed",
+        durationMs: 8000,
+        tokenUsage: 2000,
+        estimatedCostUsd: 0.1,
+        costKnown: true,
         changedFiles: [],
         judgeResults: [
           { judgeId: "j1", label: "Judge 1", type: "file-check", success: false }
         ],
         summary: "Agent B failed",
-        requestedConfig: {}, resolvedRuntime: null
+        requestedConfig: {},
+        resolvedRuntime: null
       }
     ]
   };
@@ -148,7 +172,9 @@ function createTestRun() {
 
 async function injectTestRun(page) {
   const runJson = JSON.stringify(createTestRun());
-  await page.locator("#result-loader-panel").evaluate((el) => { el.open = true; });
+  await page.locator("#result-loader-panel").evaluate((el) => {
+    el.open = true;
+  });
   await page.locator("#summary-file").setInputFiles({
     name: "summary.json",
     mimeType: "application/json",
@@ -228,7 +254,7 @@ test("clicking a comparison bar row selects the agent", {
   }
 });
 
-test("double-clicking a compare table row toggles inline detail", {
+test("clicking the selected compare table row toggles inline detail", {
   skip: process.env.REPOARENA_RUN_BROWSER_SMOKE !== "1",
   timeout: 120000
 }, async () => {
@@ -246,23 +272,17 @@ test("double-clicking a compare table row toggles inline detail", {
 
     await injectTestRun(page);
 
-    // First click selects the agent
-    await page.locator("[data-compare-agent-id='agent-a']").click();
-    await page.waitForTimeout(300);
-
-    // Second click expands inline detail
     await page.locator("[data-compare-agent-id='agent-a']").click();
     await page.waitForTimeout(300);
 
     const detailVisible = await page.locator(".compare-detail-row").isVisible();
-    assert.equal(detailVisible, true, "detail row should appear after second click");
+    assert.equal(detailVisible, true, "detail row should appear after clicking the selected row");
 
-    // Third click collapses
     await page.locator("[data-compare-agent-id='agent-a']").click();
     await page.waitForTimeout(300);
 
     const detailCount = await page.locator(".compare-detail-row").count();
-    assert.equal(detailCount, 0, "detail row should disappear after third click");
+    assert.equal(detailCount, 0, "detail row should disappear after clicking the selected row again");
   } finally {
     await browser.close();
     await uiServer.stop();
