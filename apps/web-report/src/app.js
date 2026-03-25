@@ -1,4 +1,4 @@
-import { localizeText, translate } from "./i18n.js";
+import { translate } from "./i18n.js";
 import { createResultLoaders } from "./results/loaders.js";
 import {
   baseAgentLabel,
@@ -380,7 +380,8 @@ function runtimeVerificationLabel(record) {
 }
 
 function localText(zh, en) {
-  return localizeText(state.language, zh, en);
+  void zh;
+  return en;
 }
 
 function translateDifficulty(d) {

@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
@@ -111,10 +111,10 @@
                 <span id="launcher-task-path-label">Task Pack Path</span>
                 <input id="launcher-task-path" type="text" />
               </label>
-              <label class="field field-wide" id="launcher-adhoc-prompt-field" style="display:none">
-                <span id="launcher-adhoc-prompt-label">自定义提示词</span>
-                <textarea id="launcher-adhoc-prompt" rows="6" placeholder="输入你想让 Agent 执行的任务描述..."></textarea>
-                <span class="muted" id="launcher-adhoc-prompt-hint">输入提示词后，系统会自动生成临时任务包并下发给选中的 Agent 执行。</span>
+                            <label class="field field-wide" id="launcher-adhoc-prompt-field" style="display:none">
+                <span id="launcher-adhoc-prompt-label">Custom Prompt</span>
+                <textarea id="launcher-adhoc-prompt" rows="6" placeholder="Describe the task you want the selected agents to run."></textarea>
+                <span class="muted" id="launcher-adhoc-prompt-hint">Enter a prompt and RepoArena will create a temporary task pack for the selected agents.</span>
               </label>
               <label class="field">
                 <span id="launcher-output-label">Output Folder</span>
@@ -131,10 +131,10 @@
                 <span id="launcher-probe-auth-label">Probe auth before run</span>
               </label>
               <label class="field" style="display:inline-flex;align-items:center;gap:6px;min-width:auto">
-                <span id="launcher-concurrency-label" style="white-space:nowrap">并发数</span>
+                <span id="launcher-concurrency-label" style="white-space:nowrap">Concurrency</span>
                 <input id="launcher-concurrency" type="number" min="1" max="10" value="1" style="width:60px" />
               </label>
-              <button id="launcher-quick-start" class="launcher-quick-start-btn" type="button">⚡ Quick Start</button>
+              <button id="launcher-quick-start" class="launcher-quick-start-btn" type="button">Quick Start</button>
               <button id="launcher-run" type="button">Start Benchmark</button>
             </div>
             <div id="launcher-validation" class="launcher-validation"></div>

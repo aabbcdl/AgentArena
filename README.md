@@ -1,4 +1,4 @@
-# RepoArena
+﻿# RepoArena
 
 > The local-first arena for evaluating AI coding agents in real repositories.
 
