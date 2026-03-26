@@ -34,9 +34,9 @@
     "typecheck": "pnpm -r --if-present typecheck"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.8",
-    "@types/node": "^24.5.2",
+    "@biomejs/biome": "^2.4.9",
+    "@types/node": "^25.5.0",
     "playwright": "^1.53.0",
-    "typescript": "^5.9.2"
+    "typescript": "^6.0.2"
   }
 }
