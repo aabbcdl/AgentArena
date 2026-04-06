@@ -23,7 +23,8 @@ test("runBenchmark passes only allowlisted env vars to setup, judges, teardown, 
   process.env.REPOARENA_ALLOWED_TEST = "visible";
   process.env.REPOARENA_BLOCKED_TEST = "hidden";
 
-  await writeJson(taskPath, {
+  try {
+    await writeJson(taskPath, {
     schemaVersion: "repoarena.taskpack/v1",
     id: "env-demo",
     title: "Env Demo",
@@ -65,11 +66,15 @@ test("runBenchmark passes only allowlisted env vars to setup, judges, teardown, 
   assert.equal(benchmark.results[0].judgeResults[0].success, true);
   assert.equal(benchmark.results[0].teardownResults[0].success, true);
 
-  const trace = await readFile(path.join(outputPath, "agents", "demo-fast", "trace.jsonl"), "utf8");
+  const trace = await readFile(path.join(benchmark.outputPath, "agents", "demo-fast", "trace.jsonl"), "utf8");
   assert.match(trace, /setup\.finish/);
   assert.match(trace, /teardown\.finish/);
 
   await rm(tempDir, { recursive: true, force: true });
+  } finally {
+    delete process.env.REPOARENA_ALLOWED_TEST;
+    delete process.env.REPOARENA_BLOCKED_TEST;
+  }
 });
 
 test("runBenchmark supports step-level env allowlists and inline overrides", async () => {
@@ -86,7 +91,8 @@ test("runBenchmark supports step-level env allowlists and inline overrides", asy
   process.env.REPOARENA_STEP_ONLY = "step-visible";
   process.env.REPOARENA_SHOULD_STAY_BLOCKED = "blocked";
 
-  await writeJson(taskPath, {
+  try {
+    await writeJson(taskPath, {
     schemaVersion: "repoarena.taskpack/v1",
     id: "step-env-demo",
     title: "Step Env Demo",
@@ -141,6 +147,10 @@ test("runBenchmark supports step-level env allowlists and inline overrides", asy
   assert.equal(benchmark.results[0].teardownResults[0].success, true);
 
   await rm(tempDir, { recursive: true, force: true });
+  } finally {
+    delete process.env.REPOARENA_STEP_ONLY;
+    delete process.env.REPOARENA_SHOULD_STAY_BLOCKED;
+  }
 });
 
 test("runBenchmark executes setup and teardown commands in declaration order", async () => {

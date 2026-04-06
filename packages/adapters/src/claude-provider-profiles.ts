@@ -112,18 +112,48 @@ async function ensureRegistryDir(): Promise<void> {
 }
 
 async function readRegistry(): Promise<ProfileRegistryFile> {
+  let rawRegistry: string;
   try {
-    const parsed = JSON.parse(await fs.readFile(registryPath(), "utf8")) as ProfileRegistryFile;
-    return {
-      schemaVersion: 1,
-      profiles: Array.isArray(parsed.profiles) ? parsed.profiles.map(normalizeProfile) : []
-    };
-  } catch {
-    return {
-      schemaVersion: 1,
-      profiles: []
-    };
+    rawRegistry = await fs.readFile(registryPath(), "utf8");
+  } catch (error) {
+    if (
+      error &&
+      typeof error === "object" &&
+      "code" in error &&
+      (error as NodeJS.ErrnoException).code === "ENOENT"
+    ) {
+      return {
+        schemaVersion: 1,
+        profiles: []
+      };
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to read Claude provider registry at ${registryPath()}: ${message}`);
   }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawRegistry);
+  } catch {
+    throw new Error(`Claude provider registry at ${registryPath()} is malformed JSON.`);
+  }
+
+  if (!parsed || typeof parsed !== "object") {
+    throw new Error(`Claude provider registry at ${registryPath()} must contain a JSON object.`);
+  }
+
+  const registry = parsed as Partial<ProfileRegistryFile>;
+  return {
+    schemaVersion: 1,
+    profiles: Array.isArray(registry.profiles) ? registry.profiles.map(normalizeProfile) : []
+  };
+}
+
+function tryReadRegistry(): Promise<ProfileRegistryFile> {
+  return readRegistry().catch((error) => {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to read Claude provider profiles: ${reason}`);
+  });
 }
 
 async function writeRegistry(registry: ProfileRegistryFile): Promise<void> {
@@ -238,13 +268,29 @@ try {
 async function setSecretFile(profileId: string, secret: string): Promise<void> {
   await fs.mkdir(secretDirectory(), { recursive: true });
   const filePath = secretFilePath(profileId);
-  await fs.writeFile(filePath, `${secret.trim()}\n`, { encoding: "utf8", mode: 0o600 });
+  // Store as base64 to avoid plaintext secrets on disk.
+  // This is NOT encryption — it only prevents casual exposure (e.g., grep, accidental cat).
+  // For stronger protection, use a platform keychain or external secret manager.
+  const encoded = Buffer.from(secret.trim(), "utf8").toString("base64");
+  await fs.writeFile(filePath, `${encoded}\n`, { encoding: "utf8", mode: 0o600 });
   await fs.chmod(filePath, 0o600).catch(() => {});
 }
 
 async function getSecretFile(profileId: string): Promise<string | null> {
   try {
-    return (await fs.readFile(secretFilePath(profileId), "utf8")).trim() || null;
+    const raw = (await fs.readFile(secretFilePath(profileId), "utf8")).trim();
+    if (!raw) return null;
+    // Decode base64-encoded secret (supports legacy plaintext files too)
+    try {
+      const decoded = Buffer.from(raw, "base64").toString("utf8");
+      // Heuristic: if re-encoding matches, it was base64; otherwise treat as legacy plaintext
+      if (Buffer.from(decoded, "utf8").toString("base64") === raw) {
+        return decoded || null;
+      }
+    } catch {
+      // Fall through to return raw value for legacy plaintext files
+    }
+    return raw || null;
   } catch {
     return null;
   }
@@ -269,7 +315,7 @@ export function supportsWindowsCredentialManager(): boolean {
 }
 
 export async function listClaudeProviderProfiles(): Promise<ClaudeProviderProfile[]> {
-  const registry = await readRegistry();
+  const registry = await tryReadRegistry();
   const customProfiles = await Promise.all(
     registry.profiles.map(async (profile) => ({
       ...profile,
@@ -303,7 +349,7 @@ export async function saveClaudeProviderProfile(input: ClaudeProviderProfileInpu
     throw new Error("The built-in official Claude profile cannot be replaced.");
   }
 
-  const registry = await readRegistry();
+  const registry = await tryReadRegistry();
   const id = input.id?.trim() || `${slugify(input.name) || "claude-profile"}-${randomUUID().slice(0, 6)}`;
   const profile = normalizeProfile({
     id,

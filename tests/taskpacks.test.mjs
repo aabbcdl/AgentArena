@@ -537,3 +537,261 @@ test("loadTaskPack rejects invalid difficulty values", async () => {
 
   await rm(tempDir, { recursive: true, force: true });
 });
+
+test("loadTaskPack parses patch-validation judge", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-taskpack-"));
+  const taskPath = path.join(tempDir, "task.yaml");
+
+  await writeFile(
+    taskPath,
+    [
+      "schemaVersion: repoarena.taskpack/v1",
+      "id: test-patch-validation",
+      "title: Test",
+      "prompt: Test task",
+      "judges:",
+      "  - type: patch-validation",
+      "    label: \"Issue resolved\"",
+      "    testSuite: \"npm test\"",
+      "    failToPassTests:",
+      "      - \"test/bug-fix.test.js\"",
+      "    passToPassTests:",
+      "      - \"test/**/*.test.js\"",
+      "    critical: true",
+      "metadata:",
+      "  source: official",
+      "  owner: Test",
+      "  repoTypes: [node]",
+      "  tags: []",
+      "  dependencies: []",
+      "envAllowList: []",
+      "setupCommands: []",
+      "teardownCommands: []"
+    ].join("\n"),
+    "utf8"
+  );
+
+  const taskPack = await loadTaskPack(taskPath);
+
+  assert.equal(taskPack.judges.length, 1);
+  assert.equal(taskPack.judges[0].type, "patch-validation");
+  assert.equal(taskPack.judges[0].testSuite, "npm test");
+  assert.deepEqual(taskPack.judges[0].failToPassTests, ["test/bug-fix.test.js"]);
+  assert.deepEqual(taskPack.judges[0].passToPassTests, ["test/**/*.test.js"]);
+  assert.equal(taskPack.judges[0].critical, true);
+
+  await rm(tempDir, { recursive: true, force: true });
+});
+
+test("loadTaskPack parses token-efficiency judge", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-taskpack-"));
+  const taskPath = path.join(tempDir, "task.yaml");
+
+  await writeFile(
+    taskPath,
+    [
+      "schemaVersion: repoarena.taskpack/v1",
+      "id: test-token-efficiency",
+      "title: Test",
+      "prompt: Test task",
+      "judges:",
+      "  - type: token-efficiency",
+      "    label: \"Token budget check\"",
+      "    tokenBudget: 50000",
+      "    critical: false",
+      "metadata:",
+      "  source: official",
+      "  owner: Test",
+      "  repoTypes: [node]",
+      "  tags: []",
+      "  dependencies: []",
+      "envAllowList: []",
+      "setupCommands: []",
+      "teardownCommands: []"
+    ].join("\n"),
+    "utf8"
+  );
+
+  const taskPack = await loadTaskPack(taskPath);
+
+  assert.equal(taskPack.judges.length, 1);
+  assert.equal(taskPack.judges[0].type, "token-efficiency");
+  assert.equal(taskPack.judges[0].tokenBudget, 50000);
+  assert.equal(taskPack.judges[0].critical, false);
+
+  await rm(tempDir, { recursive: true, force: true });
+});
+
+test("loadTaskPack validates interactionModel enum", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-taskpack-"));
+  const taskPath = path.join(tempDir, "task.yaml");
+
+  await writeFile(
+    taskPath,
+    [
+      "schemaVersion: repoarena.taskpack/v1",
+      "id: test-valid-interaction",
+      "title: Test",
+      "prompt: Test",
+      "metadata:",
+      "  source: official",
+      "  owner: Test",
+      "  repoTypes: [node]",
+      "  tags: []",
+      "  dependencies: []",
+      "  interactionModel: multi-turn",
+      "envAllowList: []",
+      "setupCommands: []",
+      "judges: []",
+      "teardownCommands: []"
+    ].join("\n"),
+    "utf8"
+  );
+
+  const taskPack = await loadTaskPack(taskPath);
+  assert.equal(taskPack.metadata.interactionModel, "multi-turn");
+
+  await rm(tempDir, { recursive: true, force: true });
+});
+
+test("loadTaskPack rejects invalid interactionModel", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-taskpack-"));
+  const taskPath = path.join(tempDir, "task.yaml");
+
+  await writeFile(
+    taskPath,
+    [
+      "schemaVersion: repoarena.taskpack/v1",
+      "id: test-invalid-interaction",
+      "title: Test",
+      "prompt: Test",
+      "metadata:",
+      "  source: official",
+      "  owner: Test",
+      "  repoTypes: [node]",
+      "  tags: []",
+      "  dependencies: []",
+      "  interactionModel: invalid-value",
+      "envAllowList: []",
+      "setupCommands: []",
+      "judges: []",
+      "teardownCommands: []"
+    ].join("\n"),
+    "utf8"
+  );
+
+  await assert.rejects(
+    async () => await loadTaskPack(taskPath),
+    /interactionModel/,
+    "Should reject invalid interactionModel"
+  );
+
+  await rm(tempDir, { recursive: true, force: true });
+});
+
+test("loadTaskPack parses antiContamination metadata", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-taskpack-"));
+  const taskPath = path.join(tempDir, "task.yaml");
+
+  await writeFile(
+    taskPath,
+    [
+      "schemaVersion: repoarena.taskpack/v1",
+      "id: test-anti-contam",
+      "title: Test",
+      "prompt: Test",
+      "metadata:",
+      "  source: official",
+      "  owner: Test",
+      "  repoTypes: [node]",
+      "  tags: []",
+      "  dependencies: []",
+      "  taskCategories: [coding, math]",
+      "  antiContamination:",
+      "    rotationId: \"2026-04\"",
+      "    createdAt: \"2026-04-01T00:00:00Z\"",
+      "    expiresAt: \"2026-05-01T00:00:00Z\"",
+      "envAllowList: []",
+      "setupCommands: []",
+      "judges: []",
+      "teardownCommands: []"
+    ].join("\n"),
+    "utf8"
+  );
+
+  const taskPack = await loadTaskPack(taskPath);
+
+  assert.deepEqual(taskPack.metadata.taskCategories, ["coding", "math"]);
+  assert.equal(taskPack.metadata.antiContamination.rotationId, "2026-04");
+  assert.equal(taskPack.metadata.antiContamination.createdAt, "2026-04-01T00:00:00Z");
+  assert.equal(taskPack.metadata.antiContamination.expiresAt, "2026-05-01T00:00:00Z");
+
+  await rm(tempDir, { recursive: true, force: true });
+});
+
+test("loadTaskPack parses requirementClarity enum", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-taskpack-"));
+  const taskPath = path.join(tempDir, "task.yaml");
+
+  await writeFile(
+    taskPath,
+    [
+      "schemaVersion: repoarena.taskpack/v1",
+      "id: test-requirement-clarity",
+      "title: Test",
+      "prompt: Test",
+      "metadata:",
+      "  source: official",
+      "  owner: Test",
+      "  repoTypes: [node]",
+      "  tags: []",
+      "  dependencies: []",
+      "  requirementClarity: precise",
+      "envAllowList: []",
+      "setupCommands: []",
+      "judges: []",
+      "teardownCommands: []"
+    ].join("\n"),
+    "utf8"
+  );
+
+  const taskPack = await loadTaskPack(taskPath);
+  assert.equal(taskPack.metadata.requirementClarity, "precise");
+
+  await rm(tempDir, { recursive: true, force: true });
+});
+
+test("loadTaskPack rejects invalid requirementClarity", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-taskpack-"));
+  const taskPath = path.join(tempDir, "task.yaml");
+
+  await writeFile(
+    taskPath,
+    [
+      "schemaVersion: repoarena.taskpack/v1",
+      "id: test-invalid-clarity",
+      "title: Test",
+      "prompt: Test",
+      "metadata:",
+      "  source: official",
+      "  owner: Test",
+      "  repoTypes: [node]",
+      "  tags: []",
+      "  dependencies: []",
+      "  requirementClarity: unclear",
+      "envAllowList: []",
+      "setupCommands: []",
+      "judges: []",
+      "teardownCommands: []"
+    ].join("\n"),
+    "utf8"
+  );
+
+  await assert.rejects(
+    async () => await loadTaskPack(taskPath),
+    /requirementClarity/,
+    "Should reject invalid requirementClarity"
+  );
+
+  await rm(tempDir, { recursive: true, force: true });
+});

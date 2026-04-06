@@ -15,6 +15,29 @@ import {
 } from "../packages/adapters/dist/claude-provider-profiles.js";
 import { __testUtils, getAdapter, listAvailableAdapters } from "../packages/adapters/dist/index.js";
 
+test("listAvailableAdapters includes new agents", () => {
+  const adapters = listAvailableAdapters();
+  const gemini = adapters.find((adapter) => adapter.id === "gemini-cli");
+  const aider = adapters.find((adapter) => adapter.id === "aider");
+  const kilo = adapters.find((adapter) => adapter.id === "kilo-cli");
+  const opencode = adapters.find((adapter) => adapter.id === "opencode");
+
+  assert.ok(gemini);
+  assert.equal(gemini.capability.supportTier, "experimental");
+  assert.equal(gemini.capability.tokenAvailability, "available");
+  assert.equal(gemini.capability.costAvailability, "available");
+
+  assert.ok(aider);
+  assert.equal(aider.capability.supportTier, "experimental");
+  assert.equal(aider.capability.configurableRuntime.model, true);
+
+  assert.ok(kilo);
+  assert.equal(kilo.capability.supportTier, "experimental");
+
+  assert.ok(opencode);
+  assert.equal(opencode.capability.supportTier, "experimental");
+});
+
 test("listAvailableAdapters exposes capability metadata", () => {
   const adapters = listAvailableAdapters();
   const codex = adapters.find((adapter) => adapter.id === "codex");
@@ -233,6 +256,78 @@ test("parseClaudeEvents normalizes token, cost, and error data", () => {
   assert.equal(parsed.error, "permission_error");
 });
 
+test("parseGeminiEvents extracts tokens, cost, session, and summary", () => {
+  const stdout = [
+    JSON.stringify({
+      session_id: "gemini-session-1",
+      message: {
+        usage: {
+          input_tokens: 20,
+          output_tokens: 8,
+          cache_creation_input_tokens: 2,
+          cache_read_input_tokens: 5
+        },
+        content: [{ type: "text", text: "Working on it..." }]
+      }
+    }),
+    JSON.stringify({
+      type: "result",
+      total_cost_usd: 0.05,
+      result: "Gemini finished.",
+      usage: {
+        input_tokens: 15,
+        output_tokens: 5,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 3
+      }
+    }),
+    JSON.stringify({
+      type: "result",
+      is_error: true,
+      error: "auth_failed",
+      total_cost_usd: 0.01
+    })
+  ].join("\n");
+
+  const parsed = __testUtils.parseGeminiEvents(stdout);
+  assert.equal(parsed.sessionId, "gemini-session-1");
+  assert.equal(parsed.summaryFromEvents, "Gemini finished.");
+  assert.equal(parsed.tokenUsage, 23);
+  assert.equal(parsed.estimatedCostUsd, 0.01);
+  assert.equal(parsed.costKnown, false);
+  assert.equal(parsed.error, "auth_failed");
+});
+
+test("parseGeminiEvents handles empty input", () => {
+  const parsed = __testUtils.parseGeminiEvents("");
+  assert.equal(parsed.tokenUsage, 0);
+  assert.equal(parsed.estimatedCostUsd, 0);
+  assert.equal(parsed.costKnown, false);
+  assert.equal(parsed.summaryFromEvents, undefined);
+  assert.equal(parsed.sessionId, undefined);
+  assert.equal(parsed.error, undefined);
+});
+
+test("parseGeminiEvents ignores non-JSON lines", () => {
+  const stdout = "some log line\nnot json\n{\"type\": \"result\", \"result\": \"done\"}";
+  const parsed = __testUtils.parseGeminiEvents(stdout);
+  assert.equal(parsed.summaryFromEvents, "done");
+});
+
+test("new adapter preflight returns missing when CLI not installed", async () => {
+  const adaptersToTest = ["gemini-cli", "aider", "kilo-cli", "opencode"];
+  for (const adapterId of adaptersToTest) {
+    const adapter = getAdapter(adapterId);
+    const preflight = await adapter.preflight({ probeAuth: false });
+    assert.equal(preflight.agentId, adapterId);
+    // When CLI is not installed, status should be "missing"
+    assert.ok(
+      preflight.status === "missing" || preflight.status === "unverified",
+      `${adapterId}: expected missing or unverified, got ${preflight.status}`
+    );
+  }
+});
+
 test("Claude provider profiles persist metadata without leaking secrets", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-claude-profiles-"));
   const registryPath = path.join(tempDir, "claude-provider-profiles.json");
@@ -302,6 +397,32 @@ test("Claude provider profiles persist metadata without leaking secrets", async 
       delete process.env.REPOARENA_CLAUDE_SECRET_PREFIX;
     } else {
       process.env.REPOARENA_CLAUDE_SECRET_PREFIX = originalPrefix;
+    }
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("Claude provider registry surfaces malformed JSON instead of resetting", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-claude-profiles-malformed-"));
+  const registryPath = path.join(tempDir, "claude-provider-profiles.json");
+  const originalRoot = process.env.REPOARENA_CLAUDE_PROFILE_ROOT;
+  const originalFile = process.env.REPOARENA_CLAUDE_PROFILES_FILE;
+  process.env.REPOARENA_CLAUDE_PROFILE_ROOT = tempDir;
+  process.env.REPOARENA_CLAUDE_PROFILES_FILE = registryPath;
+
+  try {
+    await writeFile(registryPath, "{ not valid json", "utf8");
+    await assert.rejects(listClaudeProviderProfiles(), /Claude provider registry.*malformed JSON/);
+  } finally {
+    if (originalRoot === undefined) {
+      delete process.env.REPOARENA_CLAUDE_PROFILE_ROOT;
+    } else {
+      process.env.REPOARENA_CLAUDE_PROFILE_ROOT = originalRoot;
+    }
+    if (originalFile === undefined) {
+      delete process.env.REPOARENA_CLAUDE_PROFILES_FILE;
+    } else {
+      process.env.REPOARENA_CLAUDE_PROFILES_FILE = originalFile;
     }
     await rm(tempDir, { recursive: true, force: true });
   }

@@ -10,10 +10,10 @@
         "noUnusedImports": "warn"
       },
       "suspicious": {
-        "noExplicitAny": "off"
+        "noExplicitAny": "warn"
       },
       "style": {
-        "noNonNullAssertion": "off",
+        "noNonNullAssertion": "warn",
         "useConst": "warn",
         "useTemplate": "off",
         "noDescendingSpecificity": "off"
@@ -40,7 +40,8 @@
     "includes": [
       "packages/*/src/**",
       "apps/*/src/**",
-      "tests/**"
+      "tests/**",
+      "!!**/apps/web-report/src/launcher/module.js"
     ]
   }
 }

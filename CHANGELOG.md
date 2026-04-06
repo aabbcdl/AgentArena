@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+### New Features
+
+- `repoarena init` — quick start command: auto-generates demo task pack, detects installed agents, outputs a ready-to-run command
+- `repoarena run` now supports `--gemini-model`, `--aider-model`, `--kilo-model`, `--opencode-model` for model configuration
+- 4 new agent adapters:
+  - **Gemini CLI** (`gemini-cli`) — Google's official terminal agent with JSON event parsing, token usage, and cost reporting
+  - **Aider** (`aider`) — open-source pair programming tool with automatic git initialization and multi-model support
+  - **Kilo CLI** (`kilo-cli`) — Kilo Code 1.0, built on OpenCode
+  - **OpenCode** (`opencode`) — free, multi-provider open-source CLI agent
+- Frontend launcher now supports full variant editors for all 4 new agents (model selection, enable/disable, add/remove variants)
+- Web report cost comparison now clearly distinguishes agents that support cost reporting
+- `biome.json` excludes `launcher/module.js` to avoid false positives with nested template literals
+
+### Bug Fixes
+
+- `isAbortError` now recognizes native `AbortError` in addition to custom `BenchmarkCancelledError`
+- `throwIfCancelled` redundant catch block removed
+- `createHttpError` replaced type assertion with explicit `HttpError` class
+- `leaderboard.ts` eliminated `any` casts and non-null assertions
+- `summarizeLauncherSelection` now includes all agent variants in count and preview
+
 ## 0.1.0 (2026-03-19)
 
 Initial public release.

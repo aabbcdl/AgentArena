@@ -1,23 +1,107 @@
+/**
+ * View model for RepoArena Web Report.
+ *
+ * TODO: Migrate to TypeScript for type safety.
+ * This file contains critical scoring logic that should be type-checked.
+ */
+
+// Match backend PRACTICAL_WEIGHTS exactly (packages/report/src/scoring.ts)
 export const DEFAULT_SCORE_WEIGHTS = Object.freeze({
-  status: 0.3,
-  tests: 0.25,
-  judges: 0.15,
-  lint: 0.1,
-  precision: 0.1,
-  duration: 0.06,
-  cost: 0.04
+  status: 0.24,
+  tests: 0.26,
+  criticalJudges: 0.20,
+  nonCriticalJudges: 0.08,
+  precision: 0.05,
+  lint: 0.03,
+  duration: 0.08,
+  cost: 0.06
 });
 
+// Simplified core presets - match backend weight definitions exactly
 export const SCORE_WEIGHT_PRESETS = Object.freeze({
-  balanced: DEFAULT_SCORE_WEIGHTS,
-  "correctness-first": Object.freeze({ status: 0.3, tests: 0.32, judges: 0.18, lint: 0.12, precision: 0.06, duration: 0.01, cost: 0.01 }),
+  // Match backend practical (default)
+  "practical": Object.freeze({
+    status: 0.24,
+    tests: 0.26,
+    criticalJudges: 0.20,
+    nonCriticalJudges: 0.08,
+    precision: 0.05,
+    lint: 0.03,
+    duration: 0.08,
+    cost: 0.06
+  }),
+  // Match backend balanced
+  "balanced": Object.freeze({
+    status: 0.30,
+    tests: 0.25,
+    judges: 0.15,
+    lint: 0.10,
+    precision: 0.10,
+    duration: 0.06,
+    cost: 0.04
+  }),
+  // Match backend issue-resolution
+  "issue-resolution": Object.freeze({
+    status: 0.15,
+    resolutionRate: 0.45,
+    failToPassTests: 0.20,
+    passToPassTests: 0.15,
+    duration: 0.05
+  }),
+  // Match backend efficiency-first
+  "efficiency-first": Object.freeze({
+    status: 0.20,
+    tests: 0.15,
+    criticalJudges: 0.15,
+    tokenEfficiency: 0.25,
+    acceptanceRate: 0.10,
+    duration: 0.10,
+    cost: 0.05
+  }),
+  // Match backend rotating-tasks
+  "rotating-tasks": Object.freeze({
+    status: 0.20,
+    tests: 0.20,
+    criticalJudges: 0.20,
+    categoryScore: 0.20,
+    duration: 0.10,
+    cost: 0.10
+  }),
+  // Match backend comprehensive
+  "comprehensive": Object.freeze({
+    status: 0.12,
+    tests: 0.15,
+    criticalJudges: 0.10,
+    nonCriticalJudges: 0.05,
+    resolutionRate: 0.12,
+    tokenEfficiency: 0.08,
+    categoryScore: 0.08,
+    duration: 0.15,
+    cost: 0.15,
+    precision: 0.05,
+    lint: 0.05
+  })
+});
+
+// Keep truly deprecated presets for backward compatibility (no longer overlap with core presets)
+export const DEPRECATED_SCORE_PRESETS = Object.freeze({
+  "correctness-first": Object.freeze({ status: 0.20, tests: 0.30, criticalJudges: 0.25, nonCriticalJudges: 0.10, duration: 0.10, cost: 0.05 }),
   "speed-first": Object.freeze({ status: 0.12, tests: 0.08, judges: 0.08, lint: 0.02, precision: 0.02, duration: 0.48, cost: 0.2 }),
   "cost-first": Object.freeze({ status: 0.12, tests: 0.1, judges: 0.08, lint: 0.05, precision: 0.05, duration: 0.1, cost: 0.5 }),
   "scope-discipline": Object.freeze({ status: 0.14, tests: 0.1, judges: 0.08, lint: 0.06, precision: 0.56, duration: 0.03, cost: 0.03 })
 });
 
-export function getScoreWeightPreset(presetId = "balanced") {
-  return SCORE_WEIGHT_PRESETS[presetId] ?? SCORE_WEIGHT_PRESETS.balanced;
+export function getScoreWeightPreset(presetId = "practical") {
+  // Default to 'practical' to match CLI default
+  if (SCORE_WEIGHT_PRESETS[presetId]) {
+    return SCORE_WEIGHT_PRESETS[presetId];
+  }
+  // Fall back to deprecated presets for backward compatibility
+  if (DEPRECATED_SCORE_PRESETS[presetId]) {
+    return DEPRECATED_SCORE_PRESETS[presetId];
+  }
+  // Default to practical
+  return SCORE_WEIGHT_PRESETS.practical;
 }
 
 export function getMatchingScorePresetId(weights = DEFAULT_SCORE_WEIGHTS) {
@@ -44,6 +128,11 @@ export function normalizeScoreWeights(weights = DEFAULT_SCORE_WEIGHTS) {
   }
 
   return Object.fromEntries(Object.entries(sanitized).map(([key, value]) => [key, value / total]));
+}
+
+// Helper to get all available presets (core + deprecated)
+export function getAllScorePresets() {
+  return { ...SCORE_WEIGHT_PRESETS, ...DEPRECATED_SCORE_PRESETS };
 }
 
 export function summarizeRun(run) {
@@ -73,13 +162,46 @@ export function runtimeIdentity(result) {
       result.resolvedRuntime?.effectiveReasoningEffort ??
       result.requestedConfig?.reasoningEffort ??
       "default",
+    version: result.resolvedRuntime?.effectiveAgentVersion ?? "unknown",
+    versionSource: result.resolvedRuntime?.agentVersionSource ?? "unknown",
     source: result.resolvedRuntime?.source ?? "unknown",
     verification: result.resolvedRuntime?.verification ?? "unknown"
   };
 }
 
+export function resultRecordKey(result) {
+  const runtime = runtimeIdentity(result);
+  return `${result.variantId ?? result.agentId}@@${runtime.version}`;
+}
+
 function resultKey(result) {
-  return result.variantId ?? result.agentId;
+  return resultRecordKey(result);
+}
+
+function taskIdentity(run) {
+  if (!run?.task) {
+    return null;
+  }
+
+  if (run.task.id) {
+    return `id:${run.task.id}`;
+  }
+
+  if (run.task.title) {
+    return `title:${run.task.title}`;
+  }
+
+  return null;
+}
+
+function areRunsComparable(leftRun, rightRun) {
+  const leftIdentity = taskIdentity(leftRun);
+  const rightIdentity = taskIdentity(rightRun);
+  if (!leftIdentity || !rightIdentity) {
+    return false;
+  }
+
+  return leftIdentity === rightIdentity;
 }
 
 export function resultLabel(result) {
@@ -139,6 +261,7 @@ function durationEfficiencyScore(result, run) {
   }
 
   const fastest = Math.min(...durations);
+  if (fastest <= 0) return 0;
   return fastest / Math.max(result.durationMs, fastest);
 }
 
@@ -149,6 +272,7 @@ function costEfficiencyScore(result, run) {
   }
 
   const cheapest = Math.min(...costs);
+  if (cheapest <= 0) return 0;
   return cheapest / Math.max(result.estimatedCostUsd, cheapest);
 }
 
@@ -176,20 +300,30 @@ export function getCompositeScoreDetails(result, run, weights = DEFAULT_SCORE_WE
   const normalizedWeights = normalizeScoreWeights(weights);
   const statusScore = result.status === "success" ? 1 : 0;
   const testsScore = Math.max(testPassRatio(result), 0);
-  const judgesScore = Math.max(judgePassRatio(result), 0);
+  const criticalJudgesScore = Math.max(result.criticalJudgePassRatio ?? judgePassRatio(result), 0);
+  const nonCriticalJudgesScore = Math.max(result.nonCriticalJudgePassRatio ?? judgePassRatio(result), 0);
   const lintScore = Math.max(lintQualityScore(result), 0);
   const precisionScore = Math.max(diffPrecisionScore(result), 0);
   const durationScore = durationEfficiencyScore(result, run);
   const costScore = costEfficiencyScore(result, run);
+  const resolutionRateScore = result.resolutionRate ?? (result.status === "success" ? 1 : 0);
+  const tokenEfficiencyScore = result.tokenEfficiencyScore ?? 0;
+  const acceptanceRateScore = result.acceptanceRate ?? 1;
+  const categoryScoreScore = result.status === "success" ? 1 : 0;
 
   const weightedScore =
-    statusScore * normalizedWeights.status +
-    testsScore * normalizedWeights.tests +
-    judgesScore * normalizedWeights.judges +
-    lintScore * normalizedWeights.lint +
-    precisionScore * normalizedWeights.precision +
-    durationScore * normalizedWeights.duration +
-    costScore * normalizedWeights.cost;
+    statusScore * (normalizedWeights.status ?? 0) +
+    testsScore * (normalizedWeights.tests ?? 0) +
+    criticalJudgesScore * (normalizedWeights.criticalJudges ?? 0) +
+    nonCriticalJudgesScore * (normalizedWeights.nonCriticalJudges ?? 0) +
+    lintScore * (normalizedWeights.lint ?? 0) +
+    precisionScore * (normalizedWeights.precision ?? 0) +
+    durationScore * (normalizedWeights.duration ?? 0) +
+    costScore * (normalizedWeights.cost ?? 0) +
+    resolutionRateScore * (normalizedWeights.resolutionRate ?? 0) +
+    tokenEfficiencyScore * (normalizedWeights.tokenEfficiency ?? 0) +
+    acceptanceRateScore * (normalizedWeights.acceptanceRate ?? 0) +
+    categoryScoreScore * (normalizedWeights.categoryScore ?? 0);
 
   return {
     total: Math.round(weightedScore * 1000) / 10,
@@ -197,11 +331,16 @@ export function getCompositeScoreDetails(result, run, weights = DEFAULT_SCORE_WE
     components: {
       status: statusScore,
       tests: testsScore,
-      judges: judgesScore,
+      criticalJudges: criticalJudgesScore,
+      nonCriticalJudges: nonCriticalJudgesScore,
       lint: lintScore,
       precision: precisionScore,
       duration: durationScore,
-      cost: costScore
+      cost: costScore,
+      resolutionRate: resolutionRateScore,
+      tokenEfficiency: tokenEfficiencyScore,
+      acceptanceRate: acceptanceRateScore,
+      categoryScore: categoryScoreScore
     }
   };
 }
@@ -213,9 +352,16 @@ export function formatCompositeScore(result, run, weights = DEFAULT_SCORE_WEIGHT
 export function getCompositeScoreReasons(result, run, weights = DEFAULT_SCORE_WEIGHTS) {
   const details = getCompositeScoreDetails(result, run, weights);
   const reasons = [];
+  const normalizedWeights = normalizeScoreWeights(weights);
 
   if (details.components.tests >= 0.999) {
     reasons.push("tests");
+  }
+  if (details.components.criticalJudges >= 0.999) {
+    reasons.push("criticalJudges");
+  }
+  if (details.components.nonCriticalJudges >= 0.999) {
+    reasons.push("nonCriticalJudges");
   }
   if (details.components.lint >= 0.999) {
     reasons.push("lint");
@@ -223,15 +369,21 @@ export function getCompositeScoreReasons(result, run, weights = DEFAULT_SCORE_WE
   if (details.components.precision >= 0.999) {
     reasons.push("precision");
   }
-  if (details.components.judges >= 0.999) {
-    reasons.push("judges");
-  }
   if (details.components.duration >= 0.999) {
     reasons.push("duration");
   }
   if (details.components.cost >= 0.999) {
     reasons.push("cost");
   }
+  // New components: use more meaningful thresholds (> 0.95 of their weight contribution)
+  if (details.components.resolutionRate > 0.95 * normalizedWeights.resolutionRate && normalizedWeights.resolutionRate > 0) {
+    reasons.push("resolution-rate-high");
+  }
+  if (details.components.tokenEfficiency > 0.95 * normalizedWeights.tokenEfficiency && normalizedWeights.tokenEfficiency > 0) {
+    reasons.push("token-efficiency-good");
+  }
+  // acceptanceRate default is 1, so skip it
+  // categoryScore is binary based on status, skip
 
   return reasons;
 }
@@ -373,8 +525,7 @@ export function buildShareCard(run, options = {}) {
   if (verdict.bestAgent) {
     const runtime = runtimeIdentity(verdict.bestAgent);
     lines.push(
-      `Best variant: ${resultLabel(verdict.bestAgent)} (${baseAgentLabel(verdict.bestAgent)} | ${runtime.provider} | ${runtime.model} | ${runtime.reasoning} | score ${formatCompositeScore(verdict.bestAgent, run)})`
-      .replace(`score ${formatCompositeScore(verdict.bestAgent, run)}`, `score ${formatCompositeScore(verdict.bestAgent, run, scoreWeights)}`)
+      `Best variant: ${resultLabel(verdict.bestAgent)} (${baseAgentLabel(verdict.bestAgent)} | ${runtime.provider} | ${runtime.model} | ${runtime.reasoning} | ${runtime.version} | score ${formatCompositeScore(verdict.bestAgent, run, scoreWeights)})`
     );
   }
 
@@ -520,13 +671,13 @@ export function buildPrTable(run, options = {}) {
   const scoreModeLabel = options.scoreModeLabel ?? null;
   const header = [
     ...(scoreModeLabel ? [`Score mode: ${scoreModeLabel}`] : []),
-    "| Variant | Base Agent | Provider | Provider Kind | Model | Reasoning | Verification | Status | Score | Duration | Tokens | Cost | Judges | Tests | Lint | Diff Precision | Files |",
-    "| --- | --- | --- | --- | --- | --- | --- | --- | ---: | --- | ---: | --- | --- | --- | --- | --- | ---: |"
+    "| Variant | Base Agent | Provider | Provider Kind | Model | Reasoning | Version | Verification | Status | Score | Duration | Tokens | Cost | Judges | Tests | Lint | Diff Precision | Files |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | ---: | --- | ---: | --- | --- | --- | --- | --- | ---: |"
   ];
   const rows = run.results.map((result) => {
     const runtime = runtimeIdentity(result);
     const passedJudges = result.judgeResults.filter((judge) => judge.success).length;
-    return `| ${resultLabel(result)} | ${baseAgentLabel(result)} | ${runtime.provider} | ${runtime.providerKind} | ${runtime.model} | ${runtime.reasoning} | ${runtime.verification}/${runtime.source} | ${result.status} | ${formatCompositeScore(result, run, scoreWeights)} | ${result.durationMs}ms | ${result.tokenUsage} | ${
+    return `| ${resultLabel(result)} | ${baseAgentLabel(result)} | ${runtime.provider} | ${runtime.providerKind} | ${runtime.model} | ${runtime.reasoning} | ${runtime.version} | ${runtime.verification}/${runtime.source} | ${result.status} | ${formatCompositeScore(result, run, scoreWeights)} | ${result.durationMs}ms | ${result.tokenUsage} | ${
       result.costKnown ? `$${result.estimatedCostUsd.toFixed(2)}` : "n/a"
     } | ${passedJudges}/${result.judgeResults.length} | ${formatTestMetric(result)} | ${formatLintMetric(result)} | ${formatDiffPrecisionMetric(result)} | ${result.changedFiles.length} |`;
   });
@@ -535,9 +686,7 @@ export function buildPrTable(run, options = {}) {
 }
 
 export function findPreviousComparableRun(runs, currentRun) {
-  const sameTaskRuns = [...runs]
-    .filter((run) => run.task.title === currentRun.task.title)
-    .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  const sameTaskRuns = getComparableRuns(runs, currentRun).sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   const currentIndex = sameTaskRuns.findIndex((run) => run.runId === currentRun.runId);
 
   if (currentIndex === -1 || currentIndex === sameTaskRuns.length - 1) {
@@ -569,10 +718,14 @@ export function getRunToRunAgentDiff(runs, currentRun) {
     rows: agentIds.map((agentId) => {
       const currentResult = currentByAgent.get(agentId) ?? null;
       const previousResult = previousByAgent.get(agentId) ?? null;
+      const currentRuntime = currentResult ? runtimeIdentity(currentResult) : null;
+      const previousRuntime = previousResult ? runtimeIdentity(previousResult) : null;
       return {
         agentId,
         currentResult,
         previousResult,
+        currentRuntime,
+        previousRuntime,
         statusChange: `${previousResult?.status ?? "missing"} -> ${currentResult?.status ?? "missing"}`,
         durationDeltaMs:
           currentResult && previousResult ? currentResult.durationMs - previousResult.durationMs : null,
@@ -583,7 +736,11 @@ export function getRunToRunAgentDiff(runs, currentRun) {
             ? currentResult.estimatedCostUsd - previousResult.estimatedCostUsd
             : null,
         judgeDelta:
-          currentResult && previousResult ? passedJudgeCount(currentResult) - passedJudgeCount(previousResult) : null
+          currentResult && previousResult ? passedJudgeCount(currentResult) - passedJudgeCount(previousResult) : null,
+        versionChange:
+          currentRuntime || previousRuntime
+            ? `${previousRuntime?.version ?? "unknown"} -> ${currentRuntime?.version ?? "unknown"}`
+            : null
       };
     })
   };
@@ -594,9 +751,7 @@ export function getAgentTrendRows(runs, currentRun, agentId) {
     return [];
   }
 
-  const sameTaskRuns = [...runs]
-    .filter((run) => run.task.title === currentRun.task.title)
-    .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+  const sameTaskRuns = getComparableRuns(runs, currentRun).sort((left, right) => left.createdAt.localeCompare(right.createdAt));
 
   const rows = [];
   let previousResult = null;
@@ -609,7 +764,9 @@ export function getAgentTrendRows(runs, currentRun, agentId) {
     rows.push({
       run,
       result,
+      runtime: runtimeIdentity(result),
       previousResult,
+      previousRuntime: previousResult ? runtimeIdentity(previousResult) : null,
       statusChange: `${previousResult?.status ?? "start"} -> ${result.status}`,
       durationDeltaMs: previousResult ? result.durationMs - previousResult.durationMs : null,
       tokenDelta: previousResult ? result.tokenUsage - previousResult.tokenUsage : null,
@@ -619,7 +776,8 @@ export function getAgentTrendRows(runs, currentRun, agentId) {
           : null,
       judgeDelta: previousResult
         ? passedJudgeCount(result) - passedJudgeCount(previousResult)
-        : null
+        : null,
+      versionChange: `${previousResult ? runtimeIdentity(previousResult).version : "start"} -> ${runtimeIdentity(result).version}`
     });
     previousResult = result;
   }
@@ -633,13 +791,15 @@ export function getAgentTrendRows(runs, currentRun, agentId) {
  */
 export function getCrossRunCompareRows(selectedRuns) {
   if (!selectedRuns || selectedRuns.length === 0) {
-    return { runs: [], agents: [], rows: [] };
+    return { runs: [], comparableRuns: [], excludedRuns: [], agents: [], rows: [] };
   }
 
-  // 收集所有 run 的所有 agent variant
-  const agentMap = new Map(); // key: variantId, value: array of {run, result}
-  
-  for (const run of selectedRuns) {
+  const baselineRun = selectedRuns[0] ?? null;
+  const comparableRuns = baselineRun ? selectedRuns.filter((run) => areRunsComparable(run, baselineRun)) : [];
+  const excludedRuns = baselineRun ? selectedRuns.filter((run) => !areRunsComparable(run, baselineRun)) : [];
+  const agentMap = new Map();
+
+  for (const run of comparableRuns) {
     for (const result of run.results) {
       const key = resultKey(result);
       if (!agentMap.has(key)) {
@@ -653,65 +813,67 @@ export function getCrossRunCompareRows(selectedRuns) {
     }
   }
 
-  // 为每个 agent 生成跨运行对比数据
   const rows = [];
-  for (const [agentId, entries] of agentMap) {
+  for (const [recordKey, entries] of agentMap) {
     if (entries.length === 0) continue;
 
     const firstEntry = entries[0];
     const stats = {
       totalRuns: entries.length,
-      successCount: entries.filter(e => e.result.status === "success").length,
-      totalDurationMs: entries.reduce((sum, e) => sum + e.result.durationMs, 0),
-      totalTokens: entries.reduce((sum, e) => sum + e.result.tokenUsage, 0),
-      totalCost: entries.filter(e => e.result.costKnown).reduce((sum, e) => sum + e.result.estimatedCostUsd, 0),
-      costKnownCount: entries.filter(e => e.result.costKnown).length,
-      totalJudgePasses: entries.reduce((sum, e) => sum + passedJudgeCount(e.result), 0),
-      totalJudges: entries.reduce((sum, e) => sum + e.result.judgeResults.length, 0)
+      successCount: entries.filter((entry) => entry.result.status === "success").length,
+      totalDurationMs: entries.reduce((sum, entry) => sum + entry.result.durationMs, 0),
+      totalTokens: entries.reduce((sum, entry) => sum + entry.result.tokenUsage, 0),
+      totalCost: entries.filter((entry) => entry.result.costKnown).reduce((sum, entry) => sum + entry.result.estimatedCostUsd, 0),
+      costKnownCount: entries.filter((entry) => entry.result.costKnown).length,
+      totalJudgePasses: entries.reduce((sum, entry) => sum + passedJudgeCount(entry.result), 0),
+      totalJudges: entries.reduce((sum, entry) => sum + entry.result.judgeResults.length, 0)
     };
 
-    // 按不同维度聚合的运行详情
     const byModel = new Map();
     const byProvider = new Map();
-    
+
     for (const entry of entries) {
       const modelKey = entry.runtime.model || "unknown";
       const providerKey = entry.runtime.provider || "unknown";
-      
+
       if (!byModel.has(modelKey)) byModel.set(modelKey, []);
       byModel.get(modelKey).push(entry);
-      
+
       if (!byProvider.has(providerKey)) byProvider.set(providerKey, []);
       byProvider.get(providerKey).push(entry);
     }
 
     rows.push({
-      agentId,
+      agentId: firstEntry.result.variantId ?? firstEntry.result.agentId,
+      recordKey,
       displayLabel: resultLabel(firstEntry.result),
       baseAgent: baseAgentLabel(firstEntry.result),
+      version: firstEntry.runtime.version,
+      versionSource: firstEntry.runtime.versionSource,
       stats,
       entries,
       byModel: Object.fromEntries(byModel),
       byProvider: Object.fromEntries(byProvider),
-      bestRuntime: entries.reduce((best, e) => {
-        if (e.result.status !== "success") return best;
-        if (!best || e.result.durationMs < best.durationMs) {
-          return { run: e.run, result: e.result, runtime: e.runtime };
+      bestRuntime: entries.reduce((best, entry) => {
+        if (entry.result.status !== "success") return best;
+        if (!best || entry.result.durationMs < best.durationMs) {
+          return { run: entry.run, result: entry.result, runtime: entry.runtime, durationMs: entry.result.durationMs };
         }
         return best;
       }, null)
     });
   }
 
-  // 按成功率降序，然后按耗时升序排序
-  rows.sort((a, b) => {
-    const successDelta = b.stats.successCount - a.stats.successCount;
+  rows.sort((left, right) => {
+    const successDelta = right.stats.successCount - left.stats.successCount;
     if (successDelta !== 0) return successDelta;
-    return a.stats.totalDurationMs - b.stats.totalDurationMs;
+    return left.stats.totalDurationMs - right.stats.totalDurationMs;
   });
 
   return {
     runs: selectedRuns,
+    comparableRuns,
+    excludedRuns,
     agents: Array.from(agentMap.keys()),
     rows
   };
@@ -720,40 +882,307 @@ export function getCrossRunCompareRows(selectedRuns) {
 /**
  * 获取跨运行对比的最佳配置推荐
  */
-export function getCrossRunRecommendation(crossRunData) {
+export function getCrossRunRecommendation(crossRunData, options = {}) {
   if (!crossRunData || crossRunData.rows.length === 0) {
     return null;
   }
 
-  // 找出成功率最高且平均耗时最低的配置
+  const scoreWeights = options.scoreWeights ?? DEFAULT_SCORE_WEIGHTS;
   const candidates = crossRunData.rows
-    .filter(row => row.stats.successCount > 0)
-    .map(row => ({
-      agentId: row.agentId,
-      displayLabel: row.displayLabel,
-      successRate: row.stats.successCount / row.stats.totalRuns,
-      avgDurationMs: row.stats.totalDurationMs / row.stats.totalRuns,
-      avgTokens: row.stats.totalTokens / row.stats.totalRuns,
-      avgCost: row.stats.costKnownCount > 0 
-        ? row.stats.totalCost / row.stats.costKnownCount 
-        : null,
-      bestRuntime: row.bestRuntime
-    }));
+    .filter((row) => row.stats.successCount > 0)
+    .map((row) => {
+      const aggregateRun = {
+        results: row.entries.map((entry) => entry.result)
+      };
+      const averageScore = row.entries.reduce(
+        (sum, entry) => sum + getCompositeScoreDetails(entry.result, aggregateRun, scoreWeights).total,
+        0
+      ) / Math.max(row.entries.length, 1);
+
+      return {
+        agentId: row.agentId,
+        recordKey: row.recordKey,
+        displayLabel: row.displayLabel,
+        version: row.version,
+        successRate: row.stats.successCount / row.stats.totalRuns,
+        avgDurationMs: row.stats.totalDurationMs / row.stats.totalRuns,
+        avgTokens: row.stats.totalTokens / row.stats.totalRuns,
+        avgCost: row.stats.costKnownCount > 0
+          ? row.stats.totalCost / row.stats.costKnownCount
+          : null,
+        bestRuntime: row.bestRuntime,
+        score: averageScore
+      };
+    });
 
   if (candidates.length === 0) return null;
 
-  // 综合评分：成功率权重 60%，耗时权重 30%，成本权重 10%
-  const maxSuccessRate = Math.max(...candidates.map(c => c.successRate));
-  const minDuration = Math.min(...candidates.filter(c => c.avgDurationMs > 0).map(c => c.avgDurationMs));
-  const minCost = Math.min(...candidates.filter(c => c.avgCost !== null).map(c => c.avgCost));
+  candidates.sort((left, right) => {
+    if (right.score !== left.score) {
+      return right.score - left.score;
+    }
+    if (right.successRate !== left.successRate) {
+      return right.successRate - left.successRate;
+    }
+    return left.avgDurationMs - right.avgDurationMs;
+  });
+  return candidates[0];
+}
 
-  for (const c of candidates) {
-    const successScore = c.successRate / maxSuccessRate;
-    const durationScore = minDuration > 0 ? minDuration / c.avgDurationMs : 0;
-    const costScore = c.avgCost !== null && minCost > 0 ? minCost / c.avgCost : 0;
-    c.score = successScore * 0.6 + durationScore * 0.3 + costScore * 0.1;
+/**
+ * ============= Leaderboard 相关函数 =============
+ * 历史排行榜：按任务、评分模式、agent 身份桶聚合
+ */
+
+/**
+ * 生成 leaderboard 身份键
+ */
+export function getLeaderboardIdentity(run, result) {
+  const runtime = runtimeIdentity(result);
+  const taskId = run.task?.id || run.task?.title || "unknown-task";
+  const scoreMode = run.scoreMode || "balanced";
+
+  return {
+    taskId,
+    scoreMode,
+    baseAgentId: result.baseAgentId || result.agentId,
+    providerProfile: runtime.provider,
+    model: runtime.model,
+    version: runtime.version
+  };
+}
+
+/**
+ * 序列化身份键
+ */
+export function serializeLeaderboardIdentity(identity) {
+  return JSON.stringify([
+    identity.taskId,
+    identity.scoreMode,
+    identity.baseAgentId,
+    identity.providerProfile,
+    identity.model,
+    identity.version
+  ]);
+}
+
+/**
+ * 计算中位数
+ */
+function median(values) {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? (sorted[mid - 1] + sorted[mid]) / 2
+    : sorted[mid];
+}
+
+/**
+ * 筛选可比较的 runs
+ */
+export function getComparableRuns(runs, currentRun) {
+  const currentTaskId = currentRun.task?.id || currentRun.task?.title;
+  const currentScoreMode = currentRun.scoreMode || "balanced";
+
+  return runs.filter((run) => {
+    const taskId = run.task?.id || run.task?.title;
+    const scoreMode = run.scoreMode || "balanced";
+    return taskId === currentTaskId && scoreMode === currentScoreMode;
+  });
+}
+
+/**
+ * 构建 leaderboard 数据
+ */
+export function buildLeaderboard(runs, currentRun) {
+  const comparableRuns = getComparableRuns(runs, currentRun);
+  const excludedRuns = runs.filter((run) => !comparableRuns.includes(run));
+
+  // 按身份键聚合结果
+  const resultMap = new Map();
+
+  for (const run of comparableRuns) {
+    for (const result of run.results) {
+      const identity = getLeaderboardIdentity(run, result);
+      const key = serializeLeaderboardIdentity(identity);
+
+      if (!resultMap.has(key)) {
+        resultMap.set(key, { runs: [], results: [] });
+      }
+      const entry = resultMap.get(key);
+      if (!entry.runs.includes(run)) {
+        entry.runs.push(run);
+      }
+      entry.results.push(result);
+    }
   }
 
-  candidates.sort((a, b) => b.score - a.score);
-  return candidates[0];
+  // 为每个 run 确定 winner，用于计算 win rate
+  const winMap = new Map();
+  const comparisonMap = new Map();
+
+  for (const run of comparableRuns) {
+    // 找出这个 run 里的 winner
+    const successfulResults = run.results.filter((r) => r.status === "success");
+    const candidates = successfulResults.length > 0 ? successfulResults : run.results;
+
+    // 按综合分排序
+    const sorted = [...candidates].sort((a, b) => {
+      const scoreA = a.compositeScore ?? 0;
+      const scoreB = b.compositeScore ?? 0;
+      if (scoreB !== scoreA) return scoreB - scoreA;
+      return a.durationMs - b.durationMs;
+    });
+
+    const winner = sorted[0];
+    if (winner) {
+      const winnerIdentity = getLeaderboardIdentity(run, winner);
+      const winnerKey = serializeLeaderboardIdentity(winnerIdentity);
+      winMap.set(winnerKey, (winMap.get(winnerKey) ?? 0) + 1);
+    }
+
+    // 记录所有参与对比的身份
+    for (const result of run.results) {
+      const identity = getLeaderboardIdentity(run, result);
+      const key = serializeLeaderboardIdentity(identity);
+      comparisonMap.set(key, (comparisonMap.get(key) ?? 0) + 1);
+    }
+  }
+
+  // 生成 leaderboard rows
+  const rows = [];
+
+  for (const [key, { runs: agentRuns, results }] of resultMap) {
+    const firstResult = results[0];
+    const identity = getLeaderboardIdentity(agentRuns[0], firstResult);
+
+    const scores = results.map((r) => r.compositeScore ?? 0).filter((s) => s > 0);
+    const durations = results.map((r) => r.durationMs).filter((d) => d > 0);
+    const costs = results
+      .filter((r) => r.costKnown && r.estimatedCostUsd > 0)
+      .map((r) => r.estimatedCostUsd);
+    const successCount = results.filter((r) => r.status === "success").length;
+
+    const averageScore = scores.length > 0
+      ? scores.reduce((sum, s) => sum + s, 0) / scores.length
+      : 0;
+    const winCount = winMap.get(key) ?? 0;
+    const totalComparisons = comparisonMap.get(key) ?? 0;
+    const winRate = totalComparisons > 0 ? winCount / totalComparisons : 0;
+    const successRate = results.length > 0 ? successCount / results.length : 0;
+
+    const lastSeenAt = agentRuns
+      .map((r) => r.createdAt)
+      .sort()
+      .reverse()[0] ?? new Date().toISOString();
+
+    // 样本充足性：至少 3 次 run 才算稳定
+    const sampleSizeSufficient = agentRuns.length >= 3;
+
+    rows.push({
+      identity,
+      displayLabel: firstResult.displayLabel || firstResult.agentId,
+      stats: {
+        runCount: agentRuns.length,
+        averageScore: Math.round(averageScore * 10) / 10,
+        winRate,  // 保持 0-1 之间的值
+        successRate,  // 保持 0-1 之间的值
+        medianDurationMs: median(durations),
+        medianCostUsd: costs.length > 0 ? median(costs) : null,
+        averageCostUsd: costs.length > 0
+          ? costs.reduce((sum, c) => sum + c, 0) / costs.length
+          : null,
+        lastSeenAt,
+        sampleSizeSufficient
+      },
+      winCount,
+      totalComparisons
+    });
+  }
+
+  // 排序：平均分 > 胜率 > 成功率 > 中位数耗时
+  rows.sort((a, b) => {
+    if (b.stats.averageScore !== a.stats.averageScore) {
+      return b.stats.averageScore - a.stats.averageScore;
+    }
+    if (b.stats.winRate !== a.stats.winRate) {
+      return b.stats.winRate - a.stats.winRate;
+    }
+    if (b.stats.successRate !== a.stats.successRate) {
+      return b.stats.successRate - a.stats.successRate;
+    }
+    return a.stats.medianDurationMs - b.stats.medianDurationMs;
+  });
+
+  return {
+    taskId: currentRun.task?.id || currentRun.task?.title || "unknown",
+    scoreMode: currentRun.scoreMode || "balanced",
+    comparableRunCount: comparableRuns.length,
+    excludedRunCount: excludedRuns.length,
+    rows,
+    comparabilityRules: [
+      "Only runs with the same task are compared",
+      "Only runs with the same score mode are compared",
+      "Different agent versions are treated as separate entries",
+      "Different providers/profiles are treated as separate entries",
+      "Different models are treated as separate entries"
+    ]
+  };
+}
+
+/**
+ * 获取排行榜说明
+ */
+export function getLeaderboardExplanation(leaderboard, locale = "en") {
+  if (locale === "zh-CN") {
+    return [
+      "此排行榜仅统计同任务、同评分模式、同配置的历史结果",
+      "版本变化会开启新的历史记录，不会继承旧版本的分数",
+      `当前榜单基于 ${leaderboard.comparableRunCount} 个可比较的 run`,
+      leaderboard.excludedRunCount > 0
+        ? `有 ${leaderboard.excludedRunCount} 个 run 因任务或评分模式不同被排除`
+        : "所有 run 都参与对比"
+    ];
+  }
+
+  return [
+    "This leaderboard only compares runs with the same task, score mode, and configuration",
+    "Version changes create new historical records; scores are not inherited from old versions",
+    `Current leaderboard is based on ${leaderboard.comparableRunCount} comparable runs`,
+    leaderboard.excludedRunCount > 0
+      ? `${leaderboard.excludedRunCount} runs were excluded due to different task or score mode`
+      : "All runs are included in the comparison"
+  ];
+}
+
+/**
+ * 获取 Agent 置信度徽章 HTML
+ * @param {object} result - Agent 运行结果
+ * @param {Array} varianceStats - 方差统计数组
+ * @param {string} locale - 语言环境
+ * @returns {string} HTML 片段
+ */
+export function getAgentConfidenceBadge(result, varianceStats, locale = "en") {
+  if (!varianceStats || varianceStats.length === 0) return "";
+
+  const stat = varianceStats.find((s) => s.agentId === result.agentId);
+  if (!stat) return "";
+
+  const isZhCn = locale === "zh-CN";
+  const confidenceText =
+    stat.confidence === "high"
+      ? isZhCn
+        ? "高可信"
+        : "High confidence"
+      : stat.confidence === "medium"
+        ? isZhCn
+          ? "中可信"
+          : "Medium confidence"
+        : isZhCn
+          ? "低可信"
+          : "Low confidence";
+  const confidenceClass = stat.confidence;
+
+  return `<span class="confidence-badge ${confidenceClass}" title="CV: ${(stat.scoreCV * 100).toFixed(1)}%, Runs: ${stat.runCount}">${confidenceText} (CV: ${(stat.scoreCV * 100).toFixed(0)}%)</span>`;
 }

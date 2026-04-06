@@ -1,0 +1,108 @@
+import path from "node:path";
+import type {
+  AdapterExecutionContext,
+  AdapterExecutionResult,
+  AdapterPreflightOptions,
+  AdapterPreflightResult
+} from "@repoarena/core";
+import { ClaudeLikeAdapter } from "./claude-adapter.js";
+import { findExecutableOnPath, pathExists } from "./process-utils.js";
+import { CURSOR_CAPABILITY, type InvocationSpec } from "./shared.js";
+
+function cursorAgentCliFromBinary(binaryPath: string): string {
+  const binaryDir = path.dirname(binaryPath);
+  return path.resolve(
+    binaryDir,
+    "..",
+    "extensions",
+    "cursor-agent",
+    "dist",
+    "claude-agent-sdk",
+    "cli.js"
+  );
+}
+
+async function resolveCursorAgentCliPath(): Promise<string | undefined> {
+  if (process.env.REPOARENA_CURSOR_AGENT_CLI?.trim()) {
+    const explicitPath = process.env.REPOARENA_CURSOR_AGENT_CLI.trim();
+    if (await pathExists(explicitPath)) {
+      return explicitPath;
+    }
+  }
+
+  const pathBinary = await findExecutableOnPath(
+    process.platform === "win32" ? ["cursor.cmd", "cursor.exe", "cursor"] : ["cursor"]
+  );
+  if (pathBinary) {
+    const derivedCliPath = cursorAgentCliFromBinary(pathBinary);
+    if (await pathExists(derivedCliPath)) {
+      return derivedCliPath;
+    }
+  }
+
+  const installRoots = process.platform === "win32"
+    ? [
+        path.join(process.env.LOCALAPPDATA ?? "", "Programs", "Cursor", "resources", "app", "bin", "cursor.cmd"),
+        path.join(process.env.ProgramFiles ?? "", "Cursor", "resources", "app", "bin", "cursor.exe")
+      ]
+    : [
+        "/Applications/Cursor.app/Contents/Resources/app/bin/cursor",
+        path.join(process.env.HOME ?? "", ".local", "bin", "cursor")
+      ];
+
+  for (const candidate of installRoots) {
+    if (!(await pathExists(candidate))) {
+      continue;
+    }
+
+    const derivedCliPath = cursorAgentCliFromBinary(candidate);
+    if (await pathExists(derivedCliPath)) {
+      return derivedCliPath;
+    }
+  }
+
+  return undefined;
+}
+
+async function resolveCursorInvocation(): Promise<InvocationSpec> {
+  if (process.env.REPOARENA_CURSOR_BIN?.trim()) {
+    const command = process.env.REPOARENA_CURSOR_BIN.trim();
+    return { command, argsPrefix: [], displayCommand: command };
+  }
+
+  const cursorAgentCliPath = await resolveCursorAgentCliPath();
+  if (cursorAgentCliPath) {
+    return {
+      command: process.execPath,
+      argsPrefix: [cursorAgentCliPath],
+      displayCommand: `${process.execPath} ${cursorAgentCliPath}`
+    };
+  }
+
+  return {
+    command: "cursor",
+    argsPrefix: [],
+    displayCommand: "cursor"
+  };
+}
+
+export { cursorAgentCliFromBinary, resolveCursorAgentCliPath, resolveCursorInvocation };
+
+export class CursorAdapter extends ClaudeLikeAdapter {
+  readonly kind = "external" as const;
+  readonly id = "cursor";
+  readonly title = "Cursor Agent";
+  readonly capability = CURSOR_CAPABILITY;
+
+  protected async resolveInvocation(): Promise<InvocationSpec> {
+    return await resolveCursorInvocation();
+  }
+
+  async preflight(options?: AdapterPreflightOptions): Promise<AdapterPreflightResult> {
+    return await super.preflight(options);
+  }
+
+  async execute(context: AdapterExecutionContext): Promise<AdapterExecutionResult> {
+    return await this.executeClaudeLike(context, "adapter.cursor.result", "Cursor");
+  }
+}

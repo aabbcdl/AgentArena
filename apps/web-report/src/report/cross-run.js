@@ -7,7 +7,6 @@ export function createCrossRunRenders({
   summarizeRun,
   runtimeIdentity,
   formatDuration,
-  getCrossRunCompareRows,
   getCrossRunRecommendation,
   escapeHtml
 }) {
@@ -87,13 +86,18 @@ export function createCrossRunRenders({
       return;
     }
 
-    const { runs, rows } = state.crossRunCompareData;
-    elements.crossRunCompareSummary.textContent = localText(
-      `对比 ${runs.length} 个运行，包含 ${rows.length} 个 Agent 配置`,
-      `Comparing ${runs.length} runs with ${rows.length} agent configurations`
-    );
+    const { runs, comparableRuns, excludedRuns, rows } = state.crossRunCompareData;
+    elements.crossRunCompareSummary.textContent = excludedRuns.length > 0
+      ? localText(
+        `已选 ${runs.length} 个运行，其中 ${comparableRuns.length} 个参与对比，${excludedRuns.length} 个因任务不同被排除。`,
+        `${comparableRuns.length} of ${runs.length} selected runs are being compared; ${excludedRuns.length} were excluded because they are a different task.`
+      )
+      : localText(
+        `对比 ${runs.length} 个运行，包含 ${rows.length} 个 Agent 配置`,
+        `Comparing ${runs.length} runs with ${rows.length} agent configurations`
+      );
 
-    const recommendation = getCrossRunRecommendation(state.crossRunCompareData);
+    const recommendation = getCrossRunRecommendation(state.crossRunCompareData, { scoreWeights: state.scoreWeights });
 
     const header = `
     <table class="compare-table">

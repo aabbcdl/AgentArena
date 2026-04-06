@@ -4,7 +4,13 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { runCommandStep, runJudge } from "../packages/judges/dist/index.js";
+import { runCommandStep, runJudge, runJudges } from "../packages/judges/dist/index.js";
+
+// TODO: Add tests for:
+// - decision-report.ts (generateDecisionReport, formatDecisionReport)
+// - variance-analysis.ts (computeVarianceAnalysis, formatVarianceReport)
+// - patch-validation judge execution
+// - token-efficiency judge execution
 
 function tempDir() {
   return path.join(tmpdir(), `repoarena-judges-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -192,6 +198,34 @@ test("command step aborts when signal is cancelled", async () => {
   await fs.rm(workspace, { recursive: true, force: true });
 });
 
+test("judges run sequentially in a shared workspace", async () => {
+  const workspace = await setupWorkspace();
+
+  const results = await runJudges(
+    [
+      {
+        id: "write-marker",
+        label: "write marker",
+        type: "command",
+        command: "node -e \"setTimeout(() => require('node:fs').writeFileSync('marker.txt', 'done'), 300)\""
+      },
+      {
+        id: "read-marker",
+        label: "read marker",
+        type: "command",
+        command: "node -e \"process.exit(require('node:fs').existsSync('marker.txt') ? 0 : 1)\""
+      }
+    ],
+    workspace,
+    ALLOWED_NAMES
+  );
+
+  assert.equal(results[0].success, true);
+  assert.equal(results[1].success, true);
+
+  await fs.rm(workspace, { recursive: true, force: true });
+});
+
 test("listWorkspaceFiles skips node_modules", async () => {
   const workspace = await setupWorkspace();
   await fs.mkdir(path.join(workspace, "src"), { recursive: true });
@@ -205,6 +239,125 @@ test("listWorkspaceFiles skips node_modules", async () => {
     workspace, ALLOWED_NAMES
   );
   assert.equal(result.success, true, "node_modules files should be skipped");
+
+  await fs.rm(workspace, { recursive: true, force: true });
+});
+
+test("file-contains judge supports flags for case-insensitive match", async () => {
+  const workspace = await setupWorkspace();
+  await fs.writeFile(path.join(workspace, "readme.txt"), "Hello World");
+
+  const result = await runJudge(
+    { id: "test-fc-flags", label: "Case insensitive", type: "file-contains", path: "readme.txt", pattern: "hello world", regex: true, flags: "i" },
+    workspace, ALLOWED_NAMES
+  );
+  assert.equal(result.success, true);
+
+  const failResult = await runJudge(
+    { id: "test-fc-flags2", label: "Case sensitive", type: "file-contains", path: "readme.txt", pattern: "hello world", regex: true },
+    workspace, ALLOWED_NAMES
+  );
+  assert.equal(failResult.success, false);
+
+  await fs.rm(workspace, { recursive: true, force: true });
+});
+
+test("snapshot judge passes when file matches snapshot", async () => {
+  const workspace = await setupWorkspace();
+  const content = "line1\nline2\nline3\n";
+  await fs.writeFile(path.join(workspace, "output.txt"), content);
+  await fs.writeFile(path.join(workspace, "expected.txt"), content);
+
+  const result = await runJudge(
+    { id: "test-snap", label: "Snapshot match", type: "snapshot", path: "output.txt", snapshotPath: "expected.txt" },
+    workspace, ALLOWED_NAMES
+  );
+  assert.equal(result.success, true);
+
+  await fs.rm(workspace, { recursive: true, force: true });
+});
+
+test("snapshot judge fails when file differs from snapshot", async () => {
+  const workspace = await setupWorkspace();
+  await fs.writeFile(path.join(workspace, "output.txt"), "actual content");
+  await fs.writeFile(path.join(workspace, "expected.txt"), "expected content");
+
+  const result = await runJudge(
+    { id: "test-snap-fail", label: "Snapshot mismatch", type: "snapshot", path: "output.txt", snapshotPath: "expected.txt" },
+    workspace, ALLOWED_NAMES
+  );
+  assert.equal(result.success, false);
+
+  await fs.rm(workspace, { recursive: true, force: true });
+});
+
+test("json-schema judge passes with valid data", async () => {
+  const workspace = await setupWorkspace();
+  await fs.writeFile(path.join(workspace, "data.json"), JSON.stringify({ name: "test", count: 5 }));
+
+  const result = await runJudge(
+    {
+      id: "test-jschema",
+      label: "Valid schema",
+      type: "json-schema",
+      path: "data.json",
+      schema: {
+        type: "object",
+        required: ["name", "count"],
+        properties: {
+          name: { type: "string" },
+          count: { type: "number" }
+        }
+      }
+    },
+    workspace, ALLOWED_NAMES
+  );
+  assert.equal(result.success, true);
+
+  await fs.rm(workspace, { recursive: true, force: true });
+});
+
+test("json-schema judge fails with invalid data", async () => {
+  const workspace = await setupWorkspace();
+  await fs.writeFile(path.join(workspace, "data.json"), JSON.stringify({ name: 123 }));
+
+  const result = await runJudge(
+    {
+      id: "test-jschema-fail",
+      label: "Invalid schema",
+      type: "json-schema",
+      path: "data.json",
+      schema: {
+        type: "object",
+        required: ["name"],
+        properties: {
+          name: { type: "string" }
+        }
+      }
+    },
+    workspace, ALLOWED_NAMES
+  );
+  assert.equal(result.success, false);
+
+  await fs.rm(workspace, { recursive: true, force: true });
+});
+
+test("command step respects timeout", async () => {
+  const workspace = await setupWorkspace();
+
+  const result = await runCommandStep(
+    {
+      id: "step-timeout",
+      label: "slow command",
+      command: "node -e \"setTimeout(() => console.log('done'), 30000)\"",
+      cwd: ".",
+      timeoutMs: 500
+    },
+    workspace,
+    ALLOWED_NAMES
+  );
+  assert.equal(result.success, false);
+  assert.ok(result.stderr.includes("timed out") || result.exitCode !== 0);
 
   await fs.rm(workspace, { recursive: true, force: true });
 });

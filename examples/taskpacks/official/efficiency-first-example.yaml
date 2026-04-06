@@ -1,0 +1,54 @@
+schemaVersion: repoarena.taskpack/v1
+id: efficiency-first-example
+title: "Efficiency First Example (CursorBench Inspired)"
+description: "Demonstrates token-efficiency judge for cost-effective coding"
+metadata:
+  source: official
+  owner: RepoArena
+  difficulty: medium
+  objective: "Complete the refactoring task within token budget"
+  repoTypes: [node, typescript]
+  tags: [efficiency-first, token-budget, cursorbench-inspired]
+  judgeRationale: "Measures token efficiency as primary metric"
+  differentiator: "Requires balancing quality with cost efficiency"
+  interactionModel: "multi-turn"
+  requirementClarity: "fuzzy"
+  tokenBudget: 80000
+prompt: |
+  Refactor the authentication module to improve security.
+  
+  Requirements:
+  - Update password hashing to use argon2
+  - Add rate limiting to login endpoint  
+  - Ensure backward compatibility with existing users
+  
+  Note: Try to complete this task efficiently - avoid unnecessary
+  token usage while maintaining code quality.
+judges:
+  - type: test-result
+    label: "All tests pass"
+    command: "npm test -- --reporter json"
+    format: jest
+    critical: true
+    timeoutMs: 90000
+  - type: token-efficiency
+    label: "Token efficiency within budget"
+    tokenBudget: 80000
+    weight: 1.0
+    critical: false
+  - type: lint-check
+    label: "Code quality check"
+    command: "npm run lint -- --format json"
+    format: eslint
+    critical: false
+    maxWarnings: 5
+envAllowList:
+  - NODE_ENV
+  - CI
+setupCommands:
+  - id: install-deps
+    label: "Install dependencies"
+    command: "npm install"
+    timeoutMs: 60000
+    envAllowList: [NODE_ENV, CI]
+teardownCommands: []

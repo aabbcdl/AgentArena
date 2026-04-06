@@ -100,12 +100,12 @@ test("web-report browser smoke renders launcher and supports zh/en switching", {
     const bodyZh = await page.locator("body").innerText();
 
     await page.selectOption("#language-select", "en");
-    await page.waitForTimeout(400);
+    await page.waitForFunction(() => document.getElementById("app-title")?.textContent === "Web Report");
     const appTitleEn = await page.locator("#app-title").textContent();
     const launcherRunEn = await page.locator("#launcher-run").textContent();
 
     await page.selectOption("#language-select", "zh-CN");
-    await page.waitForTimeout(400);
+    await page.waitForFunction(() => document.getElementById("app-title")?.textContent === "\u4ea4\u4e92\u62a5\u544a");
     const appTitleZhAgain = await page.locator("#app-title").textContent();
 
     assert.equal(appTitleZh, "\u4ea4\u4e92\u62a5\u544a");
@@ -180,7 +180,10 @@ async function injectTestRun(page) {
     mimeType: "application/json",
     buffer: Buffer.from(runJson)
   });
-  await page.waitForTimeout(600);
+  await page.waitForFunction(() => {
+    const el = document.getElementById("run-count");
+    return el && el.textContent !== "0";
+  });
 }
 
 test("mobile sidebar opens and closes via toggle and backdrop", {
@@ -206,14 +209,66 @@ test("mobile sidebar opens and closes via toggle and backdrop", {
     assert.equal(sidebarOpenBefore, false, "sidebar should be closed initially");
 
     await page.click("#sidebar-toggle");
-    await page.waitForTimeout(400);
+    await page.waitForFunction(() => document.querySelector(".sidebar")?.classList.contains("sidebar-open"));
     const sidebarOpenAfterToggle = await page.locator(".sidebar").evaluate((el) => el.classList.contains("sidebar-open"));
     assert.equal(sidebarOpenAfterToggle, true, "sidebar should open after toggle click");
 
     await page.click("#sidebar-backdrop");
-    await page.waitForTimeout(400);
+    await page.waitForFunction(() => !document.querySelector(".sidebar")?.classList.contains("sidebar-open"));
     const sidebarOpenAfterBackdrop = await page.locator(".sidebar").evaluate((el) => el.classList.contains("sidebar-open"));
     assert.equal(sidebarOpenAfterBackdrop, false, "sidebar should close after backdrop click");
+  } finally {
+    await browser.close();
+    await uiServer.stop();
+  }
+});
+
+test("wrong results file shows a visible error and run list items stay valid", {
+  skip: process.env.REPOARENA_RUN_BROWSER_SMOKE !== "1",
+  timeout: 120000
+}, async () => {
+  const { chromium } = await import("playwright");
+  const cwd = path.resolve(".");
+  const uiServer = await startUiServer(cwd);
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
+
+  try {
+    await page.goto(`http://127.0.0.1:${uiServer.port}/`, {
+      waitUntil: "networkidle",
+      timeout: 30000
+    });
+
+    await expandLauncherIfNeeded(page);
+    await page.locator("#summary-file").setInputFiles({
+      name: "summary.json",
+      mimeType: "application/json",
+      buffer: Buffer.from("{not valid json")
+    });
+    await page.waitForFunction(() => {
+      const el = document.getElementById("result-loader-message");
+      return el?.textContent && el.textContent.length > 0;
+    });
+
+    const notice = await page.locator("#result-loader-message").textContent();
+    assert.match(notice ?? "", /summary\.json|无法解析/);
+
+    await injectTestRun(page);
+
+    const runCardTag = await page.locator("#run-list .run-button").first().evaluate((el) => el.tagName);
+    assert.equal(runCardTag, "DIV");
+
+    const deleteTitle = await page.locator("#run-list [data-role='delete-run']").first().getAttribute("title");
+    assert.match(deleteTitle ?? "", /移除/);
+
+    const actionCount = await page.locator("#run-list .run-action-btn").count();
+    assert.ok(actionCount >= 2, "run cards should expose separate action buttons");
+
+    await page.locator("#run-list .run-button").first().click();
+    await page.waitForFunction(() => document.querySelector("#run-list .run-button")?.classList.contains("active"));
+
+    const activeClass = await page.locator("#run-list .run-button").first().evaluate((el) => el.classList.contains("active"));
+    assert.equal(activeClass, true, "clicking the row should still select the run");
   } finally {
     await browser.close();
     await uiServer.stop();
@@ -242,7 +297,7 @@ test("clicking a comparison bar row selects the agent", {
     assert.ok(barRows >= 2, "should have at least 2 bar rows");
 
     await page.locator("[data-bar-agent-id='agent-a']").first().click();
-    await page.waitForTimeout(300);
+    await page.waitForFunction(() => document.querySelector("[data-bar-agent-id='agent-a']")?.classList.contains("bar-row-active"));
 
     const isActive = await page.locator("[data-bar-agent-id='agent-a']").first().evaluate(
       (el) => el.classList.contains("bar-row-active")
@@ -273,13 +328,13 @@ test("clicking the selected compare table row toggles inline detail", {
     await injectTestRun(page);
 
     await page.locator("[data-compare-agent-id='agent-a']").click();
-    await page.waitForTimeout(300);
+    await page.waitForSelector(".compare-detail-row", { state: "visible" });
 
     const detailVisible = await page.locator(".compare-detail-row").isVisible();
     assert.equal(detailVisible, true, "detail row should appear after clicking the selected row");
 
     await page.locator("[data-compare-agent-id='agent-a']").click();
-    await page.waitForTimeout(300);
+    await page.waitForFunction(() => document.querySelectorAll(".compare-detail-row").length === 0);
 
     const detailCount = await page.locator(".compare-detail-row").count();
     assert.equal(detailCount, 0, "detail row should disappear after clicking the selected row again");

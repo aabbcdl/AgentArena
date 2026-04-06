@@ -1,0 +1,57 @@
+schemaVersion: repoarena.taskpack/v1
+id: issue-resolution-example
+title: "Issue Resolution Example (SWE-Bench Inspired)"
+description: "Demonstrates patch-validation judge for GitHub issue fixing"
+metadata:
+  source: official
+  owner: RepoArena
+  difficulty: hard
+  objective: "Fix a bug in the codebase and verify with test suite"
+  repoTypes: [node, typescript]
+  tags: [issue-resolution, patch-validation, swe-bench-inspired]
+  judgeRationale: "Uses project's own test suite to verify bug fix"
+  differentiator: "Real-world bug requiring understanding of codebase"
+  githubIssue:
+    owner: example-org
+    repo: example-repo
+    issueNumber: 123
+    baseCommit: "abc123def"
+    testCommit: "def456ghi"
+  failToPassTests:
+    - "test/bug-fix.test.js"
+  passToPassTests:
+    - "test/**/*.test.js"
+prompt: |
+  Fix the bug described in the GitHub issue.
+  
+  The issue is that when users submit a form with special characters,
+  the application crashes with a validation error.
+  
+  After fixing, ensure:
+  1. The failing test now passes
+  2. All existing tests still pass
+  3. The fix handles edge cases properly
+judges:
+  - type: patch-validation
+    label: "Issue resolved - all tests pass"
+    testSuite: "npm test -- --reporter json"
+    failToPassTests:
+      - "test/bug-fix.test.js"
+    passToPassTests:
+      - "test/**/*.test.js"
+    critical: true
+    timeoutMs: 120000
+  - type: token-efficiency
+    label: "Token budget check"
+    tokenBudget: 100000
+    critical: false
+envAllowList:
+  - NODE_ENV
+  - CI
+setupCommands:
+  - id: install-deps
+    label: "Install dependencies"
+    command: "npm install"
+    timeoutMs: 60000
+    envAllowList: [NODE_ENV, CI]
+teardownCommands: []

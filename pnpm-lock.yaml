@@ -85,12 +85,22 @@ importers:
       '@repoarena/judges':
         specifier: workspace:*
         version: link:../judges
+      '@repoarena/report':
+        specifier: workspace:*
+        version: link:../report
       '@repoarena/taskpacks':
         specifier: workspace:*
         version: link:../taskpacks
       '@repoarena/trace':
         specifier: workspace:*
         version: link:../trace
+      picomatch:
+        specifier: ^4.0.3
+        version: 4.0.3
+    devDependencies:
+      '@types/picomatch':
+        specifier: ^4.0.2
+        version: 4.0.2
 
   packages/taskpacks:
     dependencies:

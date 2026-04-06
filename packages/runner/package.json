@@ -12,11 +12,16 @@
     "@repoarena/adapters": "workspace:*",
     "@repoarena/core": "workspace:*",
     "@repoarena/judges": "workspace:*",
+    "@repoarena/report": "workspace:*",
     "@repoarena/taskpacks": "workspace:*",
-    "@repoarena/trace": "workspace:*"
+    "@repoarena/trace": "workspace:*",
+    "picomatch": "^4.0.3"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/picomatch": "^4.0.2"
   }
 }

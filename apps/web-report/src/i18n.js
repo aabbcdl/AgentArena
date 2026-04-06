@@ -1,4 +1,4 @@
-const en = {
+﻿const en = {
   appTitle: "Web Report",
   appDescription:
     "Open one RepoArena result and inspect who passed, what changed, and where the benchmark failed.",
@@ -95,8 +95,12 @@ const en = {
   compareSortPrecision: "Diff Precision (high to low)",
   scoreWeightsTitle: "Score Weights",
   scoreWeightsReset: "Reset",
-  scoreWeightsSummary: (s, t, j, l, p, d, c) =>
-    `Normalized weights: status ${s}, tests ${t}, judges ${j}, lint ${l}, precision ${p}, duration ${d}, cost ${c}`,
+  scoreWeightsSummary: (weights) => {
+    const parts = Object.entries(weights)
+      .filter(([_, v]) => v > 0)
+      .map(([k, v]) => `${k}: ${(v * 100).toFixed(0)}%`);
+    return parts.join(", ");
+  },
   scoreWeightStatus: "Status",
   scoreWeightTests: "Tests",
   scoreWeightJudges: "Judges",
@@ -109,6 +113,21 @@ const en = {
   scorePresetSpeed: "Speed First",
   scorePresetCost: "Cost First",
   scorePresetScope: "Scope Discipline",
+  scorePresetIssueResolution: "Issue Resolution",
+  scorePresetEfficiencyFirst: "Efficiency First",
+  scorePresetRotatingTasks: "Rotating Tasks",
+  scorePresetComprehensive: "Comprehensive",
+  scorePresetPractical: "Practical (Default)",
+  scoringModeLabel: "Scoring Mode",
+  scorePresetIssueResolutionDesc: "Focus on issue fix rate (SWE-Bench inspired)",
+  scorePresetEfficiencyFirstDesc: "Focus on token efficiency (industry best practices)",
+  scorePresetRotatingTasksDesc: "Multi-category objective scoring (LiveBench inspired)",
+  scorePresetComprehensiveDesc: "Combined metrics from all scoring modes",
+  inspirationCreditsTitle: "Scoring System Design Inspiration",
+  issueResolutionCredit: "Inspired by SWE-Bench (MIT License) — Verifies patch correctness with project test suite",
+  efficiencyFirstCredit: "Inspired by industry best practices — Token cost-efficiency as core metric",
+  rotatingTasksCredit: "Inspired by LiveBench (Apache 2.0) — Anti-contamination rotation + objective ground truth",
+  creditDisclaimer: "This implementation is fully independent with no official affiliation",
   judgeTypeAll: "All Types",
   judgeStatusAll: "All Statuses",
   judgeStatusPass: "Pass",
@@ -167,7 +186,28 @@ const en = {
   crossRunAvgTokens: "Avg Tokens",
   crossRunAvgCost: "Avg Cost",
   crossRunSuccessRate: "Success Rate",
-  crossRunRuns: "Runs"
+  crossRunRuns: "Runs",
+  leaderboardTitle: "Historical Leaderboard",
+  leaderboardNoData: "No historical data available.",
+  leaderboardExplanation1: "This leaderboard only compares runs with the same task, score mode, and configuration",
+  leaderboardExplanation2: "Version changes create new historical records; scores are not inherited from old versions",
+  leaderboardExplanation3: (count) => `Current leaderboard is based on ${count} comparable runs`,
+  leaderboardExplanation4: (count) => `${count} runs were excluded due to different task or score mode`,
+  leaderboardExplanation4All: "All runs are included in the comparison",
+  leaderboardSampleWarning: "Insufficient samples",
+  leaderboardVariant: "Variant",
+  leaderboardBaseAgent: "Base Agent",
+  leaderboardProvider: "Provider",
+  leaderboardModel: "Model",
+  leaderboardVersion: "Version",
+  leaderboardRuns: "Runs",
+  leaderboardAvgScore: "Avg Score",
+  leaderboardWinRate: "Win Rate",
+  leaderboardSuccessRate: "Success Rate",
+  leaderboardMedianDuration: "Median Duration",
+  leaderboardMedianCost: "Median Cost",
+  leaderboardLastSeen: "Last Seen",
+  leaderboardNote: "Note: Version changes create new historical records; scores are not inherited. Different providers and models are tracked separately."
 };
 
 const zhCN = {
@@ -266,8 +306,18 @@ const zhCN = {
   compareSortPrecision: "Diff 精准度（高到低）",
   scoreWeightsTitle: "评分权重",
   scoreWeightsReset: "重置",
-  scoreWeightsSummary: (s, t, j, l, p, d, c) =>
-    `归一化权重：状态 ${s}，测试 ${t}，Judges ${j}，Lint ${l}，Diff 精准度 ${p}，耗时 ${d}，成本 ${c}`,
+  scoreWeightsSummary: (weights) => {
+    const translations = {
+      status: "状态", tests: "测试", criticalJudges: "关键Judge", nonCriticalJudges: "非关键Judge",
+      resolutionRate: "解决率", tokenEfficiency: "Token效率", acceptanceRate: "接受率",
+      categoryScore: "类别得分", precision: "精确度", lint: "代码质量", duration: "耗时", cost: "成本",
+      failToPassTests: "修复测试", passToPassTests: "回归测试"
+    };
+    const parts = Object.entries(weights)
+      .filter(([_, v]) => v > 0)
+      .map(([k, v]) => `${translations[k] || k}: ${(v * 100).toFixed(0)}%`);
+    return parts.join(", ");
+  },
   scoreWeightStatus: "状态",
   scoreWeightTests: "测试",
   scoreWeightJudges: "Judges",
@@ -280,6 +330,21 @@ const zhCN = {
   scorePresetSpeed: "速度优先",
   scorePresetCost: "成本优先",
   scorePresetScope: "范围纪律优先",
+  scorePresetIssueResolution: "Issue 解决模式",
+  scorePresetEfficiencyFirst: "效率优先模式",
+  scorePresetRotatingTasks: "轮换任务模式",
+  scorePresetComprehensive: "综合评估模式",
+  scorePresetPractical: "实用模式 (默认)",
+  scoringModeLabel: "评分模式",
+  scorePresetIssueResolutionDesc: "聚焦 Issue 修复率（参考 SWE-Bench）",
+  scorePresetEfficiencyFirstDesc: "聚焦 Token 效率（参考行业最佳实践）",
+  scorePresetRotatingTasksDesc: "多类别客观评分（参考 LiveBench）",
+  scorePresetComprehensiveDesc: "综合所有指标的全面评估",
+  inspirationCreditsTitle: "评分系统设计灵感来源",
+  issueResolutionCredit: "参考 SWE-Bench (MIT License) — 用项目测试套件验证补丁正确性",
+  efficiencyFirstCredit: "参考行业最佳实践 — 以 Token 性价比为核心指标",
+  rotatingTasksCredit: "参考 LiveBench (Apache 2.0) — 防污染轮换 + 客观真值评分",
+  creditDisclaimer: "本实现完全独立，与上述项目无官方关联",
   judgeTypeAll: "全部类型",
   judgeStatusAll: "全部状态",
   judgeStatusPass: "通过",
@@ -335,7 +400,28 @@ const zhCN = {
   crossRunAvgTokens: "平均 Tokens",
   crossRunAvgCost: "平均成本",
   crossRunSuccessRate: "成功率",
-  crossRunRuns: "运行数"
+  crossRunRuns: "运行数",
+  leaderboardTitle: "历史排行榜",
+  leaderboardNoData: "暂无历史数据。",
+  leaderboardExplanation1: "此排行榜仅统计同任务、同评分模式、同配置的历史结果",
+  leaderboardExplanation2: "版本变化会开启新的历史记录，不会继承旧版本的分数",
+  leaderboardExplanation3: (count) => `当前榜单基于 ${count} 个可比较的 run`,
+  leaderboardExplanation4: (count) => `有 ${count} 个 run 因任务或评分模式不同被排除`,
+  leaderboardExplanation4All: "所有 run 都参与对比",
+  leaderboardSampleWarning: "样本不足",
+  leaderboardVariant: "配置",
+  leaderboardBaseAgent: "基础 Agent",
+  leaderboardProvider: "Provider",
+  leaderboardModel: "模型",
+  leaderboardVersion: "版本",
+  leaderboardRuns: "Run 数",
+  leaderboardAvgScore: "平均分",
+  leaderboardWinRate: "胜率",
+  leaderboardSuccessRate: "成功率",
+  leaderboardMedianDuration: "中位耗时",
+  leaderboardMedianCost: "中位成本",
+  leaderboardLastSeen: "最后更新",
+  leaderboardNote: "注：版本变化会开启新的历史记录，不继承旧版本分数。不同 provider、model 也会分开统计。"
 };
 
 export const MESSAGES = {

@@ -6,7 +6,10 @@ import {
   diffSnapshots,
   formatDuration,
   isPathInsideWorkspace,
+  isWindowsLikePath,
   normalizePath,
+  portableBasename,
+  portableRelativePath,
   resolveRepoSource,
   safePathJoin,
   uniqueSorted,
@@ -39,23 +42,32 @@ test("buildExecutionEnvironment includes only baseline and allowlisted variables
   process.env.REPOARENA_ALLOWED_TEST = "visible";
   process.env.REPOARENA_BLOCKED_TEST = "hidden";
 
-  const environment = buildExecutionEnvironment(["REPOARENA_ALLOWED_TEST"]);
+  try {
+    const environment = buildExecutionEnvironment(["REPOARENA_ALLOWED_TEST"]);
 
-  assert.equal(environment.REPOARENA_ALLOWED_TEST, "visible");
-  assert.equal(environment.REPOARENA_BLOCKED_TEST, undefined);
-  assert.ok(environment.PATH || environment.Path);
+    assert.equal(environment.REPOARENA_ALLOWED_TEST, "visible");
+    assert.equal(environment.REPOARENA_BLOCKED_TEST, undefined);
+    assert.ok(environment.PATH || environment.Path);
+  } finally {
+    delete process.env.REPOARENA_ALLOWED_TEST;
+    delete process.env.REPOARENA_BLOCKED_TEST;
+  }
 });
 
 test("buildExecutionEnvironment applies inline overrides", () => {
   process.env.REPOARENA_ALLOWED_TEST = "visible";
 
-  const environment = buildExecutionEnvironment(["REPOARENA_ALLOWED_TEST"], {
-    REPOARENA_ALLOWED_TEST: "overridden",
-    REPOARENA_INLINE_ONLY: "inline"
-  });
+  try {
+    const environment = buildExecutionEnvironment(["REPOARENA_ALLOWED_TEST"], {
+      REPOARENA_ALLOWED_TEST: "overridden",
+      REPOARENA_INLINE_ONLY: "inline"
+    });
 
-  assert.equal(environment.REPOARENA_ALLOWED_TEST, "overridden");
-  assert.equal(environment.REPOARENA_INLINE_ONLY, "inline");
+    assert.equal(environment.REPOARENA_ALLOWED_TEST, "overridden");
+    assert.equal(environment.REPOARENA_INLINE_ONLY, "inline");
+  } finally {
+    delete process.env.REPOARENA_ALLOWED_TEST;
+  }
 });
 
 test("createAgentSelection derives a stable variant id from model config", () => {
@@ -98,16 +110,44 @@ test("validateTaskPackId accepts valid IDs and rejects invalid ones", () => {
 test("normalizePath converts backslashes to forward slashes", () => {
   assert.equal(normalizePath("src\\index.ts"), "src/index.ts");
   assert.equal(normalizePath("src/index.ts"), "src/index.ts");
+  assert.equal(normalizePath("a\\b\\c"), "a/b/c");
+  assert.equal(normalizePath(""), "");
+  assert.equal(normalizePath("/already/posix"), "/already/posix");
 });
 
 test("isPathInsideWorkspace detects path traversal", () => {
   assert.equal(isPathInsideWorkspace("/workspace", "/workspace/src/file.ts"), true);
   assert.equal(isPathInsideWorkspace("/workspace", "/workspace/../etc/passwd"), false);
+  assert.equal(isPathInsideWorkspace("/workspace", "/workspace"), true);
+  assert.equal(isPathInsideWorkspace("/workspace", "/workspace/src"), true);
+  assert.equal(isPathInsideWorkspace("/workspace", "/etc/passwd"), false);
+  assert.equal(isPathInsideWorkspace("/workspace", "/workspace/src/../../etc/passwd"), false);
 });
 
 test("safePathJoin throws on path traversal", () => {
   assert.throws(() => safePathJoin("/workspace", "..", "etc", "passwd"), /Path traversal detected/);
   assert.equal(safePathJoin("/workspace", "src", "file.ts").replace(/\\/g, "/"), "/workspace/src/file.ts");
+  assert.equal(safePathJoin("/workspace", "src").replace(/\\/g, "/"), "/workspace/src");
+  assert.equal(safePathJoin("/workspace").replace(/\\/g, "/"), "/workspace");
+});
+
+test("portableRelativePath returns relative paths with forward slashes", () => {
+  assert.equal(portableRelativePath("/workspace", "/workspace/src/file.ts").replace(/\\/g, "/"), "src/file.ts");
+  assert.equal(portableRelativePath("/workspace/src", "/workspace").replace(/\\/g, "/"), "..");
+  assert.equal(portableRelativePath("/a/b", "/a/b/c/d").replace(/\\/g, "/"), "c/d");
+});
+
+test("portableBasename extracts the last path segment", () => {
+  assert.equal(portableBasename("/workspace/src/file.ts"), "file.ts");
+  assert.equal(portableBasename("/workspace"), "workspace");
+  assert.equal(portableBasename("file.ts"), "file.ts");
+});
+
+test("isWindowsLikePath detects Windows-style paths", () => {
+  assert.equal(isWindowsLikePath("C:\\Users\\test"), true);
+  assert.equal(isWindowsLikePath("D:/Projects/file.ts"), true);
+  assert.equal(isWindowsLikePath("/workspace/src"), false);
+  assert.equal(isWindowsLikePath("relative/path"), false);
 });
 
 test("resolveRepoSource returns user repo for undefined or 'user'", () => {

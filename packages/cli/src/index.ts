@@ -14,45 +14,38 @@ import {
   setClaudeProviderProfileSecret
 } from "@repoarena/adapters";
 import {
-  type AdapterPreflightResult,
   type AgentSelection,
   type BenchmarkRun,
   type ClaudeProviderProfile,
   createAgentSelection,
   createCancellation,
+  createRunId,
   formatDuration,
-  isAbortError
+  isAbortError,
+  validateTaskPackId
 } from "@repoarena/core";
-import { writeReport } from "@repoarena/report";
+import {
+  enrichRunWithScores,
+  generateDecisionReport,
+  formatDecisionReport,
+  type Locale as ReportLocale,
+  writeReport,
+  computeVarianceAnalysis,
+  formatVarianceReport
+} from "@repoarena/report";
+// @ts-expect-error - runner types need declaration file
 import { type BenchmarkProgressEvent, runBenchmark } from "@repoarena/runner";
 import { loadTaskPack } from "@repoarena/taskpacks";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-
-interface ParsedArgs {
-  command?: string;
-  repoPath?: string;
-  taskPath?: string;
-  agentIds: string[];
-  codexModel?: string;
-  codexReasoning?: string;
-  claudeProfile?: string;
-  claudeModel?: string;
-  outputPath?: string;
-  probeAuth: boolean;
-  strict: boolean;
-  updateSnapshots: boolean;
-  cleanupWorkspaces: boolean;
-  maxConcurrency?: number;
-  json: boolean;
-  templateName?: string;
-  ciTemplate?: string;
-  force: boolean;
-  workflowPath?: string;
-  ciOutputDir?: string;
-  host?: string;
-  port?: number;
-  noOpen?: boolean;
-}
+import { type ParsedArgs, parseArgs, printHelp } from "./args.js";
+import { buildBenchmarkOutputSummary, formatCapabilitySummary } from "./output.js";
+import {
+  buildCiWorkflow,
+  createAdhocLintCommand,
+  createAdhocTestCommand,
+  createPackageScriptCommand,
+  TASKPACK_TEMPLATES
+} from "./templates.js";
 
 interface UiRunPayload {
   repoPath: string;
@@ -74,6 +67,8 @@ interface UiRunPayload {
   updateSnapshots?: boolean;
   cleanupWorkspaces?: boolean;
   maxConcurrency?: number;
+  scoreMode?: string;
+  tokenBudget?: number;
 }
 
 interface UiProviderProfilePayload {
@@ -112,18 +107,35 @@ interface UiRunLogEntry {
 
 interface UiRunStatus {
   state: "idle" | "running" | "done" | "error" | "cancelled";
-  phase: UiRunPhase;
+  phase: UiRunPhase | "starting" | "preflight" | "report";
+  logs: UiRunLogEntry[];
+  updatedAt: string;
   startedAt?: string;
   repoPath?: string;
   taskPath?: string;
+  runId?: string;
   outputPath?: string;
   currentAgentId?: string;
   currentVariantId?: string;
   currentDisplayLabel?: string;
-  logs: UiRunLogEntry[];
-  updatedAt: string;
-  result?: unknown;
+  result?: {
+    run: BenchmarkRun;
+    markdown: string;
+    report: Awaited<ReturnType<typeof writeReport>>;
+  };
   error?: string;
+}
+
+interface ParsedTaskPackMetadataFile {
+  metadata?: {
+    i18n?: unknown;
+  };
+}
+
+interface ParsedAdhocTaskPackFile {
+  id?: unknown;
+  title?: unknown;
+  prompt?: unknown;
 }
 
 const CLI_PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -132,316 +144,11 @@ const WEB_REPORT_DIST_ROOT = path.join(WORKSPACE_ROOT, "apps", "web-report", "di
 const OFFICIAL_TASKPACK_ROOT = path.join(WORKSPACE_ROOT, "examples", "taskpacks", "official");
 const DEFAULT_UI_PORT = 4320;
 const MAX_REQUEST_BODY_BYTES = 1_048_576;
+const MAX_UI_LOG_ENTRIES = 30;
 
-function createNodeEvalCommand(source: string): string {
-  return `node -e ${JSON.stringify(source)}`;
+function resolveReportLocale(value?: string): ReportLocale {
+  return value === "zh-CN" ? "zh-CN" : "en";
 }
-
-function createPackageScriptCommand(scriptName: string): string {
-  return createNodeEvalCommand(`
-const { existsSync, readFileSync } = require("node:fs");
-const { spawnSync } = require("node:child_process");
-const pkgPath = "package.json";
-if (!existsSync(pkgPath)) {
-  console.error("Missing package.json");
-  process.exit(1);
-}
-const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
-if (!pkg.scripts || !pkg.scripts[${JSON.stringify(scriptName)}]) {
-  console.error(${JSON.stringify(`Missing ${scriptName} script in package.json`)});
-  process.exit(1);
-}
-for (const [cmd, args] of [["pnpm", [${JSON.stringify(scriptName)}]], ["npm", ["run", ${JSON.stringify(scriptName)}]]]) {
-  const result = spawnSync(cmd, args, { stdio: "inherit", shell: process.platform === "win32" });
-  if (!result.error) {
-    process.exit(result.status ?? 1);
-  }
-}
-console.error(${JSON.stringify(`Unable to execute ${scriptName} script with pnpm or npm`)});
-process.exit(1);
-`.trim());
-}
-
-function createAdhocTestCommand(reportFile: string): string {
-  return createNodeEvalCommand(`
-const { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } = require("node:fs");
-const { dirname } = require("node:path");
-const { spawnSync } = require("node:child_process");
-const pkgPath = "package.json";
-if (!existsSync(pkgPath)) {
-  console.error("Missing package.json");
-  process.exit(1);
-}
-const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
-if (!pkg.scripts || !pkg.scripts.test) {
-  console.error("Missing test script in package.json");
-  process.exit(1);
-}
-const reportFileValue = ${JSON.stringify(reportFile)};
-mkdirSync(dirname(reportFileValue), { recursive: true });
-const candidates = [
-  ["pnpm", ["test", "--", "--runInBand", "--json", "--outputFile", reportFileValue]],
-  ["pnpm", ["test", "--", "--runInBand", "--reporter=json", "--outputFile", reportFileValue]],
-  ["npm", ["run", "test", "--", "--runInBand", "--json", "--outputFile", reportFileValue]],
-  ["npm", ["run", "test", "--", "--runInBand", "--reporter=json", "--outputFile", reportFileValue]]
-];
-let lastStatus = 1;
-for (const [cmd, args] of candidates) {
-  rmSync(reportFileValue, { force: true });
-  const result = spawnSync(cmd, args, { stdio: "pipe", encoding: "utf8", shell: process.platform === "win32" });
-  if (result.stdout) process.stdout.write(result.stdout);
-  if (result.stderr) process.stderr.write(result.stderr);
-  if (!result.error && existsSync(reportFileValue) && statSync(reportFileValue).size > 0) {
-    process.exit(result.status ?? 1);
-  }
-  lastStatus = result.status ?? 1;
-}
-writeFileSync(reportFileValue, "");
-console.error("Unable to capture Jest/Vitest JSON output from the test script");
-process.exit(lastStatus || 1);
-`.trim());
-}
-
-function createTemplateTestCommand(reportFile: string): string {
-  return createNodeEvalCommand(`
-const { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } = require("node:fs");
-const { dirname } = require("node:path");
-const { spawnSync } = require("node:child_process");
-const pkgPath = "package.json";
-const reportFileValue = ${JSON.stringify(reportFile)};
-mkdirSync(dirname(reportFileValue), { recursive: true });
-if (!existsSync(pkgPath)) {
-  writeFileSync(reportFileValue, JSON.stringify({ success: true, numTotalTests: 0, numPassedTests: 0, numFailedTests: 0, numPendingTests: 0, numTodoTests: 0 }, null, 2));
-  process.exit(0);
-}
-const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
-if (!pkg.scripts || !pkg.scripts.test) {
-  writeFileSync(reportFileValue, JSON.stringify({ success: true, numTotalTests: 0, numPassedTests: 0, numFailedTests: 0, numPendingTests: 0, numTodoTests: 0 }, null, 2));
-  process.exit(0);
-}
-const candidates = [
-  ["pnpm", ["test", "--", "--runInBand", "--json", "--outputFile", reportFileValue]],
-  ["pnpm", ["test", "--", "--runInBand", "--reporter=json", "--outputFile", reportFileValue]],
-  ["npm", ["run", "test", "--", "--runInBand", "--json", "--outputFile", reportFileValue]],
-  ["npm", ["run", "test", "--", "--runInBand", "--reporter=json", "--outputFile", reportFileValue]]
-];
-let lastStatus = 1;
-for (const [cmd, args] of candidates) {
-  rmSync(reportFileValue, { force: true });
-  const result = spawnSync(cmd, args, { stdio: "pipe", encoding: "utf8", shell: process.platform === "win32" });
-  if (result.stdout) process.stdout.write(result.stdout);
-  if (result.stderr) process.stderr.write(result.stderr);
-  if (!result.error && existsSync(reportFileValue) && statSync(reportFileValue).size > 0) {
-    process.exit(result.status ?? 1);
-  }
-  lastStatus = result.status ?? 1;
-}
-console.error("Unable to capture Jest/Vitest JSON output from the test script");
-process.exit(lastStatus || 1);
-`.trim());
-}
-
-function createAdhocLintCommand(reportFile: string): string {
-  return createNodeEvalCommand(`
-const { existsSync, mkdirSync, statSync, writeFileSync } = require("node:fs");
-const { dirname } = require("node:path");
-const { spawnSync } = require("node:child_process");
-const reportFileValue = ${JSON.stringify(reportFile)};
-mkdirSync(dirname(reportFileValue), { recursive: true });
-const hasBiome = existsSync("biome.json");
-const eslintConfigs = ["eslint.config.js", "eslint.config.mjs", ".eslintrc", ".eslintrc.js", ".eslintrc.cjs", ".eslintrc.json"];
-const hasEslint = eslintConfigs.some((file) => existsSync(file));
-let candidates = [];
-if (hasBiome) {
-  candidates = [
-    ["pnpm", ["exec", "biome", "check", ".", "--reporter=json"]],
-    ["npx", ["@biomejs/biome", "check", ".", "--reporter=json"]]
-  ];
-} else if (hasEslint) {
-  candidates = [
-    ["pnpm", ["exec", "eslint", ".", "--format", "json"]],
-    ["npx", ["eslint", ".", "--format", "json"]]
-  ];
-} else {
-  console.error("Missing biome/eslint configuration for lint-check judge");
-  process.exit(1);
-}
-let lastStatus = 1;
-for (const [cmd, args] of candidates) {
-  const result = spawnSync(cmd, args, { stdio: "pipe", encoding: "utf8", shell: process.platform === "win32" });
-  if (!result.error) {
-    writeFileSync(reportFileValue, result.stdout || "");
-    if (result.stderr) process.stderr.write(result.stderr);
-    if (statSync(reportFileValue).size > 0 || result.status === 0) {
-      process.exit(result.status ?? 1);
-    }
-  }
-  lastStatus = result.status ?? 1;
-}
-console.error("Unable to execute structured lint check with Biome or ESLint");
-process.exit(lastStatus || 1);
-`.trim());
-}
-
-function createTemplateLintCommand(reportFile: string): string {
-  return createNodeEvalCommand(`
-const { existsSync, mkdirSync, statSync, writeFileSync } = require("node:fs");
-const { dirname } = require("node:path");
-const { spawnSync } = require("node:child_process");
-const reportFileValue = ${JSON.stringify(reportFile)};
-mkdirSync(dirname(reportFileValue), { recursive: true });
-const hasBiome = existsSync("biome.json");
-const eslintConfigs = ["eslint.config.js", "eslint.config.mjs", ".eslintrc", ".eslintrc.js", ".eslintrc.cjs", ".eslintrc.json"];
-const hasEslint = eslintConfigs.some((file) => existsSync(file));
-if (!hasBiome && !hasEslint) {
-  writeFileSync(reportFileValue, JSON.stringify([], null, 2));
-  process.exit(0);
-}
-const candidates = hasBiome
-  ? [["pnpm", ["exec", "biome", "check", ".", "--reporter=json"]], ["npx", ["@biomejs/biome", "check", ".", "--reporter=json"]]]
-  : [["pnpm", ["exec", "eslint", ".", "--format", "json"]], ["npx", ["eslint", ".", "--format", "json"]]];
-let lastStatus = 1;
-for (const [cmd, args] of candidates) {
-  const result = spawnSync(cmd, args, { stdio: "pipe", encoding: "utf8", shell: process.platform === "win32" });
-  if (!result.error) {
-    writeFileSync(reportFileValue, result.stdout || "[]");
-    if (result.stderr) process.stderr.write(result.stderr);
-    if (statSync(reportFileValue).size > 0 || result.status === 0) {
-      process.exit(result.status ?? 1);
-    }
-  }
-  lastStatus = result.status ?? 1;
-}
-console.error("Unable to execute structured lint check with Biome or ESLint");
-process.exit(lastStatus || 1);
-`.trim());
-}
-
-const TASKPACK_TEMPLATES: Record<string, string> = {
-  "repo-health": `schemaVersion: repoarena.taskpack/v1
-id: repo-health
-title: Repository Health
-description: Checks that a repository stays structurally healthy after an agent task.
-metadata:
-  source: official
-  owner: RepoArena
-  objective: Validate that an agent can make a minimal repository-safe improvement.
-  repoTypes:
-    - node
-    - generic
-  tags:
-    - repo-health
-    - maintenance
-  dependencies: []
-  judgeRationale: README and package manifest presence are baseline repository health signals.
-prompt: |
-  Review the repository and make the smallest useful change that improves correctness,
-  reliability, or maintainability. Keep changes scoped and preserve existing behavior
-  unless a test or fixture shows otherwise.
-expectedChangedPaths:
-  - src/**/*.{js,mjs,ts,tsx}
-  - packages/**/src/**/*.{js,mjs,ts,tsx}
-  - lib/**/*.{js,mjs,ts,tsx}
-  - README.md
-envAllowList: []
-judges:
-  - id: readme-exists
-    type: file-exists
-    label: README exists
-    path: README.md
-  - id: package-json-exists
-    type: file-exists
-    label: package.json exists
-    path: package.json
-  - id: tests-pass
-    type: test-result
-    label: Tests still pass when available
-    command: ${JSON.stringify(createTemplateTestCommand(".repoarena/repo-health-tests.json"))}
-    format: auto
-    reportFile: .repoarena/repo-health-tests.json
-    passOnNoTests: true
-    timeoutMs: 120000
-  - id: lint-clean
-    type: lint-check
-    label: Lint stays clean when configured
-    command: ${JSON.stringify(createTemplateLintCommand(".repoarena/repo-health-lint.json"))}
-    format: auto
-    reportFile: .repoarena/repo-health-lint.json
-    maxWarnings: 0
-    timeoutMs: 120000
-`,
-  "json-api": `schemaVersion: repoarena.taskpack/v1
-id: json-api-contract
-title: JSON API Contract
-description: Validates a JSON fixture against value assertions and schema expectations.
-metadata:
-  source: official
-  owner: RepoArena
-  objective: Verify that an agent can repair a JSON contract without breaking the payload shape.
-  repoTypes:
-    - node
-    - api
-    - backend
-  tags:
-    - json
-    - api
-    - contract
-  dependencies: []
-  judgeRationale: JSON value and schema judges capture correctness more reliably than string matching.
-prompt: |
-  Update the implementation so the generated JSON output matches the expected contract
-  and values described by the task pack.
-expectedChangedPaths:
-  - fixtures/response.json
-judges:
-  - id: api-schema
-    type: json-schema
-    label: API payload matches schema
-    path: fixtures/response.json
-    schemaPath: fixtures/response.schema.json
-  - id: api-status
-    type: json-value
-    label: Status stays ready
-    path: fixtures/response.json
-    pointer: /status
-    expected: ready
-`,
-  snapshot: `schemaVersion: repoarena.taskpack/v1
-id: snapshot-regression
-title: Snapshot Regression
-description: Exercises snapshot-based regression repair workflows.
-metadata:
-  source: official
-  owner: RepoArena
-  objective: Verify that an agent can bring generated output back in sync with a stored fixture.
-  repoTypes:
-    - node
-    - frontend
-    - test
-  tags:
-    - snapshot
-    - regression
-  dependencies:
-    - node
-  judgeRationale: Snapshot parity is a strong proxy for fixture repair tasks when exact output matters.
-prompt: |
-  Update the implementation so the generated output matches the stored snapshot fixture.
-expectedChangedPaths:
-  - scripts/**/*.{js,mjs,ts,tsx}
-  - src/**/*.{js,mjs,ts,tsx}
-  - packages/**/src/**/*.{js,mjs,ts,tsx}
-setupCommands:
-  - id: prepare-output
-    label: Prepare output fixture
-    command: node scripts/generate-output.js
-judges:
-  - id: output-snapshot
-    type: snapshot
-    label: Output matches snapshot
-    path: fixtures/actual.txt
-    snapshotPath: fixtures/expected.txt
-`
-};
 
 function normalizeCliSelections(parsed: ParsedArgs): AgentSelection[] {
   return parsed.agentIds.map((agentId) => {
@@ -457,7 +164,31 @@ function normalizeCliSelections(parsed: ParsedArgs): AgentSelection[] {
               model: parsed.claudeModel?.trim() || undefined,
               providerProfileId: parsed.claudeProfile?.trim() || undefined
             }
-        : {};
+          : agentId === "gemini-cli"
+            ? {
+                model: parsed.geminiModel?.trim() || undefined
+              }
+            : agentId === "aider"
+              ? {
+                  model: parsed.aiderModel?.trim() || undefined
+                }
+              : agentId === "kilo-cli"
+                ? {
+                    model: parsed.kiloModel?.trim() || undefined
+                  }
+                : agentId === "opencode"
+                  ? {
+                      model: parsed.opencodeModel?.trim() || undefined
+                    }
+                  : agentId === "qwen-code"
+                    ? {
+                        model: parsed.qwenModel?.trim() || undefined
+                      }
+                    : agentId === "copilot"
+                      ? {
+                          model: parsed.copilotModel?.trim() || undefined
+                        }
+                      : {};
 
     return createAgentSelection({
       baseAgentId: agentId,
@@ -465,7 +196,13 @@ function normalizeCliSelections(parsed: ParsedArgs): AgentSelection[] {
       config,
       configSource:
         (agentId === "codex" && (config.model || config.reasoningEffort)) ||
-        (agentId === "claude-code" && (config.model || config.providerProfileId))
+        (agentId === "claude-code" && (config.model || config.providerProfileId)) ||
+        (agentId === "gemini-cli" && config.model) ||
+        (agentId === "aider" && config.model) ||
+        (agentId === "kilo-cli" && config.model) ||
+        (agentId === "opencode" && config.model) ||
+        (agentId === "qwen-code" && config.model) ||
+        (agentId === "copilot" && config.model)
           ? "cli"
           : undefined
     });
@@ -490,316 +227,6 @@ function normalizeUiSelections(payload: UiRunPayload): AgentSelection[] {
       displayLabel: listAvailableAdapters().find((entry) => entry.id === agentId)?.title ?? agentId
     })
   );
-}
-
-function printHelp(): void {
-  console.log(`RepoArena CLI - AI Agent Benchmarking Framework
-
-Usage:
-  repoarena <command> [options]
-
-Commands:
-  run              Run a benchmark against a repository
-  doctor           Check adapter availability and authentication
-  list-adapters    List all available adapters and their capabilities
-  init-taskpack    Create a new task pack from a template
-  init-ci          Create a CI workflow file for automated benchmarks
-  ui               Start the web UI server
-
-Run Command:
-  repoarena run --repo <path> --task <path> --agents <list> [options]
-
-  Required:
-    --repo <path>              Path to the repository to benchmark
-    --task <path>              Path to the task pack file (.json, .yaml, .yml)
-    --agents <list>            Comma-separated list of agent IDs to benchmark
-
-  Optional:
-    --output <path>            Output directory for results (default: .repoarena/runs/<run-id>)
-    --probe-auth               Test adapter authentication before running
-    --update-snapshots         Update snapshot files if they differ
-    --cleanup-workspaces       Remove agent workspace directories after run
-    --max-concurrency <n>      Maximum number of agents to run in parallel (default: 1)
-    --json                     Output results as JSON
-
-  Codex Options:
-    --codex-model <model>      Override the Codex model (e.g., gpt-5.4)
-    --codex-reasoning <value>  Set reasoning effort (low, medium, high)
-
-  Claude Code Options:
-    --claude-profile <id>      Use a specific Claude provider profile
-    --claude-model <model>     Override the Claude model
-
-Doctor Command:
-  repoarena doctor [options]
-
-  Options:
-    --agents <list>            Comma-separated list of agents to check (default: all)
-    --probe-auth               Test authentication for each adapter
-    --strict                   Exit with error if any adapter is not ready
-    --json                     Output results as JSON
-
-List Adapters Command:
-  repoarena list-adapters [--json]
-
-Init Taskpack Command:
-  repoarena init-taskpack [options]
-
-  Options:
-    --template <name>          Template to use (repo-health, json-api, snapshot)
-    --output <path>            Output file path (default: repoarena.taskpack.yaml)
-    --force                    Overwrite existing file
-
-Init CI Command:
-  repoarena init-ci [options]
-
-  Options:
-    --task <path>              Path to the task pack file
-    --agents <list>            Comma-separated list of agents
-    --output <path>            Output workflow file path
-    --ci-template <type>       Workflow template (pull-request, smoke, nightly)
-    --ci-output-dir <path>     CI output directory (default: .repoarena/ci-benchmark)
-    --force                    Overwrite existing file
-
-UI Command:
-  repoarena ui [options]
-
-  Options:
-    --host <host>              Server host (default: 127.0.0.1)
-    --port <port>              Server port (default: 4320)
-    --no-open                  Don't open browser automatically
-
-Examples:
-  # Run a basic benchmark with demo adapters
-  repoarena run --repo . --task examples/taskpacks/demo-repo-health.json --agents demo-fast,demo-thorough
-
-  # Run with Codex and Claude Code, testing authentication
-  repoarena run --repo . --task examples/taskpacks/demo-repo-health.json --agents codex,claude-code --probe-auth
-
-  # Run with specific Codex model and reasoning
-  repoarena run --repo . --task examples/taskpacks/demo-repo-health.yaml --agents codex --codex-model gpt-5.4 --codex-reasoning high
-
-  # Run with Claude Code using a provider profile
-  repoarena run --repo . --task examples/taskpacks/official/repo-health.yaml --agents claude-code --claude-profile claude-official --claude-model claude-3-7-sonnet-latest
-
-  # Update snapshots during benchmark
-  repoarena run --repo . --task examples/taskpacks/demo-repo-health.yaml --agents demo-fast --update-snapshots
-
-  # Output results as JSON
-  repoarena run --repo . --task examples/taskpacks/demo-repo-health.yaml --agents demo-fast --json
-
-  # Check all adapters with authentication probe
-  repoarena doctor --agents codex,claude-code,cursor --probe-auth
-
-  # Strict doctor check (fails if any adapter not ready)
-  repoarena doctor --agents codex,claude-code,cursor --probe-auth --strict
-
-  # Create a new task pack from template
-  repoarena init-taskpack --template repo-health --output my-task.yaml
-
-  # Create a CI workflow for pull requests
-  repoarena init-ci --task repoarena.taskpack.yaml --agents demo-fast,codex
-
-  # Create a nightly CI workflow
-  repoarena init-ci --ci-template nightly --task examples/taskpacks/official/repo-health.yaml --agents demo-fast
-
-  # Start the web UI
-  repoarena ui --host 127.0.0.1 --port 4320
-
-For more information, visit: https://github.com/aabbcdl/RepoArena
-`);
-}
-
-function parseArgs(argv: string[]): ParsedArgs {
-  const parsed: ParsedArgs = {
-    agentIds: [],
-    probeAuth: false,
-    strict: false,
-    updateSnapshots: false,
-    cleanupWorkspaces: false,
-    json: false,
-    force: false
-  };
-
-  const args = [...argv];
-  parsed.command = args.shift();
-
-  while (args.length > 0) {
-    const token = args.shift();
-
-    if (!token) {
-      continue;
-    }
-
-    switch (token) {
-      case "--repo":
-        parsed.repoPath = args.shift();
-        if (!parsed.repoPath) {
-          throw new Error("--repo requires a path argument. Example: --repo . or --repo /path/to/repo");
-        }
-        break;
-      case "--task":
-        parsed.taskPath = args.shift();
-        if (!parsed.taskPath) {
-          throw new Error("--task requires a path argument. Example: --task taskpack.yaml");
-        }
-        break;
-      case "--agents": {
-        const agentsValue = args.shift();
-        if (!agentsValue) {
-          throw new Error("--agents requires a comma-separated list. Example: --agents demo-fast,codex");
-        }
-        parsed.agentIds = agentsValue
-          .split(",")
-          .map((value) => value.trim())
-          .filter(Boolean);
-        if (parsed.agentIds.length === 0) {
-          throw new Error("--agents list cannot be empty. Example: --agents demo-fast,codex");
-        }
-        break;
-      }
-      case "--output":
-        parsed.outputPath = args.shift();
-        if (!parsed.outputPath) {
-          throw new Error("--output requires a path argument. Example: --output ./results");
-        }
-        break;
-      case "--codex-model":
-        parsed.codexModel = args.shift();
-        if (!parsed.codexModel) {
-          throw new Error("--codex-model requires a model name. Example: --codex-model gpt-5.4");
-        }
-        break;
-      case "--codex-reasoning": {
-        parsed.codexReasoning = args.shift();
-        if (!parsed.codexReasoning) {
-          throw new Error("--codex-reasoning requires a value. Example: --codex-reasoning high");
-        }
-        const validReasoning = ["low", "medium", "high"];
-        if (!validReasoning.includes(parsed.codexReasoning.toLowerCase())) {
-          throw new Error(`--codex-reasoning must be one of: ${validReasoning.join(", ")}. Got: ${parsed.codexReasoning}`);
-        }
-        break;
-      }
-      case "--claude-profile":
-        parsed.claudeProfile = args.shift();
-        if (!parsed.claudeProfile) {
-          throw new Error("--claude-profile requires a profile ID. Example: --claude-profile claude-official");
-        }
-        break;
-      case "--claude-model":
-        parsed.claudeModel = args.shift();
-        if (!parsed.claudeModel) {
-          throw new Error("--claude-model requires a model name. Example: --claude-model claude-3-7-sonnet-latest");
-        }
-        break;
-      case "--probe-auth":
-        parsed.probeAuth = true;
-        break;
-      case "--strict":
-        parsed.strict = true;
-        break;
-      case "--update-snapshots":
-        parsed.updateSnapshots = true;
-        break;
-      case "--cleanup-workspaces":
-        parsed.cleanupWorkspaces = true;
-        break;
-      case "--json":
-        parsed.json = true;
-        break;
-      case "--template":
-        parsed.templateName = args.shift();
-        if (!parsed.templateName) {
-          throw new Error("--template requires a template name. Available: repo-health, json-api, snapshot");
-        }
-        break;
-      case "--force":
-        parsed.force = true;
-        break;
-      case "--ci-template": {
-        parsed.ciTemplate = args.shift();
-        if (!parsed.ciTemplate) {
-          throw new Error("--ci-template requires a template type. Available: pull-request, smoke, nightly");
-        }
-        const validTemplates = ["pull-request", "smoke", "nightly"];
-        if (!validTemplates.includes(parsed.ciTemplate)) {
-          throw new Error(`--ci-template must be one of: ${validTemplates.join(", ")}. Got: ${parsed.ciTemplate}`);
-        }
-        break;
-      }
-      case "--ci-output-dir":
-        parsed.ciOutputDir = args.shift();
-        if (!parsed.ciOutputDir) {
-          throw new Error("--ci-output-dir requires a path argument. Example: --ci-output-dir .repoarena/ci");
-        }
-        break;
-      case "--workflow":
-        parsed.workflowPath = args.shift();
-        if (!parsed.workflowPath) {
-          throw new Error("--workflow requires a path argument. Example: --workflow .github/workflows/benchmark.yml");
-        }
-        break;
-      case "--host":
-        parsed.host = args.shift();
-        if (!parsed.host) {
-          throw new Error("--host requires a hostname. Example: --host 127.0.0.1");
-        }
-        break;
-      case "--port": {
-        const portValue = args.shift();
-        if (!portValue) {
-          throw new Error("--port requires a port number. Example: --port 4320");
-        }
-        const value = Number.parseInt(portValue, 10);
-        if (!Number.isInteger(value) || value <= 0 || value > 65535) {
-          throw new Error(`--port must be a valid port number (1-65535). Got: ${portValue}`);
-        }
-        parsed.port = value;
-        break;
-      }
-      case "--no-open":
-        parsed.noOpen = true;
-        break;
-      case "--max-concurrency": {
-        const concurrencyValue = args.shift();
-        if (!concurrencyValue) {
-          throw new Error("--max-concurrency requires a number. Example: --max-concurrency 4");
-        }
-        const value = Number.parseInt(concurrencyValue, 10);
-        if (!Number.isInteger(value) || value <= 0) {
-          throw new Error(`--max-concurrency must be a positive integer. Got: ${concurrencyValue}`);
-        }
-        parsed.maxConcurrency = value;
-        break;
-      }
-      case "--help":
-      case "-h":
-        printHelp();
-        process.exit(0);
-        break; // eslint-disable-line no-fallthrough
-      case "--version":
-      case "-v":
-        parsed.command = "version";
-        return parsed;
-      default:
-        throw new Error(
-          `Unknown argument: ${token}\n` +
-          `Run "repoarena --help" for usage information.`
-        );
-    }
-  }
-
-  return parsed;
-}
-
-function formatCapabilitySummary(capability: AdapterPreflightResult["capability"]): string {
-  return [
-    `tier=${capability.supportTier}`,
-    `tokens=${capability.tokenAvailability}`,
-    `cost=${capability.costAvailability}`,
-    `trace=${capability.traceRichness}`
-  ].join(" | ");
 }
 
 async function runDoctor(parsed: ParsedArgs): Promise<void> {
@@ -917,145 +344,6 @@ async function runInitTaskpack(parsed: ParsedArgs): Promise<void> {
   console.log(`path=${outputPath}`);
 }
 
-function buildCiWorkflow(options: {
-  taskPath: string;
-  agentIds: string[];
-  template: "pull-request" | "smoke" | "nightly";
-  outputDir: string;
-}): string {
-  const { taskPath, agentIds, template, outputDir } = options;
-  const normalizedTaskPath = taskPath.replaceAll("\\", "/");
-  const normalizedAgents = agentIds.join(",");
-  const normalizedOutputDir = outputDir.replaceAll("\\", "/");
-  const workflowName =
-    template === "nightly"
-      ? "RepoArena Nightly Benchmark"
-      : template === "smoke"
-        ? "RepoArena Smoke Benchmark"
-        : "RepoArena Benchmark";
-  const permissionsBlock =
-    template === "pull-request"
-      ? `permissions:
-  contents: read
-  pull-requests: write`
-      : `permissions:
-  contents: read`;
-  const onBlock =
-    template === "nightly"
-      ? `on:
-  workflow_dispatch:
-  schedule:
-    - cron: "0 1 * * *"`
-      : template === "smoke"
-        ? `on:
-  workflow_dispatch:
-  push:
-    branches:
-      - main`
-        : `on:
-  pull_request:
-  workflow_dispatch:`;
-  const doctorCommand =
-    template === "nightly"
-      ? `node packages/cli/dist/index.js doctor --agents ${normalizedAgents} --probe-auth --strict --json > ${normalizedOutputDir}/doctor.json`
-      : `node packages/cli/dist/index.js doctor --agents ${normalizedAgents} --probe-auth --json > ${normalizedOutputDir}/doctor.json`;
-  const publishSummaryStep =
-    template === "pull-request"
-      ? `      - name: Publish benchmark summary
-        run: cat ${normalizedOutputDir}/pr-comment.md >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Comment benchmark summary on PR
-        if: github.event_name == 'pull_request'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require("node:fs");
-            const marker = "<!-- repoarena-benchmark-summary -->";
-            const body = \`\${marker}\\n\${fs.readFileSync("${normalizedOutputDir}/pr-comment.md", "utf8")}\`;
-            const issue_number = context.payload.pull_request.number;
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number
-            });
-            const existing = comments.find((comment) => comment.body && comment.body.includes(marker));
-
-            if (existing) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: existing.id,
-                body
-              });
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number,
-                body
-              });
-            }`
-      : `      - name: Publish benchmark summary
-        run: cat ${normalizedOutputDir}/summary.md >> "$GITHUB_STEP_SUMMARY"`;
-
-  return `name: ${workflowName}
-
-${permissionsBlock}
-
-${onBlock}
-
-jobs:
-  benchmark:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10.6.1
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build workspace
-        run: pnpm build
-
-      - name: Prepare RepoArena output directories
-        run: mkdir -p ${normalizedOutputDir}
-
-      - name: Doctor adapters
-        run: ${doctorCommand}
-
-      - name: Run benchmark
-        run: node packages/cli/dist/index.js run --repo . --task ${normalizedTaskPath} --agents ${normalizedAgents} --output ${normalizedOutputDir} --json > ${normalizedOutputDir}/run.json
-
-${publishSummaryStep}
-
-      - name: Upload benchmark artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: repoarena-benchmark
-          path: |
-            ${normalizedOutputDir}/doctor.json
-            ${normalizedOutputDir}/run.json
-            ${normalizedOutputDir}/summary.json
-            ${normalizedOutputDir}/summary.md
-            ${normalizedOutputDir}/pr-comment.md
-            ${normalizedOutputDir}/report.html
-            ${normalizedOutputDir}/badge.json
-`;
-}
-
 async function runInitCi(parsed: ParsedArgs): Promise<void> {
   const workflowPath = path.resolve(parsed.workflowPath ?? parsed.outputPath ?? ".github/workflows/repoarena-benchmark.yml");
   const taskPath = parsed.taskPath ?? "repoarena.taskpack.yaml";
@@ -1124,10 +412,18 @@ function textResponse(
   };
 }
 
-function createHttpError(message: string, statusCode: number): Error & { statusCode: number } {
-  const error = new Error(message) as Error & { statusCode: number };
-  error.statusCode = statusCode;
-  return error;
+class HttpError extends Error {
+  constructor(
+    message: string,
+    readonly statusCode: number
+  ) {
+    super(message);
+    this.name = "HttpError";
+  }
+}
+
+function createHttpError(message: string, statusCode: number): HttpError {
+  return new HttpError(message, statusCode);
 }
 
 async function readRequestBody(request: http.IncomingMessage): Promise<string> {
@@ -1189,8 +485,8 @@ async function listOfficialTaskPacks(): Promise<
           i18n: await (async () => {
             try {
               const raw = await fs.readFile(filePath, "utf8");
-              const parsed = (filePath.endsWith(".json") ? JSON.parse(raw) : parseYaml(raw)) as any;
-              return parsed?.metadata?.i18n ?? undefined;
+              const parsed = (filePath.endsWith(".json") ? JSON.parse(raw) : parseYaml(raw)) as ParsedTaskPackMetadataFile;
+              return parsed.metadata?.i18n ?? undefined;
             } catch { return undefined; }
           })()
         };
@@ -1277,7 +573,7 @@ async function runUi(parsed: ParsedArgs): Promise<void> {
     };
     activeRunStatus = {
       ...activeRunStatus,
-      logs: [...activeRunStatus.logs, nextEntry].slice(-30),
+      logs: [...activeRunStatus.logs, nextEntry].slice(-MAX_UI_LOG_ENTRIES),
       updatedAt: nextEntry.timestamp
     };
   };
@@ -1289,8 +585,17 @@ async function runUi(parsed: ParsedArgs): Promise<void> {
       // CORS protection: reject cross-origin requests
       const origin = request.headers.origin;
       if (origin) {
-        const serverOrigin = `http://${host}:${port}`;
-        if (origin !== serverOrigin && origin !== `http://localhost:${port}` && origin !== `http://127.0.0.1:${port}`) {
+        const allowedOrigins = new Set([
+          `http://${host}:${port}`,
+          `http://localhost:${port}`,
+          `http://127.0.0.1:${port}`
+        ]);
+        // When host is 0.0.0.0, accept localhost and 127.0.0.1 origins
+        if (host === "0.0.0.0") {
+          allowedOrigins.add(`http://localhost:${port}`);
+          allowedOrigins.add(`http://127.0.0.1:${port}`);
+        }
+        if (!allowedOrigins.has(origin)) {
           const forbidden = jsonResponse({ error: "Cross-origin requests are not allowed." }, 403);
           response.writeHead(forbidden.statusCode, forbidden.headers);
           response.end(forbidden.body);
@@ -1475,36 +780,36 @@ async function runUi(parsed: ParsedArgs): Promise<void> {
             owner: "user",
             difficulty: "medium",
             objective: "Execute the user-provided prompt and verify the result.",
-            repoTypes: ["generic"],
-            tags: ["adhoc", "custom"],
+            repoTypes: ["node-js"],
+            tags: ["adhoc", "custom", "node-assumptions"],
             dependencies: [],
-            judgeRationale: "Basic structural checks ensure the agent did not break the repository."
+            judgeRationale: "These default checks assume a Node-style repository with package.json, README, build, test, and lint commands."
           },
           prompt: body.prompt,
           judges: [
             {
               id: "repo-not-broken",
               type: "file-exists",
-              label: "Package manifest still exists",
+              label: "Node package manifest still exists",
               path: "package.json"
             },
             {
               id: "readme-exists",
               type: "file-exists",
-              label: "README still exists",
+              label: "Repository README still exists",
               path: "README.md"
             },
             {
               id: "build-passes",
               type: "command",
-              label: "Project still builds",
+              label: "Node project still builds",
               command: buildCommand,
               timeoutMs: 120000
             },
             {
               id: "tests-pass",
               type: "test-result",
-              label: "Tests still pass with structured results",
+              label: "Node tests still pass with structured results",
               command: testCommand,
               format: "auto",
               reportFile: testReportFile,
@@ -1513,7 +818,7 @@ async function runUi(parsed: ParsedArgs): Promise<void> {
             {
               id: "lint-clean",
               type: "lint-check",
-              label: "Lint stays clean",
+              label: "Node lint stays clean",
               command: lintCommand,
               format: "auto",
               reportFile: lintReportFile,
@@ -1542,13 +847,13 @@ async function runUi(parsed: ParsedArgs): Promise<void> {
                 const filePath = path.join(adhocDir, e.name);
                 const stat = await fs.stat(filePath);
                 const raw = await fs.readFile(filePath, "utf8");
-                const parsed = parseYaml(raw) as any;
+                const parsed = parseYaml(raw) as ParsedAdhocTaskPackFile;
                 return {
-                  id: parsed?.id ?? e.name,
-                  title: parsed?.title ?? e.name,
+                  id: typeof parsed.id === "string" ? parsed.id : e.name,
+                  title: typeof parsed.title === "string" ? parsed.title : e.name,
                   path: filePath,
                   createdAt: stat.birthtime.toISOString(),
-                  promptPreview: String(parsed?.prompt ?? "").slice(0, 200)
+                  promptPreview: String(parsed.prompt ?? "").slice(0, 200)
                 };
               })
           );
@@ -1565,9 +870,16 @@ async function runUi(parsed: ParsedArgs): Promise<void> {
 
       if (request.method === "DELETE" && requestUrl.pathname.startsWith("/api/adhoc-taskpacks/")) {
         const adhocId = decodeURIComponent(requestUrl.pathname.slice("/api/adhoc-taskpacks/".length));
-        const adhocDir = path.join(process.cwd(), ".repoarena", "adhoc-taskpacks");
-        const filePath = path.normalize(path.join(adhocDir, `${adhocId}.yaml`));
-        if (!filePath.startsWith(adhocDir)) {
+        if (!validateTaskPackId(adhocId)) {
+          const forbidden = jsonResponse({ error: "Invalid adhoc taskpack ID." }, 400);
+          response.writeHead(forbidden.statusCode, forbidden.headers);
+          response.end(forbidden.body);
+          return;
+        }
+        const adhocDir = path.resolve(process.cwd(), ".repoarena", "adhoc-taskpacks");
+        const filePath = path.resolve(adhocDir, `${adhocId}.yaml`);
+        // Harden path traversal check: use resolved paths for comparison
+        if (!filePath.startsWith(adhocDir + path.sep) && filePath !== adhocDir) {
           const forbidden = jsonResponse({ error: "Invalid adhoc taskpack ID." }, 400);
           response.writeHead(forbidden.statusCode, forbidden.headers);
           response.end(forbidden.body);
@@ -1658,23 +970,25 @@ async function runUi(parsed: ParsedArgs): Promise<void> {
           cancel: () => cancellationController.abort(),
           promise: (async () => {
           try {
-            // Do NOT pass outputPath from the UI payload directly.
-            // The runner generates a unique runId and creates a per-run
-            // subdirectory under .repoarena/runs/{runId} automatically.
-            // Passing a flat outputPath (e.g. .repoarena/ui-runs) caused
-            // summary.json to be overwritten and trace.jsonl to accumulate
-            // across runs, making later failed runs hide earlier successes.
+            const uiRunId = createRunId();
+            const outputPath = runPayload.outputPath
+              ? path.join(path.resolve(runPayload.outputPath), uiRunId)
+              : undefined;
             const benchmark = await runBenchmark({
+              runId: uiRunId,
               repoPath: runPayload.repoPath,
               taskPath: runPayload.taskPath,
               agentIds: selections.map((selection) => selection.baseAgentId),
               agents: selections,
+              outputPath,
               probeAuth: runPayload.probeAuth,
               updateSnapshots: runPayload.updateSnapshots,
               cleanupWorkspaces: runPayload.cleanupWorkspaces,
               maxConcurrency: runPayload.maxConcurrency,
+              scoreMode: runPayload.scoreMode,
+              tokenBudget: runPayload.tokenBudget ? Number(runPayload.tokenBudget) : undefined,
               cancellation,
-              onProgress: (event) => {
+              onProgress: (event: BenchmarkProgressEvent) => {
                 const phase =
                   event.phase === "starting" || event.phase === "preflight"
                     ? event.phase
@@ -1707,7 +1021,7 @@ async function runUi(parsed: ParsedArgs): Promise<void> {
             });
 
             const runCancelled =
-              cancellationController.signal.aborted || benchmark.results.some((result) => result.status === "cancelled");
+              cancellationController.signal.aborted || benchmark.results.some((result: any) => result.status === "cancelled");
             if (runCancelled) {
               appendRunLog({
                 phase: activeRunStatus.phase,
@@ -1735,7 +1049,9 @@ async function runUi(parsed: ParsedArgs): Promise<void> {
               phase: "report",
               message: "Writing report artifacts."
             });
-            const report = await writeReport(benchmark);
+            const report = await writeReport(benchmark, {
+              locale: resolveReportLocale(process.env.REPOARENA_LOCALE)
+            });
             appendRunLog({
               phase: "report",
               message: "Report artifacts are ready."
@@ -1825,10 +1141,7 @@ async function runUi(parsed: ParsedArgs): Promise<void> {
       response.writeHead(methodNotAllowed.statusCode, methodNotAllowed.headers);
       response.end(methodNotAllowed.body);
     } catch (error) {
-      const statusCode =
-        typeof (error as { statusCode?: unknown })?.statusCode === "number"
-          ? ((error as { statusCode: number }).statusCode ?? 500)
-          : 500;
+      const statusCode = error instanceof HttpError ? error.statusCode : 500;
       const payload = jsonResponse(
         { error: error instanceof Error ? error.message : String(error) },
         statusCode
@@ -1863,6 +1176,8 @@ async function runUi(parsed: ParsedArgs): Promise<void> {
 }
 
 async function runBenchmarkCommand(parsed: ParsedArgs): Promise<void> {
+  const reportLocale = resolveReportLocale(parsed.locale ?? process.env.REPOARENA_LOCALE);
+
   if (!parsed.repoPath) {
     throw new Error(
       "Missing required argument: --repo\n" +
@@ -1960,10 +1275,13 @@ async function runBenchmarkCommand(parsed: ParsedArgs): Promise<void> {
       updateSnapshots: parsed.updateSnapshots,
       cleanupWorkspaces: parsed.cleanupWorkspaces,
       maxConcurrency: parsed.maxConcurrency,
+      scoreMode: parsed.scoreMode,
+      tokenBudget: parsed.tokenBudget,
+      categories: parsed.categories,
       cancellation,
       onProgress: parsed.json
         ? undefined
-        : (event) => {
+        : (event: BenchmarkProgressEvent) => {
             const prefix = event.displayLabel ? `[${event.displayLabel}] ` : "";
             process.stderr.write(`  ${prefix}${event.message}\n`);
           }
@@ -1972,14 +1290,53 @@ async function runBenchmarkCommand(parsed: ParsedArgs): Promise<void> {
     process.removeListener("SIGINT", sigintHandler);
   }
 
-  const report = await writeReport(benchmark);
+  const report = await writeReport(benchmark, { locale: reportLocale });
+  const scoredBenchmark = enrichRunWithScores(benchmark);
+
+  // Generate decision report
+  const decisionReport = generateDecisionReport(benchmark, {
+    teamSize: 10,
+    dailyRuns: 5
+  });
+  const decisionReportPath = path.join(benchmark.outputPath, "decision-report.md");
+  await fs.writeFile(decisionReportPath, formatDecisionReport(decisionReport), "utf8");
+
+  // Variance analysis: check for previous runs with the same task
+  const runsDir = path.dirname(benchmark.outputPath); // Go up one level to find other runs
+  let varianceReportText: string | null = null;
+  try {
+    const allRunFiles = await fs.readdir(runsDir);
+    const previousRuns = await Promise.all(
+      allRunFiles
+        .filter((f) => f.endsWith(".json"))
+        .map(async (f) => {
+          try {
+            const content = await fs.readFile(path.join(runsDir, f), "utf8");
+            return JSON.parse(content) as BenchmarkRun;
+          } catch {
+            return null;
+          }
+        })
+    );
+    const comparableRuns = previousRuns.filter(
+      (r): r is BenchmarkRun => r !== null && r.task?.id === benchmark.task?.id
+    );
+    if (comparableRuns.length > 1) {
+      const varianceReport = computeVarianceAnalysis(comparableRuns);
+      varianceReportText = formatVarianceReport(varianceReport);
+    }
+  } catch {
+    // Ignore variance analysis errors - not critical for the benchmark run
+  }
 
   if (parsed.json) {
     console.log(JSON.stringify(buildBenchmarkOutputSummary(benchmark, report), null, 2));
   } else {
-    console.log(`\nRepoArena run complete: ${benchmark.runId}`);
+    console.log(`\nRepoArena run complete: ${scoredBenchmark.runId}`);
+    console.log(`Score scope: ${scoredBenchmark.scoreScope ?? "run-local"}`);
+    console.log(`Score note: ${scoredBenchmark.scoreValidityNote ?? "Scores only compare variants inside this run."}`);
     console.log(`\nPreflight Results:`);
-    for (const preflight of benchmark.preflights) {
+    for (const preflight of scoredBenchmark.preflights) {
       const statusIcon = preflight.status === "ready" ? "✓" : preflight.status === "unverified" ? "?" : "✗";
       console.log(
         `  ${statusIcon} ${preflight.displayLabel}: ${preflight.status} - ${preflight.summary}`
@@ -1987,15 +1344,28 @@ async function runBenchmarkCommand(parsed: ParsedArgs): Promise<void> {
       if (preflight.resolvedRuntime?.effectiveModel) {
         console.log(`    Model: ${preflight.resolvedRuntime.effectiveModel}`);
       }
+      if (preflight.resolvedRuntime?.effectiveAgentVersion) {
+        console.log(`    Version: ${preflight.resolvedRuntime.effectiveAgentVersion}`);
+      }
     }
 
     console.log(`\nBenchmark Results:`);
-    for (const result of benchmark.results) {
+    for (const result of scoredBenchmark.results) {
       const statusIcon = result.status === "success" ? "✓" : "✗";
       console.log(
         `  ${statusIcon} ${result.displayLabel}: ${result.status} (${formatDuration(result.durationMs)})`
       );
       console.log(`    status=${result.status}`);
+      console.log(`    Score: ${(result.compositeScore ?? 0).toFixed(1)}`);
+      if (result.resolvedRuntime?.effectiveModel) {
+        console.log(`    Model: ${result.resolvedRuntime.effectiveModel}`);
+      }
+      if (result.resolvedRuntime?.effectiveReasoningEffort) {
+        console.log(`    Reasoning: ${result.resolvedRuntime.effectiveReasoningEffort}`);
+      }
+      if (result.resolvedRuntime?.effectiveAgentVersion) {
+        console.log(`    Version: ${result.resolvedRuntime.effectiveAgentVersion}`);
+      }
       console.log(`    Tokens: ${result.tokenUsage} | Cost: ${result.costKnown ? `$${result.estimatedCostUsd.toFixed(2)}` : "n/a"} | Files changed: ${result.changedFiles.length}`);
 
       const passedJudges = result.judgeResults.filter((j) => j.success).length;
@@ -2005,16 +1375,38 @@ async function runBenchmarkCommand(parsed: ParsedArgs): Promise<void> {
       }
     }
 
-    const successCount = benchmark.results.filter((r) => r.status === "success").length;
-    const totalCount = benchmark.results.length;
+    const successCount = scoredBenchmark.results.filter((r) => r.status === "success").length;
+    const totalCount = scoredBenchmark.results.length;
     console.log(`\nSummary: ${successCount}/${totalCount} agents succeeded`);
 
+    // Print decision report summary
+    const topRec = decisionReport.recommendations.find((r) => r.recommendation === "recommended");
+    if (topRec) {
+      console.log(`\n${"═".repeat(60)}`);
+      console.log(`📋 REPOARENA DECISION REPORT`);
+      console.log(`${"═".repeat(60)}`);
+      console.log(``);
+      console.log(`🏆 推荐: ${topRec.displayLabel}`);
+      console.log(`   - 成功率: ${(topRec.successRate * 100).toFixed(0)}%`);
+      console.log(`   - 平均成本: $${topRec.avgCostPerRun.toFixed(2)}/次`);
+      console.log(`   - 置信度: ${topRec.confidence}`);
+      console.log(``);
+      console.log(`📄 完整报告: ${decisionReportPath}`);
+      console.log(`${"═".repeat(60)}`);
+    }
+
     console.log(`\nOutput Files:`);
-    console.log(`  JSON summary: ${report.jsonPath}`);
-    console.log(`  Markdown:     ${report.markdownPath}`);
-    console.log(`  HTML report:  ${report.htmlPath}`);
-    console.log(`  Badge:        ${report.badgePath}`);
-    console.log(`  PR comment:   ${report.prCommentPath}`);
+    console.log(`  JSON summary:       ${report.jsonPath}`);
+    console.log(`  Markdown:           ${report.markdownPath}`);
+    console.log(`  HTML report:        ${report.htmlPath}`);
+    console.log(`  Badge:              ${report.badgePath}`);
+    console.log(`  PR comment:         ${report.prCommentPath}`);
+    console.log(`  Decision report:    ${decisionReportPath}`);
+
+    // Print variance report if available
+    if (varianceReportText) {
+      console.log(`\n${varianceReportText}`);
+    }
   }
 
   if (benchmark.results.some((result) => result.status !== "success")) {
@@ -2022,54 +1414,76 @@ async function runBenchmarkCommand(parsed: ParsedArgs): Promise<void> {
   }
 }
 
-function buildBenchmarkOutputSummary(
-  benchmark: BenchmarkRun,
-  report: {
-    jsonPath: string;
-    markdownPath: string;
-    htmlPath: string;
-    badgePath: string;
-    prCommentPath: string;
+async function runInit(parsed: ParsedArgs): Promise<void> {
+  const repoPath = parsed.repoPath ? path.resolve(parsed.repoPath) : process.cwd();
+  const taskPackPath = parsed.outputPath ? path.resolve(parsed.outputPath) : path.join(repoPath, "repoarena.taskpack.yaml");
+
+  // Check if taskpack already exists
+  try {
+    await fs.access(taskPackPath);
+    if (!parsed.force) {
+      console.log(`Task pack already exists at: ${taskPackPath}`);
+      console.log("Use --force to overwrite, or run with an existing task pack.");
+      return;
+    }
+  } catch {
+    // File doesn't exist, proceed
   }
-) {
-  return {
-    runId: benchmark.runId,
-    createdAt: benchmark.createdAt,
-    repoPath: benchmark.repoPath,
-    outputPath: benchmark.outputPath,
-    task: {
-      id: benchmark.task.id,
-      title: benchmark.task.title,
-      schemaVersion: benchmark.task.schemaVersion,
-      metadata: benchmark.task.metadata
-    },
-    preflights: benchmark.preflights,
-    results: benchmark.results.map((result) => ({
-      agentId: result.agentId,
-      baseAgentId: result.baseAgentId,
-      variantId: result.variantId,
-      displayLabel: result.displayLabel,
-      requestedConfig: result.requestedConfig,
-      resolvedRuntime: result.resolvedRuntime,
-      agentTitle: result.agentTitle,
-      adapterKind: result.adapterKind,
-      status: result.status,
-      summary: result.summary,
-      durationMs: result.durationMs,
-      tokenUsage: result.tokenUsage,
-      estimatedCostUsd: result.estimatedCostUsd,
-      costKnown: result.costKnown,
-      changedFiles: result.changedFiles,
-      changedFilesCount: result.changedFiles.length,
-      tracePath: result.tracePath,
-      workspacePath: result.workspacePath,
-      judges: {
-        passed: result.judgeResults.filter((judge) => judge.success).length,
-        total: result.judgeResults.length
-      }
-    })),
-    report
+
+  // Generate a demo taskpack that showcases multiple judge types
+  const demoTaskPack = {
+    id: "demo-repo-health",
+    title: "Demo Repository Health Check",
+    prompt: "Analyze this repository and create a comprehensive health report covering code quality, documentation, and project structure. Create a HEALTH.md file summarizing your findings with actionable recommendations.",
+    difficulty: "easy",
+    repoTypes: ["generic"],
+    judges: [
+      { type: "file-exists", path: "HEALTH.md" },
+      { type: "file-contains", path: "HEALTH.md", pattern: "recommendation", regex: true, flags: "i" },
+      { type: "file-count", pattern: "**/*.md", min: 1 }
+    ]
   };
+
+  const yamlContent = stringifyYaml(demoTaskPack);
+  await fs.writeFile(taskPackPath, yamlContent, "utf8");
+  console.log(`\n✓ Generated demo task pack: ${taskPackPath}`);
+
+  // Detect available agents
+  const allAdapters = listAvailableAdapters().filter((a) => a.kind !== "demo");
+  const detectedAgents: string[] = [];
+
+  for (const adapter of allAdapters) {
+    try {
+      const preflight = await adapter.preflight({ probeAuth: false });
+      if (preflight.status !== "missing") {
+        detectedAgents.push(adapter.id);
+      }
+    } catch {
+      // Agent not available
+    }
+  }
+
+  const requestedAgents = parsed.agentIds.length > 0 ? parsed.agentIds : detectedAgents;
+
+  if (requestedAgents.length === 0) {
+    console.log("\n⚠ No agents detected. Install at least one agent CLI to run benchmarks.");
+    console.log("\nSupported agents:");
+    for (const adapter of allAdapters) {
+      console.log(`  - ${adapter.id}: ${adapter.title}`);
+    }
+    console.log("\nAfter installing an agent, run: repoarena init");
+    return;
+  }
+
+  if (parsed.agentIds.length > 0) {
+    console.log(`\n✓ Using requested agents: ${requestedAgents.join(", ")}`);
+    console.log(`  (${detectedAgents.length} agent(s) detected on this machine)`);
+  } else {
+    console.log(`\n✓ Detected ${detectedAgents.length} available agent(s): ${detectedAgents.join(", ")}`);
+  }
+
+  console.log(`\n▶ Ready to run! Execute:`);
+  console.log(`  repoarena run --repo ${repoPath} --task ${taskPackPath} --agents ${requestedAgents.join(",")}`);
 }
 
 async function main(): Promise<void> {
@@ -2084,6 +1498,9 @@ async function main(): Promise<void> {
     switch (parsed.command) {
       case "doctor":
         await runDoctor(parsed);
+        break;
+      case "init":
+        await runInit(parsed);
         break;
       case "run":
         await runBenchmarkCommand(parsed);
@@ -2120,7 +1537,7 @@ async function main(): Promise<void> {
       default:
         throw new Error(
           `Unknown command: ${parsed.command}\n` +
-          `Available commands: run, doctor, list-adapters, init-taskpack, init-ci, ui\n` +
+          `Available commands: run, doctor, list-adapters, init, init-taskpack, init-ci, ui\n` +
           'Run "repoarena --help" for usage information.'
         );
     }

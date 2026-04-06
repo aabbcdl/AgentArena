@@ -1,0 +1,59 @@
+schemaVersion: repoarena.taskpack/v1
+id: rotating-tasks-2026-04-example
+title: "Rotating Tasks Example (LiveBench Inspired)"
+description: "Demonstrates anti-contamination mechanism with task rotation"
+metadata:
+  source: official
+  owner: RepoArena
+  difficulty: medium
+  objective: "Solve a coding challenge with objective ground truth"
+  repoTypes: [node, typescript]
+  tags: [rotating-tasks, anti-contamination, livebench-inspired]
+  judgeRationale: "Uses objective verification without LLM judging"
+  differentiator: "Anti-contamination via monthly rotation and recent data"
+  taskCategories: [coding, reasoning]
+  antiContamination:
+    rotationId: "2026-04"
+    createdAt: "2026-04-01T00:00:00Z"
+    expiresAt: "2026-05-01T00:00:00Z"
+    sourceTimestamp: "2026-03-31T23:59:59Z"
+prompt: |
+  Implement a function that solves a specific algorithmic challenge.
+  
+  Task: Implement a binary search algorithm that finds a target value
+  in a sorted array with O(log n) time complexity.
+  
+  The solution must:
+  1. Return the index of the target if found
+  2. Return -1 if not found
+  3. Handle edge cases (empty array, duplicates)
+  
+  This task uses objective verification - your solution
+  will be tested against expected outputs.
+judges:
+  - type: command
+    label: "Algorithm correctness"
+    command: "node test/algorithm-test.js"
+    critical: true
+    timeoutMs: 30000
+    envAllowList: [NODE_ENV, CI]
+  - type: test-result
+    label: "Unit tests pass"
+    command: "npm test -- --reporter json"
+    format: jest
+    critical: true
+    timeoutMs: 60000
+  - type: token-efficiency
+    label: "Token efficiency"
+    tokenBudget: 50000
+    critical: false
+envAllowList:
+  - NODE_ENV
+  - CI
+setupCommands:
+  - id: install-deps
+    label: "Install dependencies"
+    command: "npm install"
+    timeoutMs: 60000
+    envAllowList: [NODE_ENV, CI]
+teardownCommands: []

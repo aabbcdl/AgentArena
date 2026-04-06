@@ -1,12 +1,14 @@
-﻿# RepoArena
+# RepoArena
 
 > The local-first arena for evaluating AI coding agents in real repositories.
 
 [中文说明](./README.zh-CN.md)
 
-RepoArena lets you run Claude Code, Codex, Cursor, Devin, and open source agents against the same repository tasks, then compare success rate, duration, cost, diffs, and replay traces in one report.
+RepoArena lets you run Claude Code, Codex, Cursor, Gemini CLI, Aider, Kilo CLI, OpenCode, and other coding agents against the same repository tasks, then compare success rate, duration, cost, diffs, and replay traces in one report.
 
 The primary manual entry point is `repoarena ui`: a local service mode that lets you choose a repository, task pack, and agents from the browser, run the benchmark, and inspect the result in the same UI. Opening `summary.json` files directly is now a fallback path for existing results, not the main workflow.
+
+External CLI-based adapters still depend on upstream tools, local authentication, and provider compatibility. Treat `repoarena doctor` as the readiness check before trusting a comparison.
 
 Task packs use a versioned schema. The current format is `repoarena.taskpack/v1`, with structured `judges` definitions for command, file, glob, snapshot, and JSON evaluation. Both JSON and YAML task packs are supported.
 
@@ -31,6 +33,10 @@ This repository already contains a runnable prototype with:
 - built-in demo adapters
 - a working `codex` adapter
 - `claude-code` and `cursor` adapters with auth-aware failure reporting
+- `gemini-cli` adapter with JSON event parsing (token usage + cost reporting)
+- `aider` adapter with automatic git initialization and multi-model support
+- `kilo-cli` adapter (Kilo Code 1.0, built on OpenCode)
+- `opencode` adapter (free, multi-provider open-source CLI)
 - static HTML and JSON report generation
 - Markdown summaries for CI, PR comments, and sharing
 - an interactive `apps/web-report` UI that can either run local benchmarks through `repoarena ui` or open existing reports
@@ -246,10 +252,10 @@ If an adapter is blocked by missing auth or missing local setup, RepoArena shoul
 apps/
   web-report/          Interactive benchmark UI (vanilla JS, PWA)
 packages/
-  cli/                 CLI entry point (ui, run, doctor, init-taskpack, init-ci)
+  cli/                 CLI entry point (ui, run, doctor, init, init-taskpack, init-ci)
   core/                Shared types and utilities
   runner/              Benchmark orchestrator
-  adapters/            Agent adapters (demo, codex, claude-code, cursor)
+  adapters/            Agent adapters (demo, codex, claude-code, cursor, gemini-cli, aider, kilo-cli, opencode)
   judges/              Judge implementations (command, file, glob, snapshot, json)
   taskpacks/           Task pack loader and validator
   trace/               Execution trace recorder

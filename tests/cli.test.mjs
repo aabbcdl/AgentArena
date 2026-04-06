@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -137,6 +137,11 @@ test("repoarena run exits with code 0 on successful benchmark", async () => {
 
   assert.equal(result.code, 0);
   assert.match(result.stdout, /RepoArena run complete/);
+
+  const runDirs = await readdir(outputPath, { withFileTypes: true });
+  assert.equal(runDirs.length, 1);
+  assert.equal(runDirs[0].isDirectory(), true);
+  assert.ok(await readFile(path.join(outputPath, runDirs[0].name, "summary.json"), "utf8"));
 
   await rm(tempDir, { recursive: true, force: true });
 });
@@ -300,7 +305,7 @@ test("repoarena run supports --cleanup-workspaces flag", async () => {
   await rm(tempDir, { recursive: true, force: true });
 });
 
-test("repoarena ui creates stricter adhoc taskpacks without fallback echo judges", async () => {
+test("repoarena ui creates Node-oriented adhoc taskpacks without fallback echo judges", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-cli-"));
   const server = await startUiServer(tempDir);
 
@@ -320,8 +325,37 @@ test("repoarena ui creates stricter adhoc taskpacks without fallback echo judges
     assert.match(yaml, /type: test-result/);
     assert.match(yaml, /type: lint-check/);
     assert.match(yaml, /source: community/);
+    assert.match(yaml, /repoTypes:\s*\n\s*- node-js/);
+    assert.match(yaml, /tags:\s*\n\s*- adhoc\n\s*- custom\n\s*- node-assumptions/);
+    assert.match(yaml, /judgeRationale: These default checks assume a Node-style repository with package\.json, README, build, test, and lint commands\./);
+    assert.match(yaml, /label: Node package manifest still exists/);
+    assert.match(yaml, /label: Node project still builds/);
+    assert.match(yaml, /label: Node tests still pass with structured results/);
+    assert.match(yaml, /label: Node lint stays clean/);
     assert.doesNotMatch(yaml, /No build script/);
     assert.doesNotMatch(yaml, /No test script/);
+  } finally {
+    await server.stop();
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("repoarena ui rejects adhoc taskpack path traversal deletes", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-cli-"));
+  const server = await startUiServer(tempDir);
+  const escapeTarget = path.join(tempDir, ".repoarena", "outside.yaml");
+
+  await mkdir(path.dirname(escapeTarget), { recursive: true });
+  await writeFile(escapeTarget, "outside: true\n", "utf8");
+
+  try {
+    const response = await fetch(
+      `http://127.0.0.1:${server.port}/api/adhoc-taskpacks/${encodeURIComponent("../outside")}`,
+      { method: "DELETE" }
+    );
+
+    assert.equal(response.status, 400);
+    assert.equal(await readFile(escapeTarget, "utf8"), "outside: true\n");
   } finally {
     await server.stop();
     await rm(tempDir, { recursive: true, force: true });
@@ -464,8 +498,8 @@ test("repoarena run supports JSON output", async () => {
   assert.match(payload.report.prCommentPath, /pr-comment\.md$/);
 
   const summary = JSON.parse(await readFile(payload.report.jsonPath, "utf8"));
-  assert.equal(summary.scoreMode, "balanced");
-  assert.equal(summary.scoreWeights.status, 0.3);
+  assert.equal(summary.scoreMode, "practical");
+  assert.equal(summary.scoreWeights.status, 0.24);
   assert.equal(typeof summary.results[0].compositeScore, "number");
   assert.equal(Array.isArray(summary.results[0].scoreReasons), true);
 

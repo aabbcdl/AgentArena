@@ -7,6 +7,8 @@ It lets you run multiple agents against the same repository task, inspect what t
 
 The intended manual entry point is `repoarena ui`, which starts a local service and gives you a browser-based launcher plus report view in one place. Opening existing result files is a fallback path, not the primary workflow.
 
+External CLI adapters are still subject to upstream tool behavior, login state, and provider compatibility. Use `repoarena doctor` as the readiness check before comparing results seriously.
+
 ## Core Use Case
 Most teams evaluating coding agents still rely on anecdotes, screenshots, or one-off experiments.
 

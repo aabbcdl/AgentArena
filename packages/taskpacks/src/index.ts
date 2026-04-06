@@ -10,12 +10,14 @@ import {
   type JsonSchemaJudge,
   type JsonValueJudge,
   type LintCheckJudge,
+  type PatchValidationJudge,
   type SnapshotJudge,
   TASK_PACK_SCHEMA_V1,
   type TaskJudge,
   type TaskPack,
   type TaskPackMetadata,
   type TestResultJudge,
+  type TokenEfficiencyJudge,
   validateTaskPackId
 } from "@repoarena/core";
 import { parse as parseYaml } from "yaml";
@@ -68,6 +70,20 @@ function assertOptionalPositiveInteger(value: unknown, label: string): number | 
       `Task pack field "${label}" must be a positive integer. ` +
       `Received: ${value}. ` +
       `Example: "${label}": 1000`
+    );
+  }
+  return value;
+}
+
+function assertOptionalNumber(value: unknown, label: string): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "number") {
+    throw new Error(
+      `Task pack field "${label}" must be a number. ` +
+      `Received type: ${typeof value}. ` +
+      `Example: "${label}": 1.5`
     );
   }
   return value;
@@ -181,6 +197,22 @@ function normalizeMetadata(value: unknown): TaskPackMetadata | undefined {
     );
   }
 
+  const interactionModel = assertOptionalString(metadata.interactionModel, "metadata.interactionModel");
+  if (interactionModel !== undefined && !["single-turn", "multi-turn"].includes(interactionModel)) {
+    throw new Error(
+      `Task pack field "metadata.interactionModel" must be "single-turn" or "multi-turn". ` +
+      `Received: "${interactionModel}".`
+    );
+  }
+
+  const requirementClarity = assertOptionalString(metadata.requirementClarity, "metadata.requirementClarity");
+  if (requirementClarity !== undefined && !["precise", "fuzzy", "ambiguous"].includes(requirementClarity)) {
+    throw new Error(
+      `Task pack field "metadata.requirementClarity" must be "precise", "fuzzy", or "ambiguous". ` +
+      `Received: "${requirementClarity}".`
+    );
+  }
+
   return {
     source,
     owner: assertString(metadata.owner, "metadata.owner"),
@@ -190,8 +222,35 @@ function normalizeMetadata(value: unknown): TaskPackMetadata | undefined {
     tags: assertStringArray(metadata.tags, "metadata.tags"),
     dependencies: assertStringArray(metadata.dependencies, "metadata.dependencies"),
     judgeRationale: assertOptionalString(metadata.judgeRationale, "metadata.judgeRationale"),
-    differentiator: assertOptionalString(metadata.differentiator, "metadata.differentiator")
+    differentiator: assertOptionalString(metadata.differentiator, "metadata.differentiator"),
+
+    // === SWE-Bench Extensions ===
+    githubIssue: metadata.githubIssue === undefined ? undefined : assertObject(metadata.githubIssue, "metadata.githubIssue") as TaskPackMetadata["githubIssue"],
+    failToPassTests: assertStringArray(metadata.failToPassTests, "metadata.failToPassTests"),
+    passToPassTests: assertStringArray(metadata.passToPassTests, "metadata.passToPassTests"),
+
+    // === CursorBench Extensions ===
+    tokenBudget: assertOptionalNumber(metadata.tokenBudget, "metadata.tokenBudget"),
+    efficiencyTarget: assertOptionalNumber(metadata.efficiencyTarget, "metadata.efficiencyTarget"),
+    interactionModel: interactionModel as "single-turn" | "multi-turn" | undefined,
+    requirementClarity: requirementClarity as "precise" | "fuzzy" | "ambiguous" | undefined,
+
+    // === LiveBench Extensions ===
+    taskCategories: assertStringArray(metadata.taskCategories, "metadata.taskCategories"),
+    antiContamination: metadata.antiContamination === undefined ? undefined : assertObject(metadata.antiContamination, "metadata.antiContamination") as TaskPackMetadata["antiContamination"],
+    difficultyEvolution: metadata.difficultyEvolution === undefined ? undefined : assertObject(metadata.difficultyEvolution, "metadata.difficultyEvolution") as TaskPackMetadata["difficultyEvolution"]
   };
+}
+
+/**
+ * 判断 judge 是否默认为 critical
+ * 规则：
+ * - test-result: critical (测试结果直接决定任务是否完成)
+ * - json-schema: critical (schema 验证失败意味着输出格式错误)
+ * - 其他类型默认 non-critical
+ */
+function isJudgeCriticalByDefault(type: string): boolean {
+  return type === "test-result" || type === "json-schema";
 }
 
 function normalizeJudge(
@@ -199,17 +258,22 @@ function normalizeJudge(
   index: number,
   defaultIdPrefix: string
 ): TaskJudge {
-  const type = value.type === undefined ? "command" : value.type;
+  const rawType = value.type;
+  const type = rawType === undefined || rawType === null ? "command" : String(rawType);
   const id =
     assertOptionalString(value.id, `judges[${index}].id`) ??
     `${defaultIdPrefix}-${index + 1}`;
   const label = assertString(value.label, `judges[${index}].label`);
+  const critical = value.critical === undefined
+    ? isJudgeCriticalByDefault(type)
+    : (assertOptionalBoolean(value.critical, `judges[${index}].critical`) ?? false);
 
   if (type === "command") {
     const judge: CommandJudge = {
       id,
       label,
       type: "command",
+      critical,
       command: assertString(value.command, `judges[${index}].command`),
       cwd: assertOptionalString(value.cwd, `judges[${index}].cwd`),
       timeoutMs: assertOptionalPositiveInteger(value.timeoutMs, `judges[${index}].timeoutMs`),
@@ -224,6 +288,7 @@ function normalizeJudge(
       id,
       label,
       type: "test-result",
+      critical,
       command: assertString(value.command, `judges[${index}].command`),
       cwd: assertOptionalString(value.cwd, `judges[${index}].cwd`),
       timeoutMs: assertOptionalPositiveInteger(value.timeoutMs, `judges[${index}].timeoutMs`),
@@ -241,6 +306,7 @@ function normalizeJudge(
       id,
       label,
       type: "lint-check",
+      critical,
       command: assertString(value.command, `judges[${index}].command`),
       cwd: assertOptionalString(value.cwd, `judges[${index}].cwd`),
       timeoutMs: assertOptionalPositiveInteger(value.timeoutMs, `judges[${index}].timeoutMs`),
@@ -258,6 +324,7 @@ function normalizeJudge(
       id,
       label,
       type: "file-exists",
+      critical,
       path: assertString(value.path, `judges[${index}].path`)
     };
     return judge;
@@ -268,6 +335,7 @@ function normalizeJudge(
       id,
       label,
       type: "file-contains",
+      critical,
       path: assertString(value.path, `judges[${index}].path`),
       pattern: assertString(value.pattern, `judges[${index}].pattern`),
       regex: assertOptionalBoolean(value.regex, `judges[${index}].regex`),
@@ -288,6 +356,7 @@ function normalizeJudge(
       id,
       label,
       type: "json-value",
+      critical,
       path: assertString(value.path, `judges[${index}].path`),
       pointer: assertString(value.pointer, `judges[${index}].pointer`),
       expected: value.expected
@@ -300,6 +369,7 @@ function normalizeJudge(
       id,
       label,
       type: "glob",
+      critical,
       pattern: assertString(value.pattern, `judges[${index}].pattern`),
       minMatches: assertOptionalNonNegativeInteger(value.minMatches, `judges[${index}].minMatches`),
       maxMatches: assertOptionalNonNegativeInteger(value.maxMatches, `judges[${index}].maxMatches`)
@@ -317,6 +387,7 @@ function normalizeJudge(
       id,
       label,
       type: "file-count",
+      critical,
       pattern: assertString(value.pattern, `judges[${index}].pattern`),
       equals: assertOptionalNonNegativeInteger(value.equals, `judges[${index}].equals`),
       min: assertOptionalNonNegativeInteger(value.min, `judges[${index}].min`),
@@ -343,6 +414,7 @@ function normalizeJudge(
       id,
       label,
       type: "snapshot",
+      critical,
       path: assertString(value.path, `judges[${index}].path`),
       snapshotPath: assertString(value.snapshotPath, `judges[${index}].snapshotPath`)
     };
@@ -364,9 +436,39 @@ function normalizeJudge(
       id,
       label,
       type: "json-schema",
+      critical,
       path: assertString(value.path, `judges[${index}].path`),
       schema,
       schemaPath
+    };
+    return judge;
+  }
+
+  if (type === "patch-validation") {
+    const judge: PatchValidationJudge = {
+      id,
+      label,
+      type: "patch-validation",
+      critical,
+      testSuite: assertString(value.testSuite, `judges[${index}].testSuite`),
+      failToPassTests: assertStringArray(value.failToPassTests, `judges[${index}].failToPassTests`),
+      passToPassTests: assertStringArray(value.passToPassTests, `judges[${index}].passToPassTests`),
+      command: assertOptionalString(value.command, `judges[${index}].command`) ?? "",
+      cwd: assertOptionalString(value.cwd, `judges[${index}].cwd`),
+      timeoutMs: assertOptionalPositiveInteger(value.timeoutMs, `judges[${index}].timeoutMs`),
+      envAllowList: assertStringArray(value.envAllowList, `judges[${index}].envAllowList`),
+      env: assertStringRecord(value.env, `judges[${index}].env`)
+    };
+    return judge;
+  }
+
+  if (type === "token-efficiency") {
+    const judge: TokenEfficiencyJudge = {
+      id,
+      label,
+      type: "token-efficiency",
+      critical,
+      tokenBudget: assertOptionalPositiveInteger(value.tokenBudget, `judges[${index}].tokenBudget`)
     };
     return judge;
   }
@@ -381,7 +483,9 @@ function normalizeJudge(
     "glob",
     "file-count",
     "snapshot",
-    "json-schema"
+    "json-schema",
+    "patch-validation",
+    "token-efficiency"
   ];
   throw new Error(
     `Task pack judge at index ${index} has unsupported type "${String(type)}". ` +

@@ -4,6 +4,7 @@ import path from "node:path";
 import { getAdapter, preflightAdapters } from "@repoarena/adapters";
 import {
   type AdapterPreflightResult,
+  type AgentResolvedRuntime,
   type AgentRunResult,
   type AgentSelection,
   type BenchmarkCancellation,
@@ -18,21 +19,23 @@ import {
   diffSnapshots,
   ensureDirectory,
   isAbortError,
-  normalizePath,
   resolveRepoSource,
   snapshotDirectory,
   throwIfAborted,
   uniqueSorted
 } from "@repoarena/core";
 import { runCommandSteps, runJudges } from "@repoarena/judges";
+import { getDefaultWeights } from "@repoarena/report";
 import { loadTaskPack } from "@repoarena/taskpacks";
 import { JsonlTraceRecorder } from "@repoarena/trace";
+import picomatch from "picomatch";
 
 export interface BenchmarkOptions {
   repoPath: string;
   taskPath: string;
   agentIds: string[];
   agents?: AgentSelection[];
+  runId?: string;
   outputPath?: string;
   probeAuth?: boolean;
   maxConcurrency?: number;
@@ -41,6 +44,10 @@ export interface BenchmarkOptions {
   builtinReposRoot?: string;
   cancellation?: BenchmarkCancellation;
   onProgress?: (event: BenchmarkProgressEvent) => void | Promise<void>;
+  // Scoring options
+  scoreMode?: string;
+  tokenBudget?: number;
+  categories?: string[];
 }
 
 export interface BenchmarkProgressEvent {
@@ -152,53 +159,25 @@ function buildChangedFiles(diff: DiffSummary, hints: string[]): string[] {
   return uniqueSorted([...diff.added, ...diff.changed, ...diff.removed, ...hints]);
 }
 
-function escapeRegExp(value: string): string {
-  return value.replace(/[|\\{}()[\]^$+?.]/g, "\\$&");
-}
-
-function globPatternToRegExp(pattern: string): RegExp {
-  const normalizedPattern = normalizePath(pattern);
-  let regex = "^";
-
-  for (let index = 0; index < normalizedPattern.length; index += 1) {
-    const char = normalizedPattern[index];
-    const next = normalizedPattern[index + 1];
-
-    if (char === "*") {
-      if (next === "*") {
-        const afterNext = normalizedPattern[index + 2];
-        if (afterNext === "/") {
-          regex += "(?:.*/)?";
-          index += 2;
-        } else {
-          regex += ".*";
-          index += 1;
-        }
-      } else {
-        regex += "[^/]*";
-      }
-      continue;
-    }
-
-    if (char === "?") {
-      regex += "[^/]";
-      continue;
-    }
-
-    if (char === "{") {
-      const closingIndex = normalizedPattern.indexOf("}", index);
-      if (closingIndex > index) {
-        const segment = normalizedPattern.slice(index + 1, closingIndex);
-        regex += `(?:${segment.split(",").map(escapeRegExp).join("|")})`;
-        index = closingIndex;
-        continue;
-      }
-    }
-
-    regex += escapeRegExp(char);
+function mergeResolvedRuntime(
+  primary?: AgentResolvedRuntime,
+  fallback?: AgentResolvedRuntime
+): AgentResolvedRuntime | undefined {
+  if (!primary && !fallback) {
+    return undefined;
   }
 
-  return new RegExp(`${regex}$`);
+  const merged = {
+    ...(fallback ?? {}),
+    ...(primary ?? {}),
+    notes: [...(fallback?.notes ?? []), ...(primary?.notes ?? [])].filter(Boolean)
+  };
+
+  return {
+    ...merged,
+    source: merged.source ?? "unknown",
+    verification: merged.verification ?? "unknown"
+  };
 }
 
 function buildDiffPrecision(
@@ -209,12 +188,9 @@ function buildDiffPrecision(
     return undefined;
   }
 
-  const matchers = expectedChangedPaths.map((pattern) => ({
-    pattern,
-    matches: globPatternToRegExp(pattern)
-  }));
-  const matchedFiles = changedFiles.filter((filePath) => matchers.some((entry) => entry.matches.test(filePath)));
-  const unexpectedFiles = changedFiles.filter((filePath) => !matchers.some((entry) => entry.matches.test(filePath)));
+  const matchers = expectedChangedPaths.map((pattern) => picomatch(pattern, { dot: true }));
+  const matchedFiles = changedFiles.filter((filePath) => matchers.some((isMatch) => isMatch(filePath)));
+  const unexpectedFiles = changedFiles.filter((filePath) => !matchers.some((isMatch) => isMatch(filePath)));
 
   return {
     score: changedFiles.length > 0 ? matchedFiles.length / changedFiles.length : 0,
@@ -374,14 +350,7 @@ async function runAgent(
   const executionEnvironment = buildExecutionEnvironment(task.envAllowList);
   const cancellation = options.cancellation;
   const throwIfCancelled = (stage: string) => {
-    try {
-      throwIfAborted(cancellation?.signal, createCancellationSummary(stage));
-    } catch (error) {
-      if (isAbortError(error)) {
-        throw error;
-      }
-      throw error;
-    }
+    throwIfAborted(cancellation?.signal, createCancellationSummary(stage));
   };
 
   if (preflight.status === "missing" || preflight.status === "blocked") {
@@ -581,8 +550,11 @@ async function runAgent(
       throwIfCancelled("judges");
       judgeResults = await runJudges(task.judges, workspacePath, task.envAllowList, {
         updateSnapshots: options.updateSnapshots,
-        signal: cancellation?.signal
+        signal: cancellation?.signal,
+        tokenUsage: adapterResult.tokenUsage,
+        tokenBudget: task.metadata?.tokenBudget
       });
+
     } catch (error) {
       judgeError = error;
       if (!isAbortError(error)) {
@@ -772,13 +744,46 @@ async function runAgent(
     };
   }
 
+  // Extract token usage information
+  const tokenUsage = adapterResult.tokenUsage;
+  const tokenBudget = task.metadata?.tokenBudget;
+  const tokenUsageBreakdown = adapterResult.tokenUsageBreakdown;
+  const tokenEfficiencyScore =
+    tokenUsage && tokenBudget ? Math.min(1, tokenBudget / tokenUsage) : undefined;
+
+  // Extract patch validation result from judge results
+  const patchValidationJudgeResult = judgeResults.find(
+    (result) => result.type === "patch-validation"
+  );
+  // TODO: Parse detailed test results from judge stdout when output format is standardized.
+  // Currently the judge outputs structured test details in stdout, but the runner only
+  // captures the boolean success flag. Enhance this when a formal result extraction
+  // mechanism is added to the patch-validation judge.
+  const patchValidationResult = patchValidationJudgeResult
+    ? {
+        resolved: patchValidationJudgeResult.success,
+        failToPassResults: [],  // TODO: Parse from stdout when available
+        passToPassResults: []   // TODO: Parse from stdout when available
+      }
+    : undefined;
+
+  // Calculate resolution rate
+  const resolutionRate = patchValidationResult?.resolved !== undefined
+    ? (patchValidationResult.resolved ? 1 : 0)
+    : undefined;
+
+  // Extract task metadata
+  const taskCategory = task.metadata?.taskCategories?.[0];
+  const contaminationChecked = task.metadata?.antiContamination !== undefined;
+  const difficultyGeneration = task.metadata?.difficultyEvolution?.generation;
+
   return {
     agentId: preflight.agentId,
     baseAgentId: preflight.baseAgentId,
     variantId: preflight.variantId,
     displayLabel: preflight.displayLabel,
     requestedConfig: preflight.requestedConfig,
-    resolvedRuntime: adapterResult.resolvedRuntime ?? preflight.resolvedRuntime,
+    resolvedRuntime: mergeResolvedRuntime(adapterResult.resolvedRuntime, preflight.resolvedRuntime),
     agentTitle: adapter.title,
     adapterKind: adapter.kind,
     preflight,
@@ -796,7 +801,17 @@ async function runAgent(
     tracePath,
     workspacePath,
     diff,
-    diffPrecision
+    diffPrecision,
+    // Token efficiency metrics (CursorBench)
+    tokenUsageBreakdown,
+    tokenEfficiencyScore,
+    // Patch validation results (SWE-Bench)
+    patchValidationResult,
+    resolutionRate,
+    // Task metadata extensions (LiveBench)
+    taskCategory,
+    contaminationChecked,
+    difficultyGeneration
   };
 }
 
@@ -833,14 +848,18 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
     }
   }
 
-  const runId = createRunId();
-  const outputPath = options.outputPath ?? path.join(userRepoPath, ".repoarena", "runs", runId);
+  const runId = options.runId ?? createRunId();
+  const outputRootPath = options.outputPath
+    ? path.resolve(options.outputPath)
+    : path.join(userRepoPath, ".repoarena", "runs");
+  const outputPath = path.join(outputRootPath, runId);
   const workspaceRootPath = path.join(tmpdir(), "repoarena-workspaces", runId);
   const selections = normalizeSelections(options);
   const workspacePaths: string[] = [];
 
   throwIfAborted(cancellation?.signal, createCancellationSummary("startup"));
 
+  await ensureDirectory(outputRootPath);
   await ensureDirectory(outputPath);
   await ensureDirectory(workspaceRootPath);
   await safeProgress({
@@ -970,6 +989,8 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
     createdAt: new Date().toISOString(),
     repoPath,
     outputPath,
+    scoreMode: options.scoreMode ?? "practical",
+    scoreWeights: getDefaultWeights(options.scoreMode ?? "practical"),
     task,
     preflights,
     results

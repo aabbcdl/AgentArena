@@ -16,10 +16,12 @@ import {
   type JsonValueJudge,
   type JudgeResult,
   type LintCheckJudge,
+  type PatchValidationJudge,
   resolveTimeoutMs,
   type SnapshotJudge,
   type TaskJudge,
   type TestResultJudge,
+  type TokenEfficiencyJudge,
   uniqueSorted
 } from "@repoarena/core";
 import Ajv from "ajv";
@@ -35,6 +37,10 @@ function createAjv(): InstanceType<typeof Ajv> {
 export interface JudgeExecutionOptions {
   updateSnapshots?: boolean;
   signal?: AbortSignal;
+  /** Token usage from adapter execution (for token-efficiency judges) */
+  tokenUsage?: number;
+  /** Token budget from task metadata (for token-efficiency judges) */
+  tokenBudget?: number;
 }
 
 function defaultJudgeTimeoutMs(): number {
@@ -221,7 +227,8 @@ async function runCommandJudge(
     stdout: result.stdout,
     stderr: result.stderr,
     durationMs: result.durationMs,
-    cwd: result.cwd
+    cwd: result.cwd,
+    critical: judge.critical ?? false
   };
 }
 
@@ -402,6 +409,130 @@ interface ParsedLintSummary {
   totalCount: number;
 }
 
+interface TestDetail {
+  name: string;
+  fullName: string;
+  status: "pass" | "fail" | "skip" | "pending";
+}
+
+/**
+ * Extract individual test details from test framework JSON output
+ */
+function extractTestDetails(payload: unknown, parser: string): TestDetail[] {
+  const tests: TestDetail[] = [];
+
+  if (!payload || typeof payload !== "object") {
+    return tests;
+  }
+
+  const data = payload as Record<string, unknown>;
+
+  // Jest format
+  if (parser === "jest") {
+    const testResults = (data.testResults as Array<Record<string, unknown>>) ?? [];
+    for (const file of testResults) {
+      const assertionResults = (file.assertionResults as Array<Record<string, unknown>>) ?? [];
+      for (const test of assertionResults) {
+        tests.push({
+          name: (test.title as string) ?? "",
+          fullName: (test.fullName as string) ?? "",
+          status: (test.status as TestDetail["status"]) ?? "fail"
+        });
+      }
+    }
+  } else if (parser === "vitest") {
+    // Vitest format
+    const testResults = (data.testResults as Array<Record<string, unknown>>) ?? [];
+    for (const file of testResults) {
+      const assertions = (file.assertions as Array<Record<string, unknown>>) ?? [];
+      for (const test of assertions) {
+        tests.push({
+          name: (test.name as string) ?? (test.fullName as string) ?? "",
+          fullName: (test.fullName as string) ?? "",
+          status: (test.status as TestDetail["status"]) ?? "fail"
+        });
+      }
+    }
+  } else {
+    // auto mode - try jest first, then vitest
+    const testResults = (data.testResults as Array<Record<string, unknown>>) ?? [];
+    if (testResults?.[0]?.assertionResults) {
+      // Jest format
+      for (const file of testResults) {
+        const assertionResults = (file.assertionResults as Array<Record<string, unknown>>) ?? [];
+        for (const test of assertionResults) {
+          tests.push({
+            name: (test.title as string) ?? "",
+            fullName: (test.fullName as string) ?? "",
+            status: (test.status as TestDetail["status"]) ?? "fail"
+          });
+        }
+      }
+    } else if (testResults?.[0]?.assertions) {
+      // Vitest format
+      for (const file of testResults) {
+        const assertions = (file.assertions as Array<Record<string, unknown>>) ?? [];
+        for (const test of assertions) {
+          tests.push({
+            name: (test.name as string) ?? (test.fullName as string) ?? "",
+            fullName: (test.fullName as string) ?? "",
+            status: (test.status as TestDetail["status"]) ?? "fail"
+          });
+        }
+      }
+    }
+  }
+
+  return tests;
+}
+
+/**
+ * Check if required tests match expected status
+ */
+function checkRequiredTests(
+  tests: TestDetail[],
+  requiredPatterns: string[]
+): Array<{ name: string; status: string; matched: boolean }> {
+  const results: Array<{ name: string; status: string; matched: boolean }> = [];
+
+  for (const pattern of requiredPatterns) {
+    // Support glob patterns and exact matches
+    const matched = tests.filter(test => {
+      // Exact match
+      if (test.name === pattern || test.fullName === pattern) {
+        return true;
+      }
+      // Glob pattern match (simple * and ** support)
+      if (pattern.includes("*")) {
+        const regex = pattern
+          .replace(/\*\*/g, ".*")
+          .replace(/\*/g, "[^/]*");
+        return new RegExp(`^${regex}$`).test(test.fullName) || new RegExp(`^${regex}$`).test(test.name);
+      }
+      return false;
+    });
+
+    if (matched.length > 0) {
+      // If multiple tests match, use the first one
+      const test = matched[0];
+      results.push({
+        name: test.fullName || test.name,
+        status: test.status,
+        matched: true
+      });
+    } else {
+      // Test not found in results
+      results.push({
+        name: pattern,
+        status: "not_found",
+        matched: false
+      });
+    }
+  }
+
+  return results;
+}
+
 function parseEslintSummary(payload: unknown): ParsedLintSummary | null {
   if (!Array.isArray(payload)) {
     return null;
@@ -509,7 +640,8 @@ async function runTestResultJudge(
       passedCount: summary.passedCount,
       failedCount: summary.failedCount,
       skippedCount: summary.skippedCount,
-      totalCount: summary.totalCount
+      totalCount: summary.totalCount,
+      critical: judge.critical ?? false
     };
   } catch (error) {
     return {
@@ -524,7 +656,8 @@ async function runTestResultJudge(
       stdout: result.stdout,
       stderr: `${result.stderr}\n${error instanceof Error ? error.message : String(error)}`.trim(),
       durationMs: result.durationMs,
-      cwd: result.cwd
+      cwd: result.cwd,
+      critical: judge.critical ?? false
     };
   }
 }
@@ -562,7 +695,8 @@ async function runLintCheckJudge(
       cwd: result.cwd,
       errorCount: summary.errorCount,
       warningCount: summary.warningCount,
-      totalCount: summary.totalCount
+      totalCount: summary.totalCount,
+      critical: judge.critical ?? false
     };
   } catch (error) {
     return {
@@ -577,7 +711,8 @@ async function runLintCheckJudge(
       stdout: result.stdout,
       stderr: `${result.stderr}\n${error instanceof Error ? error.message : String(error)}`.trim(),
       durationMs: result.durationMs,
-      cwd: result.cwd
+      cwd: result.cwd,
+      critical: judge.critical ?? false
     };
   }
 }
@@ -598,7 +733,8 @@ async function runFileExistsJudge(judge: FileExistsJudge, workspacePath: string)
       success: true,
       stdout: `Found ${judge.path}.`,
       stderr: "",
-      durationMs: Date.now() - startedAt
+      durationMs: Date.now() - startedAt,
+      critical: judge.critical ?? false
     };
   } catch {
     return {
@@ -611,7 +747,8 @@ async function runFileExistsJudge(judge: FileExistsJudge, workspacePath: string)
       success: false,
       stdout: "",
       stderr: `Expected file "${judge.path}" to exist.`,
-      durationMs: Date.now() - startedAt
+      durationMs: Date.now() - startedAt,
+      critical: judge.critical ?? false
     };
   }
 }
@@ -622,8 +759,24 @@ async function runFileContainsJudge(judge: FileContainsJudge, workspacePath: str
 
   try {
     const content = await fs.readFile(targetPath, "utf8");
+
+    // Validate regex flags - only allow valid JavaScript regex flags
+    const validFlags = /^[gimsuy]*$/;
+    const flags = judge.flags ?? "";
+    if (!validFlags.test(flags)) {
+      throw new Error(`Invalid regex flags: "${flags}". Only g, i, m, s, u, y are allowed.`);
+    }
+
+    // Validate pattern length to prevent performance issues
+    if (judge.pattern.length > 1000) {
+      throw new Error(
+        `File-contains judge pattern too long: ${judge.pattern.length} chars (max 1000). ` +
+        `Large patterns can cause performance issues.`
+      );
+    }
+
     const matched = judge.regex
-      ? new RegExp(judge.pattern, judge.flags).test(content)
+      ? new RegExp(judge.pattern, flags).test(content)
       : content.includes(judge.pattern);
 
     return {
@@ -640,7 +793,8 @@ async function runFileContainsJudge(judge: FileContainsJudge, workspacePath: str
       stderr: matched
         ? ""
         : `Expected file "${judge.path}" to contain ${judge.regex ? "a regex match" : "the target string"}.`,
-      durationMs: Date.now() - startedAt
+      durationMs: Date.now() - startedAt,
+      critical: judge.critical ?? false
     };
   } catch (error) {
     return {
@@ -653,7 +807,8 @@ async function runFileContainsJudge(judge: FileContainsJudge, workspacePath: str
       success: false,
       stdout: "",
       stderr: error instanceof Error ? error.message : String(error),
-      durationMs: Date.now() - startedAt
+      durationMs: Date.now() - startedAt,
+      critical: judge.critical ?? false
     };
   }
 }
@@ -680,7 +835,8 @@ async function runJsonValueJudge(judge: JsonValueJudge, workspacePath: string): 
       stderr: matched
         ? ""
         : `Expected ${judge.path} at "${judge.pointer}" to equal ${expectation}.`,
-      durationMs: Date.now() - startedAt
+      durationMs: Date.now() - startedAt,
+      critical: judge.critical ?? false
     };
   } catch (error) {
     return {
@@ -693,7 +849,8 @@ async function runJsonValueJudge(judge: JsonValueJudge, workspacePath: string): 
       success: false,
       stdout: "",
       stderr: error instanceof Error ? error.message : String(error),
-      durationMs: Date.now() - startedAt
+      durationMs: Date.now() - startedAt,
+      critical: judge.critical ?? false
     };
   }
 }
@@ -723,7 +880,8 @@ async function runGlobJudge(judge: GlobJudge, workspacePath: string): Promise<Ju
       stderr: success
         ? ""
         : `Expected glob "${judge.pattern}" to match within configured bounds, actual matches=${matches.length}.`,
-      durationMs: Date.now() - startedAt
+      durationMs: Date.now() - startedAt,
+      critical: judge.critical ?? false
     };
   } catch (error) {
     return {
@@ -739,7 +897,8 @@ async function runGlobJudge(judge: GlobJudge, workspacePath: string): Promise<Ju
       success: false,
       stdout: "",
       stderr: error instanceof Error ? error.message : String(error),
-      durationMs: Date.now() - startedAt
+      durationMs: Date.now() - startedAt,
+      critical: judge.critical ?? false
     };
   }
 }
@@ -772,7 +931,8 @@ async function runFileCountJudge(judge: FileCountJudge, workspacePath: string): 
       success,
       stdout: `Actual count=${actual}${matches.length > 0 ? `; matches: ${matches.join(", ")}` : ""}`,
       stderr: success ? "" : `File count assertion failed for pattern "${judge.pattern}".`,
-      durationMs: Date.now() - startedAt
+      durationMs: Date.now() - startedAt,
+      critical: judge.critical ?? false
     };
   } catch (error) {
     return {
@@ -789,7 +949,8 @@ async function runFileCountJudge(judge: FileCountJudge, workspacePath: string): 
       success: false,
       stdout: "",
       stderr: error instanceof Error ? error.message : String(error),
-      durationMs: Date.now() - startedAt
+      durationMs: Date.now() - startedAt,
+      critical: judge.critical ?? false
     };
   }
 }
@@ -835,7 +996,8 @@ async function runSnapshotJudgeWithOptions(
           : `Updated snapshot ${judge.snapshotPath} from ${judge.path}.`
         : "",
       stderr: success ? "" : `Snapshot mismatch for "${judge.path}" against "${judge.snapshotPath}".`,
-      durationMs: Date.now() - startedAt
+      durationMs: Date.now() - startedAt,
+      critical: judge.critical ?? false
     };
   } catch (error) {
     return {
@@ -848,7 +1010,8 @@ async function runSnapshotJudgeWithOptions(
       success: false,
       stdout: "",
       stderr: error instanceof Error ? error.message : String(error),
-      durationMs: Date.now() - startedAt
+      durationMs: Date.now() - startedAt,
+      critical: judge.critical ?? false
     };
   }
 }
@@ -883,7 +1046,8 @@ async function runJsonSchemaJudge(judge: JsonSchemaJudge, workspacePath: string)
       success,
       stdout: success ? `JSON schema validation passed for ${judge.path}.` : "",
       stderr: success ? "" : validationErrors.join("; "),
-      durationMs: Date.now() - startedAt
+      durationMs: Date.now() - startedAt,
+      critical: judge.critical ?? false
     };
   } catch (error) {
     return {
@@ -896,9 +1060,207 @@ async function runJsonSchemaJudge(judge: JsonSchemaJudge, workspacePath: string)
       success: false,
       stdout: "",
       stderr: error instanceof Error ? error.message : String(error),
-      durationMs: Date.now() - startedAt
+      durationMs: Date.now() - startedAt,
+      critical: judge.critical ?? false
     };
   }
+}
+
+/**
+ * SWE-Bench style patch validation judge.
+ * Executes test suites to verify if a GitHub issue is resolved by checking:
+ * - failToPassTests: tests that should now pass after the patch
+ * - passToPassTests: tests that should still pass after the patch
+ */
+async function runPatchValidationJudge(
+  judge: PatchValidationJudge,
+  workspacePath: string,
+  baseAllowedNames: string[],
+  options: JudgeExecutionOptions = {}
+): Promise<JudgeResult> {
+  const timeoutMs = judge.timeoutMs ?? defaultJudgeTimeoutMs();
+  const cwd = resolveJudgeWorkingDirectory(workspacePath, judge);
+  const environment = buildStepEnvironment(baseAllowedNames, judge);
+
+  // Execute the test suite
+  const result = await executeCommand(judge.testSuite, cwd, environment, timeoutMs, "Patch Validation Judge", options.signal);
+
+  try {
+    // Parse test results from JSON output
+    const payload = parseJsonPayload(result.stdout);
+    const summary = parseTestSummary(payload, "auto");
+
+    // Determine which tests are fail-to-pass vs pass-to-pass
+    const failToPassRequired = judge.failToPassTests ?? [];
+    const passToPassRequired = judge.passToPassTests ?? [];
+
+    // If specific test names are provided, we track them individually
+    // Otherwise, we rely on the overall summary counts
+    const hasSpecificTests = failToPassRequired.length > 0 || passToPassRequired.length > 0;
+
+    let success: boolean;
+    let stdoutMessage: string;
+    let stderrMessage: string;
+
+    if (hasSpecificTests) {
+      // Extract test details from the parsed test results
+      const testDetails = extractTestDetails(payload, summary.parser);
+
+      // Check fail-to-pass tests (should now be passing)
+      const failToPassResults = checkRequiredTests(testDetails, failToPassRequired);
+      const allFailToPassPassed = failToPassResults.every(r => r.status === "pass");
+
+      // Check pass-to-pass tests (should still be passing)
+      const passToPassResults = checkRequiredTests(testDetails, passToPassRequired);
+      const allPassToPassPassed = passToPassResults.every(r => r.status === "pass");
+
+      // Overall success requires:
+      // 1. No new test failures (summary.failedCount === 0 OR only expected failures)
+      // 2. All fail-to-pass tests now pass
+      // 3. All pass-to-pass tests still pass
+      const noUnexpectedFailures = summary.failedCount === 0 ||
+        (summary.failedCount > 0 && failToPassResults.every(r => r.status === "pass"));
+
+      success = allFailToPassPassed && allPassToPassPassed && noUnexpectedFailures;
+
+      const failToPassSummary = failToPassResults.map(r =>
+        `${r.name}: ${r.status}`
+      ).join(", ");
+      const passToPassSummary = passToPassResults.map(r =>
+        `${r.name}: ${r.status}`
+      ).join(", ");
+
+      stdoutMessage = `Patch validation: ${summary.passedCount}/${summary.totalCount} tests passed.\n` +
+        `Fail-to-pass tests (${failToPassResults.filter(r => r.status === "pass").length}/${failToPassRequired.length} passed):\n  ${failToPassSummary}\n` +
+        `Pass-to-pass tests (${passToPassResults.filter(r => r.status === "pass").length}/${passToPassRequired.length} passed):\n  ${passToPassSummary}`;
+      stderrMessage = success ? "" : result.stderr;
+    } else {
+      // No specific tests listed: rely on overall pass/fail
+      success = summary.failedCount === 0;
+      stdoutMessage = `Patch validation: ${summary.passedCount}/${summary.totalCount} tests passed. ` +
+        `Required fail-to-pass tests: ${failToPassRequired.length}. ` +
+        `Required pass-to-pass tests: ${passToPassRequired.length}. ` +
+        (success ? "All tests passed." : `${summary.failedCount} tests failed.`);
+      stderrMessage = success ? "" : result.stderr;
+    }
+
+    return {
+      judgeId: judge.id,
+      label: judge.label,
+      type: "patch-validation",
+      command: judge.testSuite,
+      parser: summary.parser,
+      expectation: `failToPass=${failToPassRequired.length}, passToPass=${passToPassRequired.length}`,
+      exitCode: result.exitCode,
+      success,
+      stdout: stdoutMessage,
+      stderr: stderrMessage,
+      durationMs: result.durationMs,
+      cwd: result.cwd,
+      passedCount: summary.passedCount,
+      failedCount: summary.failedCount,
+      skippedCount: summary.skippedCount,
+      totalCount: summary.totalCount,
+      critical: judge.critical ?? false
+    };
+  } catch (error) {
+    // If JSON parsing fails, fall back to exit code based evaluation
+    const success = result.exitCode === 0;
+    return {
+      judgeId: judge.id,
+      label: judge.label,
+      type: "patch-validation",
+      command: judge.testSuite,
+      expectation: `exitCode=0`,
+      exitCode: result.exitCode,
+      success,
+      stdout: result.stdout,
+      stderr: `${result.stderr}\nFailed to parse test results JSON: ${error instanceof Error ? error.message : String(error)}`.trim(),
+      durationMs: result.durationMs,
+      cwd: result.cwd,
+      critical: judge.critical ?? false
+    };
+  }
+}
+
+/**
+ * CursorBench style token efficiency judge.
+ * Evaluates token usage against an optional budget and calculates efficiency score.
+ * Efficiency score = min(1, budget / actual_usage)
+ */
+async function runTokenEfficiencyJudge(
+  judge: TokenEfficiencyJudge,
+  tokenUsage: number | undefined,
+  tokenBudget: number | undefined
+): Promise<JudgeResult> {
+  const startedAt = Date.now();
+  // Prefer explicit tokenBudget from options, fallback to judge.tokenBudget
+  const effectiveBudget = tokenBudget ?? judge.tokenBudget;
+
+  // If no tokenUsage is provided, we cannot evaluate
+  if (tokenUsage === undefined || tokenUsage === null) {
+    return {
+      judgeId: judge.id,
+      label: judge.label,
+      type: "token-efficiency",
+      target: "tokenUsage",
+      expectation: effectiveBudget ? `budget=${effectiveBudget}` : "no budget",
+      exitCode: 0,
+      success: true,
+      stdout: effectiveBudget
+        ? `Token usage not provided. Budget: ${effectiveBudget}.`
+        : "Token efficiency judge requires tokenUsage from runner context.",
+      stderr: "",
+      durationMs: Date.now() - startedAt,
+      critical: judge.critical ?? false
+    };
+  }
+
+  // Calculate efficiency score
+  let efficiencyScore: number;
+  let success: boolean;
+  let exitCode: number;
+  let stdoutMessage: string;
+  let stderrMessage: string;
+
+  if (effectiveBudget && effectiveBudget > 0) {
+    // Gradient efficiency score: differentiates between extremely efficient and near-budget agents
+    if (tokenUsage <= effectiveBudget) {
+      // Within budget: score ranges from 0.8 to 1.0 based on usage ratio
+      const usageRatio = tokenUsage / effectiveBudget;
+      efficiencyScore = 0.8 + (0.2 * (1 - usageRatio));
+    } else {
+      // Over budget: score decreases proportionally
+      efficiencyScore = Math.max(0, effectiveBudget / tokenUsage);
+    }
+    success = tokenUsage <= effectiveBudget;
+    exitCode = success ? 0 : 1;
+    stdoutMessage = `Token efficiency: ${(efficiencyScore * 100).toFixed(1)}% (${tokenUsage} tokens / ${effectiveBudget} budget)`;
+    stderrMessage = success
+      ? ""
+      : `Token usage (${tokenUsage}) exceeded budget (${effectiveBudget}). Over by ${tokenUsage - effectiveBudget} tokens.`;
+  } else {
+    // No budget set: return neutral score that doesn't affect overall score
+    efficiencyScore = 0.5; // Neutral, not 1.0
+    success = true;
+    exitCode = 0;
+    stdoutMessage = `Token usage: ${tokenUsage}. No budget configured (neutral score: 0.5).`;
+    stderrMessage = "";
+  }
+
+  return {
+    judgeId: judge.id,
+    label: judge.label,
+    type: "token-efficiency",
+    target: "tokenUsage",
+    expectation: effectiveBudget ? `budget=${effectiveBudget}` : "no budget",
+    exitCode,
+    success,
+    stdout: stdoutMessage,
+    stderr: stderrMessage,
+    durationMs: Date.now() - startedAt,
+    critical: judge.critical ?? false
+  };
 }
 
 export async function runJudge(
@@ -928,6 +1290,11 @@ export async function runJudge(
       return await runSnapshotJudgeWithOptions(judge, workspacePath, options);
     case "json-schema":
       return await runJsonSchemaJudge(judge, workspacePath);
+    case "patch-validation":
+      return await runPatchValidationJudge(judge, workspacePath, baseAllowedNames, options);
+    case "token-efficiency":
+      // Token efficiency judge requires tokenUsage from the runner context
+      return await runTokenEfficiencyJudge(judge, options.tokenUsage, options.tokenBudget);
   }
 }
 
@@ -937,9 +1304,11 @@ export async function runJudges(
   baseAllowedNames: string[],
   options: JudgeExecutionOptions = {}
 ): Promise<JudgeResult[]> {
-  return await Promise.all(
-    judges.map(async (judge) => await runJudge(judge, workspacePath, baseAllowedNames, options))
-  );
+  const results: JudgeResult[] = [];
+  for (const judge of judges) {
+    results.push(await runJudge(judge, workspacePath, baseAllowedNames, options));
+  }
+  return results;
 }
 
 export async function runCommandStep(
@@ -977,6 +1346,44 @@ export async function runCommandSteps(
   for (const step of steps) {
     throwIfCancelled(signal);
     results.push(await runCommandStep(step, workspacePath, baseAllowedNames, signal));
+  }
+
+  return results;
+}
+
+/**
+ * Run a token efficiency judge with explicit tokenUsage from the runner context.
+ * This is the preferred way to run token-efficiency judges, as it receives
+ * the actual token consumption data from the LLM execution.
+ *
+ * Note: Exported for potential future use in external orchestration.
+ * Currently token efficiency is calculated directly in the runner.
+ */
+export async function runTokenEfficiencyJudgeWithUsage(
+  judge: TokenEfficiencyJudge,
+  tokenUsage: number,
+  tokenBudget?: number
+): Promise<JudgeResult> {
+  return await runTokenEfficiencyJudge(judge, tokenUsage, tokenBudget);
+}
+
+/**
+ * Run token efficiency judges for all token-efficiency type judges in the list.
+ * This should be called after LLM execution completes and tokenUsage is known.
+ *
+ * Note: Exported for potential future use in external orchestration.
+ * Currently token efficiency is calculated directly in the runner.
+ */
+export async function runTokenEfficiencyJudges(
+  judges: TaskJudge[],
+  tokenUsage: number
+): Promise<JudgeResult[]> {
+  const results: JudgeResult[] = [];
+
+  for (const judge of judges) {
+    if (judge.type === "token-efficiency") {
+      results.push(await runTokenEfficiencyJudgeWithUsage(judge, tokenUsage));
+    }
   }
 
   return results;
