@@ -300,14 +300,17 @@ export function getCompositeScoreDetails(result, run, weights = DEFAULT_SCORE_WE
   const normalizedWeights = normalizeScoreWeights(weights);
   const statusScore = result.status === "success" ? 1 : 0;
   const testsScore = Math.max(testPassRatio(result), 0);
-  const criticalJudgesScore = Math.max(result.criticalJudgePassRatio ?? judgePassRatio(result), 0);
-  const nonCriticalJudgesScore = Math.max(result.nonCriticalJudgePassRatio ?? judgePassRatio(result), 0);
+  const criticalJudgePassRatio = result.criticalJudgePassRatio ?? judgePassRatio(result);
+  const nonCriticalJudgePassRatio = result.nonCriticalJudgePassRatio ?? judgePassRatio(result);
+  const criticalJudgesScore = Math.max(criticalJudgePassRatio, 0);
+  const nonCriticalJudgesScore = Math.max(nonCriticalJudgePassRatio, 0);
   const lintScore = Math.max(lintQualityScore(result), 0);
   const precisionScore = Math.max(diffPrecisionScore(result), 0);
   const durationScore = durationEfficiencyScore(result, run);
   const costScore = costEfficiencyScore(result, run);
+  // New components with proper fallbacks
   const resolutionRateScore = result.resolutionRate ?? (result.status === "success" ? 1 : 0);
-  const tokenEfficiencyScore = result.tokenEfficiencyScore ?? 0;
+  const tokenEfficiencyScore = result.tokenEfficiencyScore ?? 0.5;
   const acceptanceRateScore = result.acceptanceRate ?? 1;
   const categoryScoreScore = result.status === "success" ? 1 : 0;
 

@@ -427,59 +427,39 @@ function extractTestDetails(payload: unknown, parser: string): TestDetail[] {
 
   const data = payload as Record<string, unknown>;
 
-  // Jest format
-  if (parser === "jest") {
-    const testResults = (data.testResults as Array<Record<string, unknown>>) ?? [];
-    for (const file of testResults) {
-      const assertionResults = (file.assertionResults as Array<Record<string, unknown>>) ?? [];
-      for (const test of assertionResults) {
-        tests.push({
-          name: (test.title as string) ?? "",
-          fullName: (test.fullName as string) ?? "",
-          status: (test.status as TestDetail["status"]) ?? "fail"
-        });
-      }
-    }
-  } else if (parser === "vitest") {
-    // Vitest format
-    const testResults = (data.testResults as Array<Record<string, unknown>>) ?? [];
-    for (const file of testResults) {
-      const assertions = (file.assertions as Array<Record<string, unknown>>) ?? [];
-      for (const test of assertions) {
-        tests.push({
-          name: (test.name as string) ?? (test.fullName as string) ?? "",
-          fullName: (test.fullName as string) ?? "",
-          status: (test.status as TestDetail["status"]) ?? "fail"
-        });
-      }
+  // Determine actual format if in auto mode
+  let detectedFormat: "jest" | "vitest" | null = null;
+
+  if (parser === "auto") {
+    // Jest uses assertionResults array in testResults
+    const testResults = data.testResults as Array<Record<string, unknown>> | undefined;
+    if (testResults?.[0]?.assertionResults !== undefined) {
+      detectedFormat = "jest";
+    } else if (testResults?.[0]?.assertions !== undefined) {
+      detectedFormat = "vitest";
     }
   } else {
-    // auto mode - try jest first, then vitest
-    const testResults = (data.testResults as Array<Record<string, unknown>>) ?? [];
-    if (testResults?.[0]?.assertionResults) {
-      // Jest format
-      for (const file of testResults) {
-        const assertionResults = (file.assertionResults as Array<Record<string, unknown>>) ?? [];
-        for (const test of assertionResults) {
-          tests.push({
-            name: (test.title as string) ?? "",
-            fullName: (test.fullName as string) ?? "",
-            status: (test.status as TestDetail["status"]) ?? "fail"
-          });
-        }
-      }
-    } else if (testResults?.[0]?.assertions) {
-      // Vitest format
-      for (const file of testResults) {
-        const assertions = (file.assertions as Array<Record<string, unknown>>) ?? [];
-        for (const test of assertions) {
-          tests.push({
-            name: (test.name as string) ?? (test.fullName as string) ?? "",
-            fullName: (test.fullName as string) ?? "",
-            status: (test.status as TestDetail["status"]) ?? "fail"
-          });
-        }
-      }
+    detectedFormat = parser as "jest" | "vitest";
+  }
+
+  if (!detectedFormat) {
+    return tests;
+  }
+
+  const testResults = (data.testResults as Array<Record<string, unknown>>) ?? [];
+
+  for (const file of testResults) {
+    // Use detected format to extract test details
+    const assertions = detectedFormat === "jest"
+      ? (file.assertionResults as Array<Record<string, unknown>>) ?? []
+      : (file.assertions as Array<Record<string, unknown>>) ?? [];
+
+    for (const test of assertions) {
+      tests.push({
+        name: (test.title as string) ?? (test.name as string) ?? "",
+        fullName: (test.fullName as string) ?? (test.name as string) ?? "",
+        status: (test.status as TestDetail["status"]) ?? "fail"
+      });
     }
   }
 
@@ -1352,12 +1332,13 @@ export async function runCommandSteps(
 }
 
 /**
- * Run a token efficiency judge with explicit tokenUsage from the runner context.
- * This is the preferred way to run token-efficiency judges, as it receives
- * the actual token consumption data from the LLM execution.
+ * Run a single token-efficiency judge with explicit token usage.
  *
- * Note: Exported for potential future use in external orchestration.
- * Currently token efficiency is calculated directly in the runner.
+ * Note: Exported for potential future use in external orchestration scenarios.
+ * Currently token efficiency is calculated directly in the runner (runAgent function)
+ * rather than going through this function. This export is kept for API completeness
+ * and potential future refactoring where external systems may want to orchestrate
+ * token-efficiency evaluation separately.
  */
 export async function runTokenEfficiencyJudgeWithUsage(
   judge: TokenEfficiencyJudge,
@@ -1368,11 +1349,13 @@ export async function runTokenEfficiencyJudgeWithUsage(
 }
 
 /**
- * Run token efficiency judges for all token-efficiency type judges in the list.
- * This should be called after LLM execution completes and tokenUsage is known.
+ * Run token-efficiency judges with a given token usage value.
  *
- * Note: Exported for potential future use in external orchestration.
- * Currently token efficiency is calculated directly in the runner.
+ * Note: This function is exported for potential future use in external orchestration.
+ * Currently, token efficiency is calculated directly in the runner (runAgent function)
+ * rather than going through this function. This export is kept for API completeness
+ * and potential future refactoring where external systems may want to orchestrate
+ * token-efficiency evaluation separately.
  */
 export async function runTokenEfficiencyJudges(
   judges: TaskJudge[],

@@ -122,7 +122,16 @@ function renderTaskBrief(run) {
 }
 
 function renderRunList() {
-  elements.runCount.textContent = String(state.runs.length);
+  const query = state.runSearchQuery || "";
+  const filteredRuns = query
+    ? state.runs.filter((run) => {
+        const title = (run.task.title || "").toLowerCase();
+        const runId = (run.runId || "").toLowerCase();
+        return title.includes(query) || runId.includes(query);
+      })
+    : state.runs;
+
+  elements.runCount.textContent = `${filteredRuns.length} / ${state.runs.length}`;
 
   if (state.runs.length === 0) {
     elements.runList.className = "run-list empty-state";
@@ -130,8 +139,14 @@ function renderRunList() {
     return;
   }
 
+  if (filteredRuns.length === 0) {
+    elements.runList.className = "run-list empty-state";
+    elements.runList.innerHTML = `<p>${escapeHtml(t("noRunsMatchSearch") || "No runs match your search.")}</p>`;
+    return;
+  }
+
   elements.runList.className = "run-list";
-  elements.runList.innerHTML = state.runs
+  elements.runList.innerHTML = filteredRuns
     .map((run) => {
       const active = run.runId === state.selectedRunId ? "active" : "";
       const successCount = run.results.filter((result) => result.status === "success").length;

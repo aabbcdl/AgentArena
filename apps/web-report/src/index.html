@@ -131,12 +131,22 @@
               <option value="zh-CN">中文</option>
             </select>
           </div>
+          <div class="theme-control">
+            <button id="theme-toggle" type="button" class="theme-toggle-btn" aria-label="Toggle theme">
+              <svg class="icon"><use href="#icon-zap"/></svg>
+              <span id="theme-label">Light</span>
+            </button>
+          </div>
           <p id="app-description" class="muted brand-description">Load linked `summary.json` and `summary.md` files to inspect benchmark results interactively.</p>
         </div>
 
         <details id="result-loader-panel" class="panel result-loader-panel">
           <summary id="result-loader-summary">Open Existing Results (Fallback)</summary>
           <p id="result-loader-message" class="muted result-loader-message" hidden></p>
+          <div id="loading-indicator" class="loading-indicator hidden">
+            <div class="loading-spinner"></div>
+            <span id="loading-message" class="muted">Loading results...</span>
+          </div>
           <label class="file-picker recommended-picker">
             <strong id="runs-folder-title">Recommended: Load Run Folder</strong>
             <p id="runs-folder-hint" class="muted picker-help">Select one RepoArena run folder or the whole `.repoarena` results folder.</p>
@@ -163,6 +173,9 @@
             <h2 id="runs-heading">Runs</h2>
             <span id="run-count" class="muted">0</span>
           </div>
+          <div class="sidebar-search">
+            <input id="run-search" type="text" placeholder="Search runs..." class="sidebar-search-input" />
+          </div>
           <div id="run-list" class="run-list empty-state">No runs loaded.</div>
         </section>
 
@@ -172,6 +185,7 @@
             <span id="agent-count" class="muted">0</span>
           </div>
           <div id="agent-list" class="agent-list empty-state">No report loaded.</div>
+          <p id="agent-list-hint" class="muted picker-help" style="padding: 0 var(--space-3) var(--space-2); font-size: var(--text-xs);">Click to filter comparison table</p>
         </section>
       </aside>
 
@@ -242,13 +256,10 @@
                 <span id="launcher-concurrency-label" style="white-space:nowrap">Concurrency</span>
                 <input id="launcher-concurrency" type="number" min="1" max="10" value="1" style="width:60px" />
               </label>
-              <button id="launcher-quick-start" class="launcher-quick-start-btn" type="button">
-                <svg class="icon"><use href="#icon-zap"/></svg>
-                Quick Start
-              </button>
-              <button id="launcher-run" type="button">
+              <!-- Single primary action button -->
+              <button id="launcher-run" type="button" class="launcher-run-btn">
                 <svg class="icon"><use href="#icon-play"/></svg>
-                Start Benchmark
+                <span id="launcher-run-btn-label">Run Benchmark</span>
               </button>
             </div>
             <div id="launcher-validation" class="launcher-validation"></div>
@@ -306,6 +317,19 @@
             </div>
             <p class="muted credit-disclaimer" data-i18n="creditDisclaimer">本实现完全独立，与上述项目无官方关联</p>
           </article>
+        </section>
+
+        <section id="error-state" class="hero hidden">
+          <p class="eyebrow">Error</p>
+          <h2 id="error-title">Failed to load results</h2>
+          <p id="error-message" class="muted"></p>
+          <div class="hero-actions">
+            <button id="error-retry" class="btn btn-primary" type="button">
+              <svg class="icon"><use href="#icon-refresh"/></svg>
+              Try Again
+            </button>
+            <button id="error-back" class="btn" type="button">Back to Start</button>
+          </div>
         </section>
 
         <section id="dashboard" class="hidden">
@@ -398,7 +422,7 @@
               </div>
 
               <div class="weight-slider-section">
-                <details>
+                <details open>
                   <summary>⚙️ 自定义权重（高级）</summary>
                   <div class="weight-sliders" id="weight-sliders">
                     <!-- Sliders will be generated dynamically by JS -->

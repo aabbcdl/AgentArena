@@ -67,7 +67,8 @@ const state = {
   crossRunCompareData: null,
   expandedCompareAgentId: null,
   sidebarOpen: false,
-  scoreWeights: { ...DEFAULT_SCORE_WEIGHTS }
+  scoreWeights: { ...DEFAULT_SCORE_WEIGHTS },
+  runSearchQuery: ""
 };
 
 const elements = {
@@ -91,7 +92,6 @@ const elements = {
   launcherAdhocPromptLabel: document.querySelector("#launcher-adhoc-prompt-label"),
   launcherAdhocPromptHint: document.querySelector("#launcher-adhoc-prompt-hint"),
   launcherConcurrencyLabel: document.querySelector("#launcher-concurrency-label"),
-  launcherQuickStart: document.querySelector("#launcher-quick-start"),
   launcherOutputPath: document.querySelector("#launcher-output-path"),
   launcherAgents: document.querySelector("#launcher-agents"),
   launcherProbeAuth: document.querySelector("#launcher-probe-auth"),
@@ -107,9 +107,19 @@ const elements = {
   runInfo: document.querySelector("#run-info"),
   runList: document.querySelector("#run-list"),
   runCount: document.querySelector("#run-count"),
+  runSearch: document.querySelector("#run-search"),
+  loadingIndicator: document.querySelector("#loading-indicator"),
+  loadingMessage: document.querySelector("#loading-message"),
   agentList: document.querySelector("#agent-list"),
   agentCount: document.querySelector("#agent-count"),
   emptyState: document.querySelector("#empty-state"),
+  errorState: document.querySelector("#error-state"),
+  errorTitle: document.querySelector("#error-title"),
+  errorMessage: document.querySelector("#error-message"),
+  errorRetry: document.querySelector("#error-retry"),
+  errorBack: document.querySelector("#error-back"),
+  themeToggle: document.querySelector("#theme-toggle"),
+  themeLabel: document.querySelector("#theme-label"),
   dashboard: document.querySelector("#dashboard"),
   taskTitle: document.querySelector("#task-title"),
   taskMeta: document.querySelector("#task-meta"),
@@ -232,6 +242,23 @@ const WEIGHT_NAMES = {
 
 function t(key, ...args) {
   return translate(state.language, key, ...args);
+}
+
+function showLoading(message) {
+  if (elements.loadingIndicator) elements.loadingIndicator.classList.remove('hidden');
+  if (elements.loadingMessage) elements.loadingMessage.textContent = message;
+}
+
+function hideLoading() {
+  if (elements.loadingIndicator) elements.loadingIndicator.classList.add('hidden');
+}
+
+function showError(message) {
+  setHidden(elements.emptyState, true);
+  setHidden(elements.dashboard, true);
+  setHidden(elements.errorState, false);
+  if (elements.errorTitle) elements.errorTitle.textContent = localText("加载失败", "Failed to load results");
+  if (elements.errorMessage) elements.errorMessage.textContent = message;
 }
 
 function setText(id, value) {
@@ -734,7 +761,10 @@ const resultLoaders = createResultLoaders({
   render,
   renderMarkdownPanel,
   applySingleRun,
-  applyRuns
+  applyRuns,
+  showLoading,
+  hideLoading,
+  showError
 });
 
 const {
@@ -818,9 +848,6 @@ function renderStaticText() {
   setText("launcher-agents-label", t("launcherAgentsLabel"));
   setText("launcher-probe-auth-label", t("launcherProbeAuthLabel"));
   setText("launcher-concurrency-label", t("launcherConcurrencyLabel"));
-  if (elements.launcherQuickStart) {
-    elements.launcherQuickStart.textContent = t("launcherQuickStart");
-  }
   if (elements.preflightTitle) {
     elements.preflightTitle.textContent = t("preflightTitle");
   }
@@ -1178,7 +1205,6 @@ elements.launcherAgents.addEventListener("click", (event) => {
     renderLauncher();
   }
 });
-document.querySelector("#launcher-quick-start")?.addEventListener("click", handleQuickStart);
 elements.launcherRun.addEventListener("click", handleLauncherRun);
 elements.launcherToggle.addEventListener("click", () => {
   state.launcherExpanded = !state.launcherExpanded;
@@ -1244,6 +1270,12 @@ elements.runList.addEventListener("click", (event) => {
   }
 });
 
+// Run list search filter
+elements.runSearch?.addEventListener("input", (event) => {
+  state.runSearchQuery = String(event.target.value ?? "").trim().toLowerCase();
+  renderRunList();
+});
+
 elements.runInfo.addEventListener("click", (event) => {
   const button = event.target.closest('button[data-role="restore-archived-score"]');
   if (!button || !state.run) {
@@ -1272,6 +1304,8 @@ elements.agentList.addEventListener("click", (event) => {
     elements.agentTrendSection,
     !state.selectedAgentId || getAgentTrendRows(state.runs, state.run, state.selectedAgentId).length <= 1
   );
+  // Scroll to compare table to show filter result
+  elements.agentCompareSection?.scrollIntoView({ behavior: "smooth", block: "start" });
 });
 
 elements.compareTable.addEventListener("click", (event) => {
@@ -1565,6 +1599,39 @@ elements.sidebarBackdrop.addEventListener("click", () => {
   state.sidebarOpen = false;
   elements.sidebar.classList.remove("sidebar-open");
   elements.sidebarBackdrop.classList.remove("active");
+});
+
+// Error state handlers
+elements.errorRetry?.addEventListener("click", () => {
+  // Hide error, show empty state again
+  setHidden(elements.errorState, true);
+  setHidden(elements.emptyState, false);
+});
+
+elements.errorBack?.addEventListener("click", () => {
+  // Reset to initial state
+  setHidden(elements.errorState, true);
+  setHidden(elements.emptyState, false);
+  setHidden(elements.dashboard, true);
+  state.run = null;
+  state.runs = [];
+  state.selectedRunId = null;
+  state.selectedAgentId = null;
+  state.notice = null;
+  render();
+});
+
+// Theme toggle
+const savedTheme = localStorage.getItem('theme') || 'dark';
+document.documentElement.setAttribute('data-theme', savedTheme);
+if (elements.themeLabel) elements.themeLabel.textContent = savedTheme === 'dark' ? 'Light' : 'Dark';
+
+elements.themeToggle?.addEventListener("click", () => {
+  const current = document.documentElement.getAttribute('data-theme');
+  const next = current === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  localStorage.setItem('theme', next);
+  if (elements.themeLabel) elements.themeLabel.textContent = next === 'dark' ? 'Light' : 'Dark';
 });
 
 // Feature 2: Live validation on task select and agent changes
