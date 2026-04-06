@@ -16,9 +16,10 @@ export const WINDSURF_CAPABILITY: AdapterCapability = {
   costAvailability: "unavailable",
   traceRichness: "minimal",
   knownLimitations: [
-    "Windsurf does not provide a public CLI for automation.",
+    "Windsurf does not provide a public CLI for automation yet.",
     "This adapter is a placeholder and will report blocked status.",
-    "Check https://docs.windsurf.com for CLI availability updates."
+    "Windsurf adapter will be enabled once CLI support is available. Check https://docs.windsurf.com for updates.",
+    "When CLI becomes available, this adapter will need to be reimplemented with actual execute logic."
   ]
 };
 

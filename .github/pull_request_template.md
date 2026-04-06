@@ -1,13 +1,19 @@
-## What does this PR do?
+## Description
+What does this PR do?
 
-Brief description of the change.
+## Related Issues
+Closes #
 
-## How to test
+## Changes
+- 
 
-Steps to verify the change works correctly.
+## Testing
+- [ ] `pnpm build` succeeds
+- [ ] `pnpm test` passes
+- [ ] Manual testing completed
 
 ## Checklist
-
-- [ ] `pnpm build` passes
-- [ ] `pnpm test` passes
-- [ ] Updated relevant documentation (if applicable)
+- [ ] Code follows project conventions
+- [ ] Self-review completed
+- [ ] Documentation updated if needed
+- [ ] Tests added or updated

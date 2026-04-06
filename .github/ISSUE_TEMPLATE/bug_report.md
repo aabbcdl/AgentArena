@@ -1,25 +1,28 @@
 ---
 name: Bug Report
 about: Report a bug in RepoArena
-title: "[Bug] "
+title: '[BUG] '
 labels: bug
 ---
 
-**Describe the bug**
-A clear description of what went wrong.
+## Description
+A clear description of the bug.
 
-**To reproduce**
-Steps to reproduce the behavior:
-1. Run `...`
-2. See error
+## Steps to Reproduce
+1. 
+2. 
+3. 
 
-**Expected behavior**
+## Expected Behavior
 What you expected to happen.
 
-**Environment**
-- OS:
-- Node version:
-- pnpm version:
+## Actual Behavior
+What actually happened.
 
-**Additional context**
-Logs, screenshots, or `summary.json` excerpts if relevant.
+## Environment
+- OS:
+- Node.js version:
+- RepoArena version/commit:
+
+## Additional Context
+Screenshots, logs, or other relevant info.

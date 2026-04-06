@@ -1,0 +1,11 @@
+version: "3.8"
+services:
+  repoarena:
+    build: .
+    ports:
+      - "4320:4320"
+    volumes:
+      - ./.repoarena:/app/.repoarena
+      - ./examples:/app/examples:ro
+    environment:
+      - NODE_ENV=production

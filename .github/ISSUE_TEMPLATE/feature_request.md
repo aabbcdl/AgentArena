@@ -1,15 +1,18 @@
 ---
 name: Feature Request
-about: Suggest a new feature or improvement
-title: "[Feature] "
+about: Suggest an enhancement for RepoArena
+title: '[FEATURE] '
 labels: enhancement
 ---
 
-**What problem does this solve?**
-A clear description of the problem or use case.
+## Problem
+What problem does this feature solve?
 
-**Proposed solution**
-How you think it should work.
+## Proposed Solution
+How should this work?
 
-**Alternatives considered**
-Any other approaches you've thought about.
+## Alternatives
+What alternatives have you considered?
+
+## Additional Context
+Any other relevant information.

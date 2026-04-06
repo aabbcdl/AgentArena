@@ -30,6 +30,8 @@ export {
   type VarianceReport,
   type AgentVarianceStats
 } from "./variance-analysis.js";
+export { aggregateMultiRuns, formatMultiRunReport } from "./multi-run.js";
+export type { MultiRunComparison, AggregatedAgentStats } from "./multi-run.js";
 
 export interface WriteReportOptions {
   locale?: Locale;

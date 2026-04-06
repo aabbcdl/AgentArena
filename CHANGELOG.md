@@ -1,5 +1,31 @@
 # Changelog
 
+## [Unreleased] - 2026-04-05
+
+### Added
+- 10 AI coding agent adapters: Cursor, Claude Code, GitHub Copilot, Qwen Code, Windsurf, Aider, Gemini CLI, Kilo CLI, OpenCode, Codex CLI
+- 12 judge types: command, test-result, lint-check, file-exists, file-contains, json-value, json-schema, glob, file-count, snapshot, patch-validation, token-efficiency
+- 6 scoring modes: practical, balanced, issue-resolution (SWE-Bench inspired), efficiency-first (industry best practices), rotating-tasks (LiveBench inspired), comprehensive
+- Decision report generator with scenario-based recommendations and team cost calculator
+- Variance analysis module for multi-run statistical reliability
+- Web UI: code review view, share/export actions, weight sliders, theme toggle (dark/light), loading states, error recovery
+- Run list search/filter and agent click-to-filter
+- 8 project skills in .skills/ directory
+
+### Changed
+- Unified weight definitions to single source (getDefaultWeights in @repoarena/report)
+- Simplified launcher: single Run button replacing Quick Start / Start Benchmark
+- Improved light theme contrast for accessibility
+- Refined extractTestDetails with unified Jest/Vitest format detection
+
+### Fixed
+- 37 code review issues including duplicate judge execution, regex injection protection, consistent critical field defaults, CLI validation alignment, sensitive data protection
+- 4 audit findings: dead code documentation, theme contrast, auto-detection robustness, fallback completeness
+
+### Security
+- Regex injection protection (flags whitelist + 1000 char limit)
+- Sensitive data protection in adapter console output
+
 ## Unreleased
 
 ### New Features
