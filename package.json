@@ -24,6 +24,8 @@
   },
   "scripts": {
     "build": "pnpm -r --if-present build",
+    "start": "pnpm build && node packages/cli/dist/index.js ui",
+    "ui": "pnpm build && node packages/cli/dist/index.js ui",
     "demo": "pnpm build && node packages/cli/dist/index.js run --repo . --task examples/taskpacks/demo-repo-health.json --agents demo-fast,demo-thorough,demo-budget",
     "demo:codex": "pnpm build && node packages/cli/dist/index.js run --repo . --task examples/taskpacks/demo-repo-health.json --agents codex",
     "demo:arena": "pnpm build && node packages/cli/dist/index.js run --repo . --task examples/taskpacks/demo-repo-health.json --agents demo-fast,codex,claude-code,cursor,gemini-cli,aider,kilo-cli,opencode",

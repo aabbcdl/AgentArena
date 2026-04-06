@@ -768,7 +768,6 @@ const resultLoaders = createResultLoaders({
 });
 
 const {
-  fetchWithTimeout: fetchWithTimeoutImpl,
   downloadTextFile: downloadTextFileImpl,
   handleFileSelection: handleFileSelectionImpl,
   handleMarkdownSelection: handleMarkdownSelectionImpl,
@@ -906,7 +905,9 @@ function renderStaticText() {
 }
 
 function fetchWithTimeout(url, options = {}, timeoutMs = 15_000) {
-  return fetchWithTimeoutImpl(url, options, timeoutMs);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
 }
 
 function formatJudgeType(type) {
@@ -986,7 +987,8 @@ function render() {
 
   if (!state.run) {
     setHidden(elements.runInfo, true);
-    setHidden(elements.emptyState, false);
+    // Always hide hero when no run is loaded - the launcher will show instead
+    setHidden(elements.emptyState, true);
     setHidden(elements.dashboard, true);
     elements.agentCount.textContent = "0";
     elements.agentList.className = "agent-list empty-state";
