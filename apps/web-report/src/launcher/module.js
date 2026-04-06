@@ -469,7 +469,8 @@ export function createLauncherModule(deps) {
       }
       syncClaudeVariantsWithProfiles();
       syncLauncherVariantsWithAdapters();
-  
+    }
+
     const options = [
       `<option value="">${escapeHtml(t("taskPackCustom"))}</option>`,
       ...state.availableTaskPacks.map(
