@@ -374,23 +374,23 @@ export function createLauncherModule(deps) {
   }
   
   function renderLauncher() {
-    if (!state.serviceInfo) {
-      setHidden(elements.launcherPanel, true);
-      return;
-    }
-  
+    // Always show the launcher panel, even if service info is not available
+    // Use empty defaults when service info is missing
     setHidden(elements.launcherPanel, false);
+    
     if (!state.run && !state.runInProgress) {
       state.launcherExpanded = true;
     }
-  
+
+    const info = state.serviceInfo || {};
+    
     // Restore saved config once on first render
     if (!state._launcherConfigRestored) {
       state._launcherConfigRestored = true;
       const saved = loadLauncherConfig();
       if (saved) {
-        elements.launcherRepoPath.value = saved.repoPath || state.serviceInfo.repoPath || "";
-        elements.launcherOutputPath.value = saved.outputPath || state.serviceInfo.defaultOutputPath || "";
+        elements.launcherRepoPath.value = saved.repoPath || info.repoPath || "";
+        elements.launcherOutputPath.value = saved.outputPath || info.defaultOutputPath || "";
         elements.launcherTaskPath.value = saved.taskPath || "";
         elements.launcherProbeAuth.checked = Boolean(saved.probeAuth);
         state.launcherSelectedAgentIds = saved.selectedAgentIds ?? [];
@@ -455,15 +455,15 @@ export function createLauncherModule(deps) {
           }));
         }
       } else {
-        elements.launcherRepoPath.value = state.serviceInfo.repoPath || "";
-        elements.launcherOutputPath.value = state.serviceInfo.defaultOutputPath || "";
+        elements.launcherRepoPath.value = info.repoPath || "";
+        elements.launcherOutputPath.value = info.defaultOutputPath || "";
         state.launcherCodexVariants = [defaultCodexVariant()];
         syncClaudeVariantsWithProfiles();
         syncLauncherVariantsWithAdapters();
       }
-  
-      elements.launcherRepoPath.value = elements.launcherRepoPath.value || state.serviceInfo.repoPath || "";
-      elements.launcherOutputPath.value = elements.launcherOutputPath.value || state.serviceInfo.defaultOutputPath || "";
+
+      elements.launcherRepoPath.value = elements.launcherRepoPath.value || info.repoPath || "";
+      elements.launcherOutputPath.value = elements.launcherOutputPath.value || info.defaultOutputPath || "";
       if (state.launcherCodexVariants.length === 0) {
         state.launcherCodexVariants = [defaultCodexVariant()];
       }
@@ -482,9 +482,9 @@ export function createLauncherModule(deps) {
     ];
     elements.launcherTaskSelect.innerHTML = options.join("");
   
-    if (!elements.launcherTaskPath.value && state.serviceInfo.defaultTaskPath) {
-      elements.launcherTaskPath.value = state.serviceInfo.defaultTaskPath;
-      elements.launcherTaskSelect.value = state.serviceInfo.defaultTaskPath;
+    if (!elements.launcherTaskPath.value && info.defaultTaskPath) {
+      elements.launcherTaskPath.value = info.defaultTaskPath;
+      elements.launcherTaskSelect.value = info.defaultTaskPath;
     } else if (elements.launcherTaskPath.value) {
       const matching = state.availableTaskPacks.find((taskPack) => taskPack.path === elements.launcherTaskPath.value);
       elements.launcherTaskSelect.value = matching ? matching.path : "";
@@ -499,7 +499,7 @@ export function createLauncherModule(deps) {
       (adapter) => adapter.kind !== "demo" && adapter.id !== "codex" && adapter.id !== "claude-code" && adapter.id !== "gemini-cli" && adapter.id !== "aider" && adapter.id !== "kilo-cli" && adapter.id !== "opencode"
     );
     const debugAdapters = state.availableAdapters.filter((adapter) => adapter.kind === "demo");
-    const codexDefaults = state.serviceInfo.codexDefaults ?? {};
+    const codexDefaults = info.codexDefaults ?? {};
     const codexDefaultsText = localText(
       `当前默认：模型 ${codexDefaults.effectiveModel ?? "unknown"} | 推理 ${codexDefaults.effectiveReasoningEffort ?? "default"} | ${codexDefaults.verification ?? "unknown"} / ${codexDefaults.source ?? "unknown"}`,
       `Current default: model ${codexDefaults.effectiveModel ?? "unknown"} | reasoning ${codexDefaults.effectiveReasoningEffort ?? "default"} | ${codexDefaults.verification ?? "unknown"} / ${codexDefaults.source ?? "unknown"}`
@@ -846,7 +846,7 @@ export function createLauncherModule(deps) {
           "同一套 Claude Code harness 下的不同 provider/profile 变体。",
           "Provider-switched Claude Code variants under the same harness."
         ))}</p>
-        ${state.serviceInfo.riskNotice ? `<p class="warning-text">${escapeHtml(state.serviceInfo.riskNotice)}</p>` : ""}
+        ${info.riskNotice ? `<p class="warning-text">${escapeHtml(info.riskNotice)}</p>` : ""}
         ${claudeVariants || `<p class="empty-state">${escapeHtml(localText("还没有可用的 Claude Provider。", "No Claude provider profiles available yet."))}</p>`}
         ${providerEditor}
         <div class="inline-actions" style="margin-top:12px">
