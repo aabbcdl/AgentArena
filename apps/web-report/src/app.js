@@ -659,6 +659,7 @@ const {
 
 const {
   renderLauncher,
+  detectService,
   syncLauncherStateFromDom,
   validateLauncher,
   renderLauncherValidation,
