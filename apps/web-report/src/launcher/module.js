@@ -843,6 +843,22 @@ export function createLauncherModule(deps) {
       </div>
       <details class="launcher-section">
         <summary class="launcher-section-summary">${escapeHtml(localText("Claude Code 变体", "Claude Code Variants"))} · <span class="muted">${escapeHtml(localText(`${state.launcherClaudeVariants.filter(v => v.enabled).length} 个已启用`, `${state.launcherClaudeVariants.filter(v => v.enabled).length} enabled`))}</span></summary>
+        
+        <!-- 说明框 -->
+        <div class="launcher-info-box" style="margin-bottom:12px;padding:12px;border-radius:8px;background:var(--surface-secondary);border-left:3px solid var(--accent);">
+          <p style="margin:0 0 8px;font-size:var(--text-sm);"><strong>${escapeHtml(localText("💡 关于 Claude Provider", "About Claude Provider"))}</strong></p>
+          <ul style="margin:0;padding-left:20px;font-size:var(--text-xs);color:var(--text-secondary);line-height:1.6;">
+            <li>${escapeHtml(localText(
+              '<strong>"Official"（官方）</strong>：使用 Claude Code 官方登录态。需要先在终端运行 <code>claude login</code> 登录，之后 Benchmark 会自动复用登录状态。<strong>不需要填 API Key。</strong>',
+              '<strong>"Official"</strong>: Uses your official Claude Code login. Run <code>claude login</code> in terminal first, then benchmark reuses it automatically. <strong>No API Key needed.</strong>'
+            ))}</li>
+            <li>${escapeHtml(localText(
+              '<strong>第三方 Provider</strong>：如果你修改了 Claude Code 的配置文件（如 <code>.claude/settings.json</code> 指向第三方代理），或者想直接用 API Key 绕过登录，请点下方「新增 Claude Provider」添加第三方供应商。',
+              '<strong>Third-party Provider</strong>: If you modified Claude Code config (e.g. <code>.claude/settings.json</code> pointing to a proxy), or want to use an API Key directly, click "Add Claude Provider" below.'
+            ))}</li>
+          </ul>
+        </div>
+        
         <p class="muted">${escapeHtml(localText(
           "同一套 Claude Code harness 下的不同 provider/profile 变体。",
           "Provider-switched Claude Code variants under the same harness."
