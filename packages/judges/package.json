@@ -11,13 +11,13 @@
   "dependencies": {
     "@agentarena/core": "workspace:*",
     "ajv": "^8.18.0",
-    "picomatch": "^4.0.3"
+    "picomatch": "^4.0.4"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {
-    "@types/picomatch": "^4.0.2"
+    "@types/picomatch": "^4.0.3"
   }
 }
