@@ -1,6 +1,6 @@
 ---
 name: Feature Request
-about: Suggest an enhancement for RepoArena
+about: Suggest an enhancement for AgentArena
 title: '[FEATURE] '
 labels: enhancement
 ---

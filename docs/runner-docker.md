@@ -1,6 +1,6 @@
-# RepoArena Runner Docker
+# AgentArena Runner Docker
 
-RepoArena can run inside a standard Docker-based runner environment to reduce host drift across laptops, CI, and benchmark machines.
+AgentArena can run inside a standard Docker-based runner environment to reduce host drift across laptops, CI, and benchmark machines.
 
 ## Why use the runner image
 
@@ -18,7 +18,7 @@ This is useful when you want benchmark runs to depend less on the host machine's
 ## Build the image
 
 ```bash
-docker build -f Dockerfile.runner -t repoarena-runner .
+docker build -f Dockerfile.runner -t agentarena-runner .
 ```
 
 ## Open a shell in the runner
@@ -27,13 +27,13 @@ docker build -f Dockerfile.runner -t repoarena-runner .
 docker run --rm -it \
   -v "$PWD:/workspace" \
   -w /workspace \
-  repoarena-runner
+  agentarena-runner
 ```
 
 ## Use docker compose
 
 ```bash
-docker compose -f docker-compose.runner.yml run --rm repoarena-runner bash
+docker compose -f docker-compose.runner.yml run --rm agentarena-runner bash
 ```
 
 ## Typical workflow inside the container
@@ -46,7 +46,7 @@ node packages/cli/dist/index.js run \
   --repo . \
   --task examples/taskpacks/demo-repo-health.yaml \
   --agents demo-fast \
-  --output .repoarena/docker-run
+  --output .agentarena/docker-run
 ```
 
 ## Notes

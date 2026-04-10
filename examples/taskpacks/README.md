@@ -1,6 +1,6 @@
 # Examples
 
-This directory contains task pack examples and test repositories for RepoArena.
+This directory contains task pack examples and test repositories for AgentArena.
 
 ## Contents
 
@@ -24,7 +24,7 @@ node packages/cli/dist/index.js run --repo . --task examples/taskpacks/demo-repo
 Generate your own task pack:
 
 ```bash
-node packages/cli/dist/index.js init-taskpack --template repo-health --output repoarena.taskpack.yaml
+node packages/cli/dist/index.js init-taskpack --template repo-health --output agentarena.taskpack.yaml
 ```
 
 See the [official task pack README](./taskpacks/official/README.md) for detailed descriptions and selection guidance.

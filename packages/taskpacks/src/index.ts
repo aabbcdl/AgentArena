@@ -19,7 +19,7 @@ import {
   type TestResultJudge,
   type TokenEfficiencyJudge,
   validateTaskPackId
-} from "@repoarena/core";
+} from "@agentarena/core";
 import { parse as parseYaml } from "yaml";
 
 function assertString(value: unknown, label: string): string {
@@ -185,7 +185,7 @@ function normalizeMetadata(value: unknown): TaskPackMetadata | undefined {
     throw new Error(
       `Task pack field "metadata.source" must be "official" or "community". ` +
       `Received: "${source}". ` +
-      `Example: "metadata": { "source": "official", "owner": "RepoArena" }`
+      `Example: "metadata": { "source": "official", "owner": "AgentArena" }`
     );
   }
 
@@ -519,7 +519,7 @@ export async function loadTaskPack(taskPath: string): Promise<TaskPack> {
 
   if (![".json", ".yaml", ".yml"].includes(extension)) {
     throw new Error(
-      `RepoArena task packs must use .json, .yaml, or .yml extensions. ` +
+      `AgentArena task packs must use .json, .yaml, or .yml extensions. ` +
       `Received file: "${path.basename(taskPath)}" with extension "${extension}". ` +
       `Example: "my-task.yaml" or "my-task.json"`
     );

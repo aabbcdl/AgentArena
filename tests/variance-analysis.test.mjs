@@ -39,12 +39,10 @@ test("computeVarianceAnalysis returns stats for each agent", () => {
 });
 
 test("computeVarianceAnalysis warns when run count is low", () => {
-  const runs = [
-    createRun({ results: [createResult("agent-a", { compositeScore: 80 })] })
-  ];
+  const runs = [createRun({ results: [createResult("agent-a", { compositeScore: 80 })] })];
   const report = computeVarianceAnalysis(runs);
   assert.ok(report.warnings.length > 0);
-  assert.ok(report.warnings.some(w => w.includes("run")));
+  assert.ok(report.warnings.some((warning) => warning.includes("run")));
 });
 
 test("formatVarianceReport produces valid markdown", () => {
@@ -53,7 +51,7 @@ test("formatVarianceReport produces valid markdown", () => {
     createRun({ results: [createResult("agent-a", { compositeScore: 85 })] })
   ];
   const report = computeVarianceAnalysis(runs);
-  const md = formatVarianceReport(report);
-  assert.ok(md.includes("结果可信度分析"));
-  assert.ok(md.includes("Agent"));
+  const markdown = formatVarianceReport(report);
+  assert.ok(markdown.includes("Result Confidence Analysis"));
+  assert.ok(markdown.includes("Agent"));
 });

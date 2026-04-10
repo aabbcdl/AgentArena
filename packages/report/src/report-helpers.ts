@@ -6,7 +6,7 @@ import {
   type BenchmarkRun,
   portableBasename,
   portableRelativePath
-} from "@repoarena/core";
+} from "@agentarena/core";
 
 export type Locale = "en" | "zh-CN";
 
@@ -50,9 +50,9 @@ export type ReportCopy = {
 
 const REPORT_COPY: Record<Locale, ReportCopy> = {
   en: {
-    reportTitle: "RepoArena Report",
-    summaryTitle: "RepoArena Summary",
-    prCommentTitle: "RepoArena Benchmark",
+    reportTitle: "AgentArena Report",
+    summaryTitle: "AgentArena Summary",
+    prCommentTitle: "AgentArena Benchmark",
     adapterPreflightTitle: "Adapter Preflight",
     benchmarkResultsTitle: "Benchmark Results",
     promptTitle: "Prompt",
@@ -84,13 +84,13 @@ const REPORT_COPY: Record<Locale, ReportCopy> = {
     capabilityMatrixTitle: "Capability Matrix",
     resultsTitle: "Results",
     failuresTitle: "Failures",
-    htmlReportTitlePrefix: "RepoArena Report -",
+    htmlReportTitlePrefix: "AgentArena Report -",
     htmlGeneratedAtLabel: "Generated at",
   },
   "zh-CN": {
-    reportTitle: "RepoArena 报告",
-    summaryTitle: "RepoArena 摘要",
-    prCommentTitle: "RepoArena 评审摘要",
+    reportTitle: "AgentArena 报告",
+    summaryTitle: "AgentArena 摘要",
+    prCommentTitle: "AgentArena 评审摘要",
     adapterPreflightTitle: "适配器预检",
     benchmarkResultsTitle: "跑分结果",
     promptTitle: "提示词",
@@ -121,7 +121,7 @@ const REPORT_COPY: Record<Locale, ReportCopy> = {
     capabilityMatrixTitle: "能力矩阵",
     resultsTitle: "结果",
     failuresTitle: "失败项",
-    htmlReportTitlePrefix: "RepoArena 报告 -",
+    htmlReportTitlePrefix: "AgentArena 报告 -",
     htmlGeneratedAtLabel: "生成时间"
   }
 };
@@ -345,7 +345,7 @@ export function buildBadgePayload(run: BenchmarkRun): BadgePayload {
 
   return {
     schemaVersion: 1,
-    label: "RepoArena",
+    label: "AgentArena",
     message,
     color
   };

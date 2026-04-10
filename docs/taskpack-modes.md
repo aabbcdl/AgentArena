@@ -6,14 +6,14 @@
 
 ## English
 
-RepoArena supports two modes for running benchmarks, each serving different evaluation purposes.
+AgentArena supports two modes for running benchmarks, each serving different evaluation purposes.
 
 ### Mode 1: Standard Test Repository (Recommended for Comparison) | 模式一：标准测试仓库（推荐用于对比）
 
 **Best for: Comparing different agents fairly | 最适合：公平对比不同 agent**
 
 ```bash
-repoarena run --task official/multi-file-rename.yaml --agents codex,claude-code,cursor
+agentarena run --task official/multi-file-rename.yaml --agents codex,claude-code,cursor
 # Automatically uses the standard test repository
 # 自动使用标准测试仓库
 ```
@@ -26,7 +26,7 @@ repoarena run --task official/multi-file-rename.yaml --agents codex,claude-code,
 
 **How it works | 工作原理:**
 1. Task pack specifies `repoSource: "builtin://test-repo-name"`
-2. RepoArena clones or extracts the standard test repository
+2. AgentArena clones or extracts the standard test repository
 3. All agents work on identical copies
 4. Results are directly comparable
 
@@ -35,7 +35,7 @@ repoarena run --task official/multi-file-rename.yaml --agents codex,claude-code,
 **Best for: Testing agents on your actual codebase | 最适合：在你的真实代码库上测试**
 
 ```bash
-repoarena run --repo ./my-project --task official/repo-health.yaml --agents codex,claude-code
+agentarena run --repo ./my-project --task official/repo-health.yaml --agents codex,claude-code
 ```
 
 **Advantages | 优点:**
@@ -101,14 +101,14 @@ repoSource: "https://github.com/example/test-repo"
 
 ## 中文
 
-RepoArena 支持两种运行模式，各有不同的评估目的。
+AgentArena 支持两种运行模式，各有不同的评估目的。
 
 ### 模式一：标准测试仓库（推荐用于对比）
 
 **最适合：公平对比不同 agent**
 
 ```bash
-repoarena run --task official/multi-file-rename.yaml --agents codex,claude-code,cursor
+agentarena run --task official/multi-file-rename.yaml --agents codex,claude-code,cursor
 # 自动使用标准测试仓库
 ```
 
@@ -120,7 +120,7 @@ repoarena run --task official/multi-file-rename.yaml --agents codex,claude-code,
 
 **工作原理：**
 1. 任务包指定 `repoSource: "builtin://test-repo-name"`
-2. RepoArena 克隆或解压标准测试仓库
+2. AgentArena 克隆或解压标准测试仓库
 3. 所有 agent 在相同副本上工作
 4. 结果可直接对比
 
@@ -129,7 +129,7 @@ repoarena run --task official/multi-file-rename.yaml --agents codex,claude-code,
 **最适合：在你的真实代码库上测试**
 
 ```bash
-repoarena run --repo ./my-project --task official/repo-health.yaml --agents codex,claude-code
+agentarena run --repo ./my-project --task official/repo-health.yaml --agents codex,claude-code
 ```
 
 **优点：**

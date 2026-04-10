@@ -1,4 +1,4 @@
-import type { AgentRunResult, BenchmarkRun } from "@repoarena/core";
+import type { AgentRunResult, BenchmarkRun } from "@agentarena/core";
 
 export interface DecisionRecommendation {
   rank: number;
@@ -59,7 +59,7 @@ export function generateDecisionReport(
     teamEstimates,
     keyInsights,
     warnings,
-    reproduceCommand: `repoarena run --repo ${run.repoPath} --task ${run.task.id} --agents ${run.results.map((r) => r.agentId).join(",")}`
+    reproduceCommand: `agentarena run --repo ${run.repoPath} --task ${run.task.id} --agents ${run.results.map((r) => r.agentId).join(",")}`
   };
 }
 
@@ -317,7 +317,7 @@ function extractWarnings(results: AgentRunResult[]): string[] {
 export function formatDecisionReport(report: DecisionReport): string {
   const lines: string[] = [];
 
-  lines.push(`# RepoArena 决策报告`);
+  lines.push(`# AgentArena 决策报告`);
   lines.push(``);
   lines.push(`**生成时间**: ${new Date(report.generatedAt).toLocaleString()}`);
   lines.push(`**场景**: ${report.scenario}`);

@@ -7,7 +7,7 @@ import {
   type AdapterPreflightResult,
   type AgentAdapter,
   ensureDirectory
-} from "@repoarena/core";
+} from "@agentarena/core";
 import { parseCodexEvents } from "./event-parsers.js";
 import { agentTimeoutMs, runProcess } from "./process-utils.js";
 import {
@@ -21,8 +21,8 @@ import {
 } from "./shared.js";
 
 async function resolveCodexInvocation(): Promise<InvocationSpec> {
-  if (process.env.REPOARENA_CODEX_BIN?.trim()) {
-    const command = process.env.REPOARENA_CODEX_BIN.trim();
+  if (process.env.AGENTARENA_CODEX_BIN?.trim()) {
+    const command = process.env.AGENTARENA_CODEX_BIN.trim();
     return { command, argsPrefix: [], displayCommand: command };
   }
 
@@ -162,7 +162,7 @@ export class CodexCliAdapter implements AgentAdapter {
   }
 
   async execute(context: AdapterExecutionContext): Promise<AdapterExecutionResult> {
-    const metadataDir = path.join(context.workspacePath, "repoarena-demo");
+    const metadataDir = path.join(context.workspacePath, "agentarena-demo");
     const outputLastMessagePath = path.join(metadataDir, "codex-last-message.txt");
     await ensureDirectory(metadataDir);
 

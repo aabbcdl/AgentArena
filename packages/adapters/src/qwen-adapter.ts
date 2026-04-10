@@ -1,15 +1,15 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import {
+  type AdapterCapability,
   type AdapterExecutionContext,
   type AdapterExecutionResult,
   type AdapterPreflightOptions,
   type AdapterPreflightResult,
   type AgentAdapter,
   type AgentResolvedRuntime,
-  type AdapterCapability,
   ensureDirectory
-} from "@repoarena/core";
+} from "@agentarena/core";
 import { agentTimeoutMs, runProcess } from "./process-utils.js";
 import {
   buildAgentPrompt,
@@ -43,8 +43,8 @@ export const QWEN_CODE_CAPABILITY: AdapterCapability = {
  */
 async function resolveQwenInvocation(): Promise<InvocationSpec> {
   // 支持环境变量覆盖
-  if (process.env.REPOARENA_QWEN_BIN?.trim()) {
-    const command = process.env.REPOARENA_QWEN_BIN.trim();
+  if (process.env.AGENTARENA_QWEN_BIN?.trim()) {
+    const command = process.env.AGENTARENA_QWEN_BIN.trim();
     return { command, argsPrefix: [], displayCommand: command };
   }
 
@@ -77,7 +77,7 @@ async function resolveQwenRuntime(config: {
   const notes: string[] = [];
 
   if (config.requestedModel) {
-    notes.push(`Model overridden via RepoArena config: ${config.requestedModel}`);
+    notes.push(`Model overridden via AgentArena config: ${config.requestedModel}`);
   } else if (process.env.QWEN_CODE_MODEL) {
     notes.push(`Using model from QWEN_CODE_MODEL: ${process.env.QWEN_CODE_MODEL}`);
   }
@@ -167,7 +167,7 @@ function parseQwenOutput(
         summary = lastAssistant.content;
       }
     }
-  } catch (error) {
+  } catch (_error) {
     // JSON parse failed, use fallback
     // Log JSON parse failure via trace (not console, to avoid leaking sensitive data)
     // Note: this function doesn't have access to context.trace, so we skip logging here
@@ -294,7 +294,7 @@ export class QwenCodeAdapter implements AgentAdapter {
   }
 
   async execute(context: AdapterExecutionContext): Promise<AdapterExecutionResult> {
-    const metadataDir = path.join(context.workspacePath, "repoarena-qwen");
+    const metadataDir = path.join(context.workspacePath, "agentarena-qwen");
     const outputJsonPath = path.join(metadataDir, "qwen-output.json");
     await ensureDirectory(metadataDir);
 

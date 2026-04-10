@@ -1,4 +1,4 @@
-import { type AdapterPreflightResult, type BenchmarkRun, formatDuration } from "@repoarena/core";
+import { type AdapterPreflightResult, type BenchmarkRun, formatDuration } from "@agentarena/core";
 import type { LeaderboardData } from "./leaderboard.js";
 import {
   escapeMdCell,

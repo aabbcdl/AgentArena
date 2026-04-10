@@ -1,10 +1,10 @@
-schemaVersion: repoarena.taskpack/v1
+schemaVersion: agentarena.taskpack/v1
 id: official-snapshot-fix
 title: Official Snapshot Fix
 description: Brings generated output back in sync with a stored snapshot.
 metadata:
   source: official
-  owner: RepoArena
+  owner: AgentArena
   difficulty: easy
   objective: Evaluate whether an agent can repair snapshot regressions with minimal collateral changes.
   repoTypes:

@@ -4,7 +4,7 @@ import type {
   AdapterExecutionResult,
   AdapterPreflightOptions,
   AdapterPreflightResult
-} from "@repoarena/core";
+} from "@agentarena/core";
 import { ClaudeLikeAdapter } from "./claude-adapter.js";
 import { findExecutableOnPath, pathExists } from "./process-utils.js";
 import { CURSOR_CAPABILITY, type InvocationSpec } from "./shared.js";
@@ -23,8 +23,8 @@ function cursorAgentCliFromBinary(binaryPath: string): string {
 }
 
 async function resolveCursorAgentCliPath(): Promise<string | undefined> {
-  if (process.env.REPOARENA_CURSOR_AGENT_CLI?.trim()) {
-    const explicitPath = process.env.REPOARENA_CURSOR_AGENT_CLI.trim();
+  if (process.env.AGENTARENA_CURSOR_AGENT_CLI?.trim()) {
+    const explicitPath = process.env.AGENTARENA_CURSOR_AGENT_CLI.trim();
     if (await pathExists(explicitPath)) {
       return explicitPath;
     }
@@ -65,8 +65,8 @@ async function resolveCursorAgentCliPath(): Promise<string | undefined> {
 }
 
 async function resolveCursorInvocation(): Promise<InvocationSpec> {
-  if (process.env.REPOARENA_CURSOR_BIN?.trim()) {
-    const command = process.env.REPOARENA_CURSOR_BIN.trim();
+  if (process.env.AGENTARENA_CURSOR_BIN?.trim()) {
+    const command = process.env.AGENTARENA_CURSOR_BIN.trim();
     return { command, argsPrefix: [], displayCommand: command };
   }
 

@@ -45,7 +45,7 @@ function createRun(overrides = {}) {
       id: "test-task",
       title: "Test Task",
       prompt: "Test prompt",
-      schemaVersion: "repoarena.taskpack/v1",
+      schemaVersion: "agentarena.taskpack/v1",
       envAllowList: [],
       setupCommands: [],
       judges: [],

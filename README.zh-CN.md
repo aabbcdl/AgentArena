@@ -1,22 +1,22 @@
-# RepoArena
+# AgentArena
 
 > 面向真实代码仓库的本地优先 AI 编程助手评测与回放工具。
 
 [English README](./README.md)
 
-RepoArena 用来在同一个仓库、同一个任务、同一套检查规则下运行多个编程助手，然后统一比较它们的成功率、耗时、用量、成本、改动文件和回放结果。
+AgentArena 用来在同一个仓库、同一个任务、同一套检查规则下运行多个编程助手，然后统一比较它们的成功率、耗时、用量、成本、改动文件和回放结果。
 
-现在的主入口是 `repoarena ui`。它会启动一个本地页面，让你直接在浏览器里选择仓库、任务包和参与比较的助手，发起跑分，并在同一个页面里看结果。直接打开 `summary.json` 只适合浏览已经生成好的结果。
+现在的主入口是 `agentarena ui`。它会启动一个本地页面，让你直接在浏览器里选择仓库、任务包和参与比较的助手，发起跑分，并在同一个页面里看结果。直接打开 `summary.json` 只适合浏览已经生成好的结果。
 
 ## 现在能做什么
 
-- 启动本地页面：`repoarena ui`
-- 命令行跑分：`repoarena run`
-- 快速上手：`repoarena init`（自动生成任务包、检测可用助手、给出可运行命令）
-- 预检本机助手是否可用：`repoarena doctor`
-- 查看可用助手：`repoarena list-adapters`
-- 生成任务包模板：`repoarena init-taskpack`
-- 生成 GitHub Actions 配置：`repoarena init-ci`
+- 启动本地页面：`agentarena ui`
+- 命令行跑分：`agentarena run`
+- 快速上手：`agentarena init`（自动生成任务包、检测可用助手、给出可运行命令）
+- 预检本机助手是否可用：`agentarena doctor`
+- 查看可用助手：`agentarena list-adapters`
+- 生成任务包模板：`agentarena init-taskpack`
+- 生成 GitHub Actions 配置：`agentarena init-ci`
 - 输出 `summary.json`、`summary.md`、`pr-comment.md`、`report.html`、`badge.json`
 - 在页面里看实时进度、结果对比、失败原因和分享卡片
 
@@ -56,7 +56,7 @@ http://127.0.0.1:4317
 ### 备用：命令行直接跑
 
 ```bash
-node packages/cli/dist/index.js run --repo . --task examples/taskpacks/demo-repo-health.yaml --agents demo-fast --output .repoarena/manual-run
+node packages/cli/dist/index.js run --repo . --task examples/taskpacks/demo-repo-health.yaml --agents demo-fast --output .agentarena/manual-run
 ```
 
 这会生成：
@@ -90,19 +90,19 @@ node packages/cli/dist/index.js list-adapters --json
 生成任务包模板：
 
 ```bash
-node packages/cli/dist/index.js init-taskpack --template repo-health --output repoarena.taskpack.yaml
+node packages/cli/dist/index.js init-taskpack --template repo-health --output agentarena.taskpack.yaml
 ```
 
 生成 GitHub Actions 跑分配置：
 
 ```bash
-node packages/cli/dist/index.js init-ci --task repoarena.taskpack.yaml --agents demo-fast,codex
+node packages/cli/dist/index.js init-ci --task agentarena.taskpack.yaml --agents demo-fast,codex
 ```
 
 输出机器可读结果：
 
 ```bash
-node packages/cli/dist/index.js run --repo . --task repoarena.taskpack.yaml --agents demo-fast --json
+node packages/cli/dist/index.js run --repo . --task agentarena.taskpack.yaml --agents demo-fast --json
 ```
 
 ## 官方任务库
@@ -131,5 +131,5 @@ node packages/cli/dist/index.js run --repo . --task repoarena.taskpack.yaml --ag
 每次运行都会生成 `badge.json`。把它部署到静态地址后，可以直接接到 Shields：
 
 ```markdown
-![RepoArena](https://img.shields.io/endpoint?url=https://your-host.example/repoarena/badge.json)
+![AgentArena](https://img.shields.io/endpoint?url=https://your-host.example/agentarena/badge.json)
 ```

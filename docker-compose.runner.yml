@@ -1,5 +1,5 @@
 services:
-  repoarena-runner:
+  agentarena-runner:
     build:
       context: .
       dockerfile: Dockerfile.runner

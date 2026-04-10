@@ -13,7 +13,7 @@ import { runCommandStep, runJudge, runJudges } from "../packages/judges/dist/ind
 // - token-efficiency judge execution
 
 function tempDir() {
-  return path.join(tmpdir(), `repoarena-judges-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  return path.join(tmpdir(), `agentarena-judges-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 }
 
 async function setupWorkspace() {

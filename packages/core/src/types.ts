@@ -1,4 +1,4 @@
-export const TASK_PACK_SCHEMA_V1 = "repoarena.taskpack/v1";
+export const TASK_PACK_SCHEMA_V1 = "agentarena.taskpack/v1";
 
 export interface CommandExecutionSpec {
   id: string;
@@ -562,7 +562,7 @@ export interface TaskRotation {
  * Supports task rotations and category-based scoring.
  */
 export interface Leaderboard {
-  version: "repoarena.leaderboard/v1";
+  version: "agentarena.leaderboard/v1";
   updatedAt: string;
   scoreMode: string;
   entries: LeaderboardEntry[];

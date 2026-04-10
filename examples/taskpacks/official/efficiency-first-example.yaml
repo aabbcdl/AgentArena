@@ -1,10 +1,10 @@
-schemaVersion: repoarena.taskpack/v1
+schemaVersion: agentarena.taskpack/v1
 id: efficiency-first-example
 title: "Efficiency First Example (CursorBench Inspired)"
 description: "Demonstrates token-efficiency judge for cost-effective coding"
 metadata:
   source: official
-  owner: RepoArena
+  owner: AgentArena
   difficulty: medium
   objective: "Complete the refactoring task within token budget"
   repoTypes: [node, typescript]

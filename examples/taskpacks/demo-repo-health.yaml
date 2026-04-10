@@ -1,8 +1,8 @@
-schemaVersion: repoarena.taskpack/v1
+schemaVersion: agentarena.taskpack/v1
 id: demo-repo-health-yaml
 title: Demo Repo Health Check (YAML)
 description: A YAML version of the starter task pack with built-in file, glob, and JSON judges.
-prompt: Inspect the repository, leave a concise benchmark note in repoarena-demo/, and keep the repo in a healthy state.
+prompt: Inspect the repository, leave a concise benchmark note in agentarena-demo/, and keep the repo in a healthy state.
 judges:
   - id: readme-exists
     type: file-exists
@@ -23,4 +23,4 @@ judges:
     label: Package name matches repository brand
     path: package.json
     pointer: /name
-    expected: repoarena
+    expected: agentarena

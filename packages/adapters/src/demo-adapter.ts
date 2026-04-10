@@ -4,7 +4,7 @@ import type {
   AdapterPreflightOptions,
   AdapterPreflightResult,
   AgentAdapter
-} from "@repoarena/core";
+} from "@agentarena/core";
 import { sleep } from "./process-utils.js";
 import {
   buildDemoSummary,

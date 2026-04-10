@@ -1,12 +1,12 @@
-# Contributing to RepoArena
+# Contributing to AgentArena
 
 Thanks for your interest in contributing!
 
 ## Setup
 
 ```bash
-git clone https://github.com/aabbcdl/RepoArena.git
-cd RepoArena
+git clone https://github.com/aabbcdl/AgentArena.git
+cd AgentArena
 pnpm install
 pnpm build
 ```
@@ -40,7 +40,7 @@ E2E browser tests (requires Playwright Chromium):
 
 ```bash
 npx playwright install --with-deps chromium
-REPOARENA_RUN_BROWSER_SMOKE=1 pnpm test:web-report:e2e
+AGENTARENA_RUN_BROWSER_SMOKE=1 pnpm test:web-report:e2e
 ```
 
 ## Project Structure

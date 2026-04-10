@@ -1,10 +1,10 @@
 # Web Report App
 
-Local browser UI for RepoArena.
+Local browser UI for AgentArena.
 
 ## What It Does
 
-- launches benchmarks directly from the browser when opened through `repoarena ui`
+- launches benchmarks directly from the browser when opened through `agentarena ui`
 - loads `summary.json` files or whole run folders with automatic `summary.md` linking
 - compares multiple runs in one place
 - shows agent results in sortable tables with inline detail
@@ -17,7 +17,7 @@ Local browser UI for RepoArena.
 
 ## Recommended Usage
 
-### Main path: launch through `repoarena ui`
+### Main path: launch through `agentarena ui`
 
 ```bash
 pnpm build
@@ -39,13 +39,13 @@ This is the main manual workflow. The page is meant to be both the launcher and 
 ### Fallback: open built reports directly
 
 ```bash
-pnpm --filter @repoarena/web-report build
+pnpm --filter @agentarena/web-report build
 ```
 
 Then open `apps/web-report/dist/index.html` and either:
 
 - load a single `summary.json`
 - load a matching `summary.md`
-- load the whole `.repoarena/runs/` folder to browse multiple runs
+- load the whole `.agentarena/runs/` folder to browse multiple runs
 
 Direct file loading is mainly a fallback path for browsing results that already exist.

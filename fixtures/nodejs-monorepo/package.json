@@ -2,7 +2,7 @@
   "name": "test-monorepo",
   "version": "1.0.0",
   "private": true,
-  "description": "Standard test repository for RepoArena benchmarks",
+  "description": "Standard test repository for AgentArena benchmarks",
   "scripts": {
     "build": "pnpm -r build",
     "test": "pnpm -r test",

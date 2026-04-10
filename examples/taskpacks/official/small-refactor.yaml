@@ -1,10 +1,10 @@
-schemaVersion: repoarena.taskpack/v1
+schemaVersion: agentarena.taskpack/v1
 id: official-small-refactor
 title: Official Small Refactor
 description: Performs a low-risk refactor while keeping core repository structure intact.
 metadata:
   source: official
-  owner: RepoArena
+  owner: AgentArena
   difficulty: medium
   objective: Measure whether an agent can apply a constrained refactor without destabilizing the codebase.
   repoTypes:

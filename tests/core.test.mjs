@@ -39,34 +39,34 @@ test("diffSnapshots reports added, changed, and removed files", () => {
 });
 
 test("buildExecutionEnvironment includes only baseline and allowlisted variables", () => {
-  process.env.REPOARENA_ALLOWED_TEST = "visible";
-  process.env.REPOARENA_BLOCKED_TEST = "hidden";
+  process.env.AGENTARENA_ALLOWED_TEST = "visible";
+  process.env.AGENTARENA_BLOCKED_TEST = "hidden";
 
   try {
-    const environment = buildExecutionEnvironment(["REPOARENA_ALLOWED_TEST"]);
+    const environment = buildExecutionEnvironment(["AGENTARENA_ALLOWED_TEST"]);
 
-    assert.equal(environment.REPOARENA_ALLOWED_TEST, "visible");
-    assert.equal(environment.REPOARENA_BLOCKED_TEST, undefined);
+    assert.equal(environment.AGENTARENA_ALLOWED_TEST, "visible");
+    assert.equal(environment.AGENTARENA_BLOCKED_TEST, undefined);
     assert.ok(environment.PATH || environment.Path);
   } finally {
-    delete process.env.REPOARENA_ALLOWED_TEST;
-    delete process.env.REPOARENA_BLOCKED_TEST;
+    delete process.env.AGENTARENA_ALLOWED_TEST;
+    delete process.env.AGENTARENA_BLOCKED_TEST;
   }
 });
 
 test("buildExecutionEnvironment applies inline overrides", () => {
-  process.env.REPOARENA_ALLOWED_TEST = "visible";
+  process.env.AGENTARENA_ALLOWED_TEST = "visible";
 
   try {
-    const environment = buildExecutionEnvironment(["REPOARENA_ALLOWED_TEST"], {
-      REPOARENA_ALLOWED_TEST: "overridden",
-      REPOARENA_INLINE_ONLY: "inline"
+    const environment = buildExecutionEnvironment(["AGENTARENA_ALLOWED_TEST"], {
+      AGENTARENA_ALLOWED_TEST: "overridden",
+      AGENTARENA_INLINE_ONLY: "inline"
     });
 
-    assert.equal(environment.REPOARENA_ALLOWED_TEST, "overridden");
-    assert.equal(environment.REPOARENA_INLINE_ONLY, "inline");
+    assert.equal(environment.AGENTARENA_ALLOWED_TEST, "overridden");
+    assert.equal(environment.AGENTARENA_INLINE_ONLY, "inline");
   } finally {
-    delete process.env.REPOARENA_ALLOWED_TEST;
+    delete process.env.AGENTARENA_ALLOWED_TEST;
   }
 });
 

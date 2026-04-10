@@ -78,7 +78,7 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Run web-report browser smoke test
-        run: REPOARENA_RUN_BROWSER_SMOKE=1 pnpm test:web-report:e2e
+        run: AGENTARENA_RUN_BROWSER_SMOKE=1 pnpm test:web-report:e2e
 
   smoke-benchmark:
     runs-on: ubuntu-latest
@@ -112,10 +112,10 @@ jobs:
         run: pnpm build
 
       - name: Run smoke benchmark
-        run: node packages/cli/dist/index.js run --repo . --task examples/taskpacks/demo-repo-health.json --agents demo-fast --output .repoarena/ci-smoke
+        run: node packages/cli/dist/index.js run --repo . --task examples/taskpacks/demo-repo-health.json --agents demo-fast --output .agentarena/ci-smoke
 
       - name: Publish smoke summary
-        run: cat .repoarena/ci-smoke/pr-comment.md >> "$GITHUB_STEP_SUMMARY"
+        run: cat .agentarena/ci-smoke/pr-comment.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Comment smoke summary on PR
         if: github.event_name == 'pull_request'
@@ -123,8 +123,8 @@ jobs:
         with:
           script: |
             const fs = require("node:fs");
-            const summaryPath = ".repoarena/ci-smoke/pr-comment.md";
-            const marker = "<!-- repoarena-smoke-summary -->";
+            const summaryPath = ".agentarena/ci-smoke/pr-comment.md";
+            const marker = "<!-- agentarena-smoke-summary -->";
             const summary = fs.readFileSync(summaryPath, "utf8");
             const body = `${marker}\n${summary}`;
             const issue_number = context.payload.pull_request.number;
@@ -154,10 +154,10 @@ jobs:
       - name: Upload smoke report
         uses: actions/upload-artifact@v4
         with:
-          name: repoarena-smoke-report
+          name: agentarena-smoke-report
           path: |
-            .repoarena/ci-smoke/badge.json
-            .repoarena/ci-smoke/summary.json
-            .repoarena/ci-smoke/summary.md
-            .repoarena/ci-smoke/pr-comment.md
-            .repoarena/ci-smoke/report.html
+            .agentarena/ci-smoke/badge.json
+            .agentarena/ci-smoke/summary.json
+            .agentarena/ci-smoke/summary.md
+            .agentarena/ci-smoke/pr-comment.md
+            .agentarena/ci-smoke/report.html

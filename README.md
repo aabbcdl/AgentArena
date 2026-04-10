@@ -1,16 +1,16 @@
-# RepoArena
+# AgentArena
 
 > The local-first arena for evaluating AI coding agents in real repositories.
 
 [中文说明](./README.zh-CN.md)
 
-RepoArena lets you run Claude Code, Codex, Cursor, Gemini CLI, Aider, Kilo CLI, OpenCode, and other coding agents against the same repository tasks, then compare success rate, duration, cost, diffs, and replay traces in one report.
+AgentArena lets you run Claude Code, Codex, Cursor, Gemini CLI, Aider, Kilo CLI, OpenCode, and other coding agents against the same repository tasks, then compare success rate, duration, cost, diffs, and replay traces in one report.
 
-The primary manual entry point is `repoarena ui`: a local service mode that lets you choose a repository, task pack, and agents from the browser, run the benchmark, and inspect the result in the same UI. Opening `summary.json` files directly is now a fallback path for existing results, not the main workflow.
+The primary manual entry point is `agentarena ui`: a local service mode that lets you choose a repository, task pack, and agents from the browser, run the benchmark, and inspect the result in the same UI. Opening `summary.json` files directly is now a fallback path for existing results, not the main workflow.
 
-External CLI-based adapters still depend on upstream tools, local authentication, and provider compatibility. Treat `repoarena doctor` as the readiness check before trusting a comparison.
+External CLI-based adapters still depend on upstream tools, local authentication, and provider compatibility. Treat `agentarena doctor` as the readiness check before trusting a comparison.
 
-Task packs use a versioned schema. The current format is `repoarena.taskpack/v1`, with structured `judges` definitions for command, file, glob, snapshot, and JSON evaluation. Both JSON and YAML task packs are supported.
+Task packs use a versioned schema. The current format is `agentarena.taskpack/v1`, with structured `judges` definitions for command, file, glob, snapshot, and JSON evaluation. Both JSON and YAML task packs are supported.
 
 ## What It Does
 
@@ -25,11 +25,11 @@ Task packs use a versioned schema. The current format is `repoarena.taskpack/v1`
 ## Current Status
 
 This repository already contains a runnable prototype with:
-- a local `repoarena ui` entry point for launching and viewing benchmarks
-- a local `repoarena run` CLI
-- a local `repoarena doctor` CLI
-- a local `repoarena init-taskpack` CLI
-- a local `repoarena init-ci` CLI
+- a local `agentarena ui` entry point for launching and viewing benchmarks
+- a local `agentarena run` CLI
+- a local `agentarena doctor` CLI
+- a local `agentarena init-taskpack` CLI
+- a local `agentarena init-ci` CLI
 - built-in demo adapters
 - a working `codex` adapter
 - `claude-code` and `cursor` adapters with auth-aware failure reporting
@@ -39,7 +39,7 @@ This repository already contains a runnable prototype with:
 - `opencode` adapter (free, multi-provider open-source CLI)
 - static HTML and JSON report generation
 - Markdown summaries for CI, PR comments, and sharing
-- an interactive `apps/web-report` UI that can either run local benchmarks through `repoarena ui` or open existing reports
+- an interactive `apps/web-report` UI that can either run local benchmarks through `agentarena ui` or open existing reports
 - real-time benchmark progress feedback with live log streaming in the UI
 - task pack detail display including difficulty, differentiator, and judge checks
 - GitHub Actions smoke benchmarks that can comment results on pull requests
@@ -64,7 +64,7 @@ http://127.0.0.1:4317
 ```
 
 First run:
-1. start `repoarena ui`
+1. start `agentarena ui`
 2. choose the repository, task pack, and one or more real agents or Codex variants
 3. run the benchmark and inspect the result in the same page
 
@@ -73,7 +73,7 @@ First run:
 If you want to script runs directly:
 
 ```bash
-node packages/cli/dist/index.js run --repo . --task examples/taskpacks/demo-repo-health.yaml --agents demo-fast --output .repoarena/manual-run
+node packages/cli/dist/index.js run --repo . --task examples/taskpacks/demo-repo-health.yaml --agents demo-fast --output .agentarena/manual-run
 ```
 
 That command writes a run directory and generates:
@@ -116,13 +116,13 @@ node packages/cli/dist/index.js run --repo . --task examples/taskpacks/demo-repo
 Generate a starter YAML task pack:
 
 ```bash
-node packages/cli/dist/index.js init-taskpack --template repo-health --output repoarena.taskpack.yaml
+node packages/cli/dist/index.js init-taskpack --template repo-health --output agentarena.taskpack.yaml
 ```
 
 Generate a benchmark workflow for GitHub Actions:
 
 ```bash
-node packages/cli/dist/index.js init-ci --task repoarena.taskpack.yaml --agents demo-fast,codex
+node packages/cli/dist/index.js init-ci --task agentarena.taskpack.yaml --agents demo-fast,codex
 ```
 
 Run the Codex adapter:
@@ -141,7 +141,7 @@ Run the browser-level web-report smoke test (after installing Playwright Chromiu
 
 ```bash
 npx playwright install --with-deps chromium
-REPOARENA_RUN_BROWSER_SMOKE=1 pnpm test:web-report:e2e
+AGENTARENA_RUN_BROWSER_SMOKE=1 pnpm test:web-report:e2e
 ```
 
 ## Badge
@@ -149,12 +149,12 @@ REPOARENA_RUN_BROWSER_SMOKE=1 pnpm test:web-report:e2e
 Each run generates a `badge.json` in the output directory. Publish it to any static host and use a Shields endpoint badge:
 
 ```markdown
-![RepoArena](https://img.shields.io/endpoint?url=https://your-host.example/repoarena/badge.json)
+![AgentArena](https://img.shields.io/endpoint?url=https://your-host.example/agentarena/badge.json)
 ```
 
 ## Task Pack Schema
 
-RepoArena currently supports `repoarena.taskpack/v1`.
+AgentArena currently supports `agentarena.taskpack/v1`.
 
 Supported task pack file formats:
 - `.json`
@@ -230,7 +230,7 @@ JSON judges can define:
 
 Environment handling is allowlist-based. Task packs can expose specific host variables through `envAllowList`, and each setup/judge/teardown step can further extend that allowlist or inject inline `env` overrides. Agent execution still receives the task-level filtered environment.
 
-Task packs can also define optional `expectedChangedPaths` globs. RepoArena uses these to compute a `diffPrecision` signal so reports can distinguish targeted edits from scope creep.
+Task packs can also define optional `expectedChangedPaths` globs. AgentArena uses these to compute a `diffPrecision` signal so reports can distinguish targeted edits from scope creep.
 
 ## Design Principles
 
@@ -244,7 +244,7 @@ The benchmark should matter to maintainers, not just look good in a demo.
 If a result looks surprising, you should be able to inspect the trace and understand why it happened.
 
 ### Honest Readiness
-If an adapter is blocked by missing auth or missing local setup, RepoArena should say that clearly before comparison starts.
+If an adapter is blocked by missing auth or missing local setup, AgentArena should say that clearly before comparison starts.
 
 ## Repository Layout
 

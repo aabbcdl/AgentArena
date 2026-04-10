@@ -1,6 +1,6 @@
 # Benchmark Fairness
 
-RepoArena compares AI coding agents under a shared local execution model, but it does not pretend every adapter exposes identical capabilities.
+AgentArena compares AI coding agents under a shared local execution model, but it does not pretend every adapter exposes identical capabilities.
 
 ## Fairness Rules
 
@@ -17,4 +17,4 @@ RepoArena compares AI coding agents under a shared local execution model, but it
 - It does not mean every CLI exposes the same event stream richness.
 - It does not mean cost data is always available.
 
-RepoArena aims for transparent fairness: identical repo inputs where possible, explicit capability differences where not.
+AgentArena aims for transparent fairness: identical repo inputs where possible, explicit capability differences where not.

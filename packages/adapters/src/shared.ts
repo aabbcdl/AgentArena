@@ -9,7 +9,7 @@ import {
   type AgentResolvedRuntime,
   type ClaudeProviderProfile,
   ensureDirectory
-} from "@repoarena/core";
+} from "@agentarena/core";
 import { getClaudeProviderProfile, writeClaudeWorkspaceSettings } from "./claude-provider-profiles.js";
 import { parseClaudeEvents } from "./event-parsers.js";
 import type { ProcessResult } from "./process-utils.js";
@@ -64,7 +64,7 @@ export const demoProfiles: Record<string, DemoProfile> = {
 
 export const DEMO_CAPABILITY: AdapterCapability = {
   supportTier: "supported",
-  invocationMethod: "Built-in RepoArena demo adapter",
+  invocationMethod: "Built-in AgentArena demo adapter",
   authPrerequisites: [],
   tokenAvailability: "estimated",
   costAvailability: "estimated",
@@ -234,7 +234,7 @@ export async function probeInvocationVersion(
 
 export function buildAgentPrompt(context: AdapterExecutionContext): string {
   return [
-    `You are running inside RepoArena as adapter "${context.selection.baseAgentId}" and variant "${context.selection.variantId}".`,
+    `You are running inside AgentArena as adapter "${context.selection.baseAgentId}" and variant "${context.selection.variantId}".`,
     "Work only inside the current workspace.",
     "Complete the task using the existing repository files.",
     "Keep changes minimal and directly relevant.",
@@ -266,7 +266,7 @@ export async function writeDemoArtifacts(
   context: AdapterExecutionContext,
   profile: DemoProfile
 ): Promise<string[]> {
-  const demoDir = path.join(context.workspacePath, "repoarena-demo");
+  const demoDir = path.join(context.workspacePath, "agentarena-demo");
   await ensureDirectory(demoDir);
 
   const changedFiles: string[] = [];
@@ -280,11 +280,11 @@ export async function writeDemoArtifacts(
     "Prompt:",
     context.task.prompt,
     "",
-    "This file was created by the built-in demo adapter to validate the RepoArena execution pipeline."
+    "This file was created by the built-in demo adapter to validate the AgentArena execution pipeline."
   ].join("\n");
 
   await fs.writeFile(primaryFilePath, fileBody, "utf8");
-  changedFiles.push("repoarena-demo/" + path.basename(primaryFilePath));
+  changedFiles.push("agentarena-demo/" + path.basename(primaryFilePath));
 
   for (let index = 1; index < profile.extraFiles; index += 1) {
     const jsonPath = path.join(demoDir, `${context.agentId}-${index}.json`);
@@ -301,7 +301,7 @@ export async function writeDemoArtifacts(
       ),
       "utf8"
     );
-    changedFiles.push("repoarena-demo/" + path.basename(jsonPath));
+    changedFiles.push("agentarena-demo/" + path.basename(jsonPath));
   }
 
   return changedFiles;
@@ -364,17 +364,17 @@ export async function resolveCodexRuntime(context: {
       effectiveReasoningEffort: requestedConfig.reasoningEffort,
       source: context.configSource ?? "ui",
       verification: "inferred",
-      notes: ["Using explicit RepoArena Codex configuration."]
+      notes: ["Using explicit AgentArena Codex configuration."]
     };
   }
 
-  if (process.env.REPOARENA_CODEX_MODEL?.trim() || process.env.REPOARENA_CODEX_REASONING_EFFORT?.trim()) {
+  if (process.env.AGENTARENA_CODEX_MODEL?.trim() || process.env.AGENTARENA_CODEX_REASONING_EFFORT?.trim()) {
     return {
-      effectiveModel: process.env.REPOARENA_CODEX_MODEL?.trim() || undefined,
-      effectiveReasoningEffort: process.env.REPOARENA_CODEX_REASONING_EFFORT?.trim() || undefined,
+      effectiveModel: process.env.AGENTARENA_CODEX_MODEL?.trim() || undefined,
+      effectiveReasoningEffort: process.env.AGENTARENA_CODEX_REASONING_EFFORT?.trim() || undefined,
       source: "env",
       verification: "inferred",
-      notes: ["Using REPOARENA_CODEX_* environment overrides."]
+      notes: ["Using AGENTARENA_CODEX_* environment overrides."]
     };
   }
 
@@ -392,7 +392,7 @@ export async function resolveCodexRuntime(context: {
   return {
     source: "cli-default",
     verification: "unknown",
-    notes: ["Codex CLI default runtime could not be resolved from RepoArena, environment, or ~/.codex/config.toml."]
+    notes: ["Codex CLI default runtime could not be resolved from AgentArena, environment, or ~/.codex/config.toml."]
   };
 }
 
@@ -522,7 +522,7 @@ export async function probeClaudeProfileAuth(
   summary: string;
   details?: string[];
 }> {
-  const probeRoot = await fs.mkdtemp(path.join(os.tmpdir(), "repoarena-claude-probe-"));
+  const probeRoot = await fs.mkdtemp(path.join(os.tmpdir(), "agentarena-claude-probe-"));
   try {
     const workspacePath = path.join(probeRoot, "workspace");
     await ensureDirectory(workspacePath);

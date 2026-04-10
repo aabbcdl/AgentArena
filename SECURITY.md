@@ -2,9 +2,9 @@
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability in RepoArena, please report it responsibly.
+If you discover a security vulnerability in AgentArena, please report it responsibly.
 
-**Email**: Open a private security advisory via [GitHub Security Advisories](https://github.com/aabbcdl/RepoArena/security/advisories/new).
+**Email**: Open a private security advisory via [GitHub Security Advisories](https://github.com/aabbcdl/AgentArena/security/advisories/new).
 
 Please include:
 - A description of the vulnerability
@@ -15,9 +15,9 @@ We will acknowledge receipt within 48 hours and aim to provide a fix within 7 da
 
 ## Scope
 
-RepoArena is a local-first CLI tool. The primary attack surface is:
+AgentArena is a local-first CLI tool. The primary attack surface is:
 
-- The local HTTP server started by `repoarena ui` (binds to `127.0.0.1` by default)
+- The local HTTP server started by `agentarena ui` (binds to `127.0.0.1` by default)
 - Task pack files (YAML/JSON) that define shell commands executed during benchmarks
 - Agent adapter processes spawned during benchmark runs
 

@@ -2,7 +2,7 @@
   "name": "nodejs-monorepo",
   "version": "1.0.0",
   "private": true,
-  "description": "Standard test repository for RepoArena builtin task packs",
+  "description": "Standard test repository for AgentArena builtin task packs",
   "scripts": {
     "test": "echo \"All tests passed\" && exit 0"
   },

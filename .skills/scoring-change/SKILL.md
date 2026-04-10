@@ -27,7 +27,7 @@ Modify the benchmark scoring system. Weight definitions must live in a single so
    - If new score components are introduced, add helper functions (e.g. `resolutionRateScore()`, `tokenEfficiencyScoreComponent()`).
 
 3. Runner sync (`packages/runner/src/index.ts`):
-   - Import `getDefaultWeights` from `@repoarena/report` — never redefine weights locally.
+   - Import `getDefaultWeights` from `@agentarena/report` — never redefine weights locally.
    - Use it when building `BenchmarkRun.scoreWeights`.
 
 4. Web UI sync (`apps/web-report/src/view-model.js`):

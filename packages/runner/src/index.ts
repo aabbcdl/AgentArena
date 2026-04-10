@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { getAdapter, preflightAdapters } from "@repoarena/adapters";
+import { getAdapter, preflightAdapters } from "@agentarena/adapters";
 import {
   type AdapterPreflightResult,
   type AgentResolvedRuntime,
@@ -21,13 +21,14 @@ import {
   isAbortError,
   resolveRepoSource,
   snapshotDirectory,
+  type TraceEvent,
   throwIfAborted,
   uniqueSorted
-} from "@repoarena/core";
-import { runCommandSteps, runJudges } from "@repoarena/judges";
-import { getDefaultWeights } from "@repoarena/report";
-import { loadTaskPack } from "@repoarena/taskpacks";
-import { JsonlTraceRecorder } from "@repoarena/trace";
+} from "@agentarena/core";
+import { runCommandSteps, runJudges } from "@agentarena/judges";
+import { getDefaultWeights } from "@agentarena/report";
+import { loadTaskPack } from "@agentarena/taskpacks";
+import { JsonlTraceRecorder } from "@agentarena/trace";
 import picomatch from "picomatch";
 
 export interface BenchmarkOptions {
@@ -102,7 +103,7 @@ function resolvePositiveInt(value: string | undefined, fallback: number): number
 }
 
 function agentConcurrency(options: BenchmarkOptions): number {
-  return options.maxConcurrency ?? resolvePositiveInt(process.env.REPOARENA_MAX_CONCURRENCY, DEFAULT_AGENT_CONCURRENCY);
+  return options.maxConcurrency ?? resolvePositiveInt(process.env.AGENTARENA_MAX_CONCURRENCY, DEFAULT_AGENT_CONCURRENCY);
 }
 
 interface MapWithConcurrencyResult<R> {
@@ -522,7 +523,7 @@ async function runAgent(
       environment: executionEnvironment,
       task,
       signal: cancellation?.signal,
-      trace: async (event) => {
+      trace: async (event: Omit<TraceEvent, "agentId" | "timestamp">) => {
         await traceRecorder.record({
           ...event,
           agentId: preflight.agentId,
@@ -851,9 +852,9 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
   const runId = options.runId ?? createRunId();
   const outputRootPath = options.outputPath
     ? path.resolve(options.outputPath)
-    : path.join(userRepoPath, ".repoarena", "runs");
+    : path.join(userRepoPath, ".agentarena", "runs");
   const outputPath = path.join(outputRootPath, runId);
-  const workspaceRootPath = path.join(tmpdir(), "repoarena-workspaces", runId);
+  const workspaceRootPath = path.join(tmpdir(), "agentarena-workspaces", runId);
   const selections = normalizeSelections(options);
   const workspacePaths: string[] = [];
 

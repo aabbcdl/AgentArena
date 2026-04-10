@@ -25,25 +25,25 @@ importers:
 
   packages/adapters:
     dependencies:
-      '@repoarena/core':
+      '@agentarena/core':
         specifier: workspace:*
         version: link:../core
 
   packages/cli:
     dependencies:
-      '@repoarena/adapters':
+      '@agentarena/adapters':
         specifier: workspace:*
         version: link:../adapters
-      '@repoarena/core':
+      '@agentarena/core':
         specifier: workspace:*
         version: link:../core
-      '@repoarena/report':
+      '@agentarena/report':
         specifier: workspace:*
         version: link:../report
-      '@repoarena/runner':
+      '@agentarena/runner':
         specifier: workspace:*
         version: link:../runner
-      '@repoarena/taskpacks':
+      '@agentarena/taskpacks':
         specifier: workspace:*
         version: link:../taskpacks
       yaml:
@@ -54,7 +54,7 @@ importers:
 
   packages/judges:
     dependencies:
-      '@repoarena/core':
+      '@agentarena/core':
         specifier: workspace:*
         version: link:../core
       ajv:
@@ -70,28 +70,28 @@ importers:
 
   packages/report:
     dependencies:
-      '@repoarena/core':
+      '@agentarena/core':
         specifier: workspace:*
         version: link:../core
 
   packages/runner:
     dependencies:
-      '@repoarena/adapters':
+      '@agentarena/adapters':
         specifier: workspace:*
         version: link:../adapters
-      '@repoarena/core':
+      '@agentarena/core':
         specifier: workspace:*
         version: link:../core
-      '@repoarena/judges':
+      '@agentarena/judges':
         specifier: workspace:*
         version: link:../judges
-      '@repoarena/report':
+      '@agentarena/report':
         specifier: workspace:*
         version: link:../report
-      '@repoarena/taskpacks':
+      '@agentarena/taskpacks':
         specifier: workspace:*
         version: link:../taskpacks
-      '@repoarena/trace':
+      '@agentarena/trace':
         specifier: workspace:*
         version: link:../trace
       picomatch:
@@ -104,7 +104,7 @@ importers:
 
   packages/taskpacks:
     dependencies:
-      '@repoarena/core':
+      '@agentarena/core':
         specifier: workspace:*
         version: link:../core
       yaml:
@@ -113,7 +113,7 @@ importers:
 
   packages/trace:
     dependencies:
-      '@repoarena/core':
+      '@agentarena/core':
         specifier: workspace:*
         version: link:../core
 

@@ -12,7 +12,7 @@ import {
   preflightAdapters,
   saveClaudeProviderProfile,
   setClaudeProviderProfileSecret
-} from "@repoarena/adapters";
+} from "@agentarena/adapters";
 import {
   type AgentSelection,
   type BenchmarkRun,
@@ -23,19 +23,18 @@ import {
   formatDuration,
   isAbortError,
   validateTaskPackId
-} from "@repoarena/core";
+} from "@agentarena/core";
 import {
-  enrichRunWithScores,
-  generateDecisionReport,
-  formatDecisionReport,
-  type Locale as ReportLocale,
-  writeReport,
   computeVarianceAnalysis,
-  formatVarianceReport
-} from "@repoarena/report";
-// @ts-expect-error - runner types need declaration file
-import { type BenchmarkProgressEvent, runBenchmark } from "@repoarena/runner";
-import { loadTaskPack } from "@repoarena/taskpacks";
+  enrichRunWithScores,
+  formatDecisionReport,
+  formatVarianceReport, 
+  generateDecisionReport,
+  type Locale as ReportLocale,
+  writeReport
+} from "@agentarena/report";
+import { type BenchmarkProgressEvent, runBenchmark } from "@agentarena/runner";
+import { loadTaskPack } from "@agentarena/taskpacks";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { type ParsedArgs, parseArgs, printHelp } from "./args.js";
 import { buildBenchmarkOutputSummary, formatCapabilitySummary } from "./output.js";
@@ -246,7 +245,7 @@ async function runDoctor(parsed: ParsedArgs): Promise<void> {
   if (parsed.json) {
     console.log(JSON.stringify(preflights, null, 2));
   } else {
-    console.log("\nRepoArena doctor\n");
+    console.log("\nAgentArena doctor\n");
     for (const preflight of preflights) {
       console.log(
         [
@@ -293,7 +292,7 @@ async function runListAdapters(parsed: ParsedArgs): Promise<void> {
     return;
   }
 
-  console.log("\nRepoArena adapters\n");
+  console.log("\nAgentArena adapters\n");
   for (const adapter of adapters) {
     console.log(
       `- ${adapter.id} | kind=${adapter.kind} | title=${adapter.title} | ${formatCapabilitySummary(adapter.capability)}`
@@ -317,7 +316,7 @@ async function runInitTaskpack(parsed: ParsedArgs): Promise<void> {
     );
   }
 
-  const outputPath = path.resolve(parsed.outputPath ?? "repoarena.taskpack.yaml");
+  const outputPath = path.resolve(parsed.outputPath ?? "agentarena.taskpack.yaml");
   const parentPath = path.dirname(outputPath);
 
   try {
@@ -339,20 +338,20 @@ async function runInitTaskpack(parsed: ParsedArgs): Promise<void> {
     return;
   }
 
-  console.log(`\nRepoArena task pack created`);
+  console.log(`\nAgentArena task pack created`);
   console.log(`template=${templateName}`);
   console.log(`path=${outputPath}`);
 }
 
 async function runInitCi(parsed: ParsedArgs): Promise<void> {
-  const workflowPath = path.resolve(parsed.workflowPath ?? parsed.outputPath ?? ".github/workflows/repoarena-benchmark.yml");
-  const taskPath = parsed.taskPath ?? "repoarena.taskpack.yaml";
+  const workflowPath = path.resolve(parsed.workflowPath ?? parsed.outputPath ?? ".github/workflows/agentarena-benchmark.yml");
+  const taskPath = parsed.taskPath ?? "agentarena.taskpack.yaml";
   const agentIds = parsed.agentIds.length > 0 ? parsed.agentIds : ["demo-fast"];
   const ciTemplate = (parsed.ciTemplate ?? "pull-request") as "pull-request" | "smoke" | "nightly";
   if (!["pull-request", "smoke", "nightly"].includes(ciTemplate)) {
     throw new Error('Unknown CI template. Use "pull-request", "smoke", or "nightly".');
   }
-  const ciOutputDir = parsed.ciOutputDir ?? ".repoarena/ci-benchmark";
+  const ciOutputDir = parsed.ciOutputDir ?? ".agentarena/ci-benchmark";
   const parentPath = path.dirname(workflowPath);
 
   try {
@@ -378,7 +377,7 @@ async function runInitCi(parsed: ParsedArgs): Promise<void> {
     return;
   }
 
-  console.log(`\nRepoArena CI workflow created`);
+  console.log(`\nAgentArena CI workflow created`);
   console.log(`path=${workflowPath}`);
   console.log(`task=${taskPath}`);
   console.log(`agents=${agentIds.join(",")}`);
@@ -612,7 +611,7 @@ async function runUi(parsed: ParsedArgs): Promise<void> {
               mode: "local-service",
               repoPath: process.cwd(),
               defaultTaskPath: path.join(OFFICIAL_TASKPACK_ROOT, "repo-health.yaml"),
-              defaultOutputPath: path.join(process.cwd(), ".repoarena", "ui-runs"),
+              defaultOutputPath: path.join(process.cwd(), ".agentarena", "ui-runs"),
               codexDefaults,
               claudeProviderProfiles: providerProfiles.map((profile) => ({
                 id: profile.id,
@@ -760,18 +759,18 @@ async function runUi(parsed: ParsedArgs): Promise<void> {
           response.end(invalid.body);
           return;
         }
-        const adhocDir = path.join(process.cwd(), ".repoarena", "adhoc-taskpacks");
+        const adhocDir = path.join(process.cwd(), ".agentarena", "adhoc-taskpacks");
         await fs.mkdir(adhocDir, { recursive: true });
         const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
         const adhocTitle = body.title?.trim() || `Adhoc Task ${timestamp}`;
         const adhocId = `adhoc-${timestamp}`;
         const buildCommand = createPackageScriptCommand("build");
-        const testReportFile = `.repoarena/${adhocId}-test-results.json`;
-        const lintReportFile = `.repoarena/${adhocId}-lint-results.json`;
+        const testReportFile = `.agentarena/${adhocId}-test-results.json`;
+        const lintReportFile = `.agentarena/${adhocId}-lint-results.json`;
         const testCommand = createAdhocTestCommand(testReportFile);
         const lintCommand = createAdhocLintCommand(lintReportFile);
         const yamlContent = stringifyYaml({
-          schemaVersion: "repoarena.taskpack/v1",
+          schemaVersion: "agentarena.taskpack/v1",
           id: adhocId,
           title: adhocTitle,
           description: "User-defined ad-hoc task from the web UI.",
@@ -836,7 +835,7 @@ async function runUi(parsed: ParsedArgs): Promise<void> {
       }
 
       if (request.method === "GET" && requestUrl.pathname === "/api/adhoc-taskpacks") {
-        const adhocDir = path.join(process.cwd(), ".repoarena", "adhoc-taskpacks");
+        const adhocDir = path.join(process.cwd(), ".agentarena", "adhoc-taskpacks");
         try {
           const entries = await fs.readdir(adhocDir, { withFileTypes: true });
           const items = await Promise.all(
@@ -876,7 +875,7 @@ async function runUi(parsed: ParsedArgs): Promise<void> {
           response.end(forbidden.body);
           return;
         }
-        const adhocDir = path.resolve(process.cwd(), ".repoarena", "adhoc-taskpacks");
+        const adhocDir = path.resolve(process.cwd(), ".agentarena", "adhoc-taskpacks");
         const filePath = path.resolve(adhocDir, `${adhocId}.yaml`);
         // Harden path traversal check: use resolved paths for comparison
         if (!filePath.startsWith(adhocDir + path.sep) && filePath !== adhocDir) {
@@ -1021,7 +1020,7 @@ async function runUi(parsed: ParsedArgs): Promise<void> {
             });
 
             const runCancelled =
-              cancellationController.signal.aborted || benchmark.results.some((result: any) => result.status === "cancelled");
+              cancellationController.signal.aborted || benchmark.results.some((result) => result.status === "cancelled");
             if (runCancelled) {
               appendRunLog({
                 phase: activeRunStatus.phase,
@@ -1050,7 +1049,7 @@ async function runUi(parsed: ParsedArgs): Promise<void> {
               message: "Writing report artifacts."
             });
             const report = await writeReport(benchmark, {
-              locale: resolveReportLocale(process.env.REPOARENA_LOCALE)
+              locale: resolveReportLocale(process.env.AGENTARENA_LOCALE)
             });
             appendRunLog({
               phase: "report",
@@ -1157,7 +1156,7 @@ async function runUi(parsed: ParsedArgs): Promise<void> {
   });
 
   const url = `http://${host}:${port}`;
-  console.log(`\nRepoArena UI server running`);
+  console.log(`\nAgentArena UI server running`);
   console.log(`url=${url}`);
   console.log(`repo=${process.cwd()}`);
 
@@ -1176,29 +1175,29 @@ async function runUi(parsed: ParsedArgs): Promise<void> {
 }
 
 async function runBenchmarkCommand(parsed: ParsedArgs): Promise<void> {
-  const reportLocale = resolveReportLocale(parsed.locale ?? process.env.REPOARENA_LOCALE);
+  const reportLocale = resolveReportLocale(parsed.locale ?? process.env.AGENTARENA_LOCALE);
 
   if (!parsed.repoPath) {
     throw new Error(
       "Missing required argument: --repo\n" +
-      "Example: repoarena run --repo . --task taskpack.yaml --agents demo-fast\n" +
-      'Run "repoarena --help" for more information.'
+      "Example: agentarena run --repo . --task taskpack.yaml --agents demo-fast\n" +
+      'Run "agentarena --help" for more information.'
     );
   }
 
   if (!parsed.taskPath) {
     throw new Error(
       "Missing required argument: --task\n" +
-      "Example: repoarena run --repo . --task taskpack.yaml --agents demo-fast\n" +
-      'Run "repoarena --help" for more information.'
+      "Example: agentarena run --repo . --task taskpack.yaml --agents demo-fast\n" +
+      'Run "agentarena --help" for more information.'
     );
   }
 
   if (parsed.agentIds.length === 0) {
     throw new Error(
       "Missing required argument: --agents\n" +
-      "Example: repoarena run --repo . --task taskpack.yaml --agents demo-fast,codex\n" +
-      'Run "repoarena --help" for more information.'
+      "Example: agentarena run --repo . --task taskpack.yaml --agents demo-fast,codex\n" +
+      'Run "agentarena --help" for more information.'
     );
   }
 
@@ -1233,14 +1232,14 @@ async function runBenchmarkCommand(parsed: ParsedArgs): Promise<void> {
     throw new Error(
       `Unknown agent(s): ${invalidAgents.join(", ")}\n` +
       `Available agents: ${availableIds.join(", ")}\n` +
-      'Run "repoarena list-adapters" for more information.'
+      'Run "agentarena list-adapters" for more information.'
     );
   }
 
   const selections = normalizeCliSelections(parsed);
 
   if (!parsed.json) {
-    console.log(`\nStarting RepoArena benchmark...`);
+    console.log(`\nStarting AgentArena benchmark...`);
     console.log(`Repository: ${parsed.repoPath}`);
     console.log(`Task: ${parsed.taskPath}`);
     console.log(`Agents: ${parsed.agentIds.join(", ")}`);
@@ -1332,7 +1331,7 @@ async function runBenchmarkCommand(parsed: ParsedArgs): Promise<void> {
   if (parsed.json) {
     console.log(JSON.stringify(buildBenchmarkOutputSummary(benchmark, report), null, 2));
   } else {
-    console.log(`\nRepoArena run complete: ${scoredBenchmark.runId}`);
+    console.log(`\nAgentArena run complete: ${scoredBenchmark.runId}`);
     console.log(`Score scope: ${scoredBenchmark.scoreScope ?? "run-local"}`);
     console.log(`Score note: ${scoredBenchmark.scoreValidityNote ?? "Scores only compare variants inside this run."}`);
     console.log(`\nPreflight Results:`);
@@ -1383,7 +1382,7 @@ async function runBenchmarkCommand(parsed: ParsedArgs): Promise<void> {
     const topRec = decisionReport.recommendations.find((r) => r.recommendation === "recommended");
     if (topRec) {
       console.log(`\n${"═".repeat(60)}`);
-      console.log(`📋 REPOARENA DECISION REPORT`);
+      console.log(`📋 AGENTARENA DECISION REPORT`);
       console.log(`${"═".repeat(60)}`);
       console.log(``);
       console.log(`🏆 推荐: ${topRec.displayLabel}`);
@@ -1416,7 +1415,7 @@ async function runBenchmarkCommand(parsed: ParsedArgs): Promise<void> {
 
 async function runInit(parsed: ParsedArgs): Promise<void> {
   const repoPath = parsed.repoPath ? path.resolve(parsed.repoPath) : process.cwd();
-  const taskPackPath = parsed.outputPath ? path.resolve(parsed.outputPath) : path.join(repoPath, "repoarena.taskpack.yaml");
+  const taskPackPath = parsed.outputPath ? path.resolve(parsed.outputPath) : path.join(repoPath, "agentarena.taskpack.yaml");
 
   // Check if taskpack already exists
   try {
@@ -1471,7 +1470,7 @@ async function runInit(parsed: ParsedArgs): Promise<void> {
     for (const adapter of allAdapters) {
       console.log(`  - ${adapter.id}: ${adapter.title}`);
     }
-    console.log("\nAfter installing an agent, run: repoarena init");
+    console.log("\nAfter installing an agent, run: agentarena init");
     return;
   }
 
@@ -1483,7 +1482,7 @@ async function runInit(parsed: ParsedArgs): Promise<void> {
   }
 
   console.log(`\n▶ Ready to run! Execute:`);
-  console.log(`  repoarena run --repo ${repoPath} --task ${taskPackPath} --agents ${requestedAgents.join(",")}`);
+  console.log(`  agentarena run --repo ${repoPath} --task ${taskPackPath} --agents ${requestedAgents.join(",")}`);
 }
 
 async function main(): Promise<void> {
@@ -1538,7 +1537,7 @@ async function main(): Promise<void> {
         throw new Error(
           `Unknown command: ${parsed.command}\n` +
           `Available commands: run, doctor, list-adapters, init, init-taskpack, init-ci, ui\n` +
-          'Run "repoarena --help" for usage information.'
+          'Run "agentarena --help" for usage information.'
         );
     }
   } catch (error: unknown) {
@@ -1549,9 +1548,9 @@ async function main(): Promise<void> {
     if (message.includes("ENOENT") || message.includes("does not exist")) {
       console.error("\nTip: Check that the file path is correct and the file exists.");
     } else if (message.includes("Unknown agent")) {
-      console.error('\nTip: Run "repoarena list-adapters" to see available agents.');
+      console.error('\nTip: Run "agentarena list-adapters" to see available agents.');
     } else if (message.includes("Missing required")) {
-      console.error('\nTip: Run "repoarena --help" for usage information.');
+      console.error('\nTip: Run "agentarena --help" for usage information.');
     }
 
     process.exitCode = 1;

@@ -3,7 +3,7 @@ import {
   normalizePath,
   portableRelativePath,
   uniqueSorted
-} from "@repoarena/core";
+} from "@agentarena/core";
 import { safeNumber } from "./process-utils.js";
 
 interface CodexUsageEvent {

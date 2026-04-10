@@ -1,4 +1,4 @@
-import type { BenchmarkRun } from "@repoarena/core";
+import type { BenchmarkRun } from "@agentarena/core";
 import { formatRuntimeIdentity, getRunScoreMode } from "./report-helpers.js";
 
 /**

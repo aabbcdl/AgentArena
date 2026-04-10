@@ -1,7 +1,7 @@
 {
-  "name": "@repoarena/trace",
+  "name": "@agentarena/trace",
   "version": "0.1.0",
-  "description": "Execution trace recorder for RepoArena",
+  "description": "Execution trace recorder for AgentArena",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -9,7 +9,7 @@
     "dist"
   ],
   "dependencies": {
-    "@repoarena/core": "workspace:*"
+    "@agentarena/core": "workspace:*"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

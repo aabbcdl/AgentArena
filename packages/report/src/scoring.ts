@@ -1,5 +1,5 @@
 /**
- * Scoring system for RepoArena benchmark results.
+ * Scoring system for AgentArena benchmark results.
  *
  * Design inspiration:
  * - Issue Resolution mode → Inspired by SWE-Bench (MIT License)
@@ -9,7 +9,7 @@
  * Implementation is fully independent with no official affiliation.
  */
 
-import type { BenchmarkRun } from "@repoarena/core";
+import type { BenchmarkRun } from "@agentarena/core";
 import { findJudgeByType, hasScoreMetadata, type ScoredRun } from "./report-helpers.js";
 
 /**

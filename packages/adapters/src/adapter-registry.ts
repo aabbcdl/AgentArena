@@ -3,8 +3,9 @@ import type {
   AdapterPreflightResult,
   AgentAdapter,
   AgentResolvedRuntime
-} from "@repoarena/core";
+} from "@agentarena/core";
 import { AiderAdapter } from "./aider-adapter.js";
+import { AugmentAdapter } from "./augment-adapter.js";
 import { ClaudeCodeAdapter } from "./claude-adapter.js";
 import { CodexCliAdapter } from "./codex-adapter.js";
 import { CopilotAdapter } from "./copilot-adapter.js";
@@ -14,8 +15,9 @@ import { GeminiCliAdapter } from "./gemini-adapter.js";
 import { KiloCliAdapter } from "./kilo-adapter.js";
 import { OpencodeAdapter } from "./opencode-adapter.js";
 import { QwenCodeAdapter } from "./qwen-adapter.js";
-import { WindsurfAdapter } from "./windsurf-adapter.js";
 import { demoProfiles, resolveCodexRuntime } from "./shared.js";
+import { TraeAdapter } from "./trae-adapter.js";
+import { WindsurfAdapter } from "./windsurf-adapter.js";
 
 const adapterEntries: Array<[string, AgentAdapter]> = [
   ...Object.entries(demoProfiles).map(
@@ -30,6 +32,8 @@ const adapterEntries: Array<[string, AgentAdapter]> = [
   ["kilo-cli", new KiloCliAdapter()],
   ["opencode", new OpencodeAdapter()],
   ["qwen-code", new QwenCodeAdapter()],
+  ["trae", new TraeAdapter()],
+  ["augment", new AugmentAdapter()],
   ["windsurf", new WindsurfAdapter()]
 ];
 

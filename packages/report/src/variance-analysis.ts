@@ -1,4 +1,4 @@
-import type { BenchmarkRun, AgentRunResult } from "@repoarena/core";
+import type { AgentRunResult, BenchmarkRun } from "@agentarena/core";
 
 export interface AgentVarianceStats {
   agentId: string;
@@ -6,14 +6,14 @@ export interface AgentVarianceStats {
   runCount: number;
   scoreMean: number;
   scoreStdDev: number;
-  scoreCV: number; // Coefficient of Variation
+  scoreCV: number;
   durationMean: number;
   durationStdDev: number;
   costMean: number;
   costStdDev: number;
   successRate: number;
   confidence: "high" | "medium" | "low";
-  isStable: boolean; // CV < 0.1 means stable
+  isStable: boolean;
 }
 
 export interface VarianceReport {
@@ -25,7 +25,7 @@ export interface VarianceReport {
 }
 
 /**
- * Compute variance statistics across multiple runs for the same task
+ * Compute variance statistics across multiple runs for the same task.
  */
 export function computeVarianceAnalysis(
   runs: BenchmarkRun[],
@@ -33,7 +33,6 @@ export function computeVarianceAnalysis(
 ): VarianceReport {
   const { minRunsForConfidence = 3 } = options;
 
-  // Group runs by agent
   const agentResults = new Map<string, AgentRunResult[]>();
   for (const run of runs) {
     for (const result of run.results) {
@@ -45,10 +44,12 @@ export function computeVarianceAnalysis(
 
   const agents: AgentVarianceStats[] = [];
   for (const [agentId, results] of agentResults) {
-    const scores = results.map((r) => r.compositeScore ?? 0).filter((s) => s > 0);
-    const durations = results.map((r) => r.durationMs).filter((d) => d > 0);
-    const costs = results.map((r) => r.estimatedCostUsd).filter((c) => c >= 0);
-    const successes = results.filter((r) => r.status === "success").length;
+    const scores = results.map((result) => result.compositeScore ?? 0).filter((score) => score > 0);
+    const durations = results.map((result) => result.durationMs).filter((duration) => duration > 0);
+    const costs = results.map((result) => result.estimatedCostUsd).filter((cost) => cost >= 0);
+    const successes = results.filter((result) => result.status === "success").length;
+
+    const scoreCV = computeCV(scores);
 
     agents.push({
       agentId,
@@ -56,41 +57,35 @@ export function computeVarianceAnalysis(
       runCount: results.length,
       scoreMean: computeMean(scores),
       scoreStdDev: computeStdDev(scores),
-      scoreCV: computeCV(scores),
+      scoreCV,
       durationMean: computeMean(durations),
       durationStdDev: computeStdDev(durations),
       costMean: computeMean(costs),
       costStdDev: computeStdDev(costs),
       successRate: results.length > 0 ? successes / results.length : 0,
-      confidence: computeConfidence(results.length, computeCV(scores)),
-      isStable: computeCV(scores) < 0.1
+      confidence: computeConfidence(results.length, scoreCV),
+      isStable: scoreCV < 0.1
     });
   }
 
-  // 生成警告信息
   const warnings: string[] = [];
   for (const agent of agents) {
     if (agent.runCount < minRunsForConfidence) {
-      warnings.push(`${agent.displayLabel}: Only ${agent.runCount} run(s), need ${minRunsForConfidence} for reliable statistics`);
+      warnings.push(`${agent.displayLabel}: only ${agent.runCount} run(s); need ${minRunsForConfidence} for reliable statistics.`);
     }
   }
 
-  // Overall confidence
-  const allHaveMinRuns = agents.every((a) => a.runCount >= minRunsForConfidence);
-  const allStable = agents.every((a) => a.isStable);
+  const allHaveMinRuns = agents.every((agent) => agent.runCount >= minRunsForConfidence);
+  const allStable = agents.every((agent) => agent.isStable);
   const overallConfidence =
-    allHaveMinRuns && allStable
-      ? "high"
-      : agents.some((a) => a.runCount >= minRunsForConfidence)
-        ? "medium"
-        : "low";
+    allHaveMinRuns && allStable ? "high" : agents.some((agent) => agent.runCount >= minRunsForConfidence) ? "medium" : "low";
 
   const recommendation =
     overallConfidence === "high"
       ? "Results are statistically significant and reliable for decision-making."
       : overallConfidence === "medium"
-        ? "Results show some consistency. Consider running more times for higher confidence."
-        : `Results may not be reliable. Recommend running at least ${minRunsForConfidence} times for each agent.`;
+        ? "Results show some consistency. Run additional comparisons for higher confidence."
+        : `Results are not yet reliable. Run each agent at least ${minRunsForConfidence} times.`;
 
   return {
     agents,
@@ -103,14 +98,14 @@ export function computeVarianceAnalysis(
 
 function computeMean(values: number[]): number {
   if (values.length === 0) return 0;
-  return values.reduce((sum, v) => sum + v, 0) / values.length;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
 function computeStdDev(values: number[]): number {
   if (values.length < 2) return 0;
   const mean = computeMean(values);
-  const squaredDiffs = values.map((v) => Math.pow(v - mean, 2));
-  return Math.sqrt(squaredDiffs.reduce((sum, v) => sum + v, 0) / (values.length - 1));
+  const squaredDiffs = values.map((value) => (value - mean) ** 2);
+  return Math.sqrt(squaredDiffs.reduce((sum, value) => sum + value, 0) / (values.length - 1));
 }
 
 function computeCV(values: number[]): number {
@@ -127,29 +122,27 @@ function computeConfidence(runCount: number, cv: number): "high" | "medium" | "l
 }
 
 /**
- * Format variance report as human-readable text
+ * Format variance report as human-readable text.
  */
 export function formatVarianceReport(report: VarianceReport): string {
   const lines: string[] = [];
 
-  lines.push(`## 📊 结果可信度分析`);
-  lines.push(``);
-  lines.push(
-    `**整体置信度**: ${report.overallConfidence === "high" ? "高" : report.overallConfidence === "medium" ? "中" : "低"}`
-  );
-  lines.push(`**建议**: ${report.recommendation}`);
-  lines.push(``);
+  lines.push("## Result Confidence Analysis");
+  lines.push("");
+  lines.push(`**Overall confidence**: ${report.overallConfidence}`);
+  lines.push(`**Recommendation**: ${report.recommendation}`);
+  lines.push("");
 
-  lines.push(`| Agent | 运行次数 | 平均分 | 标准差 | 变异系数 | 稳定性 |`);
-  lines.push(`|-------|---------|--------|--------|---------|--------|`);
+  lines.push("| Agent | Runs | Mean Score | Std Dev | Coefficient of Variation | Stability |");
+  lines.push("|-------|------|------------|---------|---------------------------|-----------|");
 
   for (const agent of report.agents) {
-    const stability = agent.isStable ? "✅ 稳定" : "⚠️ 波动";
+    const stability = agent.isStable ? "stable" : "volatile";
     lines.push(
       `| ${agent.displayLabel} | ${agent.runCount} | ${agent.scoreMean.toFixed(1)} | ${agent.scoreStdDev.toFixed(1)} | ${(agent.scoreCV * 100).toFixed(1)}% | ${stability} |`
     );
   }
 
-  lines.push(``);
+  lines.push("");
   return lines.join("\n");
 }

@@ -1,4 +1,4 @@
-const CACHE_NAME = "repoarena-report-v6";
+const CACHE_NAME = "agentarena-report-v6";
 const CORE_ASSETS = [
   "./",
   "./index.html",

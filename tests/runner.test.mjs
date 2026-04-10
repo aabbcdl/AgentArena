@@ -10,7 +10,7 @@ async function writeJson(filePath, value) {
 }
 
 test("runBenchmark passes only allowlisted env vars to setup, judges, teardown, and agents", async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-runner-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-runner-"));
   const repoPath = path.join(tempDir, "repo");
   const outputPath = path.join(tempDir, "output");
   const taskPath = path.join(tempDir, "task.json");
@@ -20,21 +20,21 @@ test("runBenchmark passes only allowlisted env vars to setup, judges, teardown, 
   await writeFile(path.join(repoPath, "README.md"), "# Temp Repo\n", "utf8");
   await writeJson(path.join(repoPath, "package.json"), { name: "temp-repo", version: "0.0.0" });
 
-  process.env.REPOARENA_ALLOWED_TEST = "visible";
-  process.env.REPOARENA_BLOCKED_TEST = "hidden";
+  process.env.AGENTARENA_ALLOWED_TEST = "visible";
+  process.env.AGENTARENA_BLOCKED_TEST = "hidden";
 
   try {
     await writeJson(taskPath, {
-    schemaVersion: "repoarena.taskpack/v1",
+    schemaVersion: "agentarena.taskpack/v1",
     id: "env-demo",
     title: "Env Demo",
     prompt: "Create a benchmark note.",
-    envAllowList: ["REPOARENA_ALLOWED_TEST"],
+    envAllowList: ["AGENTARENA_ALLOWED_TEST"],
     setupCommands: [
       {
         label: "Write allowed env marker",
         command:
-          "node -e \"const fs=require('node:fs');fs.writeFileSync('env-setup.txt',(process.env.REPOARENA_ALLOWED_TEST||'')+'|'+(process.env.REPOARENA_BLOCKED_TEST||''))\""
+          "node -e \"const fs=require('node:fs');fs.writeFileSync('env-setup.txt',(process.env.AGENTARENA_ALLOWED_TEST||'')+'|'+(process.env.AGENTARENA_BLOCKED_TEST||''))\""
       }
     ],
     judges: [
@@ -72,13 +72,13 @@ test("runBenchmark passes only allowlisted env vars to setup, judges, teardown, 
 
   await rm(tempDir, { recursive: true, force: true });
   } finally {
-    delete process.env.REPOARENA_ALLOWED_TEST;
-    delete process.env.REPOARENA_BLOCKED_TEST;
+    delete process.env.AGENTARENA_ALLOWED_TEST;
+    delete process.env.AGENTARENA_BLOCKED_TEST;
   }
 });
 
 test("runBenchmark supports step-level env allowlists and inline overrides", async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-runner-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-runner-"));
   const repoPath = path.join(tempDir, "repo");
   const outputPath = path.join(tempDir, "output");
   const taskPath = path.join(tempDir, "task.json");
@@ -88,12 +88,12 @@ test("runBenchmark supports step-level env allowlists and inline overrides", asy
   await writeFile(path.join(repoPath, "README.md"), "# Temp Repo\n", "utf8");
   await writeJson(path.join(repoPath, "package.json"), { name: "temp-repo", version: "0.0.0" });
 
-  process.env.REPOARENA_STEP_ONLY = "step-visible";
-  process.env.REPOARENA_SHOULD_STAY_BLOCKED = "blocked";
+  process.env.AGENTARENA_STEP_ONLY = "step-visible";
+  process.env.AGENTARENA_SHOULD_STAY_BLOCKED = "blocked";
 
   try {
     await writeJson(taskPath, {
-    schemaVersion: "repoarena.taskpack/v1",
+    schemaVersion: "agentarena.taskpack/v1",
     id: "step-env-demo",
     title: "Step Env Demo",
     prompt: "Create a benchmark note.",
@@ -101,12 +101,12 @@ test("runBenchmark supports step-level env allowlists and inline overrides", asy
     setupCommands: [
       {
         label: "Write step env marker",
-        envAllowList: ["REPOARENA_STEP_ONLY"],
+        envAllowList: ["AGENTARENA_STEP_ONLY"],
         env: {
-          REPOARENA_INLINE_SETUP: "inline-setup"
+          AGENTARENA_INLINE_SETUP: "inline-setup"
         },
         command:
-          "node -e \"const fs=require('node:fs');fs.writeFileSync('step-env-setup.txt',[(process.env.REPOARENA_STEP_ONLY||''),(process.env.REPOARENA_INLINE_SETUP||''),(process.env.REPOARENA_SHOULD_STAY_BLOCKED||'')].join('|'))\""
+          "node -e \"const fs=require('node:fs');fs.writeFileSync('step-env-setup.txt',[(process.env.AGENTARENA_STEP_ONLY||''),(process.env.AGENTARENA_INLINE_SETUP||''),(process.env.AGENTARENA_SHOULD_STAY_BLOCKED||'')].join('|'))\""
       }
     ],
     judges: [
@@ -114,22 +114,22 @@ test("runBenchmark supports step-level env allowlists and inline overrides", asy
         id: "step-env-judge",
         type: "command",
         label: "Step env is available only where configured",
-        envAllowList: ["REPOARENA_STEP_ONLY"],
+        envAllowList: ["AGENTARENA_STEP_ONLY"],
         env: {
-          REPOARENA_INLINE_JUDGE: "inline-judge"
+          AGENTARENA_INLINE_JUDGE: "inline-judge"
         },
         command:
-          "node -e \"const fs=require('node:fs');const setup=fs.readFileSync('step-env-setup.txt','utf8');const judge=[(process.env.REPOARENA_STEP_ONLY||''),(process.env.REPOARENA_INLINE_JUDGE||''),(process.env.REPOARENA_SHOULD_STAY_BLOCKED||'')].join('|');process.exit(setup==='step-visible|inline-setup|'&&judge==='step-visible|inline-judge|' ? 0 : 1)\""
+          "node -e \"const fs=require('node:fs');const setup=fs.readFileSync('step-env-setup.txt','utf8');const judge=[(process.env.AGENTARENA_STEP_ONLY||''),(process.env.AGENTARENA_INLINE_JUDGE||''),(process.env.AGENTARENA_SHOULD_STAY_BLOCKED||'')].join('|');process.exit(setup==='step-visible|inline-setup|'&&judge==='step-visible|inline-judge|' ? 0 : 1)\""
       }
     ],
     teardownCommands: [
       {
         label: "Cleanup step env marker",
         env: {
-          REPOARENA_INLINE_TEARDOWN: "inline-teardown"
+          AGENTARENA_INLINE_TEARDOWN: "inline-teardown"
         },
         command:
-          "node -e \"const fs=require('node:fs');const value=(process.env.REPOARENA_INLINE_TEARDOWN||'')+'|'+(process.env.REPOARENA_STEP_ONLY||'');if(value!=='inline-teardown|'){process.exit(1)}fs.rmSync('step-env-setup.txt',{force:true})\""
+          "node -e \"const fs=require('node:fs');const value=(process.env.AGENTARENA_INLINE_TEARDOWN||'')+'|'+(process.env.AGENTARENA_STEP_ONLY||'');if(value!=='inline-teardown|'){process.exit(1)}fs.rmSync('step-env-setup.txt',{force:true})\""
       }
     ]
   });
@@ -148,13 +148,13 @@ test("runBenchmark supports step-level env allowlists and inline overrides", asy
 
   await rm(tempDir, { recursive: true, force: true });
   } finally {
-    delete process.env.REPOARENA_STEP_ONLY;
-    delete process.env.REPOARENA_SHOULD_STAY_BLOCKED;
+    delete process.env.AGENTARENA_STEP_ONLY;
+    delete process.env.AGENTARENA_SHOULD_STAY_BLOCKED;
   }
 });
 
 test("runBenchmark executes setup and teardown commands in declaration order", async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-runner-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-runner-"));
   const repoPath = path.join(tempDir, "repo");
   const outputPath = path.join(tempDir, "output");
   const taskPath = path.join(tempDir, "task.json");
@@ -165,7 +165,7 @@ test("runBenchmark executes setup and teardown commands in declaration order", a
   await writeJson(path.join(repoPath, "package.json"), { name: "temp-repo", version: "0.0.0" });
 
   await writeJson(taskPath, {
-    schemaVersion: "repoarena.taskpack/v1",
+    schemaVersion: "agentarena.taskpack/v1",
     id: "ordered-hooks",
     title: "Ordered Hooks",
     prompt: "Run ordered setup and teardown hooks.",
@@ -222,7 +222,7 @@ test("runBenchmark executes setup and teardown commands in declaration order", a
 });
 
 test("runBenchmark supports built-in file, glob, count, and json judges", async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-runner-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-runner-"));
   const repoPath = path.join(tempDir, "repo");
   const outputPath = path.join(tempDir, "output");
   const taskPath = path.join(tempDir, "task.json");
@@ -233,7 +233,7 @@ test("runBenchmark supports built-in file, glob, count, and json judges", async 
   await writeJson(path.join(repoPath, "package.json"), { name: "temp-repo", version: "0.0.0" });
 
   await writeJson(taskPath, {
-    schemaVersion: "repoarena.taskpack/v1",
+    schemaVersion: "agentarena.taskpack/v1",
     id: "builtin-judges",
     title: "Built-in Judges",
     prompt: "Run file and JSON assertions.",
@@ -241,7 +241,7 @@ test("runBenchmark supports built-in file, glob, count, and json judges", async 
       {
         label: "Prepare fixture files",
         command:
-          "node -e \"const fs=require('node:fs');fs.mkdirSync('fixtures/nested',{recursive:true});fs.writeFileSync('fixtures/note.txt','hello repoarena');fs.writeFileSync('fixtures/nested/extra.txt','extra');fs.writeFileSync('fixtures/config.json',JSON.stringify({enabled:true,name:'repoarena'}));\""
+          "node -e \"const fs=require('node:fs');fs.mkdirSync('fixtures/nested',{recursive:true});fs.writeFileSync('fixtures/note.txt','hello agentarena');fs.writeFileSync('fixtures/nested/extra.txt','extra');fs.writeFileSync('fixtures/config.json',JSON.stringify({enabled:true,name:'agentarena'}));\""
       }
     ],
     judges: [
@@ -254,9 +254,9 @@ test("runBenchmark supports built-in file, glob, count, and json judges", async 
       {
         id: "note-contains",
         type: "file-contains",
-        label: "Fixture note mentions repoarena",
+        label: "Fixture note mentions agentarena",
         path: "fixtures/note.txt",
-        pattern: "repoarena"
+        pattern: "agentarena"
       },
       {
         id: "config-enabled",
@@ -307,7 +307,7 @@ test("runBenchmark supports built-in file, glob, count, and json judges", async 
 });
 
 test("runBenchmark supports snapshot and json-schema judges", async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-runner-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-runner-"));
   const repoPath = path.join(tempDir, "repo");
   const outputPath = path.join(tempDir, "output");
   const taskPath = path.join(tempDir, "task.json");
@@ -318,7 +318,7 @@ test("runBenchmark supports snapshot and json-schema judges", async () => {
   await writeJson(path.join(repoPath, "package.json"), { name: "temp-repo", version: "0.0.0" });
 
   await writeJson(taskPath, {
-    schemaVersion: "repoarena.taskpack/v1",
+    schemaVersion: "agentarena.taskpack/v1",
     id: "advanced-judges",
     title: "Advanced Judges",
     prompt: "Run snapshot and schema assertions.",
@@ -326,7 +326,7 @@ test("runBenchmark supports snapshot and json-schema judges", async () => {
       {
         label: "Prepare snapshot fixtures",
         command:
-          "node -e \"const fs=require('node:fs');fs.mkdirSync('fixtures',{recursive:true});fs.writeFileSync('fixtures/actual.txt','hello snapshot\\n');fs.writeFileSync('fixtures/expected.txt','hello snapshot\\n');fs.writeFileSync('fixtures/config.json',JSON.stringify({enabled:true,name:'repoarena'}));fs.writeFileSync('fixtures/schema.json',JSON.stringify({type:'object',required:['enabled','name'],properties:{enabled:{type:'boolean'},name:{type:'string'}}}));\""
+          "node -e \"const fs=require('node:fs');fs.mkdirSync('fixtures',{recursive:true});fs.writeFileSync('fixtures/actual.txt','hello snapshot\\n');fs.writeFileSync('fixtures/expected.txt','hello snapshot\\n');fs.writeFileSync('fixtures/config.json',JSON.stringify({enabled:true,name:'agentarena'}));fs.writeFileSync('fixtures/schema.json',JSON.stringify({type:'object',required:['enabled','name'],properties:{enabled:{type:'boolean'},name:{type:'string'}}}));\""
       }
     ],
     judges: [
@@ -371,7 +371,7 @@ test("runBenchmark supports snapshot and json-schema judges", async () => {
 });
 
 test("runBenchmark parses structured test/lint judges and computes diff precision", async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-runner-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-runner-"));
   const repoPath = path.join(tempDir, "repo");
   const outputPath = path.join(tempDir, "output");
   const taskPath = path.join(tempDir, "task.json");
@@ -381,7 +381,7 @@ test("runBenchmark parses structured test/lint judges and computes diff precisio
   await writeJson(path.join(repoPath, "package.json"), { name: "temp-repo", version: "0.0.0" });
 
   await writeJson(taskPath, {
-    schemaVersion: "repoarena.taskpack/v1",
+    schemaVersion: "agentarena.taskpack/v1",
     id: "structured-quality-signals",
     title: "Structured Quality Signals",
     prompt: "Produce a demo change and emit structured judge reports.",
@@ -392,16 +392,16 @@ test("runBenchmark parses structured test/lint judges and computes diff precisio
         type: "test-result",
         label: "Structured test results",
         command:
-          "node -e \"const fs=require('node:fs');fs.mkdirSync('.repoarena',{recursive:true});fs.writeFileSync('.repoarena/test-results.json', JSON.stringify({success:true,numTotalTests:3,numPassedTests:2,numFailedTests:0,numPendingTests:1,numTodoTests:0}));\"",
-        reportFile: ".repoarena/test-results.json"
+          "node -e \"const fs=require('node:fs');fs.mkdirSync('.agentarena',{recursive:true});fs.writeFileSync('.agentarena/test-results.json', JSON.stringify({success:true,numTotalTests:3,numPassedTests:2,numFailedTests:0,numPendingTests:1,numTodoTests:0}));\"",
+        reportFile: ".agentarena/test-results.json"
       },
       {
         id: "lint-json",
         type: "lint-check",
         label: "Structured lint results",
         command:
-          "node -e \"const fs=require('node:fs');fs.mkdirSync('.repoarena',{recursive:true});fs.writeFileSync('.repoarena/lint-results.json', JSON.stringify([{filePath:'README.md',errorCount:0,warningCount:1,messages:[{severity:1,message:'warn'}]}]));\"",
-        reportFile: ".repoarena/lint-results.json",
+          "node -e \"const fs=require('node:fs');fs.mkdirSync('.agentarena',{recursive:true});fs.writeFileSync('.agentarena/lint-results.json', JSON.stringify([{filePath:'README.md',errorCount:0,warningCount:1,messages:[{severity:1,message:'warn'}]}]));\"",
+        reportFile: ".agentarena/lint-results.json",
         maxWarnings: 1
       }
     ]
@@ -427,7 +427,7 @@ test("runBenchmark parses structured test/lint judges and computes diff precisio
 });
 
 test("runBenchmark can update snapshot files when enabled", async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-runner-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-runner-"));
   const repoPath = path.join(tempDir, "repo");
   const outputPath = path.join(tempDir, "output");
   const taskPath = path.join(tempDir, "task.json");
@@ -437,7 +437,7 @@ test("runBenchmark can update snapshot files when enabled", async () => {
   await writeJson(path.join(repoPath, "package.json"), { name: "temp-repo", version: "0.0.0" });
 
   await writeJson(taskPath, {
-    schemaVersion: "repoarena.taskpack/v1",
+    schemaVersion: "agentarena.taskpack/v1",
     id: "update-snapshot",
     title: "Update Snapshot",
     prompt: "Refresh snapshot fixture.",
@@ -477,7 +477,7 @@ test("runBenchmark can update snapshot files when enabled", async () => {
 });
 
 test("runBenchmark cleans up workspaces when cleanupWorkspaces is enabled", async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-runner-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-runner-"));
   const repoPath = path.join(tempDir, "repo");
   const outputPath = path.join(tempDir, "output");
   const taskPath = path.join(tempDir, "task.json");
@@ -487,7 +487,7 @@ test("runBenchmark cleans up workspaces when cleanupWorkspaces is enabled", asyn
   await writeJson(path.join(repoPath, "package.json"), { name: "temp-repo", version: "0.0.0" });
 
   await writeJson(taskPath, {
-    schemaVersion: "repoarena.taskpack/v1",
+    schemaVersion: "agentarena.taskpack/v1",
     id: "cleanup-demo",
     title: "Cleanup Demo",
     prompt: "Test workspace cleanup.",
@@ -527,7 +527,7 @@ test("runBenchmark cleans up workspaces when cleanupWorkspaces is enabled", asyn
 });
 
 test("runBenchmark preserves workspaces when cleanupWorkspaces is not set", async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-runner-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-runner-"));
   const repoPath = path.join(tempDir, "repo");
   const outputPath = path.join(tempDir, "output");
   const taskPath = path.join(tempDir, "task.json");
@@ -537,7 +537,7 @@ test("runBenchmark preserves workspaces when cleanupWorkspaces is not set", asyn
   await writeJson(path.join(repoPath, "package.json"), { name: "temp-repo", version: "0.0.0" });
 
   await writeJson(taskPath, {
-    schemaVersion: "repoarena.taskpack/v1",
+    schemaVersion: "agentarena.taskpack/v1",
     id: "no-cleanup-demo",
     title: "No Cleanup Demo",
     prompt: "Test workspace preserved.",
@@ -569,7 +569,7 @@ test("runBenchmark preserves workspaces when cleanupWorkspaces is not set", asyn
 });
 
 test("runBenchmark uses builtin repo when task has repoSource", async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-runner-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-runner-"));
   const builtinRepoPath = path.join(tempDir, "builtin-repos", "node-starter");
   const userRepoPath = path.join(tempDir, "user-repo");
   const outputPath = path.join(tempDir, "output");
@@ -582,7 +582,7 @@ test("runBenchmark uses builtin repo when task has repoSource", async () => {
   await writeFile(path.join(userRepoPath, "README.md"), "# User Repo\n", "utf8");
 
   await writeJson(taskPath, {
-    schemaVersion: "repoarena.taskpack/v1",
+    schemaVersion: "agentarena.taskpack/v1",
     id: "builtin-repo-demo",
     title: "Builtin Repo Demo",
     prompt: "Test builtin repo source.",
@@ -613,7 +613,7 @@ test("runBenchmark uses builtin repo when task has repoSource", async () => {
 });
 
 test("runBenchmark emits onProgress events", async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-runner-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-runner-"));
   const repoPath = path.join(tempDir, "repo");
   const outputPath = path.join(tempDir, "output");
   const taskPath = path.join(tempDir, "task.json");
@@ -623,7 +623,7 @@ test("runBenchmark emits onProgress events", async () => {
   await writeJson(path.join(repoPath, "package.json"), { name: "temp-repo", version: "0.0.0" });
 
   await writeJson(taskPath, {
-    schemaVersion: "repoarena.taskpack/v1",
+    schemaVersion: "agentarena.taskpack/v1",
     id: "progress-demo",
     title: "Progress Demo",
     prompt: "Test progress events.",
@@ -659,7 +659,7 @@ test("runBenchmark emits onProgress events", async () => {
 });
 
 test("runBenchmark returns cancelled results and still runs teardown after abort", async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-runner-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-runner-"));
   const repoPath = path.join(tempDir, "repo");
   const outputPath = path.join(tempDir, "output");
   const taskPath = path.join(tempDir, "task-cancel.json");
@@ -669,7 +669,7 @@ test("runBenchmark returns cancelled results and still runs teardown after abort
   await writeJson(path.join(repoPath, "package.json"), { name: "temp-repo", version: "0.0.0" });
 
   await writeJson(taskPath, {
-    schemaVersion: "repoarena.taskpack/v1",
+    schemaVersion: "agentarena.taskpack/v1",
     id: "cancel-demo",
     title: "Cancel Demo",
     prompt: "Cancel a benchmark while the agent is running.",

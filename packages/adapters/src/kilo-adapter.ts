@@ -6,7 +6,7 @@ import type {
   AdapterPreflightResult,
   AgentAdapter,
   AgentResolvedRuntime
-} from "@repoarena/core";
+} from "@agentarena/core";
 import { agentTimeoutMs, runProcess } from "./process-utils.js";
 import {
   buildAgentPrompt,
@@ -35,7 +35,7 @@ const KILO_CAPABILITY: AdapterCapability = {
 };
 
 async function resolveKiloInvocation(): Promise<InvocationSpec> {
-  const command = process.env.REPOARENA_KILO_BIN?.trim() || "kilo";
+  const command = process.env.AGENTARENA_KILO_BIN?.trim() || "kilo";
   return {
     command,
     argsPrefix: [],

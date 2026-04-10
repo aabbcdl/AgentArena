@@ -3,7 +3,7 @@ import { createReadStream, promises as fs } from "node:fs";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
 import { createGunzip, createGzip } from "node:zlib";
-import { ensureDirectory, type TraceEvent } from "@repoarena/core";
+import { ensureDirectory, type TraceEvent } from "@agentarena/core";
 
 export interface TraceFilter {
   agentId?: string;

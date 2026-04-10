@@ -1,10 +1,10 @@
-schemaVersion: repoarena.taskpack/v1
+schemaVersion: agentarena.taskpack/v1
 id: official-performance-optimize
 title: Official Performance Optimize
 description: Identify and fix performance bottlenecks in the codebase.
 metadata:
   source: official
-  owner: RepoArena
+  owner: AgentArena
   difficulty: hard
   objective: Test agent's ability to identify and fix performance issues without breaking functionality.
   repoTypes:
@@ -78,14 +78,14 @@ judges:
   - id: tests-still-pass
     type: test-result
     label: All tests pass after optimization
-    command: node -e "const fs=require('node:fs');const {spawnSync}=require('node:child_process');const report='.repoarena/performance-optimize-test-results.json';fs.mkdirSync('.repoarena',{recursive:true});for(const [cmd,args] of [['pnpm',['test','--','--runInBand','--json','--outputFile',report]],['pnpm',['test','--','--runInBand','--reporter=json','--outputFile',report]],['npm',['run','test','--','--runInBand','--json','--outputFile',report]],['npm',['run','test','--','--runInBand','--reporter=json','--outputFile',report]]]){fs.rmSync(report,{force:true});const r=spawnSync(cmd,args,{stdio:'inherit',shell:process.platform==='win32'});if(!r.error&&fs.existsSync(report)&&fs.statSync(report).size>0){process.exit(r.status??1)}}process.exit(1)"
+    command: node -e "const fs=require('node:fs');const {spawnSync}=require('node:child_process');const report='.agentarena/performance-optimize-test-results.json';fs.mkdirSync('.agentarena',{recursive:true});for(const [cmd,args] of [['pnpm',['test','--','--runInBand','--json','--outputFile',report]],['pnpm',['test','--','--runInBand','--reporter=json','--outputFile',report]],['npm',['run','test','--','--runInBand','--json','--outputFile',report]],['npm',['run','test','--','--runInBand','--reporter=json','--outputFile',report]]]){fs.rmSync(report,{force:true});const r=spawnSync(cmd,args,{stdio:'inherit',shell:process.platform==='win32'});if(!r.error&&fs.existsSync(report)&&fs.statSync(report).size>0){process.exit(r.status??1)}}process.exit(1)"
     format: auto
-    reportFile: .repoarena/performance-optimize-test-results.json
+    reportFile: .agentarena/performance-optimize-test-results.json
     timeoutMs: 120000
   - id: no-unsafe-patterns
     type: command
     label: No unsafe optimization patterns
-    command: node -e "const fs=require('node:fs');const path=require('node:path');const banned=[/\bany\b/,/@ts-ignore/,/\beval\s*\(/,/\bFunction\s*\(/];const hits=[];function walk(dir){if(!fs.existsSync(dir)) return;for(const entry of fs.readdirSync(dir,{withFileTypes:true})){if(['.git','node_modules','.repoarena'].includes(entry.name)) continue;const full=path.join(dir,entry.name);if(entry.isDirectory()) walk(full); else if(/\.[cm]?[jt]sx?$/.test(entry.name)&&!entry.name.endsWith('.d.ts')){const content=fs.readFileSync(full,'utf8');if(banned.some((rule)=>rule.test(content))) hits.push(full)}}}['packages','src','lib'].forEach(walk);if(hits.length>0){console.error(hits.join('\n'));process.exit(1)}"
+    command: node -e "const fs=require('node:fs');const path=require('node:path');const banned=[/\bany\b/,/@ts-ignore/,/\beval\s*\(/,/\bFunction\s*\(/];const hits=[];function walk(dir){if(!fs.existsSync(dir)) return;for(const entry of fs.readdirSync(dir,{withFileTypes:true})){if(['.git','node_modules','.agentarena'].includes(entry.name)) continue;const full=path.join(dir,entry.name);if(entry.isDirectory()) walk(full); else if(/\.[cm]?[jt]sx?$/.test(entry.name)&&!entry.name.endsWith('.d.ts')){const content=fs.readFileSync(full,'utf8');if(banned.some((rule)=>rule.test(content))) hits.push(full)}}}['packages','src','lib'].forEach(walk);if(hits.length>0){console.error(hits.join('\n'));process.exit(1)}"
     timeoutMs: 10000
   - id: performance-improved
     type: command

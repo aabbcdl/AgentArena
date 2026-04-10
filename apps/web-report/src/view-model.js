@@ -1,5 +1,5 @@
 /**
- * View model for RepoArena Web Report.
+ * View model for AgentArena Web Report.
  *
  * TODO: Migrate to TypeScript for type safety.
  * This file contains critical scoring logic that should be type-checked.
@@ -514,7 +514,7 @@ export function buildShareCard(run, options = {}) {
   const verdict = getRunVerdict(run, { scoreWeights });
   const scoreModeLabel = options.scoreModeLabel ?? null;
   const lines = [
-    `RepoArena | ${run.task.title}`,
+    `AgentArena | ${run.task.title}`,
     `${summary.successCount}/${summary.totalAgents} agents passed`,
     `Failed: ${summary.failedCount}`,
     `Tokens: ${summary.totalTokens}`,
@@ -591,7 +591,7 @@ export function buildShareCardSvg(run, options = {}) {
     ? `${(verdict.fastest.durationMs / 1000).toFixed(1)}s`
     : "n/a";
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-label="RepoArena share card">
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-label="AgentArena share card">
   <defs>
     <linearGradient id="card-bg" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0%" stop-color="#0a0a0f" />
@@ -623,7 +623,7 @@ export function buildShareCardSvg(run, options = {}) {
   </g>
 
   <!-- Brand text -->
-  <text x="114" y="72" fill="#6366f1" font-family="${font}" font-size="18" font-weight="700" letter-spacing="3">REPOARENA</text>
+  <text x="114" y="72" fill="#6366f1" font-family="${font}" font-size="18" font-weight="700" letter-spacing="3">AGENTARENA</text>
 
   <!-- Task title -->
   <text x="68" y="130" fill="#f1f5f9" font-family="${font}" font-size="36" font-weight="700">${esc(truncate(run.task.title, 50))}</text>
@@ -665,7 +665,7 @@ export function buildShareCardSvg(run, options = {}) {
   <!-- Footer -->
   <rect x="0" y="590" width="1200" height="40" fill="#08080d" />
   <text x="68" y="616" fill="#475569" font-family="${font}" font-size="13">Run ${esc(truncate(run.runId, 30))} · ${esc(run.createdAt)}</text>
-  <text x="1132" y="616" fill="#6366f1" font-family="${font}" font-size="13" text-anchor="end" font-weight="600">repoarena.dev</text>
+  <text x="1132" y="616" fill="#6366f1" font-family="${font}" font-size="13" text-anchor="end" font-weight="600">agentarena.dev</text>
 </svg>`;
 }
 

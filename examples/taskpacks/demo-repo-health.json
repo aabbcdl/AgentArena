@@ -1,9 +1,9 @@
 {
-  "schemaVersion": "repoarena.taskpack/v1",
+  "schemaVersion": "agentarena.taskpack/v1",
   "id": "demo-repo-health",
   "title": "Demo Repo Health Check",
-  "description": "A starter task pack that exercises the RepoArena vertical slice against a real repository snapshot.",
-  "prompt": "Inspect the repository, leave a concise benchmark note in repoarena-demo/, and keep the repo in a healthy state.",
+  "description": "A starter task pack that exercises the AgentArena vertical slice against a real repository snapshot.",
+  "prompt": "Inspect the repository, leave a concise benchmark note in agentarena-demo/, and keep the repo in a healthy state.",
   "judges": [
     {
       "id": "readme-exists",
@@ -20,9 +20,9 @@
     {
       "id": "readme-mentions-brand",
       "type": "file-contains",
-      "label": "README mentions RepoArena",
+      "label": "README mentions AgentArena",
       "path": "README.md",
-      "pattern": "RepoArena"
+      "pattern": "AgentArena"
     },
     {
       "id": "package-name",
@@ -30,7 +30,7 @@
       "label": "Package name matches repository brand",
       "path": "package.json",
       "pointer": "/name",
-      "expected": "repoarena"
+      "expected": "agentarena"
     }
   ]
 }

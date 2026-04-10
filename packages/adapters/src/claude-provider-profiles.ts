@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { ClaudeProviderProfile, ClaudeProviderRiskFlag } from "@repoarena/core";
+import type { ClaudeProviderProfile, ClaudeProviderRiskFlag } from "@agentarena/core";
 
 interface ProfileRegistryFile {
   schemaVersion: 1;
@@ -41,27 +41,27 @@ const BUILT_IN_OFFICIAL_PROFILE: ClaudeProviderProfile = {
 };
 
 function appDataRoot(): string {
-  if (process.env.REPOARENA_CLAUDE_PROFILE_ROOT?.trim()) {
-    return process.env.REPOARENA_CLAUDE_PROFILE_ROOT.trim();
+  if (process.env.AGENTARENA_CLAUDE_PROFILE_ROOT?.trim()) {
+    return process.env.AGENTARENA_CLAUDE_PROFILE_ROOT.trim();
   }
 
   if (process.platform === "win32") {
-    return path.join(process.env.APPDATA ?? path.join(os.homedir(), "AppData", "Roaming"), "RepoArena");
+    return path.join(process.env.APPDATA ?? path.join(os.homedir(), "AppData", "Roaming"), "AgentArena");
   }
 
-  return path.join(process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), ".config"), "repoarena");
+  return path.join(process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), ".config"), "agentarena");
 }
 
 function registryPath(): string {
-  if (process.env.REPOARENA_CLAUDE_PROFILES_FILE?.trim()) {
-    return process.env.REPOARENA_CLAUDE_PROFILES_FILE.trim();
+  if (process.env.AGENTARENA_CLAUDE_PROFILES_FILE?.trim()) {
+    return process.env.AGENTARENA_CLAUDE_PROFILES_FILE.trim();
   }
 
   return path.join(appDataRoot(), "claude-provider-profiles.json");
 }
 
 function secretTarget(profileId: string): string {
-  const prefix = process.env.REPOARENA_CLAUDE_SECRET_PREFIX?.trim() || "RepoArena/claude-profile/";
+  const prefix = process.env.AGENTARENA_CLAUDE_SECRET_PREFIX?.trim() || "AgentArena/claude-profile/";
   return `${prefix}${profileId}`;
 }
 
@@ -207,7 +207,7 @@ Add-Type -AssemblyName System.Runtime.WindowsRuntime
 $null = [Windows.Security.Credentials.PasswordVault, Windows.Security.Credentials, ContentType = WindowsRuntime]
 $vault = New-Object Windows.Security.Credentials.PasswordVault
 $resource = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${resource}'))
-$user = 'repoarena'
+$user = 'agentarena'
 $password = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${password}'))
 try {
   try {
@@ -233,7 +233,7 @@ Add-Type -AssemblyName System.Runtime.WindowsRuntime
 $null = [Windows.Security.Credentials.PasswordVault, Windows.Security.Credentials, ContentType = WindowsRuntime]
 $vault = New-Object Windows.Security.Credentials.PasswordVault
 $resource = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${resource}'))
-$user = 'repoarena'
+$user = 'agentarena'
 try {
   $credential = $vault.Retrieve($resource, $user)
   $credential.RetrievePassword()
@@ -254,7 +254,7 @@ Add-Type -AssemblyName System.Runtime.WindowsRuntime
 $null = [Windows.Security.Credentials.PasswordVault, Windows.Security.Credentials, ContentType = WindowsRuntime]
 $vault = New-Object Windows.Security.Credentials.PasswordVault
 $resource = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${resource}'))
-$user = 'repoarena'
+$user = 'agentarena'
 try {
   $credential = $vault.Retrieve($resource, $user)
   $credential.RetrievePassword()
@@ -310,7 +310,7 @@ async function hasStoredSecret(profileId: string): Promise<boolean> {
 
 export function supportsWindowsCredentialManager(): boolean {
   // Legacy public helper kept for compatibility with existing callers/tests.
-  // RepoArena now supports profile secret storage on every platform.
+  // AgentArena now supports profile secret storage on every platform, even if the backend differs.
   return true;
 }
 

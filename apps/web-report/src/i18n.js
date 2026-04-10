@@ -1,12 +1,12 @@
 ﻿const en = {
   appTitle: "Web Report",
   appDescription:
-    "Open one RepoArena result and inspect who passed, what changed, and where the benchmark failed.",
+    "Open one AgentArena result and inspect who passed, what changed, and where the benchmark failed.",
   languageLabel: "Language",
   languageChineseLabel: "Chinese",
   runsFolderTitle: "Recommended: Load Run Folder",
   runsFolderHint:
-    "Select one RepoArena run folder or the whole `.repoarena` results folder. This is the easiest path.",
+    "Select one AgentArena run folder or the whole `.agentarena` results folder. This is the easiest path.",
   summaryFileTitle: "Load Summary JSON",
   summaryFileHint: "Use this when you only want to open a single `summary.json` file.",
   markdownFileTitle: "Optional: Load Markdown Summary",
@@ -15,7 +15,7 @@
   workflowTitle: "Recommended Flow",
   workflowSteps: [
     'Click "Recommended: Load Run Folder".',
-    "Select one run folder such as `.repoarena/manual-run`, or the parent results folder.",
+    "Select one run folder such as `.agentarena/manual-run`, or the parent results folder.",
     "After the report loads, review the verdict cards and click an agent to inspect details."
   ],
   nextStepsTitle: "Next Step",
@@ -25,11 +25,11 @@
     `Loaded ${runCount} run(s). Current run is "${run.task.title}". Next: review the top verdict cards, then click an agent on the left or in Agent Compare.`,
   runsHeading: "Runs",
   agentsHeading: "Agents",
-  heroEyebrow: "RepoArena",
+  heroEyebrow: "AgentArena",
   heroTitle: "Inspect one benchmark run without digging through raw files.",
   heroDescription:
-    "RepoArena compares AI coding agents on the same repository task, then turns the result into a reviewable, shareable report.",
-  heroWhatTitle: "What RepoArena does",
+    "AgentArena compares AI coding agents on the same repository task, then turns the result into a reviewable, shareable report.",
+  heroWhatTitle: "What AgentArena does",
   heroWhatBody:
     "It runs multiple coding agents against the same repository task, records success, time, tokens, cost, file changes, and judge results, then shows where one agent performed better or failed.",
   heroHowTitle: "How to start",
@@ -38,7 +38,7 @@
     'Open that folder here with "Recommended: Load Run Folder".',
     "Once loaded, compare agents, inspect judge failures, and export summary text or a share card."
   ],
-  topbarEyebrow: "RepoArena · Run Overview",
+  topbarEyebrow: "AgentArena · Run Overview",
   expandLogs: "Expand Logs",
   collapseLogs: "Collapse Logs",
   runCompareTitle: "Run Compare",
@@ -133,14 +133,14 @@
   judgeStatusPass: "Pass",
   judgeStatusFail: "Fail",
   launcherTitle: "Run Benchmark",
-  launcherDescription: "Use the local RepoArena service to start a benchmark from this page.",
+  launcherDescription: "Use the local AgentArena service to start a benchmark from this page.",
   launcherRepoLabel: "Repository Path",
   launcherTaskSelectLabel: "Official Task Pack",
   launcherTaskPathLabel: "Task Pack Path",
   launcherOutputLabel: "Output Folder",
   launcherAdhocPromptLabel: "Custom Prompt",
   launcherAdhocPromptHint:
-    "Enter a prompt and RepoArena will create a temporary task pack and dispatch it to the selected agents.",
+    "Enter a prompt and AgentArena will create a temporary task pack and dispatch it to the selected agents.",
   launcherAgentsLabel: "Agents",
   launcherProbeAuthLabel: "Probe auth before run",
   launcherConcurrencyLabel: "Concurrency",
@@ -213,12 +213,12 @@
 const zhCN = {
   ...en,
   appTitle: "交互报告",
-  appDescription: "打开一次 RepoArena 跑分结果，直接看谁成功、改了什么、哪里失败了。",
+  appDescription: "打开一次 AgentArena 跑分结果，直接看谁成功、改了什么、哪里失败了。",
   languageLabel: "语言",
   languageChineseLabel: "中文",
   runsFolderTitle: "推荐：打开结果文件夹",
   runsFolderHint:
-    "选择一个 RepoArena 单次结果目录，或整个 `.repoarena` 结果目录。这是最省事的入口。",
+    "选择一个 AgentArena 单次结果目录，或整个 `.agentarena` 结果目录。这是最省事的入口。",
   summaryFileTitle: "打开 Summary JSON",
   summaryFileHint: "只有单个 `summary.json` 文件时再用这个入口。",
   markdownFileTitle: "可选：打开 Markdown Summary",
@@ -227,7 +227,7 @@ const zhCN = {
   workflowTitle: "推荐流程",
   workflowSteps: [
     "先点“推荐：打开结果文件夹”。",
-    "选择一个结果目录，例如 `.repoarena/manual-run`，或者更上层的结果目录。",
+    "选择一个结果目录，例如 `.agentarena/manual-run`，或者更上层的结果目录。",
     "报告加载后，先看顶部结论卡片，再点一个 Agent 查看细节。"
   ],
   nextStepsTitle: "下一步",
@@ -239,8 +239,8 @@ const zhCN = {
   agentsHeading: "Agents",
   heroTitle: "不用翻整份静态报告，直接看一轮 benchmark 的结论。",
   heroDescription:
-    "RepoArena 会把多个 AI coding agent 放到同一个仓库任务里比较，然后把结果整理成可审查、可分享的报告。",
-  heroWhatTitle: "RepoArena 是做什么的",
+    "AgentArena 会把多个 AI coding agent 放到同一个仓库任务里比较，然后把结果整理成可审查、可分享的报告。",
+  heroWhatTitle: "AgentArena 是做什么的",
   heroWhatBody:
     "它会在同一个仓库任务上运行多个 coding agent，统一记录成功率、耗时、Token、成本、改动文件和 judge 结果，让你知道谁更稳、谁更快、谁失败在什么地方。",
   heroHowTitle: "怎么开始",
@@ -249,7 +249,7 @@ const zhCN = {
     "在这里用“推荐：打开结果文件夹”加载结果。",
     "加载后先看对比表，再看 judge 失败原因和单个 Agent 详情。"
   ],
-  topbarEyebrow: "RepoArena · 运行总览",
+  topbarEyebrow: "AgentArena · 运行总览",
   expandLogs: "展开日志",
   collapseLogs: "收起日志",
   runCompareTitle: "Run 对比",
@@ -350,7 +350,7 @@ const zhCN = {
   judgeStatusPass: "通过",
   judgeStatusFail: "失败",
   launcherTitle: "发起 Benchmark",
-  launcherDescription: "通过本地 RepoArena 服务，直接在这个页面里发起一次 benchmark。",
+  launcherDescription: "通过本地 AgentArena 服务，直接在这个页面里发起一次 benchmark。",
   launcherRepoLabel: "仓库路径",
   launcherTaskSelectLabel: "官方任务包",
   launcherTaskPathLabel: "任务包路径",

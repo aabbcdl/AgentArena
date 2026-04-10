@@ -1,4 +1,4 @@
-import { type BenchmarkRun, formatDuration } from "@repoarena/core";
+import { type BenchmarkRun, formatDuration } from "@agentarena/core";
 import type { LeaderboardData } from "./leaderboard.js";
 import {
   escapeHtml,

@@ -18,12 +18,12 @@ Execute and troubleshoot benchmark runs.
 
 - `pnpm build` — 0 errors.
 - `pnpm test` — 0 failures.
-- `repoarena doctor` — target agents are available.
+- `agentarena doctor` — target agents are available.
 
 ## Running
 
 ```
-repoarena run --repo <path> --task <task.yaml> --agents <agent1,agent2,...> [options]
+agentarena run --repo <path> --task <task.yaml> --agents <agent1,agent2,...> [options]
 ```
 
 | Option | Values | Purpose |
@@ -36,7 +36,7 @@ repoarena run --repo <path> --task <task.yaml> --agents <agent1,agent2,...> [opt
 
 ## Output
 
-Results land in `.repoarena/runs/<run-id>/`:
+Results land in `.agentarena/runs/<run-id>/`:
 
 | File | Content |
 |------|---------|

@@ -6,7 +6,7 @@ import type {
   AdapterPreflightResult,
   AgentAdapter,
   AgentResolvedRuntime
-} from "@repoarena/core";
+} from "@agentarena/core";
 import { parseGeminiEvents } from "./event-parsers.js";
 import { agentTimeoutMs, runProcess } from "./process-utils.js";
 import {
@@ -36,7 +36,7 @@ const GEMINI_CAPABILITY: AdapterCapability = {
 };
 
 async function resolveGeminiInvocation(): Promise<InvocationSpec> {
-  const command = process.env.REPOARENA_GEMINI_BIN?.trim() || "gemini";
+  const command = process.env.AGENTARENA_GEMINI_BIN?.trim() || "gemini";
   return {
     command,
     argsPrefix: [],

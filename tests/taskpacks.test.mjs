@@ -6,27 +6,27 @@ import test from "node:test";
 import { loadTaskPack } from "../packages/taskpacks/dist/index.js";
 
 test("loadTaskPack parses schema v1 judges", async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-taskpack-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-taskpack-"));
   const taskPath = path.join(tempDir, "task.json");
 
   await writeFile(
     taskPath,
     JSON.stringify(
       {
-        schemaVersion: "repoarena.taskpack/v1",
+        schemaVersion: "agentarena.taskpack/v1",
         id: "demo",
         title: "Demo Task",
         prompt: "Do the thing",
         metadata: {
           source: "official",
-          owner: "RepoArena",
+          owner: "AgentArena",
           objective: "Demo objective",
           repoTypes: ["node"],
           tags: ["demo"],
           dependencies: [],
           judgeRationale: "Demo rationale"
         },
-        envAllowList: ["CI", "REPOARENA_TOKEN"],
+        envAllowList: ["CI", "AGENTARENA_TOKEN"],
         judges: [
           {
             id: "lint",
@@ -45,10 +45,10 @@ test("loadTaskPack parses schema v1 judges", async () => {
           {
             id: "package-name",
             type: "json-value",
-            label: "Package name is repoarena",
+            label: "Package name is agentarena",
             path: "package.json",
             pointer: "/name",
-            expected: "repoarena"
+            expected: "agentarena"
           }
         ]
       },
@@ -60,11 +60,11 @@ test("loadTaskPack parses schema v1 judges", async () => {
 
   const taskPack = await loadTaskPack(taskPath);
 
-  assert.equal(taskPack.schemaVersion, "repoarena.taskpack/v1");
+  assert.equal(taskPack.schemaVersion, "agentarena.taskpack/v1");
   assert.equal(taskPack.metadata?.source, "official");
-  assert.equal(taskPack.metadata?.owner, "RepoArena");
+  assert.equal(taskPack.metadata?.owner, "AgentArena");
   assert.deepEqual(taskPack.metadata?.repoTypes, ["node"]);
-  assert.deepEqual(taskPack.envAllowList, ["CI", "REPOARENA_TOKEN"]);
+  assert.deepEqual(taskPack.envAllowList, ["CI", "AGENTARENA_TOKEN"]);
   assert.equal(taskPack.judges[0].id, "lint");
   assert.equal(taskPack.judges[0].cwd, "app");
   assert.equal(taskPack.judges[0].timeoutMs, 15000);
@@ -72,7 +72,7 @@ test("loadTaskPack parses schema v1 judges", async () => {
   assert.equal(taskPack.judges[1].path, "README.md");
   assert.equal(taskPack.judges[2].type, "json-value");
   assert.equal(taskPack.judges[2].pointer, "/name");
-  assert.equal(taskPack.judges[2].expected, "repoarena");
+  assert.equal(taskPack.judges[2].expected, "agentarena");
   assert.deepEqual(taskPack.setupCommands, []);
   assert.deepEqual(taskPack.teardownCommands, []);
 
@@ -80,14 +80,14 @@ test("loadTaskPack parses schema v1 judges", async () => {
 });
 
 test("loadTaskPack parses structured quality judges and expectedChangedPaths", async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-taskpack-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-taskpack-"));
   const taskPath = path.join(tempDir, "task.json");
 
   await writeFile(
     taskPath,
     JSON.stringify(
       {
-        schemaVersion: "repoarena.taskpack/v1",
+        schemaVersion: "agentarena.taskpack/v1",
         id: "quality-demo",
         title: "Quality Demo",
         prompt: "Run structured quality checks",
@@ -99,7 +99,7 @@ test("loadTaskPack parses structured quality judges and expectedChangedPaths", a
             label: "Tests emit JSON",
             command: "node test-runner.js",
             format: "vitest",
-            reportFile: ".repoarena/tests.json",
+            reportFile: ".agentarena/tests.json",
             passOnNoTests: true
           },
           {
@@ -108,7 +108,7 @@ test("loadTaskPack parses structured quality judges and expectedChangedPaths", a
             label: "Lint emits JSON",
             command: "node lint-runner.js",
             format: "eslint",
-            reportFile: ".repoarena/lint.json",
+            reportFile: ".agentarena/lint.json",
             maxWarnings: 2
           }
         ]
@@ -124,18 +124,18 @@ test("loadTaskPack parses structured quality judges and expectedChangedPaths", a
   assert.deepEqual(taskPack.expectedChangedPaths, ["src/**/*.ts", "README.md"]);
   assert.equal(taskPack.judges[0].type, "test-result");
   assert.equal(taskPack.judges[0].format, "vitest");
-  assert.equal(taskPack.judges[0].reportFile, ".repoarena/tests.json");
+  assert.equal(taskPack.judges[0].reportFile, ".agentarena/tests.json");
   assert.equal(taskPack.judges[0].passOnNoTests, true);
   assert.equal(taskPack.judges[1].type, "lint-check");
   assert.equal(taskPack.judges[1].format, "eslint");
-  assert.equal(taskPack.judges[1].reportFile, ".repoarena/lint.json");
+  assert.equal(taskPack.judges[1].reportFile, ".agentarena/lint.json");
   assert.equal(taskPack.judges[1].maxWarnings, 2);
 
   await rm(tempDir, { recursive: true, force: true });
 });
 
 test("loadTaskPack keeps backward compatibility with successCommands", async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-taskpack-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-taskpack-"));
   const taskPath = path.join(tempDir, "task.json");
 
   await writeFile(
@@ -160,7 +160,7 @@ test("loadTaskPack keeps backward compatibility with successCommands", async () 
 
   const taskPack = await loadTaskPack(taskPath);
 
-  assert.equal(taskPack.schemaVersion, "repoarena.taskpack/v1");
+  assert.equal(taskPack.schemaVersion, "agentarena.taskpack/v1");
   assert.deepEqual(taskPack.envAllowList, []);
   assert.equal(taskPack.judges[0].id, "legacy-1");
   assert.equal(taskPack.judges[0].type, "command");
@@ -172,18 +172,18 @@ test("loadTaskPack keeps backward compatibility with successCommands", async () 
 });
 
 test("loadTaskPack parses setup and teardown commands", async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-taskpack-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-taskpack-"));
   const taskPath = path.join(tempDir, "task.json");
 
   await writeFile(
     taskPath,
     JSON.stringify(
       {
-        schemaVersion: "repoarena.taskpack/v1",
+        schemaVersion: "agentarena.taskpack/v1",
         id: "with-hooks",
         title: "Hooked Task",
         prompt: "Run setup and teardown",
-        envAllowList: ["REPOARENA_TOKEN"],
+        envAllowList: ["AGENTARENA_TOKEN"],
         setupCommands: [
           {
             label: "Prepare fixtures",
@@ -208,7 +208,7 @@ test("loadTaskPack parses setup and teardown commands", async () => {
 
   const taskPack = await loadTaskPack(taskPath);
 
-  assert.deepEqual(taskPack.envAllowList, ["REPOARENA_TOKEN"]);
+  assert.deepEqual(taskPack.envAllowList, ["AGENTARENA_TOKEN"]);
   assert.equal(taskPack.setupCommands[0].id, "with-hooks-setup-1");
   assert.equal(taskPack.setupCommands[0].cwd, "scripts");
   assert.equal(taskPack.teardownCommands[0].id, "with-hooks-teardown-1");
@@ -218,14 +218,14 @@ test("loadTaskPack parses setup and teardown commands", async () => {
 });
 
 test("loadTaskPack parses step-level env allowlists and overrides", async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-taskpack-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-taskpack-"));
   const taskPath = path.join(tempDir, "task.json");
 
   await writeFile(
     taskPath,
     JSON.stringify(
       {
-        schemaVersion: "repoarena.taskpack/v1",
+        schemaVersion: "agentarena.taskpack/v1",
         id: "with-step-env",
         title: "Step Env Task",
         prompt: "Run step-level env configuration",
@@ -233,9 +233,9 @@ test("loadTaskPack parses step-level env allowlists and overrides", async () => 
           {
             label: "Prepare fixtures",
             command: "node prepare.js",
-            envAllowList: ["REPOARENA_SETUP_TOKEN"],
+            envAllowList: ["AGENTARENA_SETUP_TOKEN"],
             env: {
-              REPOARENA_INLINE_SETUP: "enabled"
+              AGENTARENA_INLINE_SETUP: "enabled"
             }
           }
         ],
@@ -245,9 +245,9 @@ test("loadTaskPack parses step-level env allowlists and overrides", async () => 
             type: "command",
             label: "Judge sees extra env",
             command: "node judge.js",
-            envAllowList: ["REPOARENA_JUDGE_TOKEN"],
+            envAllowList: ["AGENTARENA_JUDGE_TOKEN"],
             env: {
-              REPOARENA_INLINE_JUDGE: "enabled"
+              AGENTARENA_INLINE_JUDGE: "enabled"
             }
           }
         ],
@@ -255,9 +255,9 @@ test("loadTaskPack parses step-level env allowlists and overrides", async () => 
           {
             label: "Cleanup fixtures",
             command: "node cleanup.js",
-            envAllowList: ["REPOARENA_TEARDOWN_TOKEN"],
+            envAllowList: ["AGENTARENA_TEARDOWN_TOKEN"],
             env: {
-              REPOARENA_INLINE_TEARDOWN: "enabled"
+              AGENTARENA_INLINE_TEARDOWN: "enabled"
             }
           }
         ]
@@ -270,25 +270,25 @@ test("loadTaskPack parses step-level env allowlists and overrides", async () => 
 
   const taskPack = await loadTaskPack(taskPath);
 
-  assert.deepEqual(taskPack.setupCommands[0].envAllowList, ["REPOARENA_SETUP_TOKEN"]);
-  assert.deepEqual(taskPack.setupCommands[0].env, { REPOARENA_INLINE_SETUP: "enabled" });
-  assert.deepEqual(taskPack.judges[0].envAllowList, ["REPOARENA_JUDGE_TOKEN"]);
-  assert.deepEqual(taskPack.judges[0].env, { REPOARENA_INLINE_JUDGE: "enabled" });
-  assert.deepEqual(taskPack.teardownCommands[0].envAllowList, ["REPOARENA_TEARDOWN_TOKEN"]);
-  assert.deepEqual(taskPack.teardownCommands[0].env, { REPOARENA_INLINE_TEARDOWN: "enabled" });
+  assert.deepEqual(taskPack.setupCommands[0].envAllowList, ["AGENTARENA_SETUP_TOKEN"]);
+  assert.deepEqual(taskPack.setupCommands[0].env, { AGENTARENA_INLINE_SETUP: "enabled" });
+  assert.deepEqual(taskPack.judges[0].envAllowList, ["AGENTARENA_JUDGE_TOKEN"]);
+  assert.deepEqual(taskPack.judges[0].env, { AGENTARENA_INLINE_JUDGE: "enabled" });
+  assert.deepEqual(taskPack.teardownCommands[0].envAllowList, ["AGENTARENA_TEARDOWN_TOKEN"]);
+  assert.deepEqual(taskPack.teardownCommands[0].env, { AGENTARENA_INLINE_TEARDOWN: "enabled" });
 
   await rm(tempDir, { recursive: true, force: true });
 });
 
 test("loadTaskPack parses file-contains judges with regex options", async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-taskpack-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-taskpack-"));
   const taskPath = path.join(tempDir, "task.json");
 
   await writeFile(
     taskPath,
     JSON.stringify(
       {
-        schemaVersion: "repoarena.taskpack/v1",
+        schemaVersion: "agentarena.taskpack/v1",
         id: "file-contains-demo",
         title: "File Contains Demo",
         prompt: "Check file content",
@@ -298,7 +298,7 @@ test("loadTaskPack parses file-contains judges with regex options", async () => 
             type: "file-contains",
             label: "README contains brand",
             path: "README.md",
-            pattern: "^# RepoArena$",
+            pattern: "^# AgentArena$",
             regex: true,
             flags: "m"
           }
@@ -314,7 +314,7 @@ test("loadTaskPack parses file-contains judges with regex options", async () => 
 
   assert.equal(taskPack.judges[0].type, "file-contains");
   assert.equal(taskPack.judges[0].path, "README.md");
-  assert.equal(taskPack.judges[0].pattern, "^# RepoArena$");
+  assert.equal(taskPack.judges[0].pattern, "^# AgentArena$");
   assert.equal(taskPack.judges[0].regex, true);
   assert.equal(taskPack.judges[0].flags, "m");
 
@@ -322,13 +322,13 @@ test("loadTaskPack parses file-contains judges with regex options", async () => 
 });
 
 test("loadTaskPack supports YAML task packs with glob and file-count judges", async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-taskpack-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-taskpack-"));
   const taskPath = path.join(tempDir, "task.yaml");
 
   await writeFile(
     taskPath,
     [
-      "schemaVersion: repoarena.taskpack/v1",
+      "schemaVersion: agentarena.taskpack/v1",
       "id: yaml-demo",
       "title: YAML Demo",
       "prompt: Check YAML loading",
@@ -361,14 +361,14 @@ test("loadTaskPack supports YAML task packs with glob and file-count judges", as
 });
 
 test("loadTaskPack parses snapshot and json-schema judges", async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-taskpack-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-taskpack-"));
   const taskPath = path.join(tempDir, "task.json");
 
   await writeFile(
     taskPath,
     JSON.stringify(
       {
-        schemaVersion: "repoarena.taskpack/v1",
+        schemaVersion: "agentarena.taskpack/v1",
         id: "advanced-judges",
         title: "Advanced Judges",
         prompt: "Parse snapshot and schema judges",
@@ -418,7 +418,7 @@ test("official task pack library files all load with metadata", async () => {
   for (const fileName of files) {
     const taskPack = await loadTaskPack(path.join(officialDir, fileName));
     assert.equal(taskPack.metadata?.source, "official");
-    assert.equal(taskPack.metadata?.owner, "RepoArena");
+    assert.equal(taskPack.metadata?.owner, "AgentArena");
     assert.equal(taskPack.metadata?.repoTypes.length > 0, true);
     assert.equal(taskPack.metadata?.tags.length > 0, true);
     assert.equal(taskPack.judges.length > 0, true);
@@ -426,13 +426,13 @@ test("official task pack library files all load with metadata", async () => {
 });
 
 test("loadTaskPack parses repoSource field", async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-taskpack-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-taskpack-"));
   const taskPath = path.join(tempDir, "task.json");
 
   await writeFile(
     taskPath,
     JSON.stringify({
-      schemaVersion: "repoarena.taskpack/v1",
+      schemaVersion: "agentarena.taskpack/v1",
       id: "repo-source-demo",
       title: "Repo Source Demo",
       prompt: "Test repoSource parsing",
@@ -449,19 +449,19 @@ test("loadTaskPack parses repoSource field", async () => {
 });
 
 test("loadTaskPack parses difficulty metadata field", async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-taskpack-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-taskpack-"));
   const taskPath = path.join(tempDir, "task.json");
 
   await writeFile(
     taskPath,
     JSON.stringify({
-      schemaVersion: "repoarena.taskpack/v1",
+      schemaVersion: "agentarena.taskpack/v1",
       id: "difficulty-demo",
       title: "Difficulty Demo",
       prompt: "Test difficulty parsing",
       metadata: {
         source: "official",
-        owner: "RepoArena",
+        owner: "AgentArena",
         difficulty: "hard",
         repoTypes: ["node"],
         tags: ["test"],
@@ -479,7 +479,7 @@ test("loadTaskPack parses difficulty metadata field", async () => {
 });
 
 test("loadTaskPack rejects unsupported file extensions", async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-taskpack-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-taskpack-"));
   const taskPath = path.join(tempDir, "task.txt");
 
   await writeFile(taskPath, "id: bad", "utf8");
@@ -490,13 +490,13 @@ test("loadTaskPack rejects unsupported file extensions", async () => {
 });
 
 test("loadTaskPack rejects unsupported schema versions", async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-taskpack-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-taskpack-"));
   const taskPath = path.join(tempDir, "task.json");
 
   await writeFile(
     taskPath,
     JSON.stringify({
-      schemaVersion: "repoarena.taskpack/v99",
+      schemaVersion: "agentarena.taskpack/v99",
       id: "bad-version",
       title: "Bad Version",
       prompt: "Test"
@@ -510,19 +510,19 @@ test("loadTaskPack rejects unsupported schema versions", async () => {
 });
 
 test("loadTaskPack rejects invalid difficulty values", async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-taskpack-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-taskpack-"));
   const taskPath = path.join(tempDir, "task.json");
 
   await writeFile(
     taskPath,
     JSON.stringify({
-      schemaVersion: "repoarena.taskpack/v1",
+      schemaVersion: "agentarena.taskpack/v1",
       id: "bad-difficulty",
       title: "Bad Difficulty",
       prompt: "Test",
       metadata: {
         source: "official",
-        owner: "RepoArena",
+        owner: "AgentArena",
         difficulty: "extreme",
         repoTypes: [],
         tags: [],
@@ -539,13 +539,13 @@ test("loadTaskPack rejects invalid difficulty values", async () => {
 });
 
 test("loadTaskPack parses patch-validation judge", async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-taskpack-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-taskpack-"));
   const taskPath = path.join(tempDir, "task.yaml");
 
   await writeFile(
     taskPath,
     [
-      "schemaVersion: repoarena.taskpack/v1",
+      "schemaVersion: agentarena.taskpack/v1",
       "id: test-patch-validation",
       "title: Test",
       "prompt: Test task",
@@ -584,13 +584,13 @@ test("loadTaskPack parses patch-validation judge", async () => {
 });
 
 test("loadTaskPack parses token-efficiency judge", async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-taskpack-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-taskpack-"));
   const taskPath = path.join(tempDir, "task.yaml");
 
   await writeFile(
     taskPath,
     [
-      "schemaVersion: repoarena.taskpack/v1",
+      "schemaVersion: agentarena.taskpack/v1",
       "id: test-token-efficiency",
       "title: Test",
       "prompt: Test task",
@@ -623,13 +623,13 @@ test("loadTaskPack parses token-efficiency judge", async () => {
 });
 
 test("loadTaskPack validates interactionModel enum", async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-taskpack-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-taskpack-"));
   const taskPath = path.join(tempDir, "task.yaml");
 
   await writeFile(
     taskPath,
     [
-      "schemaVersion: repoarena.taskpack/v1",
+      "schemaVersion: agentarena.taskpack/v1",
       "id: test-valid-interaction",
       "title: Test",
       "prompt: Test",
@@ -655,13 +655,13 @@ test("loadTaskPack validates interactionModel enum", async () => {
 });
 
 test("loadTaskPack rejects invalid interactionModel", async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-taskpack-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-taskpack-"));
   const taskPath = path.join(tempDir, "task.yaml");
 
   await writeFile(
     taskPath,
     [
-      "schemaVersion: repoarena.taskpack/v1",
+      "schemaVersion: agentarena.taskpack/v1",
       "id: test-invalid-interaction",
       "title: Test",
       "prompt: Test",
@@ -690,13 +690,13 @@ test("loadTaskPack rejects invalid interactionModel", async () => {
 });
 
 test("loadTaskPack parses antiContamination metadata", async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-taskpack-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-taskpack-"));
   const taskPath = path.join(tempDir, "task.yaml");
 
   await writeFile(
     taskPath,
     [
-      "schemaVersion: repoarena.taskpack/v1",
+      "schemaVersion: agentarena.taskpack/v1",
       "id: test-anti-contam",
       "title: Test",
       "prompt: Test",
@@ -730,13 +730,13 @@ test("loadTaskPack parses antiContamination metadata", async () => {
 });
 
 test("loadTaskPack parses requirementClarity enum", async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-taskpack-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-taskpack-"));
   const taskPath = path.join(tempDir, "task.yaml");
 
   await writeFile(
     taskPath,
     [
-      "schemaVersion: repoarena.taskpack/v1",
+      "schemaVersion: agentarena.taskpack/v1",
       "id: test-requirement-clarity",
       "title: Test",
       "prompt: Test",
@@ -762,13 +762,13 @@ test("loadTaskPack parses requirementClarity enum", async () => {
 });
 
 test("loadTaskPack rejects invalid requirementClarity", async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-taskpack-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-taskpack-"));
   const taskPath = path.join(tempDir, "task.yaml");
 
   await writeFile(
     taskPath,
     [
-      "schemaVersion: repoarena.taskpack/v1",
+      "schemaVersion: agentarena.taskpack/v1",
       "id: test-invalid-clarity",
       "title: Test",
       "prompt: Test",

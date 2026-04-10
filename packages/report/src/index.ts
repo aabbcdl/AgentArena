@@ -1,12 +1,19 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { type BenchmarkRun, ensureDirectory } from "@repoarena/core";
+import { type BenchmarkRun, ensureDirectory } from "@agentarena/core";
 import { renderHtml } from "./html-template.js";
 import { buildLeaderboard, } from "./leaderboard.js";
 import { renderMarkdown, renderPrComment } from "./markdown-template.js";
 import { buildBadgePayload, type Locale, sanitizeRun } from "./report-helpers.js";
 import { enrichRunWithScores } from "./scoring.js";
 
+export {
+  type DecisionRecommendation,
+  type DecisionReport, 
+  formatDecisionReport,
+  generateDecisionReport,
+  type TeamCostEstimate
+} from "./decision-report.js";
 export {
   buildLeaderboard,
   getLeaderboardExplanation,
@@ -15,23 +22,16 @@ export {
   type LeaderboardRow,
   type LeaderboardStats
 } from "./leaderboard.js";
+export type { AggregatedAgentStats, MultiRunComparison } from "./multi-run.js";
+export { aggregateMultiRuns, formatMultiRunReport } from "./multi-run.js";
 export type { Locale, ReportCopy, ScoredResult, ScoredRun } from "./report-helpers.js";
 export { computeCompositeScore, computeScoreReasons, enrichRunWithScores, getDefaultWeights } from "./scoring.js";
 export {
-  generateDecisionReport,
-  formatDecisionReport,
-  type DecisionRecommendation,
-  type TeamCostEstimate,
-  type DecisionReport
-} from "./decision-report.js";
-export {
+  type AgentVarianceStats, 
   computeVarianceAnalysis,
   formatVarianceReport,
-  type VarianceReport,
-  type AgentVarianceStats
+  type VarianceReport
 } from "./variance-analysis.js";
-export { aggregateMultiRuns, formatMultiRunReport } from "./multi-run.js";
-export type { MultiRunComparison, AggregatedAgentStats } from "./multi-run.js";
 
 export interface WriteReportOptions {
   locale?: Locale;

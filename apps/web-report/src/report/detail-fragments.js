@@ -55,7 +55,6 @@ export function createDetailFragments({
       const matchesStatus = judgeFilters.status === "all" || (judgeFilters.status === "pass" ? judge.success : !judge.success);
       const haystack = [judge.label, judge.target ?? "", judge.expectation ?? "", judge.command ?? ""].join(" ").toLowerCase();
       const matchesSearch = judgeFilters.search === "" || haystack.includes(judgeFilters.search);
-
       return matchesType && matchesStatus && matchesSearch;
     });
 
@@ -66,7 +65,7 @@ export function createDetailFragments({
 
     const overview =
       judges.length === 0
-        ? `<p class="empty-state">${escapeHtml(localText("没有执行任何 judge。", "No judges executed."))}</p>`
+        ? `<p class="empty-state">${escapeHtml(localText("没有执行任何 Judge。", "No judges executed."))}</p>`
         : `
         <div class="judge-overview">
           ${Array.from(byType.entries())
@@ -104,7 +103,7 @@ export function createDetailFragments({
                 }
                 ${
                   judge.expectation
-                    ? `<div class="detail-row"><span>${escapeHtml(localText("预期", "Expectation"))}</span><code>${escapeHtml(judge.expectation)}</code></div>`
+                    ? `<div class="detail-row"><span>${escapeHtml(localText("期望", "Expectation"))}</span><code>${escapeHtml(judge.expectation)}</code></div>`
                     : ""
                 }
                 ${
@@ -141,16 +140,21 @@ export function createDetailFragments({
 
     return `<section class="detail-card"><h3>${escapeHtml(localText("Judge 检查项", "Judges"))}</h3>${overview}${
       filteredJudges.length === 0 && judges.length > 0
-        ? `<p class="empty-state">${escapeHtml(localText("当前筛选下没有匹配的 judge。", "No judges match the current filters."))}</p>`
+        ? `<p class="empty-state">${escapeHtml(localText("当前筛选下没有匹配的 Judge。", "No judges match the current filters."))}</p>`
         : content
     }</section>`;
   }
 
   function renderDiff(result) {
+    const diff = {
+      added: result.diff?.added ?? [],
+      changed: result.diff?.changed ?? [],
+      removed: result.diff?.removed ?? []
+    };
     const sections = [
-      [localText("新增", "Added"), result.diff.added],
-      [localText("修改", "Changed"), result.diff.changed],
-      [localText("删除", "Removed"), result.diff.removed]
+      [localText("新增", "Added"), diff.added],
+      [localText("修改", "Changed"), diff.changed],
+      [localText("删除", "Removed"), diff.removed]
     ];
 
     return `
@@ -186,8 +190,7 @@ export function createDetailFragments({
   }
 
   function renderMarkdownBlock(markdown) {
-    const escaped = escapeHtml(markdown);
-    return `<pre>${escaped}</pre>`;
+    return `<pre>${escapeHtml(markdown)}</pre>`;
   }
 
   function renderInlineAgentDetail(result) {
@@ -198,9 +201,10 @@ export function createDetailFragments({
       ...failed.map((j) => `<span class="judge-chip judge-chip-fail">${escapeHtml(j.label || j.judgeId)}</span>`)
     ].join("");
 
+    const changedFiles = result.changedFiles ?? [];
     const maxFiles = 10;
-    const files = result.changedFiles.slice(0, maxFiles);
-    const moreCount = result.changedFiles.length - maxFiles;
+    const files = changedFiles.slice(0, maxFiles);
+    const moreCount = changedFiles.length - maxFiles;
     const filesHtml =
       files.length > 0
         ? `<ul class="files-list">${files.map((f) => `<li>${escapeHtml(f)}</li>`).join("")}${moreCount > 0 ? `<li class="muted">+${moreCount} ${localText("更多", "more")}</li>` : ""}</ul>`
@@ -241,14 +245,12 @@ export function createDetailFragments({
     const selector = container.querySelector("#code-review-agent-selector");
     const compareBtn = container.querySelector("#code-review-compare-btn");
     const diffViewer = container.querySelector("#code-review-diff-viewer");
+    if (!content || !selector || !compareBtn || !diffViewer) return;
 
-    // Clear previous content
     selector.innerHTML = "";
-
-    // Add agent checkboxes
     const successfulAgents = run.results.filter((r) => r.status === "success");
     if (successfulAgents.length === 0) {
-      selector.innerHTML = `<p class="muted">${escapeHtml(localText("没有成功的 Agent 结果可供对比", "No successful agent results available for comparison"))}</p>`;
+      selector.innerHTML = `<p class="muted">${escapeHtml(localText("没有成功的 Agent 结果可供对比。", "No successful agent results available for comparison."))}</p>`;
       return;
     }
 
@@ -269,32 +271,28 @@ export function createDetailFragments({
       selector.appendChild(label);
     }
 
-    // Compare button handler
     compareBtn.replaceWith(compareBtn.cloneNode(true));
     const newCompareBtn = container.querySelector("#code-review-compare-btn");
-    newCompareBtn.addEventListener("click", () => {
+    newCompareBtn?.addEventListener("click", () => {
       const checked = selector.querySelectorAll("input:checked");
       const selectedAgentIds = Array.from(checked).map((cb) => cb.value);
       const selectedResults = run.results.filter((r) => selectedAgentIds.includes(r.agentId));
-
       renderSideBySideDiff(diffViewer, selectedResults, run);
     });
 
-    // Section toggle
     const toggle = section.querySelector(".section-toggle");
     if (toggle) {
       toggle.replaceWith(toggle.cloneNode(true));
       const newToggle = section.querySelector(".section-toggle");
-      newToggle.addEventListener("click", () => {
+      newToggle?.addEventListener("click", () => {
         const isVisible = content.style.display !== "none";
         content.style.display = isVisible ? "none" : "block";
       });
     }
   }
 
-  function renderSideBySideDiff(container, results, run) {
+  function renderSideBySideDiff(container, results, _run) {
     container.innerHTML = "";
-
     const diffContainer = document.createElement("div");
     diffContainer.className = "side-by-side-diff";
 
@@ -302,16 +300,13 @@ export function createDetailFragments({
       const panel = document.createElement("div");
       panel.className = "diff-panel";
 
-      // Header
       const header = document.createElement("div");
       header.className = "diff-panel-header";
       header.textContent = result.displayLabel;
       panel.appendChild(header);
 
-      // Content - show changed files
       const contentEl = document.createElement("div");
       contentEl.className = "diff-panel-content";
-
       if (result.changedFiles && result.changedFiles.length > 0) {
         contentEl.textContent =
           localText("变更文件:", "Changed files:") +
@@ -322,7 +317,6 @@ export function createDetailFragments({
       }
       panel.appendChild(contentEl);
 
-      // Summary
       const summary = document.createElement("div");
       summary.className = "diff-summary";
       const addedCount = result.diff?.added?.length ?? 0;
@@ -338,103 +332,99 @@ export function createDetailFragments({
   }
 
   function renderTeamCostCalculator(container, run) {
-    const section = container.querySelector('#team-cost-section');
+    const section = container.querySelector("#team-cost-section");
     if (!section) return;
 
-    const content = container.querySelector('#team-cost-content');
-    const tableContainer = container.querySelector('#team-cost-table');
-    const teamSizeInput = container.querySelector('#team-size-input');
-    const dailyRunsInput = container.querySelector('#daily-runs-input');
-    const recalcBtn = container.querySelector('#recalculate-cost-btn');
+    const content = container.querySelector("#team-cost-content");
+    const tableContainer = container.querySelector("#team-cost-table");
+    const teamSizeInput = container.querySelector("#team-size-input");
+    const dailyRunsInput = container.querySelector("#daily-runs-input");
+    const recalcBtn = container.querySelector("#recalculate-cost-btn");
+    if (!content || !tableContainer || !teamSizeInput || !dailyRunsInput) return;
 
     function renderTable() {
-      const teamSize = parseInt(teamSizeInput.value) || 10;
-      const dailyRuns = parseInt(dailyRunsInput.value) || 5;
+      const teamSize = parseInt(teamSizeInput.value, 10) || 10;
+      const dailyRuns = parseInt(dailyRunsInput.value, 10) || 5;
       const workingDays = 22;
       const monthlyMultiplier = teamSize * dailyRuns * workingDays;
 
       const successfulResults = run.results
-        .filter(r => r.status === 'success' && r.costKnown && r.estimatedCostUsd > 0)
+        .filter((r) => r.status === "success" && r.costKnown && r.estimatedCostUsd > 0)
         .sort((a, b) => a.estimatedCostUsd - b.estimatedCostUsd);
 
       const cheapest = successfulResults[0]?.estimatedCostUsd ?? 0;
-
-      let html = '<table>';
-      html += '<thead><tr><th>Agent</th><th>' + escapeHtml(localText('单次成本', 'Cost/Run')) + '</th><th>' + escapeHtml(localText('月成本', 'Monthly Cost')) + '</th><th>' + escapeHtml(localText('与最便宜差距', 'vs Cheapest')) + '</th></tr></thead>';
-      html += '<tbody>';
+      let html = "<table>";
+      html += `<thead><tr><th>Agent</th><th>${escapeHtml(localText("单次成本", "Cost/Run"))}</th><th>${escapeHtml(localText("月成本", "Monthly Cost"))}</th><th>${escapeHtml(localText("与最便宜差距", "vs Cheapest"))}</th></tr></thead>`;
+      html += "<tbody>";
 
       for (const result of run.results) {
         if (!result.costKnown || result.estimatedCostUsd <= 0) continue;
 
         const monthlyCost = result.estimatedCostUsd * monthlyMultiplier;
-        const diff = monthlyCost - (cheapest * monthlyMultiplier);
+        const diff = monthlyCost - cheapest * monthlyMultiplier;
         const isCheapest = result.estimatedCostUsd === cheapest;
 
-        html += `<tr class="${isCheapest ? 'cheapest' : diff > 0 ? 'expensive' : ''}">`;
+        html += `<tr class="${isCheapest ? "cheapest" : diff > 0 ? "expensive" : ""}">`;
         html += `<td>${escapeHtml(result.displayLabel)}</td>`;
         html += `<td>$${result.estimatedCostUsd.toFixed(2)}</td>`;
         html += `<td>$${monthlyCost.toFixed(0)}</td>`;
-        html += `<td>${isCheapest ? '✅ ' + escapeHtml(localText('最便宜', 'Cheapest')) : `+$${diff.toFixed(0)}`}</td>`;
-        html += '</tr>';
+        html += `<td>${isCheapest ? `✓ ${escapeHtml(localText("最便宜", "Cheapest"))}` : `+$${diff.toFixed(0)}`}</td>`;
+        html += "</tr>";
       }
 
-      html += '</tbody></table>';
+      html += "</tbody></table>";
       tableContainer.innerHTML = html;
     }
 
-    recalcBtn?.addEventListener('click', renderTable);
+    recalcBtn?.addEventListener("click", renderTable);
 
-    const toggle = section.querySelector('.section-toggle');
+    const toggle = section.querySelector(".section-toggle");
     if (toggle) {
       toggle.replaceWith(toggle.cloneNode(true));
-      const newToggle = section.querySelector('.section-toggle');
-      newToggle.addEventListener('click', () => {
-        const isVisible = content.style.display !== 'none';
-        content.style.display = isVisible ? 'none' : 'block';
+      const newToggle = section.querySelector(".section-toggle");
+      newToggle?.addEventListener("click", () => {
+        const isVisible = content.style.display !== "none";
+        content.style.display = isVisible ? "none" : "block";
         if (!isVisible) renderTable();
       });
     }
   }
 
   function setupShareActions(container, run, decisionReport) {
-    const exportMdBtn = container.querySelector('#share-export-md-btn');
-    const exportHtmlBtn = container.querySelector('#share-export-html-btn');
-    const copyLinkBtn = container.querySelector('#share-copy-link-btn');
-    const copySummaryBtn = container.querySelector('#share-copy-summary-btn');
+    const exportMdBtn = container.querySelector("#share-export-md-btn");
+    const exportHtmlBtn = container.querySelector("#share-export-html-btn");
+    const copyLinkBtn = container.querySelector("#share-copy-link-btn");
+    const copySummaryBtn = container.querySelector("#share-copy-summary-btn");
 
-    // Export Markdown
-    exportMdBtn?.addEventListener('click', () => {
+    exportMdBtn?.addEventListener("click", () => {
       const mdContent = decisionReport
         ? window.formatDecisionReport?.(decisionReport)
         : generateSummaryMarkdown(run);
-      downloadFile(mdContent, `repoarena-report-${run.runId}.md`, 'text/markdown');
+      downloadFile(mdContent, `agentarena-report-${run.runId}.md`, "text/markdown");
     });
 
-    // Export HTML (reuse existing report HTML)
-    exportHtmlBtn?.addEventListener('click', () => {
+    exportHtmlBtn?.addEventListener("click", () => {
       const htmlContent = document.documentElement.outerHTML;
-      downloadFile(htmlContent, `repoarena-report-${run.runId}.html`, 'text/html');
+      downloadFile(htmlContent, `agentarena-report-${run.runId}.html`, "text/html");
     });
 
-    // Copy share link
-    copyLinkBtn?.addEventListener('click', async () => {
+    copyLinkBtn?.addEventListener("click", async () => {
       const text = `Benchmark Report: ${run.task.title}\nRun ID: ${run.runId}\nGenerated: ${new Date(run.createdAt).toLocaleString()}`;
       try {
         await navigator.clipboard.writeText(text);
-        showToast(localText('分享链接已复制到剪贴板', 'Share link copied to clipboard'));
+        showToast(localText("分享信息已复制到剪贴板", "Share link copied to clipboard"));
       } catch {
-        showToast(localText('复制失败，请手动复制', 'Copy failed, please copy manually'));
+        showToast(localText("复制失败，请手动复制", "Copy failed, please copy manually"));
       }
     });
 
-    // Copy summary
-    copySummaryBtn?.addEventListener('click', async () => {
+    copySummaryBtn?.addEventListener("click", async () => {
       const summary = generateSummaryText(run);
       try {
         await navigator.clipboard.writeText(summary);
-        showToast(localText('摘要已复制到剪贴板', 'Summary copied to clipboard'));
+        showToast(localText("摘要已复制到剪贴板", "Summary copied to clipboard"));
       } catch {
-        showToast(localText('复制失败，请手动复制', 'Copy failed, please copy manually'));
+        showToast(localText("复制失败，请手动复制", "Copy failed, please copy manually"));
       }
     });
   }
@@ -442,54 +432,63 @@ export function createDetailFragments({
   function downloadFile(content, filename, mimeType) {
     const blob = new Blob([content], { type: mimeType });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
+    const a = document.createElement("a");
     a.href = url;
     a.download = filename;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    showToast(localText('文件已下载: {filename}', 'File downloaded: {filename}').replace('{filename}', filename));
+    showToast(localText("文件已下载：{filename}", "File downloaded: {filename}").replace("{filename}", filename));
   }
 
   function generateSummaryMarkdown(run) {
-    const lines = ['# RepoArena Benchmark Report\n', `**Task**: ${run.task.title}\n`, `**Date**: ${new Date(run.createdAt).toLocaleString()}\n`];
+    const lines = [
+      "# AgentArena Benchmark Report\n",
+      `**Task**: ${run.task.title}\n`,
+      `**Date**: ${new Date(run.createdAt).toLocaleString()}\n`
+    ];
 
-    const successful = run.results.filter(r => r.status === 'success');
-    const failed = run.results.filter(r => r.status !== 'success');
+    const successful = run.results.filter((r) => r.status === "success");
+    const failed = run.results.filter((r) => r.status !== "success");
 
-    lines.push(`## ${localText('结果', 'Results')}\n`);
-    lines.push(`- ${localText('成功', 'Successful')}: ${successful.length}/${run.results.length}`);
-    lines.push(`- ${localText('失败', 'Failed')}: ${failed.length}/${run.results.length}\n`);
+    lines.push(`## ${localText("结果", "Results")}\n`);
+    lines.push(`- ${localText("成功", "Successful")}: ${successful.length}/${run.results.length}`);
+    lines.push(`- ${localText("失败", "Failed")}: ${failed.length}/${run.results.length}\n`);
 
     if (successful.length > 0) {
-      const best = successful.reduce((a, b) => (a.compositeScore ?? 0) > (b.compositeScore ?? 0) ? a : b);
-      lines.push(`## 🏆 ${localText('最佳 Agent', 'Best Agent')}: ${best.displayLabel}\n`);
-      lines.push(`- ${localText('分数', 'Score')}: ${best.compositeScore?.toFixed(0)}/100`);
-      lines.push(`- ${localText('耗时', 'Duration')}: ${(best.durationMs / 1000).toFixed(0)}s`);
-      lines.push(`- ${localText('成本', 'Cost')}: $${best.estimatedCostUsd.toFixed(2)}\n`);
+      const best = successful.reduce((a, b) => ((a.compositeScore ?? 0) > (b.compositeScore ?? 0) ? a : b));
+      lines.push(`## ${localText("最佳 Agent", "Best Agent")}: ${best.displayLabel}\n`);
+      lines.push(`- ${localText("分数", "Score")}: ${best.compositeScore?.toFixed(0)}/100`);
+      lines.push(`- ${localText("耗时", "Duration")}: ${(best.durationMs / 1000).toFixed(0)}s`);
+      lines.push(`- ${localText("成本", "Cost")}: $${best.estimatedCostUsd.toFixed(2)}\n`);
     }
 
-    return lines.join('\n');
+    return lines.join("\n");
   }
 
   function generateSummaryText(run) {
-    const successful = run.results.filter(r => r.status === 'success');
-    if (successful.length === 0) return `All agents failed for task: ${run.task.title}`;
+    const successful = run.results.filter((r) => r.status === "success");
+    if (successful.length === 0) {
+      return localText(`任务 "${run.task.title}" 没有成功结果。`, `All agents failed for task: ${run.task.title}`);
+    }
 
-    const best = successful.reduce((a, b) => (a.compositeScore ?? 0) > (b.compositeScore ?? 0) ? a : b);
-    return `🏆 ${best.displayLabel} won with score ${best.compositeScore?.toFixed(0)}/100 on "${run.task.title}". Cost: $${best.estimatedCostUsd.toFixed(2)}, Duration: ${(best.durationMs / 1000).toFixed(0)}s`;
+    const best = successful.reduce((a, b) => ((a.compositeScore ?? 0) > (b.compositeScore ?? 0) ? a : b));
+    return localText(
+      `${best.displayLabel} 在 "${run.task.title}" 中得分最高：${best.compositeScore?.toFixed(0)}/100，成本 $${best.estimatedCostUsd.toFixed(2)}，耗时 ${(best.durationMs / 1000).toFixed(0)} 秒。`,
+      `${best.displayLabel} won with score ${best.compositeScore?.toFixed(0)}/100 on "${run.task.title}". Cost: $${best.estimatedCostUsd.toFixed(2)}, Duration: ${(best.durationMs / 1000).toFixed(0)}s.`
+    );
   }
 
   function showToast(message) {
-    const toast = document.createElement('div');
-    toast.className = 'toast-notification';
+    const toast = document.createElement("div");
+    toast.className = "toast-notification";
     toast.textContent = message;
     document.body.appendChild(toast);
     setTimeout(() => {
-      toast.classList.add('show');
+      toast.classList.add("show");
       setTimeout(() => {
-        toast.classList.remove('show');
+        toast.classList.remove("show");
         setTimeout(() => {
           if (toast.parentNode) {
             document.body.removeChild(toast);

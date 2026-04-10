@@ -1,6 +1,6 @@
 ---
 name: Bug Report
-about: Report a bug in RepoArena
+about: Report a bug in AgentArena
 title: '[BUG] '
 labels: bug
 ---
@@ -22,7 +22,7 @@ What actually happened.
 ## Environment
 - OS:
 - Node.js version:
-- RepoArena version/commit:
+- AgentArena version/commit:
 
 ## Additional Context
 Screenshots, logs, or other relevant info.

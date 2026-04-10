@@ -1,7 +1,7 @@
 {
-  "name": "@repoarena/judges",
+  "name": "@agentarena/judges",
   "version": "0.1.0",
-  "description": "Judge implementations for RepoArena — command, file, glob, snapshot, json",
+  "description": "Judge implementations for AgentArena — command, file, glob, snapshot, json",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -9,7 +9,7 @@
     "dist"
   ],
   "dependencies": {
-    "@repoarena/core": "workspace:*",
+    "@agentarena/core": "workspace:*",
     "ajv": "^8.18.0",
     "picomatch": "^4.0.3"
   },

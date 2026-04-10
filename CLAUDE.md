@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-RepoArena — local-first benchmark and replay tool for comparing AI coding agents in real repositories.
+AgentArena — local-first benchmark and replay tool for comparing AI coding agents in real repositories.
 
 ## Tech Stack
 
@@ -22,7 +22,7 @@ RepoArena — local-first benchmark and replay tool for comparing AI coding agen
 | `packages/taskpacks` | Task pack loader and validator |
 | `packages/trace` | Execution trace recorder |
 | `packages/report` | Report generators (JSON, Markdown, HTML, badge) |
-| `apps/web-report` | Interactive benchmark UI served by `repoarena ui` |
+| `apps/web-report` | Interactive benchmark UI served by `agentarena ui` |
 
 ## Common Commands
 
@@ -39,7 +39,7 @@ E2E tests (requires Playwright Chromium):
 
 ```bash
 npx playwright install --with-deps chromium
-REPOARENA_RUN_BROWSER_SMOKE=1 pnpm test:web-report:e2e
+AGENTARENA_RUN_BROWSER_SMOKE=1 pnpm test:web-report:e2e
 ```
 
 ## Code Conventions
@@ -47,9 +47,9 @@ REPOARENA_RUN_BROWSER_SMOKE=1 pnpm test:web-report:e2e
 - ES modules throughout (`import`/`export`, no CommonJS)
 - web-report uses no framework — state object + render functions + DOM event delegation
 - All user-facing strings in web-report go through `t(key)` or `localText(zh, en)` for i18n
-- Task packs are YAML or JSON, schema version `repoarena.taskpack/v1`
+- Task packs are YAML or JSON, schema version `agentarena.taskpack/v1`
 - Tests use Node's built-in test runner (`node --test`)
-- Playwright E2E tests are gated behind `REPOARENA_RUN_BROWSER_SMOKE=1` env var
+- Playwright E2E tests are gated behind `AGENTARENA_RUN_BROWSER_SMOKE=1` env var
 
 ## Testing
 

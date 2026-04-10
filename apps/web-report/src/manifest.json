@@ -1,6 +1,6 @@
 {
-  "name": "RepoArena Web Report",
-  "short_name": "RepoArena",
+  "name": "AgentArena Web Report",
+  "short_name": "AgentArena",
   "start_url": "./",
   "display": "standalone",
   "background_color": "#0a0a0f",

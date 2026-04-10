@@ -6,7 +6,7 @@
 
 ## English
 
-This is a **standard test repository** for RepoArena benchmarks. It provides a controlled, reproducible environment for fairly comparing different AI coding agents.
+This is a **standard test repository** for AgentArena benchmarks. It provides a controlled, reproducible environment for fairly comparing different AI coding agents.
 
 ### Purpose
 
@@ -41,7 +41,7 @@ repoSource: "builtin://nodejs-monorepo"
 
 ## 中文
 
-这是 RepoArena 基准测试的**标准测试仓库**。它提供受控、可复现的环境，用于公平对比不同的 AI 编码 agent。
+这是 AgentArena 基准测试的**标准测试仓库**。它提供受控、可复现的环境，用于公平对比不同的 AI 编码 agent。
 
 ### 目的
 

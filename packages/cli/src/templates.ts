@@ -123,13 +123,13 @@ export function createTemplateLintCommand(reportFile: string): string {
 }
 
 export const TASKPACK_TEMPLATES: Record<string, string> = {
-  "repo-health": `schemaVersion: repoarena.taskpack/v1
+  "repo-health": `schemaVersion: agentarena.taskpack/v1
 id: repo-health
 title: Repository Health
 description: Checks that a repository stays structurally healthy after an agent task.
 metadata:
   source: official
-  owner: RepoArena
+  owner: AgentArena
   objective: Validate that an agent can make a minimal repository-safe improvement.
   repoTypes:
     - node
@@ -161,27 +161,27 @@ judges:
   - id: tests-pass
     type: test-result
     label: Tests still pass when available
-    command: ${JSON.stringify(createTemplateTestCommand(".repoarena/repo-health-tests.json"))}
+    command: ${JSON.stringify(createTemplateTestCommand(".agentarena/repo-health-tests.json"))}
     format: auto
-    reportFile: .repoarena/repo-health-tests.json
+    reportFile: .agentarena/repo-health-tests.json
     passOnNoTests: true
     timeoutMs: 120000
   - id: lint-clean
     type: lint-check
     label: Lint stays clean when configured
-    command: ${JSON.stringify(createTemplateLintCommand(".repoarena/repo-health-lint.json"))}
+    command: ${JSON.stringify(createTemplateLintCommand(".agentarena/repo-health-lint.json"))}
     format: auto
-    reportFile: .repoarena/repo-health-lint.json
+    reportFile: .agentarena/repo-health-lint.json
     maxWarnings: 0
     timeoutMs: 120000
 `,
-  "json-api": `schemaVersion: repoarena.taskpack/v1
+  "json-api": `schemaVersion: agentarena.taskpack/v1
 id: json-api-contract
 title: JSON API Contract
 description: Validates a JSON fixture against value assertions and schema expectations.
 metadata:
   source: official
-  owner: RepoArena
+  owner: AgentArena
   objective: Verify that an agent can repair a JSON contract without breaking the payload shape.
   repoTypes:
     - node
@@ -211,13 +211,13 @@ judges:
     pointer: /status
     expected: ready
 `,
-  snapshot: `schemaVersion: repoarena.taskpack/v1
+  snapshot: `schemaVersion: agentarena.taskpack/v1
 id: snapshot-regression
 title: Snapshot Regression
 description: Exercises snapshot-based regression repair workflows.
 metadata:
   source: official
-  owner: RepoArena
+  owner: AgentArena
   objective: Verify that an agent can bring generated output back in sync with a stored fixture.
   repoTypes:
     - node
@@ -262,10 +262,10 @@ export function buildCiWorkflow(options: CiWorkflowOptions): string {
   const normalizedOutputDir = outputDir.replaceAll("\\", "/");
   const workflowName =
     template === "nightly"
-      ? "RepoArena Nightly Benchmark"
+      ? "AgentArena Nightly Benchmark"
       : template === "smoke"
-        ? "RepoArena Smoke Benchmark"
-        : "RepoArena Benchmark";
+        ? "AgentArena Smoke Benchmark"
+        : "AgentArena Benchmark";
   const permissionsBlock =
     template === "pull-request"
       ? `permissions:
@@ -303,7 +303,7 @@ export function buildCiWorkflow(options: CiWorkflowOptions): string {
         with:
           script: |
             const fs = require("node:fs");
-            const marker = "<!-- repoarena-benchmark-summary -->";
+            const marker = "<!-- agentarena-benchmark-summary -->";
             const body = \`\${marker}\\n\${fs.readFileSync("${normalizedOutputDir}/pr-comment.md", "utf8")}\`;
             const issue_number = context.payload.pull_request.number;
             const { data: comments } = await github.rest.issues.listComments({
@@ -362,7 +362,7 @@ jobs:
       - name: Build workspace
         run: pnpm build
 
-      - name: Prepare RepoArena output directories
+      - name: Prepare AgentArena output directories
         run: mkdir -p ${normalizedOutputDir}
 
       - name: Doctor adapters
@@ -376,7 +376,7 @@ ${publishSummaryStep}
       - name: Upload benchmark artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: repoarena-benchmark
+          name: agentarena-benchmark
           path: |
             ${normalizedOutputDir}/doctor.json
             ${normalizedOutputDir}/run.json

@@ -85,8 +85,8 @@ export function createResultLoaders({ state, localText, render, renderMarkdownPa
     const summaryFiles = files.filter((file) => file.name.toLowerCase() === "summary.json");
     if (summaryFiles.length === 0) {
       showError?.(localText(
-        "所选目录里没有 summary.json。请选择一个 RepoArena 结果目录。",
-        "No summary.json file was found in the selected folder. Choose a RepoArena results folder."
+        "所选目录里没有 summary.json。请选择一个 AgentArena 结果目录。",
+        "No summary.json file was found in the selected folder. Choose a AgentArena results folder."
       ));
       hideLoading?.();
       return;

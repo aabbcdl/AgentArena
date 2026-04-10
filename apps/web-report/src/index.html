@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>RepoArena Web Report</title>
+    <title>AgentArena Web Report</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -120,7 +120,7 @@
               <defs><linearGradient id="brand-grad" x1="0" y1="0" x2="32" y2="32"><stop stop-color="#6366f1"/><stop offset="1" stop-color="#4f46e5"/></linearGradient></defs>
             </svg>
             <div>
-              <p class="brand-name">RepoArena</p>
+              <p class="brand-name">AgentArena</p>
               <p class="brand-tagline" id="app-title">Web Report</p>
             </div>
           </div>
@@ -149,7 +149,7 @@
           </div>
           <label class="file-picker recommended-picker">
             <strong id="runs-folder-title">Recommended: Load Run Folder</strong>
-            <p id="runs-folder-hint" class="muted picker-help">Select one RepoArena run folder or the whole `.repoarena` results folder.</p>
+            <p id="runs-folder-hint" class="muted picker-help">Select one AgentArena run folder or the whole `.agentarena` results folder.</p>
             <input id="runs-folder" type="file" webkitdirectory directory multiple />
           </label>
 
@@ -223,7 +223,7 @@
                             <label class="field field-wide" id="launcher-adhoc-prompt-field" style="display:none">
                 <span id="launcher-adhoc-prompt-label">Custom Prompt</span>
                 <textarea id="launcher-adhoc-prompt" rows="6" placeholder="Describe the task you want the selected agents to run."></textarea>
-                <span class="muted" id="launcher-adhoc-prompt-hint">Enter a prompt and RepoArena will create a temporary task pack for the selected agents.</span>
+                <span class="muted" id="launcher-adhoc-prompt-hint">Enter a prompt and AgentArena will create a temporary task pack for the selected agents.</span>
               </label>
               <label class="field" style="display:none">
                 <span id="launcher-output-label">Output Folder</span>
@@ -275,10 +275,10 @@
         </section>
 
         <section id="empty-state" class="hero hidden">
-          <p id="hero-eyebrow" class="eyebrow">RepoArena</p>
+          <p id="hero-eyebrow" class="eyebrow">AgentArena</p>
           <h2 id="hero-title">Inspect one run without scrolling through a giant static page.</h2>
           <p id="hero-description" class="muted">
-            RepoArena compares AI coding agents on the same repository task, then turns the result into a reviewable, shareable report.
+            AgentArena compares AI coding agents on the same repository task, then turns the result into a reviewable, shareable report.
           </p>
           <div class="hero-grid">
             <article class="detail-card">
@@ -335,7 +335,7 @@
         <section id="dashboard" class="hidden">
           <div class="topbar">
             <div>
-              <p id="topbar-eyebrow" class="eyebrow">RepoArena · Run Overview</p>
+              <p id="topbar-eyebrow" class="eyebrow">AgentArena · Run Overview</p>
               <h2 id="task-title">Task</h2>
               <p id="task-meta" class="muted"></p>
             </div>
@@ -355,10 +355,10 @@
             </div>
           </div>
           <div class="share-actions" id="share-actions">
-            <button id="share-export-md-btn" class="btn btn-sm">📄 <span data-i18n="exportMarkdown">导出 Markdown</span></button>
-            <button id="share-export-html-btn" class="btn btn-sm">🌐 <span data-i18n="exportHtml">导出 HTML</span></button>
-            <button id="share-copy-link-btn" class="btn btn-sm">🔗 <span data-i18n="copyLink">复制分享链接</span></button>
-            <button id="share-copy-summary-btn" class="btn btn-sm">📋 <span data-i18n="copySummary">复制摘要</span></button>
+            <button id="share-export-md-btn" type="button" class="btn btn-sm">📄 <span data-i18n="exportMarkdown">导出 Markdown</span></button>
+            <button id="share-export-html-btn" type="button" class="btn btn-sm">🌐 <span data-i18n="exportHtml">导出 HTML</span></button>
+            <button id="share-copy-link-btn" type="button" class="btn btn-sm">🔗 <span data-i18n="copyLink">复制分享链接</span></button>
+            <button id="share-copy-summary-btn" type="button" class="btn btn-sm">📋 <span data-i18n="copySummary">复制摘要</span></button>
           </div>
           <p id="clipboard-status" class="muted"></p>
 
@@ -368,7 +368,7 @@
           <!-- 团队成本计算器 -->
           <article class="detail-card" id="team-cost-section">
             <h3>
-              <button class="section-toggle" data-section="team-cost">
+              <button class="section-toggle" type="button" data-section="team-cost">
                 💰 <span data-i18n="teamCostCalculatorTitle">团队成本计算器</span>
               </button>
             </h3>
@@ -383,7 +383,7 @@
                     <span data-i18n="dailyRunsLabel">每日运行次数</span>
                     <input type="number" id="daily-runs-input" value="5" min="1" max="50" />
                   </label>
-                  <button id="recalculate-cost-btn" class="btn btn-sm" data-i18n="recalculateBtn">重新计算</button>
+                  <button id="recalculate-cost-btn" type="button" class="btn btn-sm" data-i18n="recalculateBtn">重新计算</button>
                 </div>
               </div>
               <div id="team-cost-table" class="cost-table"></div>
@@ -531,6 +531,9 @@
                 <h3 id="agent-trend-title">Agent Trend</h3>
               </div>
               <p id="agent-trend-description" class="muted">Track the selected agent across runs for the current task title.</p>
+              <div id="agent-trend-chart" class="agent-trend-chart">
+                <canvas id="trend-canvas" width="600" height="200"></canvas>
+              </div>
               <div id="agent-trend-table" class="compare-table-wrap"></div>
             </section>
 
@@ -587,7 +590,7 @@
                   <div id="code-review-agent-selector" class="agent-checkboxes">
                     <!-- Checkboxes will be added dynamically -->
                   </div>
-                  <button id="code-review-compare-btn" class="btn btn-primary" disabled data-i18n="codeReviewCompareBtn">开始对比</button>
+                  <button id="code-review-compare-btn" type="button" class="btn btn-primary" disabled data-i18n="codeReviewCompareBtn">开始对比</button>
                 </div>
                 <div id="code-review-diff-viewer" class="diff-viewer-container">
                   <!-- Side-by-side diff will be rendered here -->

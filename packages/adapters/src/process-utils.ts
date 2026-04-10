@@ -1,7 +1,7 @@
 import { execSync, spawn } from "node:child_process";
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { BenchmarkCancelledError, resolveTimeoutMs } from "@repoarena/core";
+import { BenchmarkCancelledError, resolveTimeoutMs } from "@agentarena/core";
 
 export interface ProcessResult {
   exitCode: number | null;
@@ -24,7 +24,7 @@ export const DEFAULT_AGENT_TIMEOUT_MS = 15 * 60 * 1_000;
 export const MAX_PROCESS_OUTPUT_BYTES = 50 * 1024 * 1024;
 
 export function agentTimeoutMs(): number {
-  return resolveTimeoutMs(process.env.REPOARENA_AGENT_TIMEOUT_MS, DEFAULT_AGENT_TIMEOUT_MS);
+  return resolveTimeoutMs(process.env.AGENTARENA_AGENT_TIMEOUT_MS, DEFAULT_AGENT_TIMEOUT_MS);
 }
 
 export function formatTimeoutMessage(timeoutMs: number): string {

@@ -7,7 +7,7 @@ import { writeReport } from "../packages/report/dist/index.js";
 
 const demoCapability = {
   supportTier: "supported",
-  invocationMethod: "Built-in RepoArena demo adapter",
+  invocationMethod: "Built-in AgentArena demo adapter",
   authPrerequisites: [],
   tokenAvailability: "estimated",
   costAvailability: "estimated",
@@ -71,7 +71,7 @@ function createResult(outputPath, overrides = {}) {
 }
 
 test("writeReport sanitizes shareable output paths", async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-report-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-report-"));
   const outputPath = path.join(tempDir, "run-output");
 
   const benchmarkRun = {
@@ -80,7 +80,7 @@ test("writeReport sanitizes shareable output paths", async () => {
     repoPath: "D:\\project\\AgentArena",
     outputPath,
     task: {
-      schemaVersion: "repoarena.taskpack/v1",
+      schemaVersion: "agentarena.taskpack/v1",
       id: "demo",
       title: "Demo",
       prompt: "Prompt",
@@ -98,14 +98,14 @@ test("writeReport sanitizes shareable output paths", async () => {
       createResult(outputPath, {
         estimatedCostUsd: 0.1,
         costKnown: true,
-        changedFiles: ["repoarena-demo/demo-fast.md"],
+        changedFiles: ["agentarena-demo/demo-fast.md"],
         judgeResults: [
           {
             judgeId: "lint",
             label: "Lint",
             type: "file-contains",
             target: "README.md",
-            expectation: "RepoArena",
+            expectation: "AgentArena",
             exitCode: 0,
             success: true,
             stdout: "Matched content in README.md.",
@@ -115,7 +115,7 @@ test("writeReport sanitizes shareable output paths", async () => {
           }
         ],
         diff: {
-          added: ["repoarena-demo/demo-fast.md"],
+          added: ["agentarena-demo/demo-fast.md"],
           changed: [],
           removed: []
         }
@@ -140,7 +140,7 @@ test("writeReport sanitizes shareable output paths", async () => {
   assert.equal(Array.isArray(summary.results[0].scoreReasons), true);
   assert.equal(summary.results[0].judgeResults[0].cwd, "workspace/demo-fast");
   assert.equal(summary.results[0].judgeResults[0].target, "README.md");
-  assert.match(markdown, /# RepoArena Summary/);
+  assert.match(markdown, /# AgentArena Summary/);
   assert.match(markdown, /- Score Mode: `practical`/);
   assert.match(markdown, /- Score Weights: `\{"status":0\.24,"tests":0\.26/);
   assert.match(markdown, /- Success Rate: `1\/1`/);
@@ -152,9 +152,9 @@ test("writeReport sanitizes shareable output paths", async () => {
   assert.match(markdown, /- Provider Identity: provider=official \| kind=unknown \| provider source=unknown/);
   assert.match(markdown, /target=README\.md/);
   assert.doesNotMatch(markdown, /C:\\temp\\workspace/);
-  assert.equal(badge.label, "RepoArena");
+  assert.equal(badge.label, "AgentArena");
   assert.equal(badge.message, "1/1 passing");
-  assert.match(prComment, /## RepoArena Benchmark/);
+  assert.match(prComment, /## AgentArena Benchmark/);
   assert.match(prComment, /Score mode: `practical`/);
   assert.match(prComment, /Score weights: `\{"status":0\.24,"tests":0\.26/);
   assert.match(prComment, /Overview: `1\/1` passing \| Failed: `0` \| Total Tokens: `100` \| Known Cost: `\$0\.10`/);
@@ -173,7 +173,7 @@ test("writeReport sanitizes shareable output paths", async () => {
 });
 
 test("writeReport includes a failure summary section for failed agents", async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-report-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-report-"));
   const outputPath = path.join(tempDir, "run-output");
 
   const benchmarkRun = {
@@ -182,7 +182,7 @@ test("writeReport includes a failure summary section for failed agents", async (
     repoPath: "D:\\project\\AgentArena",
     outputPath,
     task: {
-      schemaVersion: "repoarena.taskpack/v1",
+      schemaVersion: "agentarena.taskpack/v1",
       id: "demo-failure",
       title: "Demo Failure",
       prompt: "Prompt",
@@ -234,7 +234,7 @@ test("writeReport includes a failure summary section for failed agents", async (
 });
 
 test("writeReport respects zh-CN locale", async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-report-locale-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-report-locale-"));
   const outputPath = path.join(tempDir, "run-output");
 
   const benchmarkRun = {
@@ -243,7 +243,7 @@ test("writeReport respects zh-CN locale", async () => {
     repoPath: "D:\\project\\AgentArena",
     outputPath,
     task: {
-      schemaVersion: "repoarena.taskpack/v1",
+      schemaVersion: "agentarena.taskpack/v1",
       id: "demo-zh",
       title: "演示",
       prompt: "演示提示词",
@@ -262,15 +262,15 @@ test("writeReport respects zh-CN locale", async () => {
   const prComment = await readFile(prCommentPath, "utf8");
 
   assert.match(html, /<html lang="zh-CN">/);
-  assert.match(html, /RepoArena 报告/);
-  assert.match(markdown, /# RepoArena 摘要/);
-  assert.match(prComment, /## RepoArena 评审摘要/);
+  assert.match(html, /AgentArena 报告/);
+  assert.match(markdown, /# AgentArena 摘要/);
+  assert.match(prComment, /## AgentArena 评审摘要/);
 
   await rm(tempDir, { recursive: true, force: true });
 });
 
 test("writeReport includes preflight warnings in PR comments", async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-report-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-report-"));
   const outputPath = path.join(tempDir, "run-output");
 
   const benchmarkRun = {
@@ -279,7 +279,7 @@ test("writeReport includes preflight warnings in PR comments", async () => {
     repoPath: "D:\\project\\AgentArena",
     outputPath,
     task: {
-      schemaVersion: "repoarena.taskpack/v1",
+      schemaVersion: "agentarena.taskpack/v1",
       id: "demo-warning",
       title: "Demo Warning",
       prompt: "Prompt",
@@ -339,7 +339,7 @@ test("writeReport includes preflight warnings in PR comments", async () => {
 });
 
 test("writeReport handles empty results array", async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-report-empty-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-report-empty-"));
   const outputPath = path.join(tempDir, "run-output");
 
   const benchmarkRun = {
@@ -348,7 +348,7 @@ test("writeReport handles empty results array", async () => {
     repoPath: ".",
     outputPath,
     task: {
-      schemaVersion: "repoarena.taskpack/v1",
+      schemaVersion: "agentarena.taskpack/v1",
       id: "empty-task",
       title: "Empty Task",
       prompt: "Nothing to do",

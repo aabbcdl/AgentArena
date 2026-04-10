@@ -6,7 +6,7 @@ import type {
   AdapterPreflightResult,
   AgentAdapter,
   AgentResolvedRuntime
-} from "@repoarena/core";
+} from "@agentarena/core";
 import { agentTimeoutMs, runProcess } from "./process-utils.js";
 import {
   buildAgentPrompt,
@@ -35,7 +35,7 @@ const OPENCODE_CAPABILITY: AdapterCapability = {
 };
 
 async function resolveOpencodeInvocation(): Promise<InvocationSpec> {
-  const command = process.env.REPOARENA_OPENCODE_BIN?.trim() || "opencode";
+  const command = process.env.AGENTARENA_OPENCODE_BIN?.trim() || "opencode";
   return {
     command,
     argsPrefix: [],

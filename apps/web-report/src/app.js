@@ -124,6 +124,9 @@ const elements = {
   taskTitle: document.querySelector("#task-title"),
   taskMeta: document.querySelector("#task-meta"),
   verdictHero: document.querySelector("#verdict-hero"),
+  leaderboardSection: document.querySelector("#leaderboard-section"),
+  leaderboardTitle: document.querySelector("#leaderboard-title"),
+  leaderboardContent: document.querySelector("#leaderboard-content"),
   comparisonBars: document.querySelector("#comparison-bars"),
   failuresSection: document.querySelector("#failures-section"),
   advancedAnalysis: document.querySelector("#advanced-analysis"),
@@ -315,7 +318,7 @@ function getNormalizedScoreWeights() {
 function saveScoreConfig() {
   try {
     localStorage.setItem(
-      "repoarena.webReport.scoreConfig",
+      "agentarena.webReport.scoreConfig",
       JSON.stringify({
         scoreWeights: state.scoreWeights
       })
@@ -327,7 +330,7 @@ function saveScoreConfig() {
 
 function loadScoreConfig() {
   try {
-    const raw = localStorage.getItem("repoarena.webReport.scoreConfig");
+    const raw = localStorage.getItem("agentarena.webReport.scoreConfig");
     return raw ? JSON.parse(raw) : null;
   } catch {
     return null;
@@ -468,7 +471,7 @@ function renderWeightSliders(weights) {
     input.dataset.weight = key;
     
     input.addEventListener('input', (e) => {
-      const newWeight = parseInt(e.target.value) / 100;
+      const newWeight = parseInt(e.target.value, 10) / 100;
       state.scoreWeights[key] = newWeight;
       label.querySelector('.weight-value').textContent = `${(newWeight * 100).toFixed(0)}%`;
       saveScoreConfig();
@@ -663,7 +666,6 @@ const {
   syncLauncherStateFromDom,
   validateLauncher,
   renderLauncherValidation,
-  handleQuickStart,
   handleLauncherRun,
   openProviderEditor,
   saveProviderProfileFromEditor,
@@ -1217,7 +1219,7 @@ elements.languageSelect.addEventListener("change", (event) => {
   state.language = String(event.target.value ?? "en");
   document.documentElement.lang = state.language === "zh-CN" ? "zh-CN" : "en";
   try {
-    localStorage.setItem("repoarena.webReport.language", state.language);
+    localStorage.setItem("agentarena.webReport.language", state.language);
   } catch {
     // ignore localStorage failures
   }
@@ -1510,7 +1512,7 @@ elements.downloadShareSvg.addEventListener("click", () => {
   }
 
   downloadTextFile(
-    `repoarena-${state.run.runId}.svg`,
+    `agentarena-${state.run.runId}.svg`,
     buildShareCardSvg(state.run, { scoreWeights: state.scoreWeights, scoreModeLabel: getScoreModeLabel() }),
     "image/svg+xml"
   );
@@ -1518,7 +1520,7 @@ elements.downloadShareSvg.addEventListener("click", () => {
 });
 
 try {
-  state.language = localStorage.getItem("repoarena.webReport.language") || "zh-CN";
+  state.language = localStorage.getItem("agentarena.webReport.language") || "zh-CN";
 } catch {
   state.language = "zh-CN";
 }

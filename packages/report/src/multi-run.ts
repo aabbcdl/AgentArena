@@ -1,4 +1,4 @@
-import type { BenchmarkRun, AgentRunResult } from "@repoarena/core";
+import type { AgentRunResult, BenchmarkRun } from "@agentarena/core";
 
 export interface AggregatedAgentStats {
   agentId: string;
@@ -33,22 +33,23 @@ export function aggregateMultiRuns(runs: BenchmarkRun[]): MultiRunComparison {
 
   const agents: AggregatedAgentStats[] = [];
   for (const [agentId, results] of agentRuns) {
-    const scores = results.map(r => r.compositeScore ?? 0).filter(s => s > 0);
-    const durations = results.map(r => r.durationMs).filter(d => d > 0);
-    const costs = results.map(r => r.estimatedCostUsd).filter(c => c >= 0);
-    const successes = results.filter(r => r.status === "success").length;
+    const scores = results.map((result) => result.compositeScore ?? 0).filter((score) => score > 0);
+    const durations = results.map((result) => result.durationMs).filter((duration) => duration > 0);
+    const costs = results.map((result) => result.estimatedCostUsd).filter((cost) => cost >= 0);
+    const successes = results.filter((result) => result.status === "success").length;
 
-    const avgScore = scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : 0;
-    const scoreStdDev = scores.length > 1
-      ? Math.sqrt(scores.map(s => Math.pow(s - avgScore, 2)).reduce((a, b) => a + b, 0) / (scores.length - 1))
-      : 0;
+    const avgScore = scores.length > 0 ? scores.reduce((sum, score) => sum + score, 0) / scores.length : 0;
+    const scoreStdDev =
+      scores.length > 1
+        ? Math.sqrt(scores.map((score) => (score - avgScore) ** 2).reduce((sum, value) => sum + value, 0) / (scores.length - 1))
+        : 0;
 
-    // Determine trend: compare first half vs second half
     let trend: "improving" | "stable" | "declining" = "stable";
     if (results.length >= 3) {
       const mid = Math.floor(results.length / 2);
-      const firstHalfAvg = results.slice(0, mid).reduce((a, r) => a + (r.compositeScore ?? 0), 0) / mid;
-      const secondHalfAvg = results.slice(mid).reduce((a, r) => a + (r.compositeScore ?? 0), 0) / (results.length - mid);
+      const firstHalfAvg = results.slice(0, mid).reduce((sum, result) => sum + (result.compositeScore ?? 0), 0) / mid;
+      const secondHalfAvg =
+        results.slice(mid).reduce((sum, result) => sum + (result.compositeScore ?? 0), 0) / (results.length - mid);
       if (secondHalfAvg > firstHalfAvg * 1.05) trend = "improving";
       else if (secondHalfAvg < firstHalfAvg * 0.95) trend = "declining";
     }
@@ -59,16 +60,16 @@ export function aggregateMultiRuns(runs: BenchmarkRun[]): MultiRunComparison {
       runCount: results.length,
       avgScore,
       scoreStdDev,
-      avgDurationMs: durations.length > 0 ? durations.reduce((a, b) => a + b, 0) / durations.length : 0,
-      avgCostUsd: costs.length > 0 ? costs.reduce((a, b) => a + b, 0) / costs.length : 0,
+      avgDurationMs: durations.length > 0 ? durations.reduce((sum, value) => sum + value, 0) / durations.length : 0,
+      avgCostUsd: costs.length > 0 ? costs.reduce((sum, value) => sum + value, 0) / costs.length : 0,
       successRate: results.length > 0 ? successes / results.length : 0,
       trend
     });
   }
 
-  agents.sort((a, b) => b.avgScore - a.avgScore);
+  agents.sort((left, right) => right.avgScore - left.avgScore);
 
-  const dates = runs.map(r => r.createdAt).sort();
+  const dates = runs.map((run) => run.createdAt).sort();
   return {
     agents,
     totalRuns: runs.length,
@@ -81,17 +82,19 @@ export function aggregateMultiRuns(runs: BenchmarkRun[]): MultiRunComparison {
  */
 export function formatMultiRunReport(comparison: MultiRunComparison): string {
   const lines: string[] = [];
-  lines.push(`# Multi-Run Agent Comparison`);
-  lines.push(``);
+  lines.push("# Multi-Run Agent Comparison");
+  lines.push("");
   lines.push(`**Total Runs**: ${comparison.totalRuns}`);
-  lines.push(`**Date Range**: ${comparison.dateRange.earliest} → ${comparison.dateRange.latest}`);
-  lines.push(``);
-  lines.push(`| Agent | Runs | Avg Score | Std Dev | Success Rate | Avg Duration | Avg Cost | Trend |`);
-  lines.push(`|-------|------|-----------|---------|--------------|--------------|----------|-------|`);
+  lines.push(`**Date Range**: ${comparison.dateRange.earliest} -> ${comparison.dateRange.latest}`);
+  lines.push("");
+  lines.push("| Agent | Runs | Avg Score | Std Dev | Success Rate | Avg Duration | Avg Cost | Trend |");
+  lines.push("|-------|------|-----------|---------|--------------|--------------|----------|-------|");
 
   for (const agent of comparison.agents) {
-    const trendEmoji = agent.trend === "improving" ? "📈" : agent.trend === "declining" ? "📉" : "➡️";
-    lines.push(`| ${agent.displayLabel} | ${agent.runCount} | ${agent.avgScore.toFixed(1)} | ${agent.scoreStdDev.toFixed(1)} | ${(agent.successRate * 100).toFixed(0)}% | ${(agent.avgDurationMs / 1000).toFixed(0)}s | $${agent.avgCostUsd.toFixed(2)} | ${trendEmoji} |`);
+    const trendEmoji = agent.trend === "improving" ? "up" : agent.trend === "declining" ? "down" : "stable";
+    lines.push(
+      `| ${agent.displayLabel} | ${agent.runCount} | ${agent.avgScore.toFixed(1)} | ${agent.scoreStdDev.toFixed(1)} | ${(agent.successRate * 100).toFixed(0)}% | ${(agent.avgDurationMs / 1000).toFixed(0)}s | $${agent.avgCostUsd.toFixed(2)} | ${trendEmoji} |`
+    );
   }
 
   return lines.join("\n");

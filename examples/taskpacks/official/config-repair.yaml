@@ -1,10 +1,10 @@
-schemaVersion: repoarena.taskpack/v1
+schemaVersion: agentarena.taskpack/v1
 id: official-config-repair
 title: Official Config Repair
 description: Repairs a broken configuration file while preserving the intended schema.
 metadata:
   source: official
-  owner: RepoArena
+  owner: AgentArena
   difficulty: easy
   objective: Verify that an agent can recover a broken configuration without introducing unrelated changes.
   repoTypes:

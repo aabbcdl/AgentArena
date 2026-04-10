@@ -1,7 +1,7 @@
 {
-  "name": "@repoarena/cli",
+  "name": "@agentarena/cli",
   "version": "0.1.0",
-  "description": "CLI entry point for RepoArena — ui, run, doctor, init-taskpack, init-ci, list-adapters",
+  "description": "CLI entry point for AgentArena — ui, run, doctor, init-taskpack, init-ci, list-adapters",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -9,17 +9,17 @@
     "node": ">=22.0.0"
   },
   "bin": {
-    "repoarena": "dist/index.js"
+    "agentarena": "dist/index.js"
   },
   "files": [
     "dist"
   ],
   "dependencies": {
-    "@repoarena/adapters": "workspace:*",
-    "@repoarena/core": "workspace:*",
-    "@repoarena/report": "workspace:*",
-    "@repoarena/runner": "workspace:*",
-    "@repoarena/taskpacks": "workspace:*",
+    "@agentarena/adapters": "workspace:*",
+    "@agentarena/core": "workspace:*",
+    "@agentarena/report": "workspace:*",
+    "@agentarena/runner": "workspace:*",
+    "@agentarena/taskpacks": "workspace:*",
     "yaml": "^2.8.2"
   },
   "scripts": {

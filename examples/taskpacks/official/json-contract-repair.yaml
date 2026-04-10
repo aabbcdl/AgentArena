@@ -1,10 +1,10 @@
-schemaVersion: repoarena.taskpack/v1
+schemaVersion: agentarena.taskpack/v1
 id: official-json-contract-repair
 title: Official JSON Contract Repair
 description: Repairs a JSON API contract using schema and value assertions.
 metadata:
   source: official
-  owner: RepoArena
+  owner: AgentArena
   difficulty: medium
   objective: Validate an agent's ability to repair structured JSON output under explicit contract checks.
   repoTypes:

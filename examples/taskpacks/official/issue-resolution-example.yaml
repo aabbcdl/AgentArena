@@ -1,10 +1,10 @@
-schemaVersion: repoarena.taskpack/v1
+schemaVersion: agentarena.taskpack/v1
 id: issue-resolution-example
 title: "Issue Resolution Example (SWE-Bench Inspired)"
 description: "Demonstrates patch-validation judge for GitHub issue fixing"
 metadata:
   source: official
-  owner: RepoArena
+  owner: AgentArena
   difficulty: hard
   objective: "Fix a bug in the codebase and verify with test suite"
   repoTypes: [node, typescript]

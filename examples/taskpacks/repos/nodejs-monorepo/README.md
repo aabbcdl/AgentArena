@@ -1,6 +1,6 @@
 # nodejs-monorepo
 
-Standard test repository used by RepoArena builtin task packs for fair agent comparison.
+Standard test repository used by AgentArena builtin task packs for fair agent comparison.
 
 ## Structure
 

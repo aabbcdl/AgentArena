@@ -4,7 +4,7 @@ import path from "node:path";
 import { normalizePath } from "./paths.js";
 import type { DiffSummary, FileSnapshotEntry } from "./types.js";
 
-const INTERNAL_IGNORED_NAMES = new Set([".repoarena", ".git", "node_modules"]);
+const INTERNAL_IGNORED_NAMES = new Set([".agentarena", ".git", "node_modules"]);
 
 export async function ensureDirectory(dirPath: string): Promise<void> {
   await fs.mkdir(dirPath, { recursive: true });

@@ -227,7 +227,7 @@ export function createLauncherModule(deps) {
           model: v.model
         }))
       };
-      localStorage.setItem("repoarena.webReport.launcherConfig", JSON.stringify(config));
+      localStorage.setItem("agentarena.webReport.launcherConfig", JSON.stringify(config));
     } catch {
       // ignore localStorage failures
     }
@@ -235,7 +235,7 @@ export function createLauncherModule(deps) {
   
   function loadLauncherConfig() {
     try {
-      const raw = localStorage.getItem("repoarena.webReport.launcherConfig");
+      const raw = localStorage.getItem("agentarena.webReport.launcherConfig");
       return raw ? JSON.parse(raw) : null;
     } catch {
       return null;
@@ -634,8 +634,8 @@ export function createLauncherModule(deps) {
           </div>
           <p class="warning-text">${escapeHtml(
             localText(
-              "第三方兼容层可能改变 Claude Code 行为。结果代表 Claude Code + 该 provider/profile 的表现，不是原生 RepoArena API agent。",
-              "Third-party compatibility layers can change Claude Code behavior. Results represent \"Claude Code + this provider/profile\", not native RepoArena API agents."
+              "第三方兼容层可能改变 Claude Code 行为。结果代表 Claude Code + 该 provider/profile 的表现，不是原生 AgentArena API agent。",
+              "Third-party compatibility layers can change Claude Code behavior. Results represent \"Claude Code + this provider/profile\", not native AgentArena API agents."
             )
           )}</p>
           <div class="launcher-grid">

@@ -36,10 +36,10 @@ export interface ParsedArgs {
 }
 
 export function printHelp(): void {
-  console.log(`RepoArena CLI - AI Agent Benchmarking Framework
+  console.log(`AgentArena CLI - AI Agent Benchmarking Framework
 
 Usage:
-  repoarena <command> [options]
+  agentarena <command> [options]
 
 Commands:
   run              Run a benchmark against a repository
@@ -51,7 +51,7 @@ Commands:
   ui               Start the web UI server
 
 Run Command:
-  repoarena run --repo <path> --task <path> --agents <list> [options]
+  agentarena run --repo <path> --task <path> --agents <list> [options]
 
   Required:
     --repo <path>              Path to the repository to benchmark
@@ -59,7 +59,7 @@ Run Command:
     --agents <list>            Comma-separated list of agent IDs to benchmark
 
   Optional:
-    --output <path>            Output directory for results (default: .repoarena/runs/<run-id>)
+    --output <path>            Output directory for results (default: .agentarena/runs/<run-id>)
     --probe-auth               Test adapter authentication before running
     --update-snapshots         Update snapshot files if they differ
     --cleanup-workspaces       Remove agent workspace directories after run
@@ -96,7 +96,7 @@ Run Command:
     --copilot-model <model>    Override the Copilot CLI model (if supported)
 
 Doctor Command:
-  repoarena doctor [options]
+  agentarena doctor [options]
 
   Options:
     --agents <list>            Comma-separated list of agents to check (default: all)
@@ -105,38 +105,38 @@ Doctor Command:
     --json                     Output results as JSON
 
 List Adapters Command:
-  repoarena list-adapters [--json]
+  agentarena list-adapters [--json]
 
 Init Command:
-  repoarena init [options]
+  agentarena init [options]
 
   Options:
     --repo <path>              Path to the repository (default: current directory)
-    --output <path>            Task pack output path (default: repoarena.taskpack.yaml)
+    --output <path>            Task pack output path (default: agentarena.taskpack.yaml)
     --agents <list>            Comma-separated list of agents to benchmark (default: detected)
     --force                    Overwrite existing task pack
 
 Init Taskpack Command:
-  repoarena init-taskpack [options]
+  agentarena init-taskpack [options]
 
   Options:
     --template <name>          Template to use (repo-health, json-api, snapshot)
-    --output <path>            Output file path (default: repoarena.taskpack.yaml)
+    --output <path>            Output file path (default: agentarena.taskpack.yaml)
     --force                    Overwrite existing file
 
 Init CI Command:
-  repoarena init-ci [options]
+  agentarena init-ci [options]
 
   Options:
     --task <path>              Path to the task pack file
     --agents <list>            Comma-separated list of agents
     --output <path>            Output workflow file path
     --ci-template <type>       Workflow template (pull-request, smoke, nightly)
-    --ci-output-dir <path>     CI output directory (default: .repoarena/ci-benchmark)
+    --ci-output-dir <path>     CI output directory (default: .agentarena/ci-benchmark)
     --force                    Overwrite existing file
 
 UI Command:
-  repoarena ui [options]
+  agentarena ui [options]
 
   Options:
     --host <host>              Server host (default: 127.0.0.1)
@@ -145,42 +145,42 @@ UI Command:
 
 Examples:
   # Run a basic benchmark with demo adapters
-  repoarena run --repo . --task examples/taskpacks/demo-repo-health.json --agents demo-fast,demo-thorough
+  agentarena run --repo . --task examples/taskpacks/demo-repo-health.json --agents demo-fast,demo-thorough
 
   # Run with Codex and Claude Code, testing authentication
-  repoarena run --repo . --task examples/taskpacks/demo-repo-health.json --agents codex,claude-code --probe-auth
+  agentarena run --repo . --task examples/taskpacks/demo-repo-health.json --agents codex,claude-code --probe-auth
 
   # Run with specific Codex model and reasoning
-  repoarena run --repo . --task examples/taskpacks/demo-repo-health.yaml --agents codex --codex-model gpt-5.4 --codex-reasoning high
+  agentarena run --repo . --task examples/taskpacks/demo-repo-health.yaml --agents codex --codex-model gpt-5.4 --codex-reasoning high
 
   # Run with Claude Code using a provider profile
-  repoarena run --repo . --task examples/taskpacks/official/repo-health.yaml --agents claude-code --claude-profile claude-official --claude-model claude-3-7-sonnet-latest
+  agentarena run --repo . --task examples/taskpacks/official/repo-health.yaml --agents claude-code --claude-profile claude-official --claude-model claude-3-7-sonnet-latest
 
   # Update snapshots during benchmark
-  repoarena run --repo . --task examples/taskpacks/demo-repo-health.yaml --agents demo-fast --update-snapshots
+  agentarena run --repo . --task examples/taskpacks/demo-repo-health.yaml --agents demo-fast --update-snapshots
 
   # Output results as JSON
-  repoarena run --repo . --task examples/taskpacks/demo-repo-health.yaml --agents demo-fast --json
+  agentarena run --repo . --task examples/taskpacks/demo-repo-health.yaml --agents demo-fast --json
 
   # Check all adapters with authentication probe
-  repoarena doctor --agents codex,claude-code,cursor --probe-auth
+  agentarena doctor --agents codex,claude-code,cursor --probe-auth
 
   # Strict doctor check (fails if any adapter not ready)
-  repoarena doctor --agents codex,claude-code,cursor --probe-auth --strict
+  agentarena doctor --agents codex,claude-code,cursor --probe-auth --strict
 
   # Create a new task pack from template
-  repoarena init-taskpack --template repo-health --output my-task.yaml
+  agentarena init-taskpack --template repo-health --output my-task.yaml
 
   # Create a CI workflow for pull requests
-  repoarena init-ci --task repoarena.taskpack.yaml --agents demo-fast,codex
+  agentarena init-ci --task agentarena.taskpack.yaml --agents demo-fast,codex
 
   # Create a nightly CI workflow
-  repoarena init-ci --ci-template nightly --task examples/taskpacks/official/repo-health.yaml --agents demo-fast
+  agentarena init-ci --ci-template nightly --task examples/taskpacks/official/repo-health.yaml --agents demo-fast
 
   # Start the web UI
-  repoarena ui --host 127.0.0.1 --port 4320
+  agentarena ui --host 127.0.0.1 --port 4320
 
-For more information, visit: https://github.com/aabbcdl/RepoArena
+For more information, visit: https://github.com/aabbcdl/AgentArena
 `);
 }
 
@@ -352,7 +352,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
       case "--ci-output-dir":
         parsed.ciOutputDir = args.shift();
         if (!parsed.ciOutputDir) {
-          throw new Error("--ci-output-dir requires a path argument. Example: --ci-output-dir .repoarena/ci");
+          throw new Error("--ci-output-dir requires a path argument. Example: --ci-output-dir .agentarena/ci");
         }
         break;
       case "--workflow":
@@ -444,7 +444,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
       default:
         throw new Error(
           `Unknown argument: ${token}\n` +
-          `Run "repoarena --help" for usage information.`
+          `Run "agentarena --help" for usage information.`
         );
     }
   }

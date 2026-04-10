@@ -6,7 +6,7 @@ import type {
   AdapterPreflightResult,
   AgentAdapter,
   AgentResolvedRuntime
-} from "@repoarena/core";
+} from "@agentarena/core";
 import { getClaudeProviderProfileSecret, writeClaudeWorkspaceSettings } from "./claude-provider-profiles.js";
 import { parseClaudeEvents } from "./event-parsers.js";
 import { agentTimeoutMs, runProcess } from "./process-utils.js";
@@ -23,7 +23,7 @@ import {
 } from "./shared.js";
 
 async function resolveClaudeInvocation(): Promise<InvocationSpec> {
-  const command = process.env.REPOARENA_CLAUDE_BIN?.trim() || "claude";
+  const command = process.env.AGENTARENA_CLAUDE_BIN?.trim() || "claude";
   return {
     command,
     argsPrefix: [],

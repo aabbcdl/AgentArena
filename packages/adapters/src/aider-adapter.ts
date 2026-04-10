@@ -8,7 +8,7 @@ import type {
   AdapterPreflightResult,
   AgentAdapter,
   AgentResolvedRuntime
-} from "@repoarena/core";
+} from "@agentarena/core";
 import { agentTimeoutMs, runProcess } from "./process-utils.js";
 import {
   buildAgentPrompt,
@@ -37,7 +37,7 @@ const AIDER_CAPABILITY: AdapterCapability = {
 };
 
 async function resolveAiderInvocation(): Promise<InvocationSpec> {
-  const command = process.env.REPOARENA_AIDER_BIN?.trim() || "aider";
+  const command = process.env.AGENTARENA_AIDER_BIN?.trim() || "aider";
   return {
     command,
     argsPrefix: [],

@@ -6,7 +6,7 @@ import test from "node:test";
 import { InMemoryTraceRecorder, JsonlTraceRecorder } from "../packages/trace/dist/index.js";
 
 function tempDir() {
-  return path.join(tmpdir(), `repoarena-trace-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  return path.join(tmpdir(), `agentarena-trace-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 }
 
 test("JsonlTraceRecorder records and reads events", async () => {

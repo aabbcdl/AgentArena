@@ -1,10 +1,10 @@
-schemaVersion: repoarena.taskpack/v1
+schemaVersion: agentarena.taskpack/v1
 id: rotating-tasks-2026-04-example
 title: "Rotating Tasks Example (LiveBench Inspired)"
 description: "Demonstrates anti-contamination mechanism with task rotation"
 metadata:
   source: official
-  owner: RepoArena
+  owner: AgentArena
   difficulty: medium
   objective: "Solve a coding challenge with objective ground truth"
   repoTypes: [node, typescript]

@@ -28,7 +28,7 @@ Integrate a new coding agent into the benchmark adapter ecosystem.
    - Use `buildAgentPrompt(context)` for prompt formatting.
    - Use `runProcess()` for CLI execution with timeout and cancellation support.
    - Use `probeHelp()` and `probeInvocationVersion()` for preflight checks.
-   - Support `REPOARENA_<AGENT>_BIN` environment variable for custom binary path.
+   - Support `AGENTARENA_<AGENT>_BIN` environment variable for custom binary path.
    - If the CLI reports token usage, parse it; otherwise estimate or mark as unknown.
    - If the CLI does not support headless mode, return `"blocked"` status with a clear explanation.
 
@@ -39,8 +39,8 @@ Integrate a new coding agent into the benchmark adapter ecosystem.
 4. If the agent supports model selection, add `--<agent>-model` to `packages/cli/src/args.ts` and handle it in `normalizeCliSelections()` in `packages/cli/src/index.ts`.
 
 5. Verify:
-   - `pnpm --filter @repoarena/adapters build`
-   - `pnpm --filter @repoarena/cli build`
+   - `pnpm --filter @agentarena/adapters build`
+   - `pnpm --filter @agentarena/cli build`
    - `pnpm test` — existing tests must still pass.
 
 ## What to Check Before Committing

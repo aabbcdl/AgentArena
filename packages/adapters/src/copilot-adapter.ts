@@ -1,14 +1,14 @@
 import path from "node:path";
 import {
+  type AdapterCapability,
   type AdapterExecutionContext,
   type AdapterExecutionResult,
   type AdapterPreflightOptions,
   type AdapterPreflightResult,
   type AgentAdapter,
   type AgentResolvedRuntime,
-  type AdapterCapability,
   ensureDirectory
-} from "@repoarena/core";
+} from "@agentarena/core";
 import { agentTimeoutMs, runProcess } from "./process-utils.js";
 import {
   buildAgentPrompt,
@@ -36,8 +36,8 @@ export const COPILOT_CAPABILITY: AdapterCapability = {
 };
 
 async function resolveCopilotInvocation(): Promise<InvocationSpec> {
-  if (process.env.REPOARENA_COPILOT_BIN?.trim()) {
-    const command = process.env.REPOARENA_COPILOT_BIN.trim();
+  if (process.env.AGENTARENA_COPILOT_BIN?.trim()) {
+    const command = process.env.AGENTARENA_COPILOT_BIN.trim();
     return { command, argsPrefix: [], displayCommand: command };
   }
 
@@ -172,7 +172,7 @@ export class CopilotAdapter implements AgentAdapter {
   }
 
   async execute(context: AdapterExecutionContext): Promise<AdapterExecutionResult> {
-    const metadataDir = path.join(context.workspacePath, "repoarena-copilot");
+    const metadataDir = path.join(context.workspacePath, "agentarena-copilot");
     await ensureDirectory(metadataDir);
 
     const prompt = buildAgentPrompt(context);

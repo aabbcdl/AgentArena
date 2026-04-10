@@ -33,8 +33,8 @@ Add a new judge type to the evaluation system.
 4. If the judge contributes to scoring, add a scoring helper in `packages/report/src/scoring.ts` and wire it into the relevant weight modes.
 
 5. Verify:
-   - `pnpm --filter @repoarena/judges build`
-   - `pnpm --filter @repoarena/taskpacks build`
+   - `pnpm --filter @agentarena/judges build`
+   - `pnpm --filter @agentarena/taskpacks build`
    - Create a test task pack YAML using the new judge type and verify it loads.
    - Add a unit test in `tests/judges.test.mjs`.
 

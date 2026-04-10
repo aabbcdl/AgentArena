@@ -272,7 +272,7 @@ test("share helpers produce shareable summary text and PR tables", () => {
   const shareCard = buildShareCard(run);
   const prTable = buildPrTable(run);
 
-  assert.match(shareCard, /RepoArena \| Task A/);
+  assert.match(shareCard, /AgentArena \| Task A/);
   assert.match(shareCard, /Best variant: demo-fast .*score \d+\.\d/);
   assert.match(prTable, /\| Variant \| Base Agent \| Provider \| Provider Kind \| Model \| Reasoning \| Version \| Verification \| Status \| Score \| Duration \| Tokens \| Cost \| Judges \| Tests \| Lint \| Diff Precision \| Files \|/);
   assert.match(prTable, /\| demo-fast \| demo-fast \| official \| unknown \| unknown \| default \| unknown \| unknown\/unknown \| success \| \d+\.\d \| 1000ms \| 100 \| \$0\.10 \| 2\/2 \| n\/a \| n\/a \| n\/a \| 1 \|/);

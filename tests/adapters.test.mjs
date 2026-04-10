@@ -54,7 +54,7 @@ test("listAvailableAdapters exposes capability metadata", () => {
 });
 
 test("demo adapter execution returns normalized benchmark output", async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-adapters-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-adapters-"));
   const workspacePath = path.join(tempDir, "workspace");
   await mkdir(workspacePath, { recursive: true });
 
@@ -65,7 +65,7 @@ test("demo adapter execution returns normalized benchmark output", async () => {
     workspacePath,
     environment: process.env,
     task: {
-      schemaVersion: "repoarena.taskpack/v1",
+      schemaVersion: "agentarena.taskpack/v1",
       id: "demo-task",
       title: "Demo Task",
       prompt: "Create a minimal change.",
@@ -121,15 +121,15 @@ test("parseCodexEvents extracts file changes, tokens, and thread ids", () => {
 });
 
 test("resolveCodexRuntime uses requested config before env and config defaults", async () => {
-  const originalModel = process.env.REPOARENA_CODEX_MODEL;
-  const originalReasoning = process.env.REPOARENA_CODEX_REASONING_EFFORT;
+  const originalModel = process.env.AGENTARENA_CODEX_MODEL;
+  const originalReasoning = process.env.AGENTARENA_CODEX_REASONING_EFFORT;
   const originalUserProfile = process.env.USERPROFILE;
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-codex-home-"));
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-codex-home-"));
   const codexDir = path.join(homeDir, ".codex");
   await mkdir(codexDir, { recursive: true });
   process.env.USERPROFILE = homeDir;
-  process.env.REPOARENA_CODEX_MODEL = "env-model";
-  process.env.REPOARENA_CODEX_REASONING_EFFORT = "medium";
+  process.env.AGENTARENA_CODEX_MODEL = "env-model";
+  process.env.AGENTARENA_CODEX_REASONING_EFFORT = "medium";
 
   try {
     const resolved = await __testUtils.resolveCodexRuntime({
@@ -145,14 +145,14 @@ test("resolveCodexRuntime uses requested config before env and config defaults",
     assert.equal(resolved.verification, "inferred");
   } finally {
     if (originalModel === undefined) {
-      delete process.env.REPOARENA_CODEX_MODEL;
+      delete process.env.AGENTARENA_CODEX_MODEL;
     } else {
-      process.env.REPOARENA_CODEX_MODEL = originalModel;
+      process.env.AGENTARENA_CODEX_MODEL = originalModel;
     }
     if (originalReasoning === undefined) {
-      delete process.env.REPOARENA_CODEX_REASONING_EFFORT;
+      delete process.env.AGENTARENA_CODEX_REASONING_EFFORT;
     } else {
-      process.env.REPOARENA_CODEX_REASONING_EFFORT = originalReasoning;
+      process.env.AGENTARENA_CODEX_REASONING_EFFORT = originalReasoning;
     }
     if (originalUserProfile === undefined) {
       delete process.env.USERPROFILE;
@@ -164,24 +164,24 @@ test("resolveCodexRuntime uses requested config before env and config defaults",
 });
 
 test("resolveCodexRuntime falls back from env to ~/.codex/config.toml", async () => {
-  const originalModel = process.env.REPOARENA_CODEX_MODEL;
-  const originalReasoning = process.env.REPOARENA_CODEX_REASONING_EFFORT;
+  const originalModel = process.env.AGENTARENA_CODEX_MODEL;
+  const originalReasoning = process.env.AGENTARENA_CODEX_REASONING_EFFORT;
   const originalUserProfile = process.env.USERPROFILE;
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-codex-home-"));
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-codex-home-"));
   const codexDir = path.join(homeDir, ".codex");
   await mkdir(codexDir, { recursive: true });
   process.env.USERPROFILE = homeDir;
 
   try {
-    process.env.REPOARENA_CODEX_MODEL = "env-model";
-    process.env.REPOARENA_CODEX_REASONING_EFFORT = "low";
+    process.env.AGENTARENA_CODEX_MODEL = "env-model";
+    process.env.AGENTARENA_CODEX_REASONING_EFFORT = "low";
     let resolved = await __testUtils.resolveCodexRuntime({});
     assert.equal(resolved.effectiveModel, "env-model");
     assert.equal(resolved.effectiveReasoningEffort, "low");
     assert.equal(resolved.source, "env");
 
-    delete process.env.REPOARENA_CODEX_MODEL;
-    delete process.env.REPOARENA_CODEX_REASONING_EFFORT;
+    delete process.env.AGENTARENA_CODEX_MODEL;
+    delete process.env.AGENTARENA_CODEX_REASONING_EFFORT;
     await writeFile(
       path.join(codexDir, "config.toml"),
       'model = "config-model"\nmodel_reasoning_effort = "high"\n',
@@ -195,14 +195,14 @@ test("resolveCodexRuntime falls back from env to ~/.codex/config.toml", async ()
     assert.equal(resolved.verification, "inferred");
   } finally {
     if (originalModel === undefined) {
-      delete process.env.REPOARENA_CODEX_MODEL;
+      delete process.env.AGENTARENA_CODEX_MODEL;
     } else {
-      process.env.REPOARENA_CODEX_MODEL = originalModel;
+      process.env.AGENTARENA_CODEX_MODEL = originalModel;
     }
     if (originalReasoning === undefined) {
-      delete process.env.REPOARENA_CODEX_REASONING_EFFORT;
+      delete process.env.AGENTARENA_CODEX_REASONING_EFFORT;
     } else {
-      process.env.REPOARENA_CODEX_REASONING_EFFORT = originalReasoning;
+      process.env.AGENTARENA_CODEX_REASONING_EFFORT = originalReasoning;
     }
     if (originalUserProfile === undefined) {
       delete process.env.USERPROFILE;
@@ -329,14 +329,14 @@ test("new adapter preflight returns missing when CLI not installed", async () =>
 });
 
 test("Claude provider profiles persist metadata without leaking secrets", async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-claude-profiles-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-claude-profiles-"));
   const registryPath = path.join(tempDir, "claude-provider-profiles.json");
-  const originalRoot = process.env.REPOARENA_CLAUDE_PROFILE_ROOT;
-  const originalFile = process.env.REPOARENA_CLAUDE_PROFILES_FILE;
-  const originalPrefix = process.env.REPOARENA_CLAUDE_SECRET_PREFIX;
-  process.env.REPOARENA_CLAUDE_PROFILE_ROOT = tempDir;
-  process.env.REPOARENA_CLAUDE_PROFILES_FILE = registryPath;
-  process.env.REPOARENA_CLAUDE_SECRET_PREFIX = `RepoArena/test/${Date.now()}/`;
+  const originalRoot = process.env.AGENTARENA_CLAUDE_PROFILE_ROOT;
+  const originalFile = process.env.AGENTARENA_CLAUDE_PROFILES_FILE;
+  const originalPrefix = process.env.AGENTARENA_CLAUDE_SECRET_PREFIX;
+  process.env.AGENTARENA_CLAUDE_PROFILE_ROOT = tempDir;
+  process.env.AGENTARENA_CLAUDE_PROFILES_FILE = registryPath;
+  process.env.AGENTARENA_CLAUDE_SECRET_PREFIX = `AgentArena/test/${Date.now()}/`;
 
   let profileId;
   try {
@@ -384,60 +384,60 @@ test("Claude provider profiles persist metadata without leaking secrets", async 
       } catch {}
     }
     if (originalRoot === undefined) {
-      delete process.env.REPOARENA_CLAUDE_PROFILE_ROOT;
+      delete process.env.AGENTARENA_CLAUDE_PROFILE_ROOT;
     } else {
-      process.env.REPOARENA_CLAUDE_PROFILE_ROOT = originalRoot;
+      process.env.AGENTARENA_CLAUDE_PROFILE_ROOT = originalRoot;
     }
     if (originalFile === undefined) {
-      delete process.env.REPOARENA_CLAUDE_PROFILES_FILE;
+      delete process.env.AGENTARENA_CLAUDE_PROFILES_FILE;
     } else {
-      process.env.REPOARENA_CLAUDE_PROFILES_FILE = originalFile;
+      process.env.AGENTARENA_CLAUDE_PROFILES_FILE = originalFile;
     }
     if (originalPrefix === undefined) {
-      delete process.env.REPOARENA_CLAUDE_SECRET_PREFIX;
+      delete process.env.AGENTARENA_CLAUDE_SECRET_PREFIX;
     } else {
-      process.env.REPOARENA_CLAUDE_SECRET_PREFIX = originalPrefix;
+      process.env.AGENTARENA_CLAUDE_SECRET_PREFIX = originalPrefix;
     }
     await rm(tempDir, { recursive: true, force: true });
   }
 });
 
 test("Claude provider registry surfaces malformed JSON instead of resetting", async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-claude-profiles-malformed-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-claude-profiles-malformed-"));
   const registryPath = path.join(tempDir, "claude-provider-profiles.json");
-  const originalRoot = process.env.REPOARENA_CLAUDE_PROFILE_ROOT;
-  const originalFile = process.env.REPOARENA_CLAUDE_PROFILES_FILE;
-  process.env.REPOARENA_CLAUDE_PROFILE_ROOT = tempDir;
-  process.env.REPOARENA_CLAUDE_PROFILES_FILE = registryPath;
+  const originalRoot = process.env.AGENTARENA_CLAUDE_PROFILE_ROOT;
+  const originalFile = process.env.AGENTARENA_CLAUDE_PROFILES_FILE;
+  process.env.AGENTARENA_CLAUDE_PROFILE_ROOT = tempDir;
+  process.env.AGENTARENA_CLAUDE_PROFILES_FILE = registryPath;
 
   try {
     await writeFile(registryPath, "{ not valid json", "utf8");
     await assert.rejects(listClaudeProviderProfiles(), /Claude provider registry.*malformed JSON/);
   } finally {
     if (originalRoot === undefined) {
-      delete process.env.REPOARENA_CLAUDE_PROFILE_ROOT;
+      delete process.env.AGENTARENA_CLAUDE_PROFILE_ROOT;
     } else {
-      process.env.REPOARENA_CLAUDE_PROFILE_ROOT = originalRoot;
+      process.env.AGENTARENA_CLAUDE_PROFILE_ROOT = originalRoot;
     }
     if (originalFile === undefined) {
-      delete process.env.REPOARENA_CLAUDE_PROFILES_FILE;
+      delete process.env.AGENTARENA_CLAUDE_PROFILES_FILE;
     } else {
-      process.env.REPOARENA_CLAUDE_PROFILES_FILE = originalFile;
+      process.env.AGENTARENA_CLAUDE_PROFILES_FILE = originalFile;
     }
     await rm(tempDir, { recursive: true, force: true });
   }
 });
 
 test("resolveClaudeRuntime and workspace settings respect provider profiles", async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "repoarena-claude-runtime-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-claude-runtime-"));
   const registryPath = path.join(tempDir, "claude-provider-profiles.json");
   const workspacePath = path.join(tempDir, "workspace");
-  const originalRoot = process.env.REPOARENA_CLAUDE_PROFILE_ROOT;
-  const originalFile = process.env.REPOARENA_CLAUDE_PROFILES_FILE;
-  const originalPrefix = process.env.REPOARENA_CLAUDE_SECRET_PREFIX;
-  process.env.REPOARENA_CLAUDE_PROFILE_ROOT = tempDir;
-  process.env.REPOARENA_CLAUDE_PROFILES_FILE = registryPath;
-  process.env.REPOARENA_CLAUDE_SECRET_PREFIX = `RepoArena/test/${Date.now()}/`;
+  const originalRoot = process.env.AGENTARENA_CLAUDE_PROFILE_ROOT;
+  const originalFile = process.env.AGENTARENA_CLAUDE_PROFILES_FILE;
+  const originalPrefix = process.env.AGENTARENA_CLAUDE_SECRET_PREFIX;
+  process.env.AGENTARENA_CLAUDE_PROFILE_ROOT = tempDir;
+  process.env.AGENTARENA_CLAUDE_PROFILES_FILE = registryPath;
+  process.env.AGENTARENA_CLAUDE_SECRET_PREFIX = `AgentArena/test/${Date.now()}/`;
 
   let profileId;
   try {
@@ -506,19 +506,19 @@ test("resolveClaudeRuntime and workspace settings respect provider profiles", as
       } catch {}
     }
     if (originalRoot === undefined) {
-      delete process.env.REPOARENA_CLAUDE_PROFILE_ROOT;
+      delete process.env.AGENTARENA_CLAUDE_PROFILE_ROOT;
     } else {
-      process.env.REPOARENA_CLAUDE_PROFILE_ROOT = originalRoot;
+      process.env.AGENTARENA_CLAUDE_PROFILE_ROOT = originalRoot;
     }
     if (originalFile === undefined) {
-      delete process.env.REPOARENA_CLAUDE_PROFILES_FILE;
+      delete process.env.AGENTARENA_CLAUDE_PROFILES_FILE;
     } else {
-      process.env.REPOARENA_CLAUDE_PROFILES_FILE = originalFile;
+      process.env.AGENTARENA_CLAUDE_PROFILES_FILE = originalFile;
     }
     if (originalPrefix === undefined) {
-      delete process.env.REPOARENA_CLAUDE_SECRET_PREFIX;
+      delete process.env.AGENTARENA_CLAUDE_SECRET_PREFIX;
     } else {
-      process.env.REPOARENA_CLAUDE_SECRET_PREFIX = originalPrefix;
+      process.env.AGENTARENA_CLAUDE_SECRET_PREFIX = originalPrefix;
     }
     await rm(tempDir, { recursive: true, force: true });
   }

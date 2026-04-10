@@ -1,10 +1,10 @@
-schemaVersion: repoarena.taskpack/v1
+schemaVersion: agentarena.taskpack/v1
 id: official-failing-test-fix
 title: Official Failing Test Fix
 description: Repairs a failing test while preserving the surrounding test suite.
 metadata:
   source: official
-  owner: RepoArena
+  owner: AgentArena
   difficulty: medium
   objective: Measure whether an agent can isolate and repair a failing test case.
   repoTypes:
@@ -56,9 +56,9 @@ judges:
   - id: all-tests-pass
     type: test-result
     label: All tests pass
-    command: node -e "const fs=require('node:fs');const {spawnSync}=require('node:child_process');const report='.repoarena/failing-test-fix-results.json';fs.mkdirSync('.repoarena',{recursive:true});for(const [cmd,args] of [['pnpm',['test','--','--runInBand','--json','--outputFile',report]],['pnpm',['test','--','--runInBand','--reporter=json','--outputFile',report]],['npm',['run','test','--','--runInBand','--json','--outputFile',report]],['npm',['run','test','--','--runInBand','--reporter=json','--outputFile',report]]]){fs.rmSync(report,{force:true});const r=spawnSync(cmd,args,{stdio:'inherit',shell:process.platform==='win32'});if(!r.error&&fs.existsSync(report)&&fs.statSync(report).size>0){process.exit(r.status??1)}}process.exit(1)"
+    command: node -e "const fs=require('node:fs');const {spawnSync}=require('node:child_process');const report='.agentarena/failing-test-fix-results.json';fs.mkdirSync('.agentarena',{recursive:true});for(const [cmd,args] of [['pnpm',['test','--','--runInBand','--json','--outputFile',report]],['pnpm',['test','--','--runInBand','--reporter=json','--outputFile',report]],['npm',['run','test','--','--runInBand','--json','--outputFile',report]],['npm',['run','test','--','--runInBand','--reporter=json','--outputFile',report]]]){fs.rmSync(report,{force:true});const r=spawnSync(cmd,args,{stdio:'inherit',shell:process.platform==='win32'});if(!r.error&&fs.existsSync(report)&&fs.statSync(report).size>0){process.exit(r.status??1)}}process.exit(1)"
     format: auto
-    reportFile: .repoarena/failing-test-fix-results.json
+    reportFile: .agentarena/failing-test-fix-results.json
     timeoutMs: 120000
   - id: package-manifest-exists
     type: file-exists

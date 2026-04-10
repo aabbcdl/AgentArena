@@ -1,13 +1,12 @@
-import path from "node:path";
-import {
-  type AdapterExecutionContext,
-  type AdapterExecutionResult,
-  type AdapterPreflightOptions,
-  type AdapterPreflightResult,
-  type AgentAdapter,
-  type AgentResolvedRuntime,
-  type AdapterCapability
-} from "@repoarena/core";
+import type {
+  AdapterCapability,
+  AdapterExecutionContext,
+  AdapterExecutionResult,
+  AdapterPreflightOptions,
+  AdapterPreflightResult,
+  AgentAdapter,
+  AgentResolvedRuntime
+} from "@agentarena/core";
 import { agentTimeoutMs, runProcess } from "./process-utils.js";
 import {
   buildAgentPrompt,
@@ -31,7 +30,7 @@ export interface CliAdapterConfig {
   commandArgs: string[];
   /** Capability metadata for this adapter */
   capability: AdapterCapability;
-  /** Environment variable for custom binary path (e.g. "REPOARENA_QWEN_BIN") */
+  /** Environment variable for custom binary path (e.g. "AGENTARENA_QWEN_BIN") */
   binEnvVar?: string;
   /** Extract token usage from stdout (returns 0 if not parseable) */
   parseTokenUsage?: (stdout: string) => number;
@@ -154,8 +153,10 @@ class BaseCliAdapterImpl implements AgentAdapter {
   private async resolveInvocation(): Promise<InvocationSpec> {
     const { binEnvVar, command } = this.config;
     if (binEnvVar && process.env[binEnvVar]?.trim()) {
-      const cmd = process.env[binEnvVar]!.trim();
-      return { command: cmd, argsPrefix: [], displayCommand: cmd };
+      const cmd = process.env[binEnvVar]?.trim();
+      if (cmd) {
+        return { command: cmd, argsPrefix: [], displayCommand: cmd };
+      }
     }
     if (process.platform === "win32") {
       return { command: `${command}.cmd`, argsPrefix: [], displayCommand: `${command}.cmd` };

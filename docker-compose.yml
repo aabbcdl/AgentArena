@@ -1,11 +1,11 @@
 version: "3.8"
 services:
-  repoarena:
+  agentarena:
     build: .
     ports:
       - "4320:4320"
     volumes:
-      - ./.repoarena:/app/.repoarena
+      - ./.agentarena:/app/.agentarena
       - ./examples:/app/examples:ro
     environment:
       - NODE_ENV=production

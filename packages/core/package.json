@@ -1,7 +1,7 @@
 {
-  "name": "@repoarena/core",
+  "name": "@agentarena/core",
   "version": "0.1.0",
-  "description": "Shared types and utilities for RepoArena",
+  "description": "Shared types and utilities for AgentArena",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

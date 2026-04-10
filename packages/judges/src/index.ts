@@ -23,7 +23,7 @@ import {
   type TestResultJudge,
   type TokenEfficiencyJudge,
   uniqueSorted
-} from "@repoarena/core";
+} from "@agentarena/core";
 import Ajv from "ajv";
 import picomatch from "picomatch";
 
@@ -44,7 +44,7 @@ export interface JudgeExecutionOptions {
 }
 
 function defaultJudgeTimeoutMs(): number {
-  return resolveTimeoutMs(process.env.REPOARENA_JUDGE_TIMEOUT_MS, DEFAULT_JUDGE_TIMEOUT_MS);
+  return resolveTimeoutMs(process.env.AGENTARENA_JUDGE_TIMEOUT_MS, DEFAULT_JUDGE_TIMEOUT_MS);
 }
 
 function resolveWorkspacePath(workspacePath: string, relativeTargetPath: string, label: string): string {
@@ -99,7 +99,7 @@ function createGlobMatcher(pattern: string): (value: string) => boolean {
   return picomatch(pattern, { dot: true });
 }
 
-const IGNORED_DIRS = new Set(["node_modules", ".git", ".repoarena"]);
+const IGNORED_DIRS = new Set(["node_modules", ".git", ".agentarena"]);
 
 async function listWorkspaceFiles(rootPath: string): Promise<string[]> {
   const files: string[] = [];

@@ -6,7 +6,7 @@
 
 ## English
 
-This directory contains the first-party task pack library maintained by RepoArena.
+This directory contains the first-party task pack library maintained by AgentArena.
 
 ### Difficulty Levels | 难度分级
 
@@ -79,7 +79,7 @@ Recommended for comparing multiple agents.
 
 ## 中文
 
-本目录包含由 RepoArena 维护的官方任务包库。
+本目录包含由 AgentArena 维护的官方任务包库。
 
 ### 难度分级
 

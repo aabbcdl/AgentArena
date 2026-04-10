@@ -1,6 +1,6 @@
 # Adapter Capabilities
 
-RepoArena classifies adapters by **support tier** and exposes a capability matrix in `doctor`, `list-adapters`, JSON summaries, and reports.
+AgentArena classifies adapters by **support tier** and exposes a capability matrix in `doctor`, `list-adapters`, JSON summaries, and reports.
 
 ## Support Tiers
 
@@ -12,11 +12,11 @@ RepoArena classifies adapters by **support tier** and exposes a capability matri
 
 | Adapter | Tier | Invocation | Tokens | Cost | Trace |
 | --- | --- | --- | --- | --- | --- |
-| `demo-fast`, `demo-thorough`, `demo-budget` | supported | Built-in RepoArena demo adapter | estimated | estimated | partial |
+| `demo-fast`, `demo-thorough`, `demo-budget` | supported | Built-in AgentArena demo adapter | estimated | estimated | partial |
 | `codex` | supported | Codex CLI JSON event stream | available | unavailable | full |
 | `claude-code` | experimental | Claude Code CLI stream-json mode | available | available | partial |
 | `cursor` | experimental | Cursor internal claude-agent-sdk CLI bridge | available | available | partial |
 
 ## Why This Exists
 
-The capability matrix prevents false precision. RepoArena can compare agents honestly only if the report makes capability differences visible instead of hiding them.
+The capability matrix prevents false precision. AgentArena can compare agents honestly only if the report makes capability differences visible instead of hiding them.

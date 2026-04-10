@@ -1,10 +1,10 @@
-schemaVersion: repoarena.taskpack/v1
+schemaVersion: agentarena.taskpack/v1
 id: official-repo-health
 title: Official Repo Health
 description: Validates baseline repository health after a minimal improvement task.
 metadata:
   source: official
-  owner: RepoArena
+  owner: AgentArena
   difficulty: easy
   objective: Check that an agent can make a small useful change without damaging repository structure.
   repoTypes:

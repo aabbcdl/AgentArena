@@ -1,7 +1,7 @@
 {
-  "name": "@repoarena/taskpacks",
+  "name": "@agentarena/taskpacks",
   "version": "0.1.0",
-  "description": "Task pack loader and validator for RepoArena",
+  "description": "Task pack loader and validator for AgentArena",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -9,7 +9,7 @@
     "dist"
   ],
   "dependencies": {
-    "@repoarena/core": "workspace:*",
+    "@agentarena/core": "workspace:*",
     "yaml": "^2.8.2"
   },
   "scripts": {

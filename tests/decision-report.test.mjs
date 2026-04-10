@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { generateDecisionReport, formatDecisionReport } from "../packages/report/dist/index.js";
+import { formatDecisionReport, generateDecisionReport } from "../packages/report/dist/index.js";
 
 function createResult(agentId, overrides = {}) {
   return {
@@ -67,7 +67,7 @@ test("formatDecisionReport produces valid markdown", () => {
   const run = createRun({ results: [createResult("agent-a", { compositeScore: 85 })] });
   const report = generateDecisionReport(run);
   const md = formatDecisionReport(report);
-  assert.ok(md.includes("RepoArena 决策报告"));
+  assert.ok(md.includes("AgentArena 决策报告"));
   assert.ok(md.includes("推荐方案"));
-  assert.ok(md.includes("复现命令") || md.includes("reproduceCommand") || md.includes("repoarena run"));
+  assert.ok(md.includes("复现命令") || md.includes("reproduceCommand") || md.includes("agentarena run"));
 });

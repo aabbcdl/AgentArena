@@ -1,11 +1,11 @@
-import {
-  type AdapterExecutionContext,
-  type AdapterExecutionResult,
-  type AdapterPreflightOptions,
-  type AdapterPreflightResult,
-  type AgentAdapter,
-  type AdapterCapability
-} from "@repoarena/core";
+import type {
+  AdapterCapability,
+  AdapterExecutionContext,
+  AdapterExecutionResult,
+  AdapterPreflightOptions,
+  AdapterPreflightResult,
+  AgentAdapter
+} from "@agentarena/core";
 import { createPreflightResult, getAdaptersPackageVersion } from "./shared.js";
 
 export const WINDSURF_CAPABILITY: AdapterCapability = {
@@ -53,7 +53,7 @@ export class WindsurfAdapter implements AgentAdapter {
     );
   }
 
-  async execute(context: AdapterExecutionContext): Promise<AdapterExecutionResult> {
+  async execute(_context: AdapterExecutionContext): Promise<AdapterExecutionResult> {
     return {
       status: "failed",
       summary: "Windsurf CLI is not available. Windsurf has not released a public CLI for automation. Please check https://docs.windsurf.com for CLI availability updates.",

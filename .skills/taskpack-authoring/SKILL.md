@@ -34,7 +34,7 @@ Key optional fields: `difficulty` (`easy`/`medium`/`hard`), `interactionModel` (
 1. Copy an existing example from `examples/taskpacks/official/`.
 2. Edit `id`, `title`, `prompt`, and judges for the new task.
 3. Validate enum fields match allowed values exactly.
-4. Smoke test: `repoarena run --repo . --task <path>.yaml --agents demo-fast`.
+4. Smoke test: `agentarena run --repo . --task <path>.yaml --agents demo-fast`.
 
 ## What to Check Before Committing
 

@@ -1,5 +1,5 @@
-import type { AdapterPreflightResult, BenchmarkRun } from "@repoarena/core";
-import { enrichRunWithScores } from "@repoarena/report";
+import type { AdapterPreflightResult, BenchmarkRun } from "@agentarena/core";
+import { enrichRunWithScores } from "@agentarena/report";
 
 export function formatCapabilitySummary(capability: AdapterPreflightResult["capability"]): string {
   return [

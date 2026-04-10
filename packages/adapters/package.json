@@ -1,7 +1,7 @@
 {
-  "name": "@repoarena/adapters",
+  "name": "@agentarena/adapters",
   "version": "0.1.0",
-  "description": "Agent adapters for RepoArena — demo, codex, claude-code, cursor",
+  "description": "Agent adapters for AgentArena — demo, codex, claude-code, cursor",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -9,7 +9,7 @@
     "dist"
   ],
   "dependencies": {
-    "@repoarena/core": "workspace:*"
+    "@agentarena/core": "workspace:*"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
