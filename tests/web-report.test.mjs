@@ -22,6 +22,7 @@ import {
   missingCoreComparisonData,
   resultRecordKey
 } from "../apps/web-report/src/view-model.js";
+import { TraceReplayer } from "../apps/web-report/src/trace-replay-bridge.js";
 
 function createRun(runId, taskTitle, overrides = {}) {
   return {
@@ -595,4 +596,79 @@ test("fairComparisonIdentity uses fairComparison metadata when present", () => {
   assert.equal(identity.taskIdentity, "task:custom");
   assert.equal(identity.judgeIdentity, "judge:xyz");
   assert.equal(identity.repoBaselineIdentity, "repo:abc");
+});
+
+test("TraceReplayer buildTimeline returns empty steps for no events", async () => {
+  const replayer = new TraceReplayer("not-a-real-path");
+  replayer.events = [];
+  const timeline = await replayer.buildTimeline();
+
+  assert.deepEqual(timeline.steps, []);
+  assert.equal(timeline.metadata.totalEvents, 0);
+  assert.equal(timeline.metadata.errorCount, 0);
+});
+
+test("TraceReplayer buildTimeline groups events into steps by time window", async () => {
+  const events = [
+    { timestamp: "2026-04-21T10:00:00.000Z", type: "setup", agentId: "agent-1", runId: "run-1", message: "start" },
+    { timestamp: "2026-04-21T10:00:00.050Z", type: "adapter:think", agentId: "agent-1", runId: "run-1", message: "thinking" },
+    { timestamp: "2026-04-21T10:00:00.200Z", type: "adapter:execute", agentId: "agent-1", runId: "run-1", message: "executing" },
+    { timestamp: "2026-04-21T10:00:01.000Z", type: "adapter:execute", agentId: "agent-1", runId: "run-1", message: "done" },
+    { timestamp: "2026-04-21T10:00:02.000Z", type: "judge:result", agentId: "agent-1", runId: "run-1", message: "judged" }
+  ];
+  const replayer = new TraceReplayer("in-memory");
+  replayer.events = events;
+
+  const timeline = await replayer.buildTimeline({ stepWindowMs: 100 });
+
+  assert.ok(timeline.steps.length >= 1);
+  assert.equal(timeline.metadata.totalEvents, 5);
+  assert.equal(timeline.metadata.agentId, "agent-1");
+  assert.ok(timeline.metadata.durationMs > 0);
+});
+
+test("TraceReplayer buildTimeline categorizes events by type prefix", async () => {
+  const events = [
+    { timestamp: "2026-04-21T10:00:00.000Z", type: "setup:start", agentId: "a", runId: "r", message: "s" },
+    { timestamp: "2026-04-21T10:00:00.001Z", type: "judge:run", agentId: "a", runId: "r", message: "j" },
+    { timestamp: "2026-04-21T10:00:00.002Z", type: "adapter:execute", agentId: "a", runId: "r", message: "a" },
+    { timestamp: "2026-04-21T10:00:00.003Z", type: "snapshot:take", agentId: "a", runId: "r", message: "p" }
+  ];
+  const replayer = new TraceReplayer("in-memory");
+  replayer.events = events;
+
+  const timeline = await replayer.buildTimeline({ stepWindowMs: 1000 });
+
+  const categories = timeline.steps.map(s => s.category);
+  assert.deepEqual(categories, ["setup", "judge", "agent", "snapshot"]);
+});
+
+test("TraceReplayer countErrors counts error-type events", async () => {
+  const replayer = new TraceReplayer("in-memory");
+  replayer.events = [
+    { timestamp: "2026-04-21T10:00:00.000Z", type: "setup", agentId: "a", runId: "r", message: "ok" },
+    { timestamp: "2026-04-21T10:00:00.001Z", type: "error", agentId: "a", runId: "r", message: "fail" },
+    { timestamp: "2026-04-21T10:00:00.002Z", type: "adapter", agentId: "a", runId: "r", message: "ok", metadata: { error: "boom" } }
+  ];
+
+  const count = replayer.countErrors(replayer.events);
+  assert.equal(count, 2);
+});
+
+test("TraceReplayer matchesFilter filters by agentId, runId, type, messageContains", async () => {
+  const events = [
+    { timestamp: "2026-04-21T10:00:00.000Z", type: "adapter:execute", agentId: "agent-a", runId: "run-1", message: "hello world" },
+    { timestamp: "2026-04-21T10:00:00.001Z", type: "judge:run", agentId: "agent-b", runId: "run-1", message: "hello world" },
+    { timestamp: "2026-04-21T10:00:00.002Z", type: "adapter:execute", agentId: "agent-a", runId: "run-2", message: "goodbye" }
+  ];
+  const replayer = new TraceReplayer("in-memory");
+  replayer.events = events;
+
+  assert.equal(replayer.matchesFilter(events[0], { agentId: "agent-a" }), true);
+  assert.equal(replayer.matchesFilter(events[1], { agentId: "agent-a" }), false);
+  assert.equal(replayer.matchesFilter(events[0], { runId: "run-2" }), false);
+  assert.equal(replayer.matchesFilter(events[0], { type: "judge" }), false);
+  assert.equal(replayer.matchesFilter(events[0], { type: "adapter:execute" }), true);
+  assert.equal(replayer.matchesFilter(events[0], { messageContains: "hello" }), true);
+  assert.equal(replayer.matchesFilter(events[0], { messageContains: "goodbye" }), false);
 });
