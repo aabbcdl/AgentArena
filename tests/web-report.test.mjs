@@ -5,6 +5,7 @@ import {
   buildShareCard,
   buildShareCardSvg,
   DEFAULT_SCORE_WEIGHTS,
+  fairComparisonIdentity,
   findPreviousComparableRun,
   formatCompositeScore,
   formatDiffPrecisionMetric,
@@ -13,10 +14,12 @@ import {
   getCompositeScoreDetails,
   getCrossRunCompareRows,
   getCrossRunRecommendation,
+  getFairComparisonExclusionReasons,
   getRunCompareRows,
   getRunToRunAgentDiff,
-  getRunVerdict, 
+  getRunVerdict,
   getScoreWeightPreset,
+  missingCoreComparisonData,
   resultRecordKey
 } from "../apps/web-report/src/view-model.js";
 
@@ -495,4 +498,101 @@ test("getCrossRunRecommendation returns null when all agents failed", () => {
   const data = getCrossRunCompareRows(runs);
   const recommendation = getCrossRunRecommendation(data);
   assert.equal(recommendation, null);
+});
+
+test("getFairComparisonExclusionReasons returns empty when runs are fully comparable", () => {
+  const anchor = createRun("run-anchor", "Task A", {
+    fairComparison: { taskIdentity: "task:A", judgeIdentity: "judge:x", repoBaselineIdentity: "repo:y" }
+  });
+  const candidate = createRun("run-candidate", "Task A", {
+    fairComparison: { taskIdentity: "task:A", judgeIdentity: "judge:x", repoBaselineIdentity: "repo:y" },
+    results: [createResult("agent-1", { durationMs: 1000, tokenUsage: 100, judgeResults: [{ success: true }] })]
+  });
+
+  const reasons = getFairComparisonExclusionReasons(candidate, anchor);
+
+  assert.deepEqual(reasons, []);
+});
+
+test("getFairComparisonExclusionReasons returns 'different-task-pack' when task identity differs", () => {
+  const anchor = createRun("run-anchor", "Task A", {
+    fairComparison: { taskIdentity: "task:A", judgeIdentity: "judge:x", repoBaselineIdentity: "repo:y" }
+  });
+  const candidate = createRun("run-candidate", "Task B", {
+    fairComparison: { taskIdentity: "task:B", judgeIdentity: "judge:x", repoBaselineIdentity: "repo:y" },
+    results: [createResult("agent-1", { durationMs: 1000, tokenUsage: 100, judgeResults: [{ success: true }] })]
+  });
+
+  const reasons = getFairComparisonExclusionReasons(candidate, anchor);
+
+  assert.deepEqual(reasons, ["different-task-pack"]);
+});
+
+test("getFairComparisonExclusionReasons returns multiple reasons when multiple conditions differ", () => {
+  const anchor = createRun("run-anchor", "Task A", {
+    fairComparison: { taskIdentity: "task:A", judgeIdentity: "judge:x", repoBaselineIdentity: "repo:y" }
+  });
+  const candidate = createRun("run-candidate", "Task B", {
+    fairComparison: { taskIdentity: "task:B", judgeIdentity: "judge:z", repoBaselineIdentity: "repo:w" },
+    results: [createResult("agent-1", { durationMs: 1000, tokenUsage: 100, judgeResults: [{ success: true }] })]
+  });
+
+  const reasons = getFairComparisonExclusionReasons(candidate, anchor);
+
+  assert.deepEqual(reasons, ["different-task-pack", "different-judge-logic", "different-repo-baseline"]);
+});
+
+test("getFairComparisonExclusionReasons returns 'missing-core-data' when result data is incomplete", () => {
+  const anchor = createRun("run-anchor", "Task A", {
+    fairComparison: { taskIdentity: "task:A", judgeIdentity: "judge:x", repoBaselineIdentity: "repo:y" },
+    results: [createResult("agent-1", { durationMs: 1000, tokenUsage: 100, judgeResults: [{ success: true }] })]
+  });
+  // Empty results array triggers missing-core-data
+  const candidate = createRun("run-candidate", "Task A", {
+    fairComparison: { taskIdentity: "task:A", judgeIdentity: "judge:x", repoBaselineIdentity: "repo:y" },
+    results: []
+  });
+
+  const reasons = getFairComparisonExclusionReasons(candidate, anchor);
+
+  assert.deepEqual(reasons, ["missing-core-data"]);
+});
+
+test("missingCoreComparisonData returns true when results array is empty", () => {
+  const run = createRun("run-1", "Task A", { results: [] });
+  assert.equal(missingCoreComparisonData(run), true);
+});
+
+test("missingCoreComparisonData returns true when results array is undefined", () => {
+  const run = createRun("run-1", "Task A", { results: undefined });
+  assert.equal(missingCoreComparisonData(run), true);
+});
+
+test("missingCoreComparisonData returns false when all results have required fields", () => {
+  const run = createRun("run-1", "Task A", {
+    results: [
+      createResult("agent-1", { durationMs: 1000, tokenUsage: 100, judgeResults: [{ success: true }] })
+    ]
+  });
+  assert.equal(missingCoreComparisonData(run), false);
+});
+
+test("fairComparisonIdentity falls back to taskIdentity when fairComparison is absent", () => {
+  const run = createRun("run-1", "My Task", { fairComparison: undefined });
+  const identity = fairComparisonIdentity(run);
+
+  assert.equal(identity.taskIdentity, "id:my-task");
+  assert.equal(identity.judgeIdentity, null);
+  assert.equal(identity.repoBaselineIdentity, null);
+});
+
+test("fairComparisonIdentity uses fairComparison metadata when present", () => {
+  const run = createRun("run-1", "My Task", {
+    fairComparison: { taskIdentity: "task:custom", judgeIdentity: "judge:xyz", repoBaselineIdentity: "repo:abc" }
+  });
+  const identity = fairComparisonIdentity(run);
+
+  assert.equal(identity.taskIdentity, "task:custom");
+  assert.equal(identity.judgeIdentity, "judge:xyz");
+  assert.equal(identity.repoBaselineIdentity, "repo:abc");
 });

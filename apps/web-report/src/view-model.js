@@ -190,7 +190,7 @@ function resultKey(result) {
   return resultRecordKey(result);
 }
 
-function fairComparisonIdentity(run) {
+export function fairComparisonIdentity(run) {
   return {
     taskIdentity: run.fairComparison?.taskIdentity ?? taskIdentity(run),
     judgeIdentity: run.fairComparison?.judgeIdentity ?? null,
@@ -198,7 +198,7 @@ function fairComparisonIdentity(run) {
   };
 }
 
-function missingCoreComparisonData(run) {
+export function missingCoreComparisonData(run) {
   if (!run?.results?.length) return true;
   return run.results.some((result) => {
     const hasStatus = typeof result.status === "string" && result.status.length > 0;
@@ -208,7 +208,7 @@ function missingCoreComparisonData(run) {
   });
 }
 
-function getFairComparisonExclusionReasons(candidateRun, anchorRun) {
+export function getFairComparisonExclusionReasons(candidateRun, anchorRun) {
   const candidate = fairComparisonIdentity(candidateRun);
   const anchor = fairComparisonIdentity(anchorRun);
   const reasons = [];

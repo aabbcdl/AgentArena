@@ -113,7 +113,7 @@ export async function runProcess(
             try {
               process.kill(-pid, "SIGTERM");
             } catch {
-              child.kill("SIGTERM");
+              if (child) child.kill("SIGTERM");
             }
             setTimeout(() => {
               try {
@@ -127,7 +127,7 @@ export async function runProcess(
             try {
               execSync(`taskkill /F /T /PID ${pid}`, { stdio: "ignore" });
             } catch {
-              child.kill("SIGTERM");
+              if (child) child.kill("SIGTERM");
             }
           }
         } catch {
