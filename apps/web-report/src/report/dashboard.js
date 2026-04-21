@@ -47,6 +47,7 @@ export function createDashboardModule(deps) {
     renderCodeReviewSection,
     renderTeamCostCalculator,
     setupShareActions,
+    buildShareCard,
     buildLeaderboard
   } = deps;
 
@@ -178,6 +179,39 @@ function renderRunList() {
     .join("");
 }
 
+function translateFairComparisonReason(reason, t) {
+  switch (reason) {
+    case "different-task-pack":
+      return t("runCompareReasonDifferentTaskPack");
+    case "different-judge-logic":
+      return t("runCompareReasonDifferentJudgeLogic");
+    case "different-repo-baseline":
+      return t("runCompareReasonDifferentRepoBaseline");
+    case "missing-core-data":
+    default:
+      return t("runCompareReasonMissingCoreData");
+  }
+}
+
+function renderExcludedRuns(excludedRows, t, escapeHtml) {
+  if (excludedRows.length === 0) return "";
+  return `
+    <section class="compare-excluded-block">
+      <h4>${escapeHtml(t("runCompareExcludedTitle"))}</h4>
+      <p class="muted">${escapeHtml(t("runCompareExcludedDescription"))}</p>
+      <ul class="compare-excluded-list">
+        ${excludedRows.map((row) => `
+          <li>
+            <strong>${escapeHtml(row.run.task.title)}</strong>
+            <code>${escapeHtml(row.run.runId)}</code>
+            <p>${escapeHtml(row.reasons.map((reason) => translateFairComparisonReason(reason, t)).join(" "))}</p>
+          </li>
+        `).join("")}
+      </ul>
+    </section>
+  `;
+}
+
 function renderRunCompareTable() {
   if (state.runs.length === 0) {
     elements.runCompareTable.innerHTML = `<p class="empty-state">${escapeHtml(t("noRunsLoaded"))}</p>`;
@@ -185,12 +219,22 @@ function renderRunCompareTable() {
   }
 
   const taskTitle = runCompareFilters.scope === "current-task" ? state.run?.task.title ?? null : null;
-  const rows = getRunCompareRows(state.runs, {
+  const { comparableRows, excludedRows } = getRunCompareRows(state.runs, {
     taskTitle,
     sort: runCompareFilters.sort,
-    markdownByRunId: state.markdownByRunId
+    markdownByRunId: state.markdownByRunId,
+    currentRunId: state.selectedRunId
   });
-  elements.runCompareTable.innerHTML = `
+
+  if (comparableRows.length === 0) {
+    elements.runCompareTable.innerHTML =
+      `<p class="empty-state">${escapeHtml(t("runCompareNoComparable"))}</p>` +
+      renderExcludedRuns(excludedRows, t, escapeHtml);
+    return;
+  }
+
+  const tableHtml = `
+    <p class="muted run-compare-fair-note">${escapeHtml(comparableRows.length === 1 ? t("runCompareSingleComparable") : t("runCompareFairOnlyDescription"))}</p>
     <table class="compare-table">
       <thead>
         <tr>
@@ -205,7 +249,7 @@ function renderRunCompareTable() {
         </tr>
       </thead>
       <tbody>
-        ${rows
+        ${comparableRows
           .map(({ run, summary }) => {
             const isActive = run.runId === state.selectedRunId ? "active" : "";
             return `
@@ -225,6 +269,8 @@ function renderRunCompareTable() {
       </tbody>
     </table>
   `;
+
+  elements.runCompareTable.innerHTML = tableHtml + renderExcludedRuns(excludedRows, t, escapeHtml);
 }
 
 function renderRunDiffTableV2() {

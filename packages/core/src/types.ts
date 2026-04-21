@@ -128,6 +128,63 @@ export interface TokenEfficiencyJudge {
   critical?: boolean;
 }
 
+/**
+ * Directory exists judge: verifies that a directory path exists.
+ * Useful for checking agent-created folder structures.
+ */
+export interface DirectoryExistsJudge {
+  id: string;
+  label: string;
+  type: "directory-exists";
+  path: string;
+  critical?: boolean;
+}
+
+/**
+ * Regex match judge: applies a regex pattern against file content and checks for matches.
+ * More flexible than file-contains with full regex support.
+ */
+export interface RegexMatchJudge {
+  id: string;
+  label: string;
+  type: "regex-match";
+  path: string;
+  pattern: string;
+  flags?: string;
+  /** If true, the judge fails when the pattern matches (inverse match). */
+  shouldNotMatch?: boolean;
+  /** Minimum number of matches required (default: 1). */
+  minMatches?: number;
+  /** Maximum number of matches allowed (0 = unlimited). */
+  maxMatches?: number;
+  critical?: boolean;
+}
+
+/**
+ * Code compilation judge: runs a build/compile command and checks exit code.
+ * Common preset: supports common build commands.
+ */
+export interface CompilationJudge {
+  id: string;
+  label: string;
+  type: "compilation";
+  /** Optional explicit build command. If omitted, the judge auto-detects a suitable tool. */
+  command?: string;
+  /** Working directory relative to workspace root. */
+  cwd?: string;
+  /** Timeout in milliseconds. */
+  timeoutMs?: number;
+  /** Environment variable allowlist. */
+  envAllowList?: string[];
+  /** Environment variable overrides. */
+  env?: Record<string, string>;
+  /** Expected build tool (auto-detect if not specified). */
+  tool?: "auto" | "npm" | "pnpm" | "yarn" | "cargo" | "go" | "make" | "gradle" | "maven";
+  /** Additional build arguments. */
+  buildArgs?: string[];
+  critical?: boolean;
+}
+
 export type TaskJudge =
   | CommandJudge
   | TestResultJudge
@@ -140,7 +197,10 @@ export type TaskJudge =
   | SnapshotJudge
   | JsonSchemaJudge
   | PatchValidationJudge
-  | TokenEfficiencyJudge;
+  | TokenEfficiencyJudge
+  | DirectoryExistsJudge
+  | RegexMatchJudge
+  | CompilationJudge;
 
 export interface TaskPackMetadata {
   source: "official" | "community";
@@ -291,6 +351,8 @@ export interface ClaudeProviderProfile {
 export interface TraceEvent {
   timestamp: string;
   agentId: string;
+  /** Optional run ID to associate events with a specific benchmark run. */
+  runId?: string;
   type: string;
   message: string;
   metadata?: Record<string, unknown>;
@@ -494,6 +556,12 @@ export interface BenchmarkCancellation {
   throwIfCancelled: () => void;
 }
 
+export interface FairComparisonMetadata {
+  taskIdentity?: string;
+  judgeIdentity?: string;
+  repoBaselineIdentity?: string;
+}
+
 export interface BenchmarkRun {
   runId: string;
   createdAt: string;
@@ -503,6 +571,7 @@ export interface BenchmarkRun {
   scoreWeights?: Record<string, number>;
   scoreScope?: "run-local";
   scoreValidityNote?: string;
+  fairComparison?: FairComparisonMetadata;
   task: TaskPack;
   preflights: AdapterPreflightResult[];
   results: AgentRunResult[];

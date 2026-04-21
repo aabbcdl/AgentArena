@@ -1,5 +1,30 @@
-import type { AdapterPreflightResult, BenchmarkRun } from "@agentarena/core";
+import { createHash } from "node:crypto";
+import type { AdapterPreflightResult, BenchmarkRun, TaskJudge, TaskPack } from "@agentarena/core";
 import { enrichRunWithScores } from "@agentarena/report";
+
+function createTaskIdentity(task: TaskPack): string {
+  return task.id ? `task:${task.id}` : `task-title:${task.title}`;
+}
+
+function createJudgeIdentity(task: TaskPack): string {
+  const payload = JSON.stringify(
+    task.judges.map((judge: TaskJudge) => ({
+      id: judge.id,
+      type: judge.type,
+      label: judge.label,
+      critical: judge.critical ?? false
+    }))
+  );
+  return `judge:${createHash("sha256").update(payload).digest("hex")}`;
+}
+
+function createRepoBaselineIdentity(benchmark: BenchmarkRun): string | undefined {
+  const baseCommit = benchmark.task.metadata?.githubIssue?.baseCommit;
+  if (baseCommit) {
+    return `repo-base:${baseCommit}`;
+  }
+  return undefined;
+}
 
 export function formatCapabilitySummary(capability: AdapterPreflightResult["capability"]): string {
   return [
@@ -30,6 +55,11 @@ export function buildBenchmarkOutputSummary(
     scoreWeights: scoredBenchmark.scoreWeights,
     scoreScope: scoredBenchmark.scoreScope,
     scoreValidityNote: scoredBenchmark.scoreValidityNote,
+    fairComparison: {
+      taskIdentity: createTaskIdentity(scoredBenchmark.task),
+      judgeIdentity: createJudgeIdentity(scoredBenchmark.task),
+      repoBaselineIdentity: createRepoBaselineIdentity(scoredBenchmark)
+    },
     task: {
       id: scoredBenchmark.task.id,
       title: scoredBenchmark.task.title,

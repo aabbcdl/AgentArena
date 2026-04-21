@@ -1,16 +1,30 @@
 export function createCrossRunRenders({
-  state,
-  elements,
-  t,
-  localText,
-  setHidden,
-  summarizeRun,
-  runtimeIdentity,
-  formatDuration,
-  getCrossRunRecommendation,
-  escapeHtml
+	state,
+	elements,
+	t,
+	localText,
+	setHidden,
+	summarizeRun,
+	runtimeIdentity,
+	formatDuration,
+	getCrossRunRecommendation,
+	escapeHtml
 }) {
-  function renderCrossRunCompare() {
+	function translateFairComparisonReason(reason, t) {
+		switch (reason) {
+			case "different-task-pack":
+				return t("runCompareReasonDifferentTaskPack");
+			case "different-judge-logic":
+				return t("runCompareReasonDifferentJudgeLogic");
+			case "different-repo-baseline":
+				return t("runCompareReasonDifferentRepoBaseline");
+			case "missing-core-data":
+			default:
+				return t("runCompareReasonMissingCoreData");
+		}
+	}
+
+	function renderCrossRunCompare() {
     if (state.runs.length < 2) {
       setHidden(elements.crossRunCompareSection, true);
       return;
@@ -90,12 +104,12 @@ export function createCrossRunRenders({
     const { runs, comparableRuns, excludedRuns, rows } = state.crossRunCompareData;
     elements.crossRunCompareSummary.textContent = excludedRuns.length > 0
       ? localText(
-        `已选 ${runs.length} 个运行，其中 ${comparableRuns.length} 个参与对比，${excludedRuns.length} 个因任务不同被排除。`,
-        `${comparableRuns.length} of ${runs.length} selected runs are being compared; ${excludedRuns.length} were excluded because they are a different task.`
+        `已选 ${runs.length} 个运行，其中 ${comparableRuns.length} 个进入公平对比，${excludedRuns.length} 个因前提不一致被排除。`,
+        `${comparableRuns.length} of ${runs.length} selected runs are in the fair comparison; ${excludedRuns.length} were excluded because the comparison conditions do not match.`
       )
       : localText(
-        `对比 ${runs.length} 个运行，包含 ${rows.length} 个 Agent 配置`,
-        `Comparing ${runs.length} runs with ${rows.length} agent configurations`
+        `对比 ${runs.length} 个运行，全部满足公平对比条件。`,
+        `Comparing ${runs.length} runs; all meet the fair comparison rules.`
       );
 
     const recommendation = getCrossRunRecommendation(state.crossRunCompareData, { scoreWeights: state.scoreWeights });
@@ -151,8 +165,25 @@ export function createCrossRunRenders({
       })
       .join("");
 
-    elements.crossRunCompareTable.innerHTML = header + body + "</tbody></table>";
-    
+    const excludedHtml = excludedRuns.length === 0
+      ? ""
+      : `
+        <section class="compare-excluded-block">
+          <h4>${escapeHtml(t("runCompareExcludedTitle"))}</h4>
+          <ul class="compare-excluded-list">
+            ${excludedRuns.map(({ run, reasons }) => `
+              <li>
+                <strong>${escapeHtml(run.task.title)}</strong>
+                <code>${escapeHtml(run.runId)}</code>
+                <p>${escapeHtml(reasons.map((reason) => translateFairComparisonReason(reason, t)).join(" "))}</p>
+              </li>
+            `).join("")}
+          </ul>
+        </section>
+      `;
+
+    elements.crossRunCompareTable.innerHTML = header + body + "</tbody></table>" + excludedHtml;
+
     // 绘制雷达图
     renderRadarChart(rows);
   }
@@ -310,7 +341,6 @@ export function createCrossRunRenders({
       const displayLabel = data.label.length > 8 ? data.label.slice(0, 8) + '...' : data.label;
       ctx.fillText(displayLabel, x + 16, legendY + 10);
     });
-    elements.crossRunCompareTable.innerHTML = header + body + "</tbody></table>";
   }
 
   function renderAgentRadarChart() {

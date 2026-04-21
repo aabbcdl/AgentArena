@@ -91,6 +91,10 @@ export const DEPRECATED_SCORE_PRESETS = Object.freeze({
   "scope-discipline": Object.freeze({ status: 0.14, tests: 0.1, judges: 0.08, lint: 0.06, precision: 0.56, duration: 0.03, cost: 0.03 })
 });
 
+/**
+ * @param {string} [presetId]
+ * @returns {Record<string, number>}
+ */
 export function getScoreWeightPreset(presetId = "practical") {
   // Default to 'practical' to match CLI default
   if (SCORE_WEIGHT_PRESETS[presetId]) {
@@ -104,16 +108,24 @@ export function getScoreWeightPreset(presetId = "practical") {
   return SCORE_WEIGHT_PRESETS.practical;
 }
 
+/**
+ * @param {Record<string, number>} [weights]
+ * @returns {string | null}
+ */
 export function getMatchingScorePresetId(weights = DEFAULT_SCORE_WEIGHTS) {
   const normalized = normalizeScoreWeights(weights);
   return (
     Object.entries(SCORE_WEIGHT_PRESETS).find(([, preset]) => {
-      const normalizedPreset = normalizeScoreWeights(preset);
+      const normalizedPreset = normalizeScoreWeights(/** @type {Record<string, number>} */ (preset));
       return Object.keys(normalizedPreset).every((key) => Math.abs(normalizedPreset[key] - normalized[key]) < 0.001);
     })?.[0] ?? null
   );
 }
 
+/**
+ * @param {Record<string, number>} [weights]
+ * @returns {Record<string, number>}
+ */
 export function normalizeScoreWeights(weights = DEFAULT_SCORE_WEIGHTS) {
   const merged = {
     ...DEFAULT_SCORE_WEIGHTS,
@@ -176,6 +188,45 @@ export function resultRecordKey(result) {
 
 function resultKey(result) {
   return resultRecordKey(result);
+}
+
+function fairComparisonIdentity(run) {
+  return {
+    taskIdentity: run.fairComparison?.taskIdentity ?? taskIdentity(run),
+    judgeIdentity: run.fairComparison?.judgeIdentity ?? null,
+    repoBaselineIdentity: run.fairComparison?.repoBaselineIdentity ?? null
+  };
+}
+
+function missingCoreComparisonData(run) {
+  if (!run?.results?.length) return true;
+  return run.results.some((result) => {
+    const hasStatus = typeof result.status === "string" && result.status.length > 0;
+    const hasJudgeResults = Array.isArray(result.judgeResults);
+    const hasScoreInputs = typeof result.durationMs === "number" && typeof result.tokenUsage === "number";
+    return !hasStatus || !hasJudgeResults || !hasScoreInputs;
+  });
+}
+
+function getFairComparisonExclusionReasons(candidateRun, anchorRun) {
+  const candidate = fairComparisonIdentity(candidateRun);
+  const anchor = fairComparisonIdentity(anchorRun);
+  const reasons = [];
+
+  if (!candidate.taskIdentity || candidate.taskIdentity !== anchor.taskIdentity) {
+    reasons.push("different-task-pack");
+  }
+  if (!candidate.judgeIdentity || candidate.judgeIdentity !== anchor.judgeIdentity) {
+    reasons.push("different-judge-logic");
+  }
+  if (!candidate.repoBaselineIdentity || candidate.repoBaselineIdentity !== anchor.repoBaselineIdentity) {
+    reasons.push("different-repo-baseline");
+  }
+  if (missingCoreComparisonData(candidateRun)) {
+    reasons.push("missing-core-data");
+  }
+
+  return reasons;
 }
 
 function taskIdentity(run) {
@@ -451,28 +502,49 @@ export function getRunCompareRows(runs, options = {}) {
   const taskTitle = options.taskTitle ?? null;
   const sort = options.sort ?? "created";
   const markdownByRunId = options.markdownByRunId ?? new Map();
+  const currentRunId = options.currentRunId ?? null;
 
-  const rows = runs
-    .filter((run) => !taskTitle || run.task.title === taskTitle)
-    .map((run) => ({
+  const filteredRuns = runs.filter((run) => !taskTitle || run.task.title === taskTitle);
+  const anchorRun = filteredRuns.find((run) => run.runId === currentRunId) ?? filteredRuns[0] ?? null;
+
+  if (!anchorRun) {
+    return { anchorRun: null, comparableRows: [], excludedRows: [] };
+  }
+
+  const comparableRows = [];
+  const excludedRows = [];
+
+  for (const run of filteredRuns) {
+    const row = {
       run,
       summary: summarizeRun(run),
       hasMarkdown: markdownByRunId.has(run.runId)
-    }));
+    };
+    const reasons = run.runId === anchorRun.runId ? [] : getFairComparisonExclusionReasons(run, anchorRun);
+    if (reasons.length === 0) {
+      comparableRows.push(row);
+    } else {
+      excludedRows.push({ ...row, reasons });
+    }
+  }
 
-  return rows.sort((left, right) => {
+  const sortedComparable = comparableRows.sort((left, right) => {
     if (sort === "created") {
       return right.run.createdAt.localeCompare(left.run.createdAt);
     }
-
     const rightValue = runCompareSortValue(sort, right);
     const leftValue = runCompareSortValue(sort, left);
     if (rightValue === leftValue) {
       return right.run.createdAt.localeCompare(left.run.createdAt);
     }
-
     return rightValue > leftValue ? 1 : -1;
   });
+
+  return {
+    anchorRun,
+    comparableRows: sortedComparable,
+    excludedRows: excludedRows.sort((left, right) => right.run.createdAt.localeCompare(left.run.createdAt))
+  };
 }
 
 export function getCompareResults(run, options = {}) {
@@ -798,8 +870,8 @@ export function getCrossRunCompareRows(selectedRuns) {
   }
 
   const baselineRun = selectedRuns[0] ?? null;
-  const comparableRuns = baselineRun ? selectedRuns.filter((run) => areRunsComparable(run, baselineRun)) : [];
-  const excludedRuns = baselineRun ? selectedRuns.filter((run) => !areRunsComparable(run, baselineRun)) : [];
+  const comparableRuns = baselineRun ? selectedRuns.filter((run) => getFairComparisonExclusionReasons(run, baselineRun).length === 0) : [];
+  const excludedRuns = baselineRun ? selectedRuns.filter((run) => getFairComparisonExclusionReasons(run, baselineRun).length > 0).map((run) => ({ run, reasons: getFairComparisonExclusionReasons(run, baselineRun) })) : [];
   const agentMap = new Map();
 
   for (const run of comparableRuns) {
