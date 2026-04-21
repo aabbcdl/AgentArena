@@ -30,6 +30,7 @@ function createRun(runId, taskTitle, overrides = {}) {
     },
     scoreMode: overrides.scoreMode,
     scoreWeights: overrides.scoreWeights,
+    fairComparison: overrides.fairComparison,
     results: overrides.results ?? []
   };
 }
@@ -58,26 +59,29 @@ test("getRunCompareRows filters to the selected task title and sorts by success"
   const runs = [
     createRun("run-a", "Task A", {
       createdAt: "2026-03-14T10:00:00.000Z",
+      fairComparison: { taskIdentity: "task:task-a", judgeIdentity: "judge:abc", repoBaselineIdentity: "repo:def" },
       results: [createResult("demo-fast"), createResult("codex", { status: "failed" })]
     }),
     createRun("run-b", "Task A", {
       createdAt: "2026-03-14T11:00:00.000Z",
+      fairComparison: { taskIdentity: "task:task-a", judgeIdentity: "judge:abc", repoBaselineIdentity: "repo:def" },
       results: [createResult("demo-fast"), createResult("codex")]
     }),
     createRun("run-c", "Task B", {
       createdAt: "2026-03-14T12:00:00.000Z",
+      fairComparison: { taskIdentity: "task:task-b", judgeIdentity: "judge:abc", repoBaselineIdentity: "repo:def" },
       results: [createResult("demo-fast", { status: "failed" })]
     })
   ];
 
-  const rows = getRunCompareRows(runs, {
+  const result = getRunCompareRows(runs, {
     taskTitle: "Task A",
     sort: "success",
     markdownByRunId: new Map([["run-b", "summary"]])
   });
 
-  assert.deepEqual(rows.map((row) => row.run.runId), ["run-b", "run-a"]);
-  assert.equal(rows[0].hasMarkdown, true);
+  assert.deepEqual(result.comparableRows.map((row) => row.run.runId), ["run-b", "run-a"]);
+  assert.equal(result.comparableRows[0].hasMarkdown, true);
 });
 
 test("getCompareResults filters failed agents and sorts by changed files", () => {
@@ -411,6 +415,7 @@ test("getCrossRunCompareRows excludes runs from different tasks", () => {
     createRun("run-a", "Task A", {
       taskId: "task-a",
       createdAt: "2026-03-14T09:00:00.000Z",
+      fairComparison: { taskIdentity: "task:task-a", judgeIdentity: "judge:abc", repoBaselineIdentity: "repo:def" },
       results: [
         createResult("demo-fast", { durationMs: 2000, tokenUsage: 100, judgeResults: [{ success: true }] }),
         createResult("codex", { status: "failed", durationMs: 3000, tokenUsage: 200, judgeResults: [{ success: false }] })
@@ -419,6 +424,7 @@ test("getCrossRunCompareRows excludes runs from different tasks", () => {
     createRun("run-b", "Task A", {
       taskId: "task-a",
       createdAt: "2026-03-14T10:00:00.000Z",
+      fairComparison: { taskIdentity: "task:task-a", judgeIdentity: "judge:abc", repoBaselineIdentity: "repo:def" },
       results: [
         createResult("demo-fast", { durationMs: 1500, tokenUsage: 120, judgeResults: [{ success: true }, { success: true }] }),
         createResult("codex", { status: "success", durationMs: 2500, tokenUsage: 180, judgeResults: [{ success: true }] })
@@ -427,6 +433,7 @@ test("getCrossRunCompareRows excludes runs from different tasks", () => {
     createRun("run-c", "Task B", {
       taskId: "task-b",
       createdAt: "2026-03-14T11:00:00.000Z",
+      fairComparison: { taskIdentity: "task:task-b", judgeIdentity: "judge:abc", repoBaselineIdentity: "repo:def" },
       results: [createResult("demo-fast", { durationMs: 800, tokenUsage: 90, judgeResults: [{ success: true }] })]
     })
   ];
@@ -435,7 +442,7 @@ test("getCrossRunCompareRows excludes runs from different tasks", () => {
   assert.equal(data.runs.length, 3);
   assert.equal(data.comparableRuns.length, 2);
   assert.equal(data.excludedRuns.length, 1);
-  assert.equal(data.excludedRuns[0].runId, "run-c");
+  assert.equal(data.excludedRuns[0].run.runId, "run-c");
   assert.equal(data.rows.length, 2);
 });
 
@@ -447,6 +454,7 @@ test("getCrossRunCompareRows returns empty for no runs", () => {
 test("getCrossRunRecommendation picks the best agent by composite score", () => {
   const runs = [
     createRun("run-a", "Task A", {
+      fairComparison: { taskIdentity: "task:task-a", judgeIdentity: "judge:abc", repoBaselineIdentity: "repo:def" },
       results: [
         createResult("fast-agent", {
           durationMs: 1000,
@@ -467,7 +475,7 @@ test("getCrossRunRecommendation picks the best agent by composite score", () => 
   ];
 
   const data = getCrossRunCompareRows(runs);
-  const recommendation = getCrossRunRecommendation(data);
+  const recommendation = getCrossRunRecommendation(data, { scoreWeights: DEFAULT_SCORE_WEIGHTS });
 
   assert.ok(recommendation);
   // fast-agent should win: same success rate but faster and cheaper
