@@ -1,9 +1,15 @@
-﻿import { translate } from "./i18n.js";
+import { RUN_LOADED } from "./core/events.js";
+import { judgeRegistry } from "./core/judge-registry.js";
+import { stateManager } from "./core/state.js";
+import { translate } from "./i18n.js";
 import { createLauncherModule } from "./launcher/module.js";
 import { createCrossRunRenders } from "./report/cross-run.js";
 import { createDashboardModule } from "./report/dashboard.js";
 import { createDetailFragments } from "./report/detail-fragments.js";
 import { createResultLoaders } from "./results/loaders.js";
+import { createTraceReplayModule } from "./trace-replay.js";
+import { formatDuration } from "./utils/format.js";
+import { resultStore } from "./utils/storage.js";
 import {
   baseAgentLabel,
   buildLeaderboard, 
@@ -26,8 +32,10 @@ import {
   getMatchingScorePresetId,
   getRunCompareRows,
   getRunToRunAgentDiff,
+  getRunTrustSummary,
   getRunVerdict,
   getScoreWeightPreset,
+  getSelectionTrustSummary,
   normalizeScoreWeights,
   resultLabel,
   resultRecordKey,
@@ -60,14 +68,14 @@ const state = {
   launcherKiloVariants: [],
   launcherOpencodeVariants: [],
   launcherProviderEditor: null,
-  launcherExpanded: true,
+  launcherExpanded: false,
   launcherScoreMode: "practical",
   crossRunSelectMode: false,
   crossRunSelectedIds: new Set(),
   crossRunCompareData: null,
   expandedCompareAgentId: null,
   sidebarOpen: false,
-  scoreWeights: { ...DEFAULT_SCORE_WEIGHTS },
+  scoreWeights: /** @type {Record<string, number>} */ ({ ...DEFAULT_SCORE_WEIGHTS }),
   runSearchQuery: ""
 };
 
@@ -187,7 +195,10 @@ const elements = {
   advancedAnalysisSummary: document.querySelector("#advanced-analysis-summary"),
   sidebarToggle: document.querySelector("#sidebar-toggle"),
   sidebarBackdrop: document.querySelector("#sidebar-backdrop"),
-  sidebar: document.querySelector(".sidebar")
+  sidebar: document.querySelector(".sidebar"),
+  skipLink: document.querySelector("#skip-link"),
+  agentListHint: document.querySelector("#agent-list-hint"),
+  updateBannerText: document.querySelector("#update-banner-text")
 };
 
 const judgeFilters = {
@@ -205,6 +216,122 @@ const runCompareFilters = {
   sort: "created",
   scope: "current-task"
 };
+
+const RUN_CACHE_STORAGE_KEY = "agentarena.webReport.cachedRuns.v1";
+const RUN_CACHE_MAX_BYTES = 1_500_000;
+
+function readStorage(key) {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeStorage(key, value) {
+  try {
+    localStorage.setItem(key, value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function removeStorage(key) {
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    // ignore localStorage failures
+  }
+}
+
+function readLocationState() {
+  const params = new URLSearchParams(window.location.search);
+  const language = params.get("lang");
+  return {
+    language: language === "zh-CN" || language === "en" ? language : null,
+    runId: params.get("run"),
+    agentId: params.get("agent")
+  };
+}
+
+function syncLocationState(mode = "replace") {
+  const url = new URL(window.location.href);
+  if (state.language === "zh-CN" || state.language === "en") {
+    url.searchParams.set("lang", state.language);
+  } else {
+    url.searchParams.delete("lang");
+  }
+  if (state.selectedRunId) {
+    url.searchParams.set("run", state.selectedRunId);
+  } else {
+    url.searchParams.delete("run");
+  }
+  if (state.selectedAgentId) {
+    url.searchParams.set("agent", state.selectedAgentId);
+  } else {
+    url.searchParams.delete("agent");
+  }
+
+  const nextUrl = `${url.pathname}${url.search}${url.hash}`;
+  const currentUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+  if (nextUrl === currentUrl) {
+    return;
+  }
+
+  if (mode === "push") {
+    window.history.pushState(null, "", nextUrl);
+  } else {
+    window.history.replaceState(null, "", nextUrl);
+  }
+}
+
+function restoreCachedRuns() {
+  const raw = readStorage(RUN_CACHE_STORAGE_KEY);
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed?.runs)) {
+      return null;
+    }
+
+    const markdownEntries = parsed.markdownEntries;
+    return {
+      runs: parsed.runs,
+      markdownByRunId: new Map(
+        Array.isArray(markdownEntries)
+          ? markdownEntries.filter((entry) => Array.isArray(entry) && entry.length === 2)
+          : []
+      ),
+      standaloneMarkdown: typeof parsed.standaloneMarkdown === "string" ? parsed.standaloneMarkdown : null
+    };
+  } catch {
+    return null;
+  }
+}
+
+function persistCachedRuns() {
+  if (state.runs.length === 0) {
+    removeStorage(RUN_CACHE_STORAGE_KEY);
+    return;
+  }
+
+  const payload = {
+    version: 1,
+    runs: state.runs,
+    markdownEntries: Array.from(state.markdownByRunId.entries()),
+    standaloneMarkdown: state.standaloneMarkdown
+  };
+  const serialized = JSON.stringify(payload);
+  if (serialized.length > RUN_CACHE_MAX_BYTES) {
+    removeStorage(RUN_CACHE_STORAGE_KEY);
+    return;
+  }
+  writeStorage(RUN_CACHE_STORAGE_KEY, serialized);
+}
 
 function debounce(fn, delayMs) {
   let timer;
@@ -227,20 +354,20 @@ const scoreWeightElements = {
   cost: "scoreWeightCost"
 };
 
-// Weight name mapping for slider labels
+// Weight name mapping for slider labels — now uses i18n keys
 const WEIGHT_NAMES = {
-  status: '状态',
-  tests: '测试通过率',
-  criticalJudges: '关键Judge',
-  nonCriticalJudges: '非关键Judge',
-  resolutionRate: '解决率',
-  tokenEfficiency: 'Token效率',
-  acceptanceRate: '接受率',
-  categoryScore: '类别得分',
-  duration: '耗时',
-  cost: '成本',
-  precision: '精确度',
-  lint: '代码质量'
+  status: 'scoreWeightStatus',
+  tests: 'scoreWeightTests',
+  criticalJudges: 'scoreWeightCriticalJudges',
+  nonCriticalJudges: 'scoreWeightNonCriticalJudges',
+  resolutionRate: 'scoreWeightResolutionRate',
+  tokenEfficiency: 'scoreWeightTokenEfficiency',
+  acceptanceRate: 'scoreWeightAcceptanceRate',
+  categoryScore: 'scoreWeightCategoryScore',
+  duration: 'scoreWeightDuration',
+  cost: 'scoreWeightCost',
+  precision: 'scoreWeightPrecision',
+  lint: 'scoreWeightLint'
 };
 
 function t(key, ...args) {
@@ -249,7 +376,7 @@ function t(key, ...args) {
 
 function showLoading(message) {
   if (elements.loadingIndicator) elements.loadingIndicator.classList.remove('hidden');
-  if (elements.loadingMessage) elements.loadingMessage.textContent = message;
+  if (elements.loadingMessage) elements.loadingMessage.textContent = message || t("loadingResults");
 }
 
 function hideLoading() {
@@ -260,12 +387,19 @@ function showError(message) {
   setHidden(elements.emptyState, true);
   setHidden(elements.dashboard, true);
   setHidden(elements.errorState, false);
-  if (elements.errorTitle) elements.errorTitle.textContent = localText("加载失败", "Failed to load results");
+  if (elements.errorTitle) elements.errorTitle.textContent = t("failedToLoad");
   if (elements.errorMessage) elements.errorMessage.textContent = message;
 }
 
 function setText(id, value) {
   const element = document.querySelector(`#${id}`);
+  if (element) {
+    element.textContent = value;
+  }
+}
+
+function setTextBySelector(selector, value) {
+  const element = document.querySelector(selector);
   if (element) {
     element.textContent = value;
   }
@@ -284,13 +418,8 @@ function escapeHtml(value) {
     .replaceAll("'", "&#39;");
 }
 
-function formatDuration(durationMs) {
-  if (durationMs < 1000) {
-    return `${durationMs}ms`;
-  }
-
-  return `${(durationMs / 1000).toFixed(2)}s`;
-}
+// formatElapsedDuration uses imported utils from ./utils/format.js
+// The imported formatDuration is used directly by new code
 
 function formatElapsedDuration(durationMs) {
   if (!Number.isFinite(durationMs) || durationMs <= 0) {
@@ -316,21 +445,17 @@ function getNormalizedScoreWeights() {
 }
 
 function saveScoreConfig() {
-  try {
-    localStorage.setItem(
-      "agentarena.webReport.scoreConfig",
-      JSON.stringify({
-        scoreWeights: state.scoreWeights
-      })
-    );
-  } catch {
-    // ignore localStorage failures
-  }
+  writeStorage(
+    "agentarena.webReport.scoreConfig",
+    JSON.stringify({
+      scoreWeights: state.scoreWeights
+    })
+  );
 }
 
 function loadScoreConfig() {
   try {
-    const raw = localStorage.getItem("agentarena.webReport.scoreConfig");
+    const raw = readStorage("agentarena.webReport.scoreConfig");
     return raw ? JSON.parse(raw) : null;
   } catch {
     return null;
@@ -359,7 +484,7 @@ function getScoreModeLabel() {
     case "comprehensive":
       return t("scorePresetComprehensive");
     default:
-      return localText("自定义权重", "Custom Weights");
+      return t("customWeights");
   }
 }
 
@@ -431,7 +556,7 @@ function updateScoreWeight(key, value) {
 }
 
 function applyScorePreset(presetId) {
-  state.scoreWeights = { ...getScoreWeightPreset(presetId) };
+  state.scoreWeights = /** @type {Record<string, number>} */ ({ ...getScoreWeightPreset(presetId) });
   saveScoreConfig();
   renderScoreWeightsControls();
   renderWeightSliders(state.scoreWeights);
@@ -508,19 +633,19 @@ function localText(zh, en) {
 
 function translateDifficulty(d) {
   if (!d) return "";
-  const map = { easy: localText("简单", "Easy"), medium: localText("中等", "Medium"), hard: localText("困难", "Hard") };
+  const map = { easy: t("difficultyEasy"), medium: t("difficultyMedium"), hard: t("difficultyHard") };
   return map[d] || d;
 }
 
 function translateStatus(s) {
-  if (s === "success") return localText("成功", "success");
-  if (s === "failed") return localText("失败", "failed");
+  if (s === "success") return t("compareStatusSuccess");
+  if (s === "failed") return t("compareStatusFailed");
   return s;
 }
 
 function providerDisplayName(profile) {
   if (!profile) {
-    return localText("官方", "Official");
+    return t("providerOfficial");
   }
   return profile.name;
 }
@@ -546,28 +671,22 @@ function taskIntentSummary(task) {
 
 function baselineTaskWarning(task) {
   if (task.id === "official-repo-health" || task.id === "repo-health") {
-    return localText(
-      "这不是代码审查，也不是 bugfix benchmark。它只检查 Agent 是否做了一个小改动，同时没有破坏仓库的基础结构。",
-      "This is not a code review or bug-fix benchmark. It only checks whether the agent made one small improvement without breaking baseline repository structure."
-    );
+    return t("baselineWarning");
   }
 
-  return localText(
-    "先看任务目标和 Judge 依据，再解读 compare 结果。",
-    "Read the task objective and judge rationale before interpreting the compare results."
-  );
+  return t("generalWarning");
 }
 
 function taskMeaningBadges(task) {
   if (task.id === "official-repo-health" || task.id === "repo-health") {
     return [
-      localText("基线健全性检查", "Baseline Sanity Check"),
-      localText("不是代码审查", "Not a code review"),
-      localText("不是 bugfix benchmark", "Not a bugfix benchmark")
+      t("baselineSanityCheck"),
+      t("notACodeReview"),
+      t("notABugfixBenchmark")
     ];
   }
 
-  return [localText("按任务目标解读结果", "Interpret results through the task goal")];
+  return [t("interpretThroughGoal")];
 }
 
 function summarizeTaskPrompt(prompt) {
@@ -584,7 +703,7 @@ function summarizeTaskPrompt(prompt) {
 function summarizeJudges(taskPack) {
   const judges = Array.isArray(taskPack?.judges) ? taskPack.judges : [];
   if (judges.length === 0) {
-    return localText("没有 judge", "No judges");
+    return t("noJudges");
   }
 
   const labels = judges.map((judge) => judge.label || judge.id).filter(Boolean);
@@ -593,7 +712,7 @@ function summarizeJudges(taskPack) {
     return summary;
   }
 
-  return localText(`${summary} 等共 ${labels.length} 项`, `${summary} +${labels.length - 3} more`);
+  return t("judgesSummary", summary, labels.length);
 }
 
 
@@ -603,28 +722,22 @@ function runFocusLine(run) {
   const fastest = verdict.fastest ? resultLabel(verdict.fastest) : "n/a";
 
   if (run.task.id === "official-repo-health" || run.task.id === "repo-health") {
-    return localText(
-      `这是一次 baseline sanity check，不是代码审查。当前综合最佳是 ${best}，最快是 ${fastest}。`,
-      `This is a baseline sanity check, not a code review. Current best is ${best} and fastest is ${fastest}.`
-    );
+    return t("sanityFocusLine", best, fastest);
   }
 
-  return localText(
-    `先按任务目标解读结果。当前综合最佳是 ${best}，最快是 ${fastest}。`,
-    `Interpret this run through the task objective first. Current best is ${best} and fastest is ${fastest}.`
-  );
+  return t("generalFocusLine", best, fastest);
 }
 
 const crossRunRenders = createCrossRunRenders({
   state,
   elements,
   t,
-  localText,
   setHidden,
   summarizeRun,
   runtimeIdentity,
   formatDuration,
   getCrossRunRecommendation,
+  getSelectionTrustSummary,
   escapeHtml
 });
 
@@ -641,7 +754,8 @@ const detailFragments = createDetailFragments({
   formatCompositeScore,
   formatTestMetric,
   formatLintMetric,
-  baseAgentLabel
+  baseAgentLabel,
+  render
 });
 
 const {
@@ -664,6 +778,7 @@ const {
   renderLauncher,
   detectService,
   syncLauncherStateFromDom,
+  saveLauncherConfig,
   validateLauncher,
   renderLauncherValidation,
   handleLauncherRun,
@@ -735,6 +850,7 @@ const {
   summarizeRun,
   getRunCompareRows,
   getRunToRunAgentDiff,
+  getRunTrustSummary,
   getAgentTrendRows,
   getRunVerdict,
   getCompareResults,
@@ -747,6 +863,7 @@ const {
   findJudgeByType,
   getCompositeScoreReasons,
   diffPrecisionScore,
+  getSelectionTrustSummary,
   renderStepCards,
   renderJudgeCards,
   renderDiff,
@@ -755,6 +872,7 @@ const {
   renderCodeReviewSection,
   renderTeamCostCalculator,
   setupShareActions,
+  buildShareCard,
   buildLeaderboard
 });
 
@@ -770,6 +888,11 @@ const resultLoaders = createResultLoaders({
   showError
 });
 
+const traceReplay = createTraceReplayModule({
+  escapeHtml,
+  t
+});
+
 const {
   downloadTextFile: downloadTextFileImpl,
   handleFileSelection: handleFileSelectionImpl,
@@ -778,9 +901,12 @@ const {
 } = resultLoaders;
 
 function renderStaticText() {
+  document.title = `AgentArena · ${t("appTitle")}`;
   setText("result-loader-summary", t("existingResultsFallback"));
   setText("app-title", t("appTitle"));
   setText("app-description", t("appDescription"));
+  setText("skip-link", t("skipToContent"));
+  setText("update-banner-text", t("updateAvailable"));
   setText("language-label", t("languageLabel"));
   if (elements.languageSelect.options[0]) {
     elements.languageSelect.options[0].text = "English";
@@ -796,6 +922,15 @@ function renderStaticText() {
   setText("markdown-file-hint", t("markdownFileHint"));
   setText("runs-heading", t("runsHeading"));
   setText("agents-heading", t("agentsHeading"));
+  if (elements.runSearch) {
+    elements.runSearch.placeholder = t("searchRuns");
+  }
+  if (elements.agentListHint) {
+    elements.agentListHint.textContent = t("agentListHint");
+  }
+  if (elements.loadingMessage && elements.loadingIndicator?.classList.contains("hidden")) {
+    elements.loadingMessage.textContent = t("loadingResults");
+  }
   setText("hero-eyebrow", t("heroEyebrow"));
   setText("hero-title", t("heroTitle"));
   setText("hero-description", t("heroDescription"));
@@ -836,6 +971,7 @@ function renderStaticText() {
   setText("judge-filters-title", t("judgeFiltersTitle"));
   setText("markdown-summary-title", t("markdownSummaryTitle"));
   setText("launcher-title", t("launcherTitle"));
+  setText("launcher-eyebrow", t("launcherEyebrow"));
   setText("launcher-mode", t("launcherMode"));
   setText("launcher-description", t("launcherDescription"));
   setText("launcher-repo-label", t("launcherRepoLabel"));
@@ -848,6 +984,7 @@ function renderStaticText() {
   }
   setText("launcher-output-label", t("launcherOutputLabel"));
   setText("launcher-agents-label", t("launcherAgentsLabel"));
+  setText("launcher-agents-note", t("launcherAgentsNote"));
   setText("launcher-probe-auth-label", t("launcherProbeAuthLabel"));
   setText("launcher-concurrency-label", t("launcherConcurrencyLabel"));
   if (elements.preflightTitle) {
@@ -856,6 +993,12 @@ function renderStaticText() {
   if (elements.advancedAnalysisSummary) {
     elements.advancedAnalysisSummary.textContent = t("advancedAnalysisSummary");
   }
+  setText("compare-zone-eyebrow", t("compareZoneEyebrow"));
+  setText("compare-zone-title", t("compareZoneTitle"));
+  setText("compare-zone-description", t("compareZoneDescription"));
+  setText("diagnostics-zone-eyebrow", t("diagnosticsZoneEyebrow"));
+  setText("diagnostics-zone-title", t("diagnosticsZoneTitle"));
+  setText("diagnostics-zone-description", t("diagnosticsZoneDescription"));
   setText("cross-run-compare-title", t("crossRunCompareTitle"));
   setText("cross-run-description", t("crossRunDescription"));
   if (elements.crossRunToggleSelect) {
@@ -876,6 +1019,20 @@ function renderStaticText() {
   setText("copy-share-card", t("copySummary"));
   setText("copy-pr-table", t("copyPrTable"));
   setText("download-share-svg", t("downloadShareSvg"));
+  setTextBySelector('[data-i18n="teamCostCalculatorTitle"]', t("teamCostCalculatorTitle"));
+  setTextBySelector('[data-i18n="teamSizeLabel"]', t("teamSizeLabel"));
+  setTextBySelector('[data-i18n="dailyRunsLabel"]', t("dailyRunsLabel"));
+  setTextBySelector('[data-i18n="recalculateBtn"]', t("recalculateBtn"));
+  if (elements.sidebarToggle) {
+    elements.sidebarToggle.setAttribute("aria-label", t("toggleSidebar"));
+  }
+  if (elements.themeToggle) {
+    elements.themeToggle.setAttribute("aria-label", t("toggleTheme"));
+  }
+  if (elements.themeLabel) {
+    const currentTheme = document.documentElement.getAttribute("data-theme");
+    elements.themeLabel.textContent = currentTheme === "dark" ? t("themeLabelLight") : t("themeLabelDark");
+  }
   elements.judgeSearch.placeholder = t("judgeSearchPlaceholder");
   elements.languageSelect.value = state.language;
   elements.runCompareScope.options[0].text = t("runCompareScopeCurrent");
@@ -914,28 +1071,20 @@ function fetchWithTimeout(url, options = {}, timeoutMs = 15_000) {
 }
 
 function formatJudgeType(type) {
-  switch (type) {
-    case "test-result":
-      return localText("测试结果", "Test Result");
-    case "lint-check":
-      return localText("Lint 检查", "Lint Check");
-    case "file-exists":
-      return localText("文件存在", "File Exists");
-    case "file-contains":
-      return localText("文件包含内容", "File Contains");
-    case "json-value":
-      return localText("JSON 值断言", "JSON Value");
-    case "glob":
-      return localText("Glob 匹配", "Glob");
-    case "file-count":
-      return localText("文件数量", "File Count");
-    case "snapshot":
-      return localText("快照", "Snapshot");
-    case "json-schema":
-      return localText("JSON Schema", "JSON Schema");
-    default:
-      return localText("命令", "Command");
-  }
+  const typeMap = {
+    "test-result": "judgeTestResult",
+    "lint-check": "judgeLintCheck",
+    "file-exists": "judgeFileExists",
+    "file-contains": "judgeFileContains",
+    "json-value": "judgeJsonValue",
+    glob: "judgeGlob",
+    "file-count": "judgeFileCount",
+    snapshot: "judgeSnapshot",
+    "json-schema": "judgeJsonSchema",
+    "patch-validation": "judgePatchValidation",
+    "token-efficiency": "judgeTokenEfficiency"
+  };
+  return t(typeMap[type] || "judgeCommand");
 }
 
 function statusClass(status) {
@@ -963,10 +1112,23 @@ function updateCurrentRun() {
 }
 
 function applyRuns(runs, markdownByRunId = new Map()) {
+  const locationState = readLocationState();
   state.runs = sortRuns(runs);
   state.markdownByRunId = markdownByRunId;
-  state.selectedRunId = state.runs[0]?.runId ?? null;
+  const preferredRunId =
+    locationState.runId && state.runs.some((run) => run.runId === locationState.runId)
+      ? locationState.runId
+      : state.selectedRunId;
+  state.selectedRunId =
+    preferredRunId && state.runs.some((run) => run.runId === preferredRunId)
+      ? preferredRunId
+      : state.runs[0]?.runId ?? null;
+  if (locationState.agentId) {
+    state.selectedAgentId = locationState.agentId;
+  }
   updateCurrentRun();
+  persistCachedRuns();
+  syncLocationState();
   render();
 }
 
@@ -977,6 +1139,11 @@ function applySingleRun(run, markdown = null) {
     markdownByRunId.set(run.runId, markdown);
   }
   applyRuns([run, ...existingRuns], markdownByRunId);
+
+  // Load trace replay for the run
+  if (traceReplay.isVisible()) {
+    traceReplay.loadTraceForRun(run);
+  }
 }
 
 function render() {
@@ -990,8 +1157,7 @@ function render() {
 
   if (!state.run) {
     setHidden(elements.runInfo, true);
-    // Always hide hero when no run is loaded - the launcher will show instead
-    setHidden(elements.emptyState, true);
+    setHidden(elements.emptyState, false);
     setHidden(elements.dashboard, true);
     elements.agentCount.textContent = "0";
     elements.agentList.className = "agent-list empty-state";
@@ -1018,12 +1184,9 @@ async function handleMarkdownSelection(event) {
 async function copyToClipboard(value, label) {
   try {
     await navigator.clipboard.writeText(value);
-    elements.clipboardStatus.textContent = localText(`${label} 已复制。`, `${label} copied.`);
+    elements.clipboardStatus.textContent = t("summaryCopied", label);
   } catch (error) {
-    elements.clipboardStatus.textContent = localText(
-      `${label} 复制失败。`,
-      `Failed to copy ${label.toLowerCase()}.`
-    );
+    elements.clipboardStatus.textContent = t("summaryCopyFailed", label);
     console.error(error);
   }
 }
@@ -1046,15 +1209,9 @@ elements.launcherTaskSelect.addEventListener("change", (event) => {
     elements.launcherAdhocPromptField.style.display = "none";
   } else {
     elements.launcherAdhocPromptField.style.display = "";
-    elements.launcherAdhocPromptLabel.textContent = localText("自定义提示词", "Custom Prompt");
-    elements.launcherAdhocPromptHint.textContent = localText(
-      "输入提示词后，系统会自动生成临时任务包并下发给选中的 Agent 执行。",
-      "Enter your prompt and the system will create a temporary task pack and dispatch it to the selected agents."
-    );
-    elements.launcherAdhocPrompt.placeholder = localText(
-      "输入你想让 Agent 执行的任务描述...",
-      "Describe the task you want the agents to perform..."
-    );
+    elements.launcherAdhocPromptLabel.textContent = t("launcherAdhocPromptLabel");
+    elements.launcherAdhocPromptHint.textContent = t("customPromptHint");
+    elements.launcherAdhocPrompt.placeholder = t("customPromptPlaceholder");
   }
   saveLauncherConfig();
   renderLauncher();
@@ -1218,11 +1375,8 @@ elements.launcherToggle.addEventListener("click", () => {
 elements.languageSelect.addEventListener("change", (event) => {
   state.language = String(event.target.value ?? "en");
   document.documentElement.lang = state.language === "zh-CN" ? "zh-CN" : "en";
-  try {
-    localStorage.setItem("agentarena.webReport.language", state.language);
-  } catch {
-    // ignore localStorage failures
-  }
+  writeStorage("agentarena.webReport.language", state.language);
+  syncLocationState("push");
   render();
 });
 
@@ -1231,7 +1385,7 @@ elements.runList.addEventListener("click", (event) => {
   if (deleteBtn) {
     event.stopPropagation();
     const runId = deleteBtn.getAttribute("data-run-id");
-    const confirmMsg = localText("确定删除这个 run？此操作不可撤销。", "Delete this run? This cannot be undone.");
+    const confirmMsg = t("deleteRunConfirm");
     if (!confirm(confirmMsg)) return;
     state.runs = state.runs.filter((r) => r.runId !== runId);
     state.markdownByRunId.delete(runId);
@@ -1239,6 +1393,8 @@ elements.runList.addEventListener("click", (event) => {
       state.selectedRunId = state.runs[0]?.runId ?? null;
     }
     updateCurrentRun();
+    persistCachedRuns();
+    syncLocationState();
     render();
     return;
   }
@@ -1267,6 +1423,7 @@ elements.runList.addEventListener("click", (event) => {
 
   state.selectedRunId = button.getAttribute("data-run-id");
   updateCurrentRun();
+  syncLocationState("push");
   render();
   if (window.innerWidth <= 768) {
     state.sidebarOpen = false;
@@ -1288,7 +1445,7 @@ elements.runInfo.addEventListener("click", (event) => {
   }
 
   if (state.run.scoreWeights) {
-    state.scoreWeights = { ...DEFAULT_SCORE_WEIGHTS, ...state.run.scoreWeights };
+    state.scoreWeights = /** @type {Record<string, number>} */ ({ ...DEFAULT_SCORE_WEIGHTS, ...state.run.scoreWeights });
     saveScoreConfig();
     render();
   }
@@ -1301,6 +1458,7 @@ elements.agentList.addEventListener("click", (event) => {
   }
 
   state.selectedAgentId = button.getAttribute("data-agent-id");
+  syncLocationState("push");
   renderAgentList(state.run);
   renderCompareTableV2(state.run);
   renderAgentTrendTableV2(state.run);
@@ -1337,6 +1495,7 @@ elements.compareTable.addEventListener("click", (event) => {
 
   state.selectedAgentId = clickedId;
   state.expandedCompareAgentId = null;
+  syncLocationState("push");
   renderAgentList(state.run);
   renderCompareTableV2(state.run);
   renderAgentTrendTableV2(state.run);
@@ -1355,6 +1514,7 @@ elements.comparisonBars.addEventListener("click", (event) => {
 
   state.selectedAgentId = barRow.getAttribute("data-bar-agent-id");
   state.expandedCompareAgentId = null;
+  syncLocationState("push");
   renderAgentList(state.run);
   renderCompareTableV2(state.run);
   renderComparisonBars(state.run);
@@ -1390,6 +1550,7 @@ elements.runCompareTable.addEventListener("click", (event) => {
 
   state.selectedRunId = row.getAttribute("data-compare-run-id");
   updateCurrentRun();
+  syncLocationState("push");
   render();
 });
 
@@ -1400,6 +1561,7 @@ elements.runDiffTable.addEventListener("click", (event) => {
   }
 
   state.selectedAgentId = row.getAttribute("data-run-diff-agent-id");
+  syncLocationState("push");
   renderAgentList(state.run);
   renderCompareTableV2(state.run);
   renderRunDiffTableV2();
@@ -1419,6 +1581,7 @@ elements.agentTrendTable.addEventListener("click", (event) => {
 
   state.selectedRunId = row.getAttribute("data-agent-trend-run-id");
   updateCurrentRun();
+  syncLocationState("push");
   render();
 });
 
@@ -1459,7 +1622,7 @@ for (const [key, elementName] of Object.entries(scoreWeightElements)) {
 }
 
 elements.scoreWeightsReset?.addEventListener("click", () => {
-  state.scoreWeights = { ...DEFAULT_SCORE_WEIGHTS };
+  state.scoreWeights = /** @type {Record<string, number>} */ ({ ...DEFAULT_SCORE_WEIGHTS });
   renderScoreWeightsControls();
   if (state.run) {
     renderVerdictHero(state.run);
@@ -1495,7 +1658,7 @@ elements.copyShareCard.addEventListener("click", async () => {
     return;
   }
 
-    await copyToClipboard(buildShareCard(state.run, { scoreWeights: state.scoreWeights, scoreModeLabel: getScoreModeLabel() }), localText("摘要", "Summary"));
+    await copyToClipboard(buildShareCard(state.run, { scoreWeights: state.scoreWeights, scoreModeLabel: getScoreModeLabel() }), t("copySummary"));
 });
 
 elements.copyPrTable.addEventListener("click", async () => {
@@ -1503,7 +1666,7 @@ elements.copyPrTable.addEventListener("click", async () => {
     return;
   }
 
-    await copyToClipboard(buildPrTable(state.run, { scoreWeights: state.scoreWeights, scoreModeLabel: getScoreModeLabel() }), localText("PR 表格", "PR table"));
+    await copyToClipboard(buildPrTable(state.run, { scoreWeights: state.scoreWeights, scoreModeLabel: getScoreModeLabel() }), t("copyPrTable"));
 });
 
 elements.downloadShareSvg.addEventListener("click", () => {
@@ -1516,19 +1679,23 @@ elements.downloadShareSvg.addEventListener("click", () => {
     buildShareCardSvg(state.run, { scoreWeights: state.scoreWeights, scoreModeLabel: getScoreModeLabel() }),
     "image/svg+xml"
   );
-  elements.clipboardStatus.textContent = localText("分享 SVG 已下载。", "Share SVG downloaded.");
+  elements.clipboardStatus.textContent = t("svgDownloaded");
 });
 
-try {
-  state.language = localStorage.getItem("agentarena.webReport.language") || "zh-CN";
-} catch {
-  state.language = "zh-CN";
-}
+const initialLocationState = readLocationState();
+state.language = initialLocationState.language ?? readStorage("agentarena.webReport.language") ?? "zh-CN";
 document.documentElement.lang = state.language === "zh-CN" ? "zh-CN" : "en";
 
 const savedScoreConfig = loadScoreConfig();
 if (savedScoreConfig?.scoreWeights) {
-  state.scoreWeights = { ...DEFAULT_SCORE_WEIGHTS, ...savedScoreConfig.scoreWeights };
+  state.scoreWeights = /** @type {Record<string, number>} */ ({ ...DEFAULT_SCORE_WEIGHTS, ...savedScoreConfig.scoreWeights });
+}
+
+const restoredCache = restoreCachedRuns();
+if (restoredCache) {
+  state.standaloneMarkdown = restoredCache.standaloneMarkdown;
+  applyRuns(restoredCache.runs, restoredCache.markdownByRunId);
+  state.notice = localText("已恢复最近一次缓存结果，可离线查看。", "Restored the latest cached report for offline viewing.");
 }
 
 // 跨运行对比功能
@@ -1565,7 +1732,7 @@ elements.crossRunCompareBtn.addEventListener("click", () => {
   const selectedRuns = state.runs.filter(run => state.crossRunSelectedIds.has(run.runId));
   if (selectedRuns.length < 2) return;
   
-  state.crossRunCompareData = getCrossRunCompareRows(selectedRuns);
+  state.crossRunCompareData = getCrossRunCompareRows(selectedRuns, { scoreWeights: state.scoreWeights });
   state.crossRunSelectMode = false;
   state.crossRunSelectedIds = new Set(state.crossRunCompareData.comparableRuns.map((run) => run.runId));
   renderCrossRunCompare();
@@ -1623,21 +1790,57 @@ elements.errorBack?.addEventListener("click", () => {
   state.selectedRunId = null;
   state.selectedAgentId = null;
   state.notice = null;
+  persistCachedRuns();
+  syncLocationState();
   render();
 });
 
 // Theme toggle
-const savedTheme = localStorage.getItem('theme') || 'dark';
+const savedTheme = readStorage("theme") || "dark";
 document.documentElement.setAttribute('data-theme', savedTheme);
-if (elements.themeLabel) elements.themeLabel.textContent = savedTheme === 'dark' ? 'Light' : 'Dark';
+if (elements.themeLabel) elements.themeLabel.textContent = savedTheme === "dark" ? t("themeLabelLight") : t("themeLabelDark");
 
 elements.themeToggle?.addEventListener("click", () => {
   const current = document.documentElement.getAttribute('data-theme');
-  const next = current === 'dark' ? 'light' : 'dark';
-  document.documentElement.setAttribute('data-theme', next);
-  localStorage.setItem('theme', next);
-  if (elements.themeLabel) elements.themeLabel.textContent = next === 'dark' ? 'Light' : 'Dark';
+  const next = current === "dark" ? "light" : "dark";
+  document.documentElement.setAttribute("data-theme", next);
+  writeStorage("theme", next);
+  renderStaticText();
 });
+
+// Update banner handling
+const updateBanner = document.getElementById('update-banner');
+const updateReload = document.getElementById('update-reload');
+if (updateReload) {
+  updateReload.addEventListener('click', () => {
+    const registration = globalThis.__agentarenaSwRegistration;
+    if (registration?.waiting) {
+      registration.waiting.postMessage({ type: "SKIP_WAITING" });
+      return;
+    }
+    window.location.reload();
+  });
+}
+
+// Expose to SW update handler in index.html
+globalThis.showUpdateBanner = (registration) => {
+  if (registration) {
+    globalThis.__agentarenaSwRegistration = registration;
+  }
+  if (updateBanner) {
+    updateBanner.classList.remove('hidden');
+  }
+};
+
+function hideUpdateBanner() {
+  if (updateBanner) {
+    updateBanner.classList.add('hidden');
+  }
+}
+hideUpdateBanner();
+
+// Trace Replay UI setup
+traceReplay.setupEventListeners();
 
 // Feature 2: Live validation on task select and agent changes
 elements.launcherTaskSelect.addEventListener("change", () => {
@@ -1647,5 +1850,51 @@ elements.launcherAgents.addEventListener("change", () => {
   renderLauncherValidation(validateLauncher());
 });
 
+window.addEventListener("popstate", () => {
+  const locationState = readLocationState();
+  state.language = locationState.language ?? readStorage("agentarena.webReport.language") ?? state.language;
+  document.documentElement.lang = state.language === "zh-CN" ? "zh-CN" : "en";
+  state.selectedRunId = locationState.runId;
+  state.selectedAgentId = locationState.agentId;
+  updateCurrentRun();
+  render();
+});
+
+// Initialize new modules
+async function initNewModules() {
+  // Initialize storage (IndexedDB)
+  await resultStore.init();
+  
+  // Check if IndexedDB is available, show warning if not (Safari private mode)
+  if (!resultStore.isAvailable()) {
+    showIndexedDBWarning();
+  }
+  
+  // Initialize judge registry
+  await judgeRegistry.init();
+  
+  // Publish initial state
+  stateManager.publish(RUN_LOADED, { runs: state.runs });
+}
+
+function showIndexedDBWarning() {
+  const notice = document.createElement('div');
+  notice.className = 'indexeddb-warning';
+  notice.innerHTML = `
+    <span class="warning-icon">⚠️</span>
+    <span class="warning-text">${state.language === 'zh-CN' 
+      ? '当前处于隐私模式，数据不会持久化保存。建议切换到普通模式以使用完整功能。' 
+      : 'You are in private mode. Data will not be persisted. Please switch to normal mode for full functionality.'}</span>
+    <button class="warning-close" onclick="this.parentElement.remove()">×</button>
+  `;
+  document.body.appendChild(notice);
+  
+  // Auto-remove after 10 seconds
+  setTimeout(() => notice.remove(), 10000);
+}
+
+// Run initialization
 detectService();
+syncLocationState();
 render();
+initNewModules();

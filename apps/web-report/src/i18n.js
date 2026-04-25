@@ -1,4 +1,4 @@
-﻿const en = {
+const en = {
   appTitle: "Web Report",
   appDescription:
     "Benchmark the coding agents you already run locally, then inspect which setup actually performs better on your real repository tasks.",
@@ -339,10 +339,39 @@
   runCompareReasonDifferentRepoBaseline: "Used a different repository baseline.",
   runCompareReasonMissingCoreData: "Missing key comparison data.",
 
+
+  // Trust and comparability
+  trustRunStrong: "All results complete with known costs.",
+  trustRunCaution: "Some results are incomplete or have unknown cost — comparison is directional.",
+  trustRunNoWinner: "No agent passed — ranking reflects partial results only.",
+  trustSelectionStrong: "Comparing fairly-matched runs.",
+  trustSelectionCautionExcluded: "Some runs were excluded from comparison.",
+  trustSelectionCautionLegacy: "Some runs predate fairness metadata — treat comparisons as approximate.",
+  trustSelectionCautionLowSample: "Less than three comparable runs — treat this ranking as directional.",
+
+  // Cross-run selection
+  crossRunCancelSelection: "Cancel Selection",
+  crossRunPassed: "passed",
+  crossRunModelLabel: "Model",
+  crossRunProviderLabel: "Provider",
+  crossRunVariantLabel: "Variant",
+  crossRunBaseAgentLabel: "Base Agent",
+  crossRunBestModelLabel: "Best Model",
+  crossRunBestProviderLabel: "Best Provider",
+  crossRunSelectedRuns: "Selected {count} runs, {comparableCount} meet fair comparison rules, {excludedCount} excluded due to inconsistent conditions.",
+  crossRunAllRunsMeetRules: "Comparing {count} runs; all meet fair comparison rules.",
+
   // Credit items
   issueResolutionCreditLabel: "Issue Resolution Mode",
   efficiencyFirstCreditLabel: "Efficiency First Mode",
-  rotatingTasksCreditLabel: "Rotating Tasks Mode"
+  rotatingTasksCreditLabel: "Rotating Tasks Mode",
+  trace: {
+    step: 'Step {step}',
+    stepProgress: 'Step {current}/{total}',
+    play: 'Play',
+    pause: 'Pause',
+    selectRun: 'Select a run to view trace replay'
+  }
 };
 
 const zhCN = {
@@ -693,6 +722,28 @@ const zhCN = {
   runCompareReasonDifferentRepoBaseline: "使用了不同的仓库基线。",
   runCompareReasonMissingCoreData: "缺少关键对比数据。",
 
+
+  // Trust and comparability
+  trustRunStrong: "所有结果完整，成本可知。",
+  trustRunCaution: "部分结果不完整或成本未知，对比仅供参考。",
+  trustRunNoWinner: "无 Agent 通过，排名仅供参考。",
+  trustSelectionStrong: "正在公平对比可比较的结果。",
+  trustSelectionCautionExcluded: "部分结果因前提不一致被排除。",
+  trustSelectionCautionLegacy: "部分结果早于公平元数据，对比应视为近似。",
+  trustSelectionCautionLowSample: "可公平比较的结果少于 3 个，排名仅供参考。",
+
+  // Cross-run selection
+  crossRunCancelSelection: "取消选择",
+  crossRunPassed: "成功",
+  crossRunModelLabel: "模型",
+  crossRunProviderLabel: "Provider",
+  crossRunVariantLabel: "配置名称",
+  crossRunBaseAgentLabel: "基础 Agent",
+  crossRunBestModelLabel: "最佳模型",
+  crossRunBestProviderLabel: "最佳 Provider",
+  crossRunSelectedRuns: "已选 {count} 个运行，其中 {comparableCount} 个进入公平对比，{excludedCount} 个因前提不一致被排除。",
+  crossRunAllRunsMeetRules: "对比 {count} 个运行，全部满足公平对比条件。",
+
   // Dashboard - Run Info
   archivedScoreMode: "归档评分模式",
   activeScoreMode: "当前评分模式",
@@ -880,7 +931,14 @@ const zhCN = {
   bestAgentLabel: "最佳 Agent",
   scoreLabel: "分数",
   durationLabel2: "耗时",
-  noSuccessResults: (title) => `任务 "${title}" 没有成功结果。`
+  noSuccessResults: (title) => `任务 "${title}" 没有成功结果。`,
+  trace: {
+    step: '步骤 {step}',
+    stepProgress: '步骤 {current}/{total}',
+    play: '播放',
+    pause: '暂停',
+    selectRun: '选择要查看跟踪回放的运行'
+  }
 };
 
 export const MESSAGES = {
