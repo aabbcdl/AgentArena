@@ -34,7 +34,7 @@ jobs:
       - run: pnpm build
       - name: Run benchmark
         run: node packages/cli/dist/index.js run --repo . --task examples/taskpacks/official/repo-health.yaml --agents demo-fast,demo-thorough
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: benchmark-results
           path: .agentarena/runs/
