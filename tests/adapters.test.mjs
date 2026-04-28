@@ -533,3 +533,88 @@ test("resolveClaudeRuntime and workspace settings respect provider profiles", as
     await rm(tempDir, { recursive: true, force: true });
   }
 });
+
+test("demo-thorough adapter execution returns normalized benchmark output", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-adapters-"));
+  const workspacePath = path.join(tempDir, "workspace");
+  await mkdir(workspacePath, { recursive: true });
+
+  const adapter = getAdapter("demo-thorough");
+  const result = await adapter.execute({
+    agentId: "demo-thorough",
+    repoPath: tempDir,
+    workspacePath,
+    environment: process.env,
+    task: {
+      schemaVersion: "agentarena.taskpack/v1",
+      id: "demo-task",
+      title: "Demo Task",
+      prompt: "Create a minimal change.",
+      envAllowList: [],
+      setupCommands: [],
+      judges: [],
+      teardownCommands: []
+    },
+    trace: async () => {}
+  });
+
+  assert.equal(result.status, "success");
+  assert.equal(result.costKnown, true);
+  assert.equal(result.changedFilesHint.length > 0, true);
+
+  await rm(tempDir, { recursive: true, force: true });
+});
+
+test("concurrent adapter executions do not interfere with each other", async () => {
+  const tempDirA = await mkdtemp(path.join(os.tmpdir(), "agentarena-adapters-"));
+  const tempDirB = await mkdtemp(path.join(os.tmpdir(), "agentarena-adapters-"));
+  const workspacePathA = path.join(tempDirA, "workspace");
+  const workspacePathB = path.join(tempDirB, "workspace");
+  await mkdir(workspacePathA, { recursive: true });
+  await mkdir(workspacePathB, { recursive: true });
+
+  const adapter = getAdapter("demo-fast");
+  const [resultA, resultB] = await Promise.all([
+    adapter.execute({
+      agentId: "demo-fast",
+      repoPath: tempDirA,
+      workspacePath: workspacePathA,
+      environment: process.env,
+      task: {
+        schemaVersion: "agentarena.taskpack/v1",
+        id: "demo-task-a",
+        title: "Demo Task A",
+        prompt: "Create a minimal change.",
+        envAllowList: [],
+        setupCommands: [],
+        judges: [],
+        teardownCommands: []
+      },
+      trace: async () => {}
+    }),
+    adapter.execute({
+      agentId: "demo-fast",
+      repoPath: tempDirB,
+      workspacePath: workspacePathB,
+      environment: process.env,
+      task: {
+        schemaVersion: "agentarena.taskpack/v1",
+        id: "demo-task-b",
+        title: "Demo Task B",
+        prompt: "Create another minimal change.",
+        envAllowList: [],
+        setupCommands: [],
+        judges: [],
+        teardownCommands: []
+      },
+      trace: async () => {}
+    })
+  ]);
+
+  assert.equal(resultA.status, "success");
+  assert.equal(resultB.status, "success");
+  assert.notEqual(resultA.changedFilesHint, resultB.changedFilesHint);
+
+  await rm(tempDirA, { recursive: true, force: true });
+  await rm(tempDirB, { recursive: true, force: true });
+});

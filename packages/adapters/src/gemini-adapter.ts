@@ -202,13 +202,28 @@ export class GeminiCliAdapter implements AgentAdapter {
       }
     });
 
+    // Detect changed files via git diff
+    const changedFilesHint: string[] = [];
+    try {
+      const { execFileSync } = await import("node:child_process");
+      const gitDiff = execFileSync("git", ["diff", "--name-only"], {
+        cwd: context.workspacePath,
+        encoding: "utf8"
+      }).trim();
+      if (gitDiff) {
+        changedFilesHint.push(...gitDiff.split("\n").filter(Boolean));
+      }
+    } catch {
+      // git not available or no changes
+    }
+
     return {
       status: execution.exitCode === 0 && !execution.error ? "success" : "failed",
       summary,
       tokenUsage: parsed.tokenUsage,
       estimatedCostUsd: parsed.estimatedCostUsd,
       costKnown: parsed.costKnown,
-      changedFilesHint: [],
+      changedFilesHint,
       resolvedRuntime
     };
   }

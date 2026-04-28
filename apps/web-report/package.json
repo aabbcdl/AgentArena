@@ -5,6 +5,6 @@
   "private": true,
   "scripts": {
     "build": "node scripts/build.mjs",
-    "typecheck": "node -e \"console.log('web-report uses plain browser JavaScript; no typecheck step configured yet')\""
+    "typecheck": "tsc -p tsconfig.typecheck.json"
   }
 }

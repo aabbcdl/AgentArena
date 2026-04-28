@@ -29,7 +29,7 @@ The current version focuses on a runnable local benchmark loop:
 - browser-level smoke coverage for the local web report flow
 - an optional Docker runner shell for more reproducible execution environments
 - step-level environment overrides for setup, judges, and teardown
-- built-in command, file, glob, snapshot, and JSON judges
+- built-in command, test-result, lint-check, file-exists, file-contains, regex-match, directory-exists, compilation, glob, file-count, snapshot, patch-validation, token-efficiency, json-value, json-schema judges
 - diff detection
 - JSON, Markdown, PR comment, badge, static HTML, and interactive web report generation
 - support for demo adapters plus external CLI-based adapters

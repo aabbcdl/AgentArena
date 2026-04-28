@@ -12,9 +12,15 @@ export function uniqueSorted(values: string[]): string[] {
   return Array.from(new Set(values)).sort();
 }
 
+const MAX_REASONABLE_TIMEOUT_MS = 24 * 60 * 60 * 1_000; // 24 hours
+
 export function resolveTimeoutMs(value: string | undefined, fallbackMs: number): number {
   const parsed = Number.parseInt(value ?? "", 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallbackMs;
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallbackMs;
+  }
+  // Cap at a reasonable maximum to prevent absurdly large timeouts
+  return Math.min(parsed, MAX_REASONABLE_TIMEOUT_MS);
 }
 
 export function formatDuration(durationMs: number): string {

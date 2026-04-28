@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { TraceReplayer } from "../apps/web-report/src/trace-replay-bridge.js";
 import {
   buildPrTable,
   buildShareCard,
@@ -17,12 +18,13 @@ import {
   getFairComparisonExclusionReasons,
   getRunCompareRows,
   getRunToRunAgentDiff,
+  getRunTrustSummary,
   getRunVerdict,
   getScoreWeightPreset,
+  getSelectionTrustSummary,
   missingCoreComparisonData,
   resultRecordKey
 } from "../apps/web-report/src/view-model.js";
-import { TraceReplayer } from "../apps/web-report/src/trace-replay-bridge.js";
 
 function createRun(runId, taskTitle, overrides = {}) {
   return {
@@ -88,18 +90,190 @@ test("getRunCompareRows filters to the selected task title and sorts by success"
   assert.equal(result.comparableRows[0].hasMarkdown, true);
 });
 
-test("getCompareResults filters failed agents and sorts by changed files", () => {
+test("legacy runs without fairness metadata stay comparable when task identity still matches", () => {
+  const runs = [
+    createRun("run-a", "Task A", {
+      createdAt: "2026-03-14T09:00:00.000Z",
+      results: [createResult("demo-fast", { judgeResults: [{ success: true }] })]
+    }),
+    createRun("run-b", "Task A", {
+      createdAt: "2026-03-14T10:00:00.000Z",
+      results: [createResult("demo-fast", { judgeResults: [{ success: true }] })]
+    })
+  ];
+
+  const data = getRunCompareRows(runs, {
+    taskTitle: "Task A",
+    sort: "created"
+  });
+
+  assert.equal(data.comparableRows.length, 2);
+  assert.equal(data.excludedRows.length, 0);
+});
+
+test("legacy cross-run comparison keeps matching-task runs comparable without fairness metadata", () => {
+  const runs = [
+    createRun("run-a", "Task A", {
+      createdAt: "2026-03-14T09:00:00.000Z",
+      results: [createResult("demo-fast", { durationMs: 2000, tokenUsage: 100, judgeResults: [{ success: true }] })]
+    }),
+    createRun("run-b", "Task A", {
+      createdAt: "2026-03-14T10:00:00.000Z",
+      results: [createResult("demo-fast", { durationMs: 1500, tokenUsage: 120, judgeResults: [{ success: true }] })]
+    }),
+    createRun("run-c", "Task B", {
+      createdAt: "2026-03-14T11:00:00.000Z",
+      results: [createResult("demo-fast", { durationMs: 800, tokenUsage: 90, judgeResults: [{ success: true }] })]
+    })
+  ];
+
+  const data = getCrossRunCompareRows(runs);
+
+  assert.equal(data.comparableRuns.length, 2);
+  assert.equal(data.excludedRuns.length, 1);
+  assert.equal(data.excludedRuns[0].run.runId, "run-c");
+});
+test("getSelectionTrustSummary marks legacy fallback and low sample size for comparable runs", () => {
+  const runs = [
+    createRun("run-a", "Task A", {
+      createdAt: "2026-03-14T09:00:00.000Z",
+      results: [createResult("demo-fast", { durationMs: 2000, tokenUsage: 100, judgeResults: [{ success: true }] })]
+    }),
+    createRun("run-b", "Task A", {
+      createdAt: "2026-03-14T10:00:00.000Z",
+      results: [createResult("demo-fast", { durationMs: 1500, tokenUsage: 120, judgeResults: [{ success: true }] })]
+    })
+  ];
+
+  const data = getCrossRunCompareRows(runs);
+  const summary = getSelectionTrustSummary(data, { minimumComparableRuns: 3 });
+
+  assert.equal(summary.comparableRuns, 2);
+  assert.equal(summary.excludedRuns, 0);
+  assert.equal(summary.hasLegacyFallback, true);
+  assert.equal(summary.lowSampleSize, true);
+  assert.equal(summary.level, "caution");
+});
+
+test("getSelectionTrustSummary marks insufficient comparison when no comparable runs remain", () => {
+  const runs = [
+    createRun("run-a", "Task A", {
+      fairComparison: { taskIdentity: "task:task-a", judgeIdentity: "judge:abc", repoBaselineIdentity: "repo:def" },
+      results: [createResult("demo-fast", { durationMs: 2000, tokenUsage: 100, judgeResults: [{ success: true }] })]
+    }),
+    createRun("run-b", "Task B", {
+      fairComparison: { taskIdentity: "task:task-b", judgeIdentity: "judge:abc", repoBaselineIdentity: "repo:def" },
+      results: [createResult("demo-fast", { durationMs: 1500, tokenUsage: 120, judgeResults: [{ success: true }] })]
+    })
+  ];
+
+  const data = getCrossRunCompareRows(runs);
+  const summary = getSelectionTrustSummary(data);
+
+  assert.equal(summary.comparableRuns, 1);
+  assert.equal(summary.excludedRuns, 1);
+  assert.equal(summary.lowSampleSize, true);
+  assert.equal(summary.level, "caution");
+});
+
+test("getRunTrustSummary flags missing cost visibility and failed agents", () => {
   const run = createRun("run-1", "Task A", {
     results: [
-      createResult("a", { status: "failed", changedFiles: ["a", "b"], judgeResults: [{ success: false }] }),
-      createResult("b", { status: "failed", changedFiles: ["a"], judgeResults: [{ success: false }] }),
-      createResult("c", { status: "success", changedFiles: ["a", "b", "c"], judgeResults: [{ success: true }] })
+      createResult("agent-a", { costKnown: false, judgeResults: [{ success: true }] }),
+      createResult("agent-b", { status: "failed", costKnown: true, estimatedCostUsd: 0.2, judgeResults: [{ success: false }] })
     ]
   });
 
-  const rows = getCompareResults(run, { status: "failed", sort: "changed" });
-  assert.deepEqual(rows.map((row) => row.agentId), ["a", "b"]);
+  const summary = getRunTrustSummary(run);
+
+  assert.equal(summary.totalAgents, 2);
+  assert.equal(summary.failedAgents, 1);
+  assert.equal(summary.missingCostCount, 1);
+  assert.equal(summary.level, "caution");
 });
+
+test("getRunTrustSummary stays strong when all agents succeed with known cost", () => {
+  const run = createRun("run-1", "Task A", {
+    results: [
+      createResult("agent-a", { costKnown: true, estimatedCostUsd: 0.1, judgeResults: [{ success: true }] }),
+      createResult("agent-b", { costKnown: true, estimatedCostUsd: 0.2, judgeResults: [{ success: true }] })
+    ]
+  });
+
+  const summary = getRunTrustSummary(run);
+
+  assert.equal(summary.failedAgents, 0);
+  assert.equal(summary.missingCostCount, 0);
+  assert.equal(summary.level, "strong");
+});
+
+test("trust summary for run with partial failures and missing cost data surfaces downgrade message key", () => {
+  const run = createRun("run-1", "Task A", {
+    results: [
+      createResult("agent-a", {
+        status: "success",
+        costKnown: false,
+        durationMs: 1000,
+        tokenUsage: 500,
+        judgeResults: [{ success: true }]
+      }),
+      createResult("agent-b", {
+        status: "failed",
+        costKnown: true,
+        estimatedCostUsd: 0.1,
+        durationMs: 500,
+        tokenUsage: 200,
+        judgeResults: [{ success: false }]
+      })
+    ]
+  });
+
+  const summary = getRunTrustSummary(run);
+  assert.equal(summary.level, "caution");
+  assert.equal(summary.failedAgents, 1);
+  assert.equal(summary.missingCostCount, 1);
+  assert.equal(summary.missingCoreDataCount, 0);
+});
+
+test("trust summary for run compare selection with excluded runs surfaces downgrade message key", () => {
+  // getCrossRunCompareRows does not surface a `runs` field, so we test
+  // getSelectionTrustSummary directly with a shape that includes all runs.
+  const comparableRuns = [
+    createRun("run-a", "Task A", {
+      createdAt: "2026-03-14T09:00:00.000Z",
+      fairComparison: { taskIdentity: "task:a", judgeIdentity: "judge:x", repoBaselineIdentity: "repo:y" },
+      results: [createResult("demo-fast", { costKnown: true, estimatedCostUsd: 0.05, durationMs: 2000, tokenUsage: 100, judgeResults: [{ success: true }] })]
+    }),
+    createRun("run-b", "Task A", {
+      createdAt: "2026-03-14T10:00:00.000Z",
+      fairComparison: { taskIdentity: "task:a", judgeIdentity: "judge:x", repoBaselineIdentity: "repo:y" },
+      results: [createResult("demo-fast", { costKnown: true, estimatedCostUsd: 0.04, durationMs: 1500, tokenUsage: 120, judgeResults: [{ success: true }] })]
+    })
+  ];
+  const excludedRuns = [
+    {
+      run: createRun("run-c", "Task A", {
+        createdAt: "2026-03-14T11:00:00.000Z",
+        results: [createResult("demo-fast", { durationMs: 1800, tokenUsage: 110, judgeResults: [{ success: true }] })]
+      }),
+      reasons: ["missing-core-data"]
+    }
+  ];
+  const allRuns = [...comparableRuns, excludedRuns[0].run];
+
+  const selectionTrust = getSelectionTrustSummary({ comparableRuns, excludedRuns, runs: allRuns });
+  const runTrust = getRunTrustSummary(comparableRuns[0]);
+
+  // Selection has exclusions and missing core data → caution
+  assert.equal(selectionTrust.level, "caution");
+  assert.equal(selectionTrust.hasExclusions, true);
+  assert.equal(selectionTrust.hasLegacyFallback, false); // comparable runs all have fairComparison
+  assert.equal(selectionTrust.excludedRuns, 1);
+
+  // Comparable run has full data → strong
+  assert.equal(runTrust.level, "strong");
+});
+
 
 test("getRunVerdict returns best and fastest agents", () => {
   const run = createRun("run-1", "Task A", {

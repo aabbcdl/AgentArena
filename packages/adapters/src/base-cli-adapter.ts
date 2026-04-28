@@ -7,7 +7,7 @@ import type {
   AgentAdapter,
   AgentResolvedRuntime
 } from "@agentarena/core";
-import { agentTimeoutMs, runProcess } from "./process-utils.js";
+import { agentTimeoutMs, pathExists, runProcess } from "./process-utils.js";
 import {
   buildAgentPrompt,
   createPreflightResult,
@@ -128,8 +128,8 @@ class BaseCliAdapterImpl implements AgentAdapter {
     // Detect changed files via git
     const changedFilesHint: string[] = [];
     try {
-      const { execSync } = await import("node:child_process");
-      const gitDiff = execSync("git diff --name-only", { cwd: context.workspacePath, encoding: "utf8" }).trim();
+      const { execFileSync } = await import("node:child_process");
+      const gitDiff = execFileSync("git", ["diff", "--name-only"], { cwd: context.workspacePath, encoding: "utf8" }).trim();
       if (gitDiff) changedFilesHint.push(...gitDiff.split("\n").filter(Boolean));
     } catch { /* git not available */ }
 
@@ -155,6 +155,14 @@ class BaseCliAdapterImpl implements AgentAdapter {
     if (binEnvVar && process.env[binEnvVar]?.trim()) {
       const cmd = process.env[binEnvVar]?.trim();
       if (cmd) {
+        // Validate that the binary exists before returning
+        const exists = await pathExists(cmd);
+        if (!exists) {
+          throw new Error(
+            `Custom binary path "${cmd}" (from ${binEnvVar}) does not exist or is not accessible. ` +
+            `Please check your ${binEnvVar} environment variable.`
+          );
+        }
         return { command: cmd, argsPrefix: [], displayCommand: cmd };
       }
     }

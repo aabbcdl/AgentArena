@@ -57,6 +57,11 @@ export function getAdapter(agentId: string): AgentAdapter {
   return adapter;
 }
 
+/** Safe variant that returns undefined instead of throwing for unknown agent IDs. */
+export function tryGetAdapter(agentId: string): AgentAdapter | undefined {
+  return adapters.get(agentId);
+}
+
 export async function preflightAdapters(
   selections: AdapterPreflightOptions["selection"][],
   options?: AdapterPreflightOptions

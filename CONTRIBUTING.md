@@ -40,7 +40,7 @@ E2E browser tests (requires Playwright Chromium):
 
 ```bash
 npx playwright install --with-deps chromium
-AGENTARENA_RUN_BROWSER_SMOKE=1 pnpm test:web-report:e2e
+pnpm test:web-report:e2e
 ```
 
 ## Project Structure

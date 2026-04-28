@@ -1,10 +1,12 @@
 import { createHash } from "node:crypto";
-import { promises as fs } from "node:fs";
+import { createReadStream, promises as fs } from "node:fs";
 import path from "node:path";
+import { pipeline } from "node:stream/promises";
 import { normalizePath } from "./paths.js";
 import type { DiffSummary, FileSnapshotEntry } from "./types.js";
 
 const INTERNAL_IGNORED_NAMES = new Set([".agentarena", ".git", "node_modules"]);
+const MAX_SNAPSHOT_FILE_SIZE = 100 * 1024 * 1024; // 100 MB - skip larger files
 
 export async function ensureDirectory(dirPath: string): Promise<void> {
   await fs.mkdir(dirPath, { recursive: true });
@@ -21,6 +23,13 @@ export async function copyRepository(sourcePath: string, destinationPath: string
     });
 }
 
+async function hashFileStream(filePath: string): Promise<string> {
+  const hash = createHash("sha256");
+  const stream = createReadStream(filePath);
+  await pipeline(stream, hash);
+  return hash.digest("hex");
+}
+
 export async function snapshotDirectory(rootPath: string): Promise<Map<string, FileSnapshotEntry>> {
   const snapshots = new Map<string, FileSnapshotEntry>();
 
@@ -30,6 +39,7 @@ export async function snapshotDirectory(rootPath: string): Promise<Map<string, F
       entries = await fs.readdir(currentPath, { withFileTypes: true });
     } catch (_error) {
       // Skip directories that cannot be read (e.g., permission issues)
+      console.warn(`Snapshot: skipped directory due to error: ${currentPath}`, _error instanceof Error ? _error.message : String(_error));
       return;
     }
 
@@ -51,13 +61,23 @@ export async function snapshotDirectory(rootPath: string): Promise<Map<string, F
       }
 
       try {
-        const fileBuffer = await fs.readFile(absolutePath);
-        // Use SHA-256 for better security (SHA-1 is sufficient for file comparison but SHA-256 is more future-proof)
-        const hash = createHash("sha256").update(fileBuffer).digest("hex");
+        // Check file size first to avoid loading huge files into memory
+        const stat = await fs.stat(absolutePath);
+        if (stat.size > MAX_SNAPSHOT_FILE_SIZE) {
+          // Create a synthetic hash based on metadata for huge files
+          const hash = createHash("sha256")
+            .update(`huge-file:${relativePath}:${stat.size}:${stat.mtimeMs}`)
+            .digest("hex");
+          snapshots.set(relativePath, { relativePath, hash });
+          continue;
+        }
+
+        const hash = await hashFileStream(absolutePath);
         snapshots.set(relativePath, { relativePath, hash });
       } catch (_error) {
         // Skip files that cannot be read (e.g., permission issues, broken symlinks).
         // This is intentional — snapshot comparison should not fail due to inaccessible files.
+        console.warn(`Snapshot: skipped file due to error: ${relativePath}`, _error instanceof Error ? _error.message : String(_error));
       }
     }
   }

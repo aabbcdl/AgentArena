@@ -6,6 +6,15 @@ import {
 } from "@agentarena/core";
 import { safeNumber } from "./process-utils.js";
 
+/** Strip ANSI escape sequences from a string (color codes, cursor movements, etc.) */
+function stripAnsi(input: string): string {
+  // Use character code based pattern to avoid noControlCharacters lint
+  const ESC = String.fromCharCode(0x1b);
+  const CSI = String.fromCharCode(0x9b);
+  const pattern = new RegExp(`[${ESC}${CSI}][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]`, "g");
+  return input.replace(pattern, "");
+}
+
 interface CodexUsageEvent {
   input_tokens?: number;
   cached_input_tokens?: number;
@@ -49,10 +58,16 @@ export interface ClaudeJsonEvent {
   };
 }
 
-export function extractNestedStringValues(value: unknown, collector: Map<string, string>): void {
+const MAX_PARSE_DEPTH = 50; // Prevent stack overflow on deeply nested JSON
+
+export function extractNestedStringValues(value: unknown, collector: Map<string, string>, depth = 0): void {
+  if (depth > MAX_PARSE_DEPTH) {
+    return; // Stop recursion to prevent stack overflow
+  }
+
   if (Array.isArray(value)) {
     for (const entry of value) {
-      extractNestedStringValues(entry, collector);
+      extractNestedStringValues(entry, collector, depth + 1);
     }
     return;
   }
@@ -66,7 +81,7 @@ export function extractNestedStringValues(value: unknown, collector: Map<string,
     if (typeof childValue === "string" && childValue.trim()) {
       collector.set(normalizedKey, childValue.trim());
     }
-    extractNestedStringValues(childValue, collector);
+    extractNestedStringValues(childValue, collector, depth + 1);
   }
 }
 
@@ -83,17 +98,27 @@ export function parseCodexEvents(stdout: string, workspacePath: string): {
   let threadId: string | undefined;
   let eventModel: string | undefined;
   let eventReasoningEffort: string | undefined;
+  let parseErrorCount = 0;
+  const MAX_PARSE_ERRORS = 10; // Stop logging after this many to avoid noise
 
-  for (const line of stdout.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed.startsWith("{")) {
+  for (const rawLine of stdout.split(/\r?\n/)) {
+    const line = stripAnsi(rawLine.trim());
+    if (!line.startsWith("{")) {
       continue;
     }
 
     let parsed: CodexJsonEvent;
     try {
-      parsed = JSON.parse(trimmed) as CodexJsonEvent;
+      parsed = JSON.parse(line) as CodexJsonEvent;
     } catch {
+      parseErrorCount += 1;
+      // Only log first few parse errors to avoid flooding
+      if (parseErrorCount <= 3) {
+        console.warn(`parseCodexEvents: Failed to parse JSON line: ${line.slice(0, 100)}...`);
+      }
+      if (parseErrorCount > MAX_PARSE_ERRORS) {
+        // After too many errors, silently skip to avoid performance impact
+      }
       continue;
     }
 
@@ -101,11 +126,11 @@ export function parseCodexEvents(stdout: string, workspacePath: string): {
       threadId = parsed.thread_id;
     }
 
-    if (parsed.type === "item.completed" && parsed.item?.type === "agent_message" && parsed.item.text) {
+    if (parsed.type === "item.completed" && parsed.item?.type === "agent_message" && typeof parsed.item.text === "string") {
       summaryFromEvents = parsed.item.text;
     }
 
-    if (parsed.type === "item.completed" && parsed.item?.type === "file_change" && parsed.item.changes) {
+    if (parsed.type === "item.completed" && parsed.item?.type === "file_change" && Array.isArray(parsed.item.changes)) {
       for (const change of parsed.item.changes) {
         if (!change.path) {
           continue;
@@ -137,6 +162,10 @@ export function parseCodexEvents(stdout: string, workspacePath: string): {
       stringValues.get("reasoningeffort") ??
       stringValues.get("reasoninglevel") ??
       eventReasoningEffort;
+  }
+
+  if (parseErrorCount > MAX_PARSE_ERRORS) {
+    console.warn(`parseCodexEvents: Skipped ${parseErrorCount} unparseable lines in total.`);
   }
 
   return {
@@ -187,17 +216,23 @@ export function parseGeminiEvents(stdout: string): {
   let summaryFromEvents: string | undefined;
   let sessionId: string | undefined;
   let error: string | undefined;
+  let parseErrorCount = 0;
+  const MAX_PARSE_ERRORS = 10;
 
-  for (const line of stdout.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed.startsWith("{")) {
+  for (const rawLine of stdout.split(/\r?\n/)) {
+    const line = stripAnsi(rawLine.trim());
+    if (!line.startsWith("{")) {
       continue;
     }
 
     let parsed: GeminiJsonEvent;
     try {
-      parsed = JSON.parse(trimmed) as GeminiJsonEvent;
+      parsed = JSON.parse(line) as GeminiJsonEvent;
     } catch {
+      parseErrorCount += 1;
+      if (parseErrorCount <= 3) {
+        console.warn(`parseGeminiEvents: Failed to parse JSON line: ${line.slice(0, 100)}...`);
+      }
       continue;
     }
 
@@ -205,7 +240,7 @@ export function parseGeminiEvents(stdout: string): {
       sessionId = parsed.session_id;
     }
 
-    if (parsed.message?.content) {
+    if (parsed.message?.content && Array.isArray(parsed.message.content)) {
       const text = parsed.message.content
         .filter((value) => value.type === "text" && typeof value.text === "string")
         .map((value) => value.text?.trim() ?? "")
@@ -251,6 +286,10 @@ export function parseGeminiEvents(stdout: string): {
     }
   }
 
+  if (parseErrorCount > MAX_PARSE_ERRORS) {
+    console.warn(`parseGeminiEvents: Skipped ${parseErrorCount} unparseable lines in total.`);
+  }
+
   return {
     tokenUsage,
     estimatedCostUsd,
@@ -275,17 +314,23 @@ export function parseClaudeEvents(stdout: string): {
   let summaryFromEvents: string | undefined;
   let sessionId: string | undefined;
   let error: string | undefined;
+  let parseErrorCount = 0;
+  const MAX_PARSE_ERRORS = 10;
 
-  for (const line of stdout.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed.startsWith("{")) {
+  for (const rawLine of stdout.split(/\r?\n/)) {
+    const line = stripAnsi(rawLine.trim());
+    if (!line.startsWith("{")) {
       continue;
     }
 
     let parsed: ClaudeJsonEvent;
     try {
-      parsed = JSON.parse(trimmed) as ClaudeJsonEvent;
+      parsed = JSON.parse(line) as ClaudeJsonEvent;
     } catch {
+      parseErrorCount += 1;
+      if (parseErrorCount <= 3) {
+        console.warn(`parseClaudeEvents: Failed to parse JSON line: ${line.slice(0, 100)}...`);
+      }
       continue;
     }
 
@@ -293,7 +338,7 @@ export function parseClaudeEvents(stdout: string): {
       sessionId = parsed.session_id;
     }
 
-    if (parsed.message?.content) {
+    if (parsed.message?.content && Array.isArray(parsed.message.content)) {
       const text = parsed.message.content
         .filter((value) => value.type === "text" && typeof value.text === "string")
         .map((value) => value.text?.trim() ?? "")
@@ -339,6 +384,10 @@ export function parseClaudeEvents(stdout: string): {
         error = parsed.error ?? parsed.result ?? "The adapter reported an error.";
       }
     }
+  }
+
+  if (parseErrorCount > MAX_PARSE_ERRORS) {
+    console.warn(`parseClaudeEvents: Skipped ${parseErrorCount} unparseable lines in total.`);
   }
 
   return {

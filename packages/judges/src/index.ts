@@ -8,6 +8,8 @@ import {
   type CommandExecutionSpec,
   type CommandJudge,
   type CommandStepResult,
+  type CompilationJudge,
+  type DirectoryExistsJudge,
   type FileContainsJudge,
   type FileCountJudge,
   type FileExistsJudge,
@@ -17,6 +19,7 @@ import {
   type JudgeResult,
   type LintCheckJudge,
   type PatchValidationJudge,
+  type RegexMatchJudge,
   resolveTimeoutMs,
   type SnapshotJudge,
   type TaskJudge,
@@ -99,19 +102,99 @@ function createGlobMatcher(pattern: string): (value: string) => boolean {
   return picomatch(pattern, { dot: true });
 }
 
+/**
+ * Escape regex metacharacters in a string before using it in a RegExp.
+ */
+function escapeRegExp(string: string): string {
+  const MAX_PATTERN_LENGTH = 10000;
+  if (string.length > MAX_PATTERN_LENGTH) {
+    console.warn(`escapeRegExp: Pattern length ${string.length} exceeds maximum ${MAX_PATTERN_LENGTH}, truncating`);
+    string = string.slice(0, MAX_PATTERN_LENGTH);
+  }
+  return string.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Parse a command string into [cmd, ...args] for safe execution without shell.
+ * Handles simple quoting for spaces within single or double quotes.
+ */
+export function parseCommand(command: string): [string, string[]] {
+  const trimmed = command.trim();
+  if (!trimmed) {
+    throw new Error("Command string is empty.");
+  }
+
+  const args: string[] = [];
+  let current = "";
+  let inSingleQuote = false;
+  let inDoubleQuote = false;
+  let escaped = false;
+
+  for (let i = 0; i < trimmed.length; i++) {
+    const ch = trimmed[i];
+
+    if (escaped) {
+      current += ch;
+      escaped = false;
+      continue;
+    }
+
+    if (ch === "\\" && (inDoubleQuote || (!inSingleQuote && !inDoubleQuote))) {
+      escaped = true;
+      continue;
+    }
+
+    if (ch === "'" && !inDoubleQuote) {
+      inSingleQuote = !inSingleQuote;
+      continue;
+    }
+
+    if (ch === '"' && !inSingleQuote) {
+      inDoubleQuote = !inDoubleQuote;
+      continue;
+    }
+
+    if (ch === " " && !inSingleQuote && !inDoubleQuote) {
+      if (current.length > 0) {
+        args.push(current);
+        current = "";
+      }
+      continue;
+    }
+
+    current += ch;
+  }
+
+  if (current.length > 0) {
+    args.push(current);
+  }
+
+  if (args.length === 0) {
+    throw new Error(`Invalid command string: "${command}"`);
+  }
+
+  return [args[0], args.slice(1)];
+}
+
 const IGNORED_DIRS = new Set(["node_modules", ".git", ".agentarena"]);
+const MAX_WALK_DEPTH = 64; // Prevent stack overflow on extremely deep trees
 
 async function listWorkspaceFiles(rootPath: string): Promise<string[]> {
   const files: string[] = [];
 
-  async function walk(currentPath: string): Promise<void> {
+  async function walk(currentPath: string, depth: number): Promise<void> {
+    if (depth > MAX_WALK_DEPTH) {
+      console.warn(`Warning: Max depth (${MAX_WALK_DEPTH}) reached walking ${currentPath}. Skipping deeper files.`);
+      return;
+    }
+
     const entries = await fs.readdir(currentPath, { withFileTypes: true });
 
     for (const entry of entries) {
       const absolutePath = path.join(currentPath, entry.name);
       if (entry.isDirectory()) {
         if (IGNORED_DIRS.has(entry.name)) continue;
-        await walk(absolutePath);
+        await walk(absolutePath, depth + 1);
         continue;
       }
 
@@ -123,7 +206,7 @@ async function listWorkspaceFiles(rootPath: string): Promise<string[]> {
     }
   }
 
-  await walk(rootPath);
+  await walk(rootPath, 0);
   return files.sort();
 }
 
@@ -233,21 +316,31 @@ async function runCommandJudge(
 }
 
 async function executeCommand(
-  command: string,
+  commandOrCmd: string,
   cwd: string,
   environment: NodeJS.ProcessEnv,
   timeoutMs: number,
   timeoutLabel: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  args?: string[]
 ): Promise<CommandExecutionCapture> {
   const startedAt = Date.now();
   throwIfCancelled(signal);
 
+  let cmd: string;
+  let cmdArgs: string[];
+  if (args !== undefined) {
+    cmd = commandOrCmd;
+    cmdArgs = args;
+  } else {
+    [cmd, cmdArgs] = parseCommand(commandOrCmd);
+  }
+
   return await new Promise((resolve, reject) => {
-    const child = spawn(command, {
+    const child = spawn(cmd, cmdArgs, {
       cwd,
       env: environment,
-      shell: true,
+      shell: false,
       stdio: ["ignore", "pipe", "pipe"]
     });
 
@@ -255,20 +348,43 @@ async function executeCommand(
     let stderr = "";
     let timedOut = false;
     let cancelled = false;
+    let settled = false;
+
+    const settle = () => {
+      if (settled) return false;
+      settled = true;
+      return true;
+    };
+
+    const cleanup = () => {
+      clearTimeout(timeoutHandle);
+      clearTimeout(killHandle);
+      signal?.removeEventListener("abort", cancelExecution);
+    };
 
     const cancelExecution = () => {
       cancelled = true;
-      child.kill();
+      if (!child.killed) {
+        child.kill();
+      }
     };
 
+    let killHandle: ReturnType<typeof setTimeout> | undefined;
     const timeoutHandle = setTimeout(() => {
       timedOut = true;
-      child.kill();
-      setTimeout(() => {
-        if (!child.killed) {
-          child.kill("SIGKILL");
+      if (!child.killed) {
+        child.kill();
+      }
+      // Escalate to SIGKILL after 3 seconds if still alive
+      killHandle = setTimeout(() => {
+        if (!child.killed && child.pid) {
+          try {
+            process.kill(child.pid, "SIGKILL");
+          } catch {
+            // Process may have already exited
+          }
         }
-      }, 5_000);
+      }, 3_000);
     }, timeoutMs);
 
     signal?.addEventListener("abort", cancelExecution, { once: true });
@@ -282,8 +398,8 @@ async function executeCommand(
     });
 
     child.on("close", (exitCode) => {
-      clearTimeout(timeoutHandle);
-      signal?.removeEventListener("abort", cancelExecution);
+      cleanup();
+      if (!settle()) return;
       if (cancelled) {
         reject(new BenchmarkCancelledError());
         return;
@@ -298,8 +414,8 @@ async function executeCommand(
     });
 
     child.on("error", (error) => {
-      clearTimeout(timeoutHandle);
-      signal?.removeEventListener("abort", cancelExecution);
+      cleanup();
+      if (!settle()) return;
       if (cancelled) {
         reject(new BenchmarkCancelledError());
         return;
@@ -321,27 +437,47 @@ function parseJsonPayload(rawText: string): unknown {
     throw new Error("Expected JSON output but received empty content.");
   }
 
-  const candidates = [trimmed];
+  // Limit input size to prevent memory issues
+  const MAX_JSON_INPUT = 10 * 1024 * 1024; // 10 MB
+  if (trimmed.length > MAX_JSON_INPUT) {
+    throw new Error(
+      `JSON output too large (${(trimmed.length / 1024 / 1024).toFixed(1)} MB, max ${MAX_JSON_INPUT / 1024 / 1024} MB). ` +
+      `Consider using a reportFile instead of stdout for large outputs.`
+    );
+  }
+
+  const candidates: string[] = [trimmed];
+
+  // Try to extract JSON object from mixed output
   const objectStart = trimmed.indexOf("{");
   const objectEnd = trimmed.lastIndexOf("}");
   if (objectStart !== -1 && objectEnd > objectStart) {
     candidates.push(trimmed.slice(objectStart, objectEnd + 1));
   }
+
+  // Try to extract JSON array from mixed output
   const arrayStart = trimmed.indexOf("[");
   const arrayEnd = trimmed.lastIndexOf("]");
   if (arrayStart !== -1 && arrayEnd > arrayStart) {
     candidates.push(trimmed.slice(arrayStart, arrayEnd + 1));
   }
 
+  // Try each candidate, tracking parse errors for better diagnostics
+  let lastError: Error | null = null;
   for (const candidate of candidates) {
     try {
       return JSON.parse(candidate) as unknown;
-    } catch {
-      // Try next candidate.
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
     }
   }
 
-  throw new Error("Unable to parse JSON from judge output.");
+  const errorDetail = lastError?.message ?? "unknown parse error";
+  throw new Error(
+    `Unable to parse JSON from judge output. Tried ${candidates.length} candidate(s). ` +
+    `Last error: ${errorDetail}. ` +
+    `Output preview: ${trimmed.slice(0, 200)}${trimmed.length > 200 ? "..." : ""}`
+  );
 }
 
 async function readJsonJudgePayload(
@@ -484,10 +620,11 @@ function checkRequiredTests(
       }
       // Glob pattern match (simple * and ** support)
       if (pattern.includes("*")) {
-        const regex = pattern
-          .replace(/\*\*/g, ".*")
-          .replace(/\*/g, "[^/]*");
-        return new RegExp(`^${regex}$`).test(test.fullName) || new RegExp(`^${regex}$`).test(test.name);
+        // First escape regex metacharacters, then convert glob patterns
+        const escaped = escapeRegExp(pattern)
+          .replace(/\\*\\*/g, ".*")  // ** -> .*
+          .replace(/\\\*/g, "[^/]*");  // * -> [^/]*
+        return new RegExp(`^${escaped}$`).test(test.fullName) || new RegExp(`^${escaped}$`).test(test.name);
       }
       return false;
     });
@@ -1243,6 +1380,261 @@ async function runTokenEfficiencyJudge(
   };
 }
 
+async function runDirectoryExistsJudge(
+  judge: DirectoryExistsJudge,
+  workspacePath: string
+): Promise<JudgeResult> {
+  const startedAt = Date.now();
+  const targetPath = resolveWorkspacePath(workspacePath, judge.path, `Judge "${judge.id}" path`);
+
+  try {
+    const stat = await fs.stat(targetPath);
+    const exists = stat.isDirectory();
+
+    return {
+      judgeId: judge.id,
+      label: judge.label,
+      type: "directory-exists",
+      target: judge.path,
+      expectation: "directory exists",
+      exitCode: exists ? 0 : 1,
+      success: exists,
+      stdout: exists ? `Found directory "${judge.path}".` : "",
+      stderr: exists ? "" : `Expected directory "${judge.path}" does not exist or is not a directory.`,
+      durationMs: Date.now() - startedAt,
+      critical: judge.critical ?? false
+    };
+  } catch (error) {
+    return {
+      judgeId: judge.id,
+      label: judge.label,
+      type: "directory-exists",
+      target: judge.path,
+      expectation: "directory exists",
+      exitCode: 1,
+      success: false,
+      stdout: "",
+      stderr: `Failed to check directory "${judge.path}": ${error instanceof Error ? error.message : String(error)}`,
+      durationMs: Date.now() - startedAt,
+      critical: judge.critical ?? false
+    };
+  }
+}
+
+async function runRegexMatchJudge(
+  judge: RegexMatchJudge,
+  workspacePath: string
+): Promise<JudgeResult> {
+  const startedAt = Date.now();
+  const targetPath = resolveWorkspacePath(workspacePath, judge.path, `Judge "${judge.id}" path`);
+
+  try {
+    const content = await fs.readFile(targetPath, "utf8");
+
+    // Validate regex flags
+    const validFlags = /^[gimsuy]*$/;
+    const flags = judge.flags ?? "";
+    if (!validFlags.test(flags)) {
+      throw new Error(`Invalid regex flags: "${flags}". Only g, i, m, s, u, y are allowed.`);
+    }
+
+    // Validate pattern length
+    if (judge.pattern.length > 2000) {
+      throw new Error(
+        `Regex pattern too long: ${judge.pattern.length} chars (max 2000). ` +
+        `Large patterns can cause performance issues or ReDoS vulnerabilities.`
+      );
+    }
+
+    // Compile regex with timeout protection via manual check
+    let regex: RegExp;
+    try {
+      regex = new RegExp(judge.pattern, flags);
+    } catch (error) {
+      throw new Error(`Invalid regex pattern "${judge.pattern}": ${error instanceof Error ? error.message : String(error)}`);
+    }
+
+    const matches = content.match(regex);
+    const matchCount = matches ? matches.length : 0;
+    const minMatches = judge.minMatches ?? 1;
+    const shouldNotMatch = judge.shouldNotMatch ?? false;
+
+    let success: boolean;
+    if (shouldNotMatch) {
+      success = matchCount === 0;
+    } else {
+      success = matchCount >= minMatches;
+      if (judge.maxMatches && judge.maxMatches > 0) {
+        success = success && matchCount <= judge.maxMatches;
+      }
+    }
+
+    const matchDetail = shouldNotMatch
+      ? `Pattern should NOT match (found ${matchCount} matches)`
+      : `Found ${matchCount} match(es) (expected ${minMatches}${judge.maxMatches ? `-${judge.maxMatches}` : "+"})`;
+
+    return {
+      judgeId: judge.id,
+      label: judge.label,
+      type: "regex-match",
+      target: judge.path,
+      expectation: shouldNotMatch ? `regex should not match: /${judge.pattern}/${flags}` : `regex: /${judge.pattern}/${flags}`,
+      exitCode: success ? 0 : 1,
+      success,
+      stdout: success ? `${matchDetail}.` : `${matchDetail}.`,
+      stderr: "",
+      durationMs: Date.now() - startedAt,
+      critical: judge.critical ?? false
+    };
+  } catch (error) {
+    return {
+      judgeId: judge.id,
+      label: judge.label,
+      type: "regex-match",
+      target: judge.path,
+      expectation: `regex: /${judge.pattern}/${judge.flags ?? ""}`,
+      exitCode: 1,
+      success: false,
+      stdout: "",
+      stderr: error instanceof Error ? error.message : String(error),
+      durationMs: Date.now() - startedAt,
+      critical: judge.critical ?? false
+    };
+  }
+}
+
+async function runCompilationJudge(
+  judge: CompilationJudge,
+  workspacePath: string,
+  baseAllowedNames: string[],
+  options: JudgeExecutionOptions = {}
+): Promise<JudgeResult> {
+  const startedAt = Date.now();
+  const timeoutMs = judge.timeoutMs ?? defaultJudgeTimeoutMs();
+  const cwd = resolveJudgeWorkingDirectory(workspacePath, judge);
+  const environment = buildStepEnvironment(baseAllowedNames, judge);
+
+  // Build the compilation command
+  let command: string;
+  let args: string[] = [];
+
+  if (judge.command) {
+    // User provided explicit command
+    command = judge.command;
+  } else {
+    // Auto-detect build tool
+    const tool = judge.tool ?? "auto";
+    if (tool !== "auto") {
+      const toolCommands: Record<string, { cmd: string; args: string[] }> = {
+        npm: { cmd: "npm", args: ["run", "build"] },
+        pnpm: { cmd: "pnpm", args: ["build"] },
+        yarn: { cmd: "yarn", args: ["build"] },
+        cargo: { cmd: "cargo", args: ["build"] },
+        go: { cmd: "go", args: ["build", "./..."] },
+        make: { cmd: "make", args: [] },
+        gradle: { cmd: "gradle", args: ["build"] },
+        maven: { cmd: "mvn", args: ["compile"] }
+      };
+      const detected = toolCommands[tool];
+      command = detected.cmd;
+      args = [...detected.args];
+    } else {
+      // Auto-detect from workspace files
+      const hasPnpmLock = await pathExists(path.join(workspacePath, "pnpm-lock.yaml"));
+      const hasYarnLock = await pathExists(path.join(workspacePath, "yarn.lock"));
+      const hasPackageJson = await pathExists(path.join(workspacePath, "package.json"));
+      const hasCargoToml = await pathExists(path.join(workspacePath, "Cargo.toml"));
+      const hasGoMod = await pathExists(path.join(workspacePath, "go.mod"));
+      const hasMakefile = await pathExists(path.join(workspacePath, "Makefile"));
+      const hasGradleFile = await pathExists(path.join(workspacePath, "build.gradle")) || await pathExists(path.join(workspacePath, "build.gradle.kts"));
+      const hasPomXml = await pathExists(path.join(workspacePath, "pom.xml"));
+
+      if (hasCargoToml) {
+        command = "cargo";
+        args = ["build"];
+      } else if (hasGoMod) {
+        command = "go";
+        args = ["build", "./..."];
+      } else if (hasMakefile) {
+        command = "make";
+        args = [];
+      } else if (hasGradleFile) {
+        command = "gradle";
+        args = ["build"];
+      } else if (hasPomXml) {
+        command = "mvn";
+        args = ["compile"];
+      } else if (hasPnpmLock && hasPackageJson) {
+        command = "pnpm";
+        args = ["build"];
+      } else if (hasYarnLock && hasPackageJson) {
+        command = "yarn";
+        args = ["build"];
+      } else if (hasPackageJson) {
+        command = "npm";
+        args = ["run", "build"];
+      } else {
+        return {
+          judgeId: judge.id,
+          label: judge.label,
+          type: "compilation",
+          target: "workspace",
+          expectation: "compilation succeeds",
+          exitCode: 1,
+          success: false,
+          stdout: "",
+          stderr: "Could not auto-detect build tool. No recognized project files found.",
+          durationMs: Date.now() - startedAt,
+          critical: judge.critical ?? false
+        };
+      }
+    }
+  }
+
+  // Add user-specified build args
+  if (judge.buildArgs && judge.buildArgs.length > 0) {
+    args.push(...judge.buildArgs);
+  }
+
+  let result: CommandExecutionCapture;
+  if (judge.command) {
+    // User provided explicit command string, use original parseCommand approach
+    result = await executeCommand(command, cwd, environment, timeoutMs, "Compilation", options.signal);
+  } else {
+    // Use already constructed command and args directly
+    result = await executeCommand(command, cwd, environment, timeoutMs, "Compilation", options.signal, args);
+  }
+
+  const successHint = result.exitCode === 0 ? "Compilation succeeded." : `Compilation failed with exit code ${result.exitCode}.`;
+  const debugHint = result.exitCode !== 0
+    ? "\nDebug tip: Check the build output above for errors. Common issues include missing dependencies, syntax errors, or type errors."
+    : "";
+
+  return {
+    judgeId: judge.id,
+    label: judge.label,
+    type: "compilation",
+    target: judge.command ?? "auto-detected build",
+    expectation: "compilation succeeds",
+    exitCode: result.exitCode,
+    success: result.exitCode === 0,
+    stdout: `${successHint}${debugHint}\n${result.stdout}`.trim(),
+    stderr: result.stderr,
+    durationMs: result.durationMs,
+    cwd: result.cwd,
+    critical: judge.critical ?? false
+  };
+}
+
+async function pathExists(targetPath: string): Promise<boolean> {
+  try {
+    await fs.access(targetPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function runJudge(
   judge: TaskJudge,
   workspacePath: string,
@@ -1275,6 +1667,12 @@ export async function runJudge(
     case "token-efficiency":
       // Token efficiency judge requires tokenUsage from the runner context
       return await runTokenEfficiencyJudge(judge, options.tokenUsage, options.tokenBudget);
+    case "directory-exists":
+      return await runDirectoryExistsJudge(judge, workspacePath);
+    case "regex-match":
+      return await runRegexMatchJudge(judge, workspacePath);
+    case "compilation":
+      return await runCompilationJudge(judge, workspacePath, baseAllowedNames, options);
   }
 }
 

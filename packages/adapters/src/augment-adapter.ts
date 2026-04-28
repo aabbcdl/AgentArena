@@ -88,10 +88,10 @@ function parseAugmentOutput(stdout: string): {
   for (const line of lines) {
     try {
       const parsed = JSON.parse(line) as Record<string, unknown>;
+      // Prefer explicit summary over message; don't let message override if summary is already set
       if (typeof parsed.summary === "string" && parsed.summary.trim()) {
         summary = parsed.summary.trim();
-      }
-      if (typeof parsed.message === "string" && parsed.message.trim()) {
+      } else if (!summary && typeof parsed.message === "string" && parsed.message.trim()) {
         summary = parsed.message.trim();
       }
       if (typeof parsed.token_usage === "number") {
@@ -113,7 +113,7 @@ function parseAugmentOutput(stdout: string): {
 
   return {
     tokenUsage,
-    summary,
+    summary: summary || "Augment completed the task.",
     changedFiles
   };
 }
@@ -283,8 +283,8 @@ export class AugmentAdapter implements AgentAdapter {
 
     if (changedFilesHint.length === 0) {
       try {
-        const { execSync } = await import("node:child_process");
-        const gitDiff = execSync("git diff --name-only", {
+        const { execFileSync } = await import("node:child_process");
+        const gitDiff = execFileSync("git", ["diff", "--name-only"], {
           cwd: context.workspacePath,
           encoding: "utf8"
         }).trim();

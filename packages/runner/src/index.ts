@@ -69,6 +69,8 @@ export interface BenchmarkProgressEvent {
 const DEFAULT_AGENT_CONCURRENCY = 1;
 const WORKSPACE_CLEANUP_MAX_RETRIES = 3;
 const WORKSPACE_CLEANUP_RETRY_DELAY_MS = 1000;
+const DEFAULT_AGENT_EXECUTE_TIMEOUT_MS = 30 * 60 * 1_000; // 30 minutes hard cap
+const AGENT_EXECUTE_TIMEOUT_GRACE_MS = 5_000;
 
 interface WorkspaceCleanupResult {
   success: boolean;
@@ -106,6 +108,13 @@ function agentConcurrency(options: BenchmarkOptions): number {
   return options.maxConcurrency ?? resolvePositiveInt(process.env.AGENTARENA_MAX_CONCURRENCY, DEFAULT_AGENT_CONCURRENCY);
 }
 
+function agentExecuteTimeoutMs(): number {
+  return resolvePositiveInt(
+    process.env.AGENTARENA_AGENT_EXECUTE_TIMEOUT_MS,
+    DEFAULT_AGENT_EXECUTE_TIMEOUT_MS
+  );
+}
+
 interface MapWithConcurrencyResult<R> {
   results: R[];
   aborted: boolean;
@@ -117,8 +126,13 @@ async function mapWithConcurrency<T, R>(
   mapper: (item: T, index: number) => Promise<R>,
   options: { signal?: AbortSignal } = {}
 ): Promise<MapWithConcurrencyResult<R>> {
-  const safeLimit = Math.max(1, Math.min(limit, items.length || 1));
-  const results = new Array<R>(items.length);
+  if (items.length === 0) {
+    return { results: [], aborted: false };
+  }
+
+  const safeLimit = Math.max(1, Math.min(limit, items.length));
+  const results = new Array<R | undefined>(items.length);
+  const errors = new Array<Error | unknown | undefined>(items.length);
   let nextIndex = 0;
   let aborted = false;
 
@@ -139,19 +153,18 @@ async function mapWithConcurrency<T, R>(
           aborted = true;
           return;
         }
-        throw error;
+        // Isolate errors: record the failure but don't crash other workers
+        errors[currentIndex] = error;
+        console.error(`mapWithConcurrency: item[${currentIndex}] failed: ${formatErrorMessage(error)}`);
       }
     }
   }
 
-  const workers = Array.from({ length: safeLimit }, async () => {
-    await worker();
-  });
-
+  const workers = Array.from({ length: safeLimit }, () => worker());
   await Promise.all(workers);
 
   return {
-    results: results.filter((value) => value !== undefined),
+    results: results.filter((value): value is R => value !== undefined),
     aborted
   };
 }
@@ -204,6 +217,28 @@ function buildDiffPrecision(
 
 function summarizeCommandStepFailure(stage: "setup" | "teardown", result: CommandStepResult): string {
   return `${stage} command "${result.label}" failed with exit code ${result.exitCode}.`;
+}
+
+function wrapWithTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  label: string
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timeoutHandle = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${timeoutMs}ms.`));
+    }, timeoutMs);
+
+    promise
+      .then((value) => {
+        clearTimeout(timeoutHandle);
+        resolve(value);
+      })
+      .catch((error) => {
+        clearTimeout(timeoutHandle);
+        reject(error);
+      });
+  });
 }
 
 function createCancellationSummary(stage: string): string {
@@ -313,35 +348,46 @@ function createSkippedRunResult(
 }
 
 async function cleanupWorkspace(workspacePath: string, retries = WORKSPACE_CLEANUP_MAX_RETRIES): Promise<WorkspaceCleanupResult> {
+  let lastError: unknown;
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
       await fs.rm(workspacePath, { recursive: true, force: true });
       return { success: true, path: workspacePath };
     } catch (error) {
-      const errorDetails = formatErrorDetails(error);
+      lastError = error;
       if (attempt < retries) {
         // Wait before retrying
         await new Promise(resolve => setTimeout(resolve, WORKSPACE_CLEANUP_RETRY_DELAY_MS));
-        continue;
       }
-      return {
-        success: false,
-        path: workspacePath,
-        error: `Failed after ${retries} attempts: ${errorDetails.message}`
-      };
     }
   }
-  return { success: false, path: workspacePath, error: "Unexpected cleanup failure" };
+  const errorDetails = formatErrorDetails(lastError);
+  return {
+    success: false,
+    path: workspacePath,
+    error: `Failed after ${retries} attempts: ${errorDetails.message}`
+  };
 }
 
-async function runAgent(
-  repoPath: string,
+interface AgentRunContext {
+  task: Awaited<ReturnType<typeof loadTaskPack>>;
+  adapter: ReturnType<typeof getAdapter>;
+  agentOutputPath: string;
+  workspacePath: string;
+  tracePath: string;
+  traceRecorder: JsonlTraceRecorder;
+  executionEnvironment: ReturnType<typeof buildExecutionEnvironment>;
+  cancellation: Pick<BenchmarkOptions, "cancellation">["cancellation"];
+  throwIfCancelled: (stage: string) => void;
+}
+
+async function createAgentRunContext(
   outputPath: string,
   workspaceRootPath: string,
   taskPath: string,
   preflight: AdapterPreflightResult,
   options: Pick<BenchmarkOptions, "updateSnapshots" | "cancellation">
-): Promise<AgentRunResult> {
+): Promise<AgentRunContext> {
   const task = await loadTaskPack(taskPath);
   const adapter = getAdapter(preflight.baseAgentId);
   const agentOutputPath = path.join(outputPath, "agents", preflight.variantId);
@@ -353,6 +399,25 @@ async function runAgent(
   const throwIfCancelled = (stage: string) => {
     throwIfAborted(cancellation?.signal, createCancellationSummary(stage));
   };
+  return {
+    task,
+    adapter,
+    agentOutputPath,
+    workspacePath,
+    tracePath,
+    traceRecorder,
+    executionEnvironment,
+    cancellation,
+    throwIfCancelled
+  };
+}
+
+async function setupWorkspaceAndPrechecks(
+  repoPath: string,
+  preflight: AdapterPreflightResult,
+  context: AgentRunContext
+): Promise<AgentRunResult | undefined> {
+  const { agentOutputPath, workspacePath, traceRecorder, throwIfCancelled } = context;
 
   if (preflight.status === "missing" || preflight.status === "blocked") {
     await ensureDirectory(agentOutputPath);
@@ -376,7 +441,7 @@ async function runAgent(
         status: preflight.status
       }
     });
-    return createSkippedRunResult(preflight, tracePath, workspacePath);
+    return createSkippedRunResult(preflight, context.tracePath, workspacePath);
   }
 
   await ensureDirectory(agentOutputPath);
@@ -395,7 +460,7 @@ async function runAgent(
       metadata: errorDetails
     });
     return {
-      ...createSkippedRunResult(preflight, tracePath, workspacePath),
+      ...createSkippedRunResult(preflight, context.tracePath, workspacePath),
       summary: `Failed to copy repository: ${errorDetails.message}`
     };
   }
@@ -412,13 +477,25 @@ async function runAgent(
     }
   });
 
+  return undefined;
+}
+
+async function runSetupCommands(
+  preflight: AdapterPreflightResult,
+  context: AgentRunContext
+): Promise<{ setupResults: CommandStepResult[]; earlyResult?: AgentRunResult }> {
+  const { task, workspacePath, traceRecorder, throwIfCancelled, cancellation } = context;
+
   let setupResults: CommandStepResult[] = [];
   try {
     throwIfCancelled("setup");
     setupResults = await runCommandSteps(task.setupCommands, workspacePath, task.envAllowList, cancellation?.signal);
   } catch (error) {
     if (isAbortError(error)) {
-      return createCancelledRunResult(preflight, tracePath, workspacePath, formatErrorMessage(error));
+      return {
+        setupResults: [],
+        earlyResult: createCancelledRunResult(preflight, context.tracePath, workspacePath, formatErrorMessage(error))
+      };
     }
     const errorDetails = formatErrorDetails(error);
     await traceRecorder.record({
@@ -429,9 +506,12 @@ async function runAgent(
       metadata: errorDetails
     });
     return {
-      ...createSkippedRunResult(preflight, tracePath, workspacePath),
-      summary: `Setup commands failed: ${errorDetails.message}`,
-      setupResults: []
+      setupResults: [],
+      earlyResult: {
+        ...createSkippedRunResult(preflight, context.tracePath, workspacePath),
+        summary: `Setup commands failed: ${errorDetails.message}`,
+        setupResults: []
+      }
     };
   }
 
@@ -456,39 +536,51 @@ async function runAgent(
   });
 
   if (setupResults.some((value) => !value.success)) {
+    const failedStep = setupResults.find((value) => !value.success) ?? setupResults[0];
     return {
-      agentId: preflight.agentId,
-      baseAgentId: preflight.baseAgentId,
-      variantId: preflight.variantId,
-      displayLabel: preflight.displayLabel,
-      requestedConfig: preflight.requestedConfig,
-      resolvedRuntime: preflight.resolvedRuntime,
-      agentTitle: adapter.title,
-      adapterKind: adapter.kind,
-      preflight,
-      status: "failed",
-      summary: summarizeCommandStepFailure(
-        "setup",
-        setupResults.find((value) => !value.success) ?? setupResults[0]
-      ),
-      durationMs: 0,
-      tokenUsage: 0,
-      estimatedCostUsd: 0,
-      costKnown: false,
-      changedFiles: [],
-      changedFilesHint: [],
       setupResults,
-      judgeResults: [],
-      teardownResults: [],
-      tracePath,
-      workspacePath,
-      diff: {
-        added: [],
-        changed: [],
-        removed: []
+      earlyResult: {
+        agentId: preflight.agentId,
+        baseAgentId: preflight.baseAgentId,
+        variantId: preflight.variantId,
+        displayLabel: preflight.displayLabel,
+        requestedConfig: preflight.requestedConfig,
+        resolvedRuntime: preflight.resolvedRuntime,
+        agentTitle: context.adapter.title,
+        adapterKind: context.adapter.kind,
+        preflight,
+        status: "failed",
+        summary: failedStep
+          ? summarizeCommandStepFailure("setup", failedStep)
+          : "Setup command failed but no result was captured.",
+        durationMs: 0,
+        tokenUsage: 0,
+        estimatedCostUsd: 0,
+        costKnown: false,
+        changedFiles: [],
+        changedFilesHint: [],
+        setupResults,
+        judgeResults: [],
+        teardownResults: [],
+        tracePath: context.tracePath,
+        workspacePath,
+        diff: {
+          added: [],
+          changed: [],
+          removed: []
+        }
       }
     };
   }
+
+  return { setupResults, earlyResult: undefined };
+}
+
+async function createBeforeSnapshot(
+  preflight: AdapterPreflightResult,
+  context: AgentRunContext
+): Promise<Map<string, { relativePath: string; hash: string }>> {
+  const { workspacePath, traceRecorder } = context;
 
   let beforeSnapshot: Map<string, { relativePath: string; hash: string }>;
   try {
@@ -499,18 +591,48 @@ async function runAgent(
       agentId: preflight.agentId,
       timestamp: new Date().toISOString(),
       type: "snapshot.before_failed",
-      message: "Failed to create before snapshot.",
+      message: "Failed to create before snapshot. Diff accuracy will be reduced.",
       metadata: errorDetails
     });
+    console.warn(`Warning: Before snapshot failed for ${preflight.agentId}: ${errorDetails.message}. Diff may be inaccurate.`);
     beforeSnapshot = new Map();
   }
 
+  return beforeSnapshot;
+}
+
+async function executeAgent(
+  preflight: AdapterPreflightResult,
+  repoPath: string,
+  context: AgentRunContext
+): Promise<{ adapterResult: Awaited<ReturnType<typeof context.adapter.execute>> | undefined; adapterError: unknown; startedAt: number }> {
+  const { adapter, workspacePath, executionEnvironment, traceRecorder, cancellation, task } = context;
   const startedAt = Date.now();
   let adapterResult: Awaited<ReturnType<typeof adapter.execute>> | undefined;
   let adapterError: unknown;
+  const adapterTimeoutMs = agentExecuteTimeoutMs();
+  const adapterAbortController = new AbortController();
+  let adapterTimedOut = false;
+  let adapterTimeoutHandle: ReturnType<typeof setTimeout> | undefined;
+  const forwardCancellation = () => {
+    adapterAbortController.abort();
+  };
+
+  if (cancellation?.signal) {
+    if (cancellation.signal.aborted) {
+      forwardCancellation();
+    } else {
+      cancellation.signal.addEventListener("abort", forwardCancellation, { once: true });
+    }
+  }
 
   try {
-    adapterResult = await adapter.execute({
+    adapterTimeoutHandle = setTimeout(() => {
+      adapterTimedOut = true;
+      adapterAbortController.abort();
+    }, adapterTimeoutMs);
+
+    const executePromise = adapter.execute({
       agentId: preflight.agentId,
       selection: {
         baseAgentId: preflight.baseAgentId,
@@ -522,7 +644,7 @@ async function runAgent(
       workspacePath,
       environment: executionEnvironment,
       task,
-      signal: cancellation?.signal,
+      signal: adapterAbortController.signal,
       trace: async (event: Omit<TraceEvent, "agentId" | "timestamp">) => {
         await traceRecorder.record({
           ...event,
@@ -531,17 +653,46 @@ async function runAgent(
         });
       }
     });
+
+    adapterResult = await wrapWithTimeout(
+      executePromise,
+      adapterTimeoutMs + AGENT_EXECUTE_TIMEOUT_GRACE_MS,
+      `${adapter.title} execution shutdown`
+    );
   } catch (error) {
-    adapterError = error;
+    adapterError =
+      adapterTimedOut
+        ? new Error(`${adapter.title} execution timed out after ${adapterTimeoutMs}ms.`)
+        : error;
     const errorDetails = formatErrorDetails(error);
     await traceRecorder.record({
       agentId: preflight.agentId,
       timestamp: new Date().toISOString(),
       type: "adapter.error",
-      message: `${adapter.title} execution failed.`,
-      metadata: errorDetails
+      message: adapterTimedOut ? `${adapter.title} execution timed out.` : `${adapter.title} execution failed.`,
+      metadata: {
+        ...errorDetails,
+        timeoutMs: adapterTimedOut ? adapterTimeoutMs : undefined
+      }
     });
+  } finally {
+    if (adapterTimeoutHandle) {
+      clearTimeout(adapterTimeoutHandle);
+    }
+    cancellation?.signal?.removeEventListener("abort", forwardCancellation);
   }
+
+  return { adapterResult, adapterError, startedAt };
+}
+
+async function runJudgesAndAfterSnapshot(
+  preflight: AdapterPreflightResult,
+  adapterResult: Awaited<ReturnType<typeof context.adapter.execute>> | undefined,
+  beforeSnapshot: Map<string, { relativePath: string; hash: string }>,
+  options: Pick<BenchmarkOptions, "updateSnapshots">,
+  context: AgentRunContext
+): Promise<{ judgeResults: Awaited<ReturnType<typeof runJudges>>; judgeError: unknown; afterSnapshot: Map<string, { relativePath: string; hash: string }>; diff: DiffSummary; changedFiles: string[]; diffPrecision: DiffPrecisionSummary | undefined }> {
+  const { task, workspacePath, traceRecorder, throwIfCancelled, cancellation } = context;
 
   let judgeResults: Awaited<ReturnType<typeof runJudges>> = [];
   let judgeError: unknown;
@@ -580,15 +731,27 @@ async function runAgent(
       agentId: preflight.agentId,
       timestamp: new Date().toISOString(),
       type: "snapshot.after_failed",
-      message: "Failed to create after snapshot.",
+      message: "Failed to create after snapshot. Diff accuracy will be reduced.",
       metadata: errorDetails
     });
+    console.warn(`Warning: After snapshot failed for ${preflight.agentId}: ${errorDetails.message}. Diff may be inaccurate.`);
     afterSnapshot = new Map();
   }
 
   const diff = diffSnapshots(beforeSnapshot, afterSnapshot);
   const changedFiles = buildChangedFiles(diff, adapterResult?.changedFilesHint ?? []);
   const diffPrecision = buildDiffPrecision(task.expectedChangedPaths, changedFiles);
+
+  return { judgeResults, judgeError, afterSnapshot, diff, changedFiles, diffPrecision };
+}
+
+async function runTeardownCommands(
+  preflight: AdapterPreflightResult,
+  adapterError: unknown,
+  judgeError: unknown,
+  context: AgentRunContext
+): Promise<{ teardownResults: CommandStepResult[]; teardownError: unknown }> {
+  const { task, workspacePath, traceRecorder, cancellation } = context;
 
   let teardownResults: CommandStepResult[] = [];
   let teardownError: unknown;
@@ -616,22 +779,19 @@ async function runAgent(
     }
   }
 
-  const durationMs = Date.now() - startedAt;
-  const cancelled =
-    isAbortError(adapterError) ||
-    isAbortError(judgeError) ||
-    isAbortError(teardownError) ||
-    cancellation?.signal?.aborted === true;
-  const success =
-    !cancelled &&
-    adapterResult?.status === "success" &&
-    !adapterError &&
-    !judgeError &&
-    judgeResults.every((value) => value.success) &&
-    !teardownError &&
-    teardownResults.every((value) => value.success);
+  return { teardownResults, teardownError };
+}
 
-  await traceRecorder.record({
+async function recordFinalEvents(
+  preflight: AdapterPreflightResult,
+  judgeResults: Awaited<ReturnType<typeof runJudges>>,
+  judgeError: unknown,
+  teardownResults: CommandStepResult[],
+  teardownError: unknown,
+  success: boolean,
+  context: AgentRunContext
+): Promise<void> {
+  await context.traceRecorder.record({
     agentId: preflight.agentId,
     timestamp: new Date().toISOString(),
     type: "judge.finish",
@@ -646,7 +806,7 @@ async function runAgent(
     }
   });
 
-  await traceRecorder.record({
+  await context.traceRecorder.record({
     agentId: preflight.agentId,
     timestamp: new Date().toISOString(),
     type: "teardown.finish",
@@ -666,6 +826,27 @@ async function runAgent(
       teardownError: teardownError ? formatErrorMessage(teardownError) : undefined
     }
   });
+}
+
+function buildFinalResult(
+  preflight: AdapterPreflightResult,
+  adapterResult: Awaited<ReturnType<typeof context.adapter.execute>> | undefined,
+  adapterError: unknown,
+  startedAt: number,
+  setupResults: CommandStepResult[],
+  judgeResults: Awaited<ReturnType<typeof runJudges>>,
+  _judgeError: unknown,
+  teardownResults: CommandStepResult[],
+  _teardownError: unknown,
+  diff: DiffSummary,
+  changedFiles: string[],
+  diffPrecision: DiffPrecisionSummary | undefined,
+  cancelled: boolean,
+  success: boolean,
+  context: AgentRunContext
+): AgentRunResult {
+  const { adapter, workspacePath, tracePath, task } = context;
+  const durationMs = Date.now() - startedAt;
 
   if (cancelled) {
     return {
@@ -816,6 +997,84 @@ async function runAgent(
   };
 }
 
+async function runAgent(
+  repoPath: string,
+  outputPath: string,
+  workspaceRootPath: string,
+  taskPath: string,
+  preflight: AdapterPreflightResult,
+  options: Pick<BenchmarkOptions, "updateSnapshots" | "cancellation">
+): Promise<AgentRunResult> {
+  const context = await createAgentRunContext(outputPath, workspaceRootPath, taskPath, preflight, options);
+
+  // Step 1: Setup workspace and prechecks
+  const earlyResult1 = await setupWorkspaceAndPrechecks(repoPath, preflight, context);
+  if (earlyResult1) {
+    return earlyResult1;
+  }
+
+  // Step 2: Run setup commands
+  const { setupResults, earlyResult: earlyResult2 } = await runSetupCommands(preflight, context);
+  if (earlyResult2) {
+    return earlyResult2;
+  }
+
+  // Step 3: Create before snapshot
+  const beforeSnapshot = await createBeforeSnapshot(preflight, context);
+
+  // Step 4: Execute agent
+  const { adapterResult, adapterError, startedAt } = await executeAgent(preflight, repoPath, context);
+
+  // Step 5: Run judges and create after snapshot
+  const { judgeResults, judgeError, diff, changedFiles, diffPrecision } = await runJudgesAndAfterSnapshot(
+    preflight,
+    adapterResult,
+    beforeSnapshot,
+    options,
+    context
+  );
+
+  // Step 6: Run teardown commands
+  const { teardownResults, teardownError } = await runTeardownCommands(preflight, adapterError, judgeError, context);
+
+  // Determine final status
+  const cancelled =
+    isAbortError(adapterError) ||
+    isAbortError(judgeError) ||
+    isAbortError(teardownError) ||
+    context.cancellation?.signal?.aborted === true;
+  const success =
+    !cancelled &&
+    adapterResult?.status === "success" &&
+    !adapterError &&
+    !judgeError &&
+    judgeResults.every((value) => value.success) &&
+    !teardownError &&
+    teardownResults.every((value) => value.success);
+
+  // Record final events
+  await recordFinalEvents(preflight, judgeResults, judgeError, teardownResults, teardownError, success, context);
+
+  // Step 7: Build and return final result
+  return buildFinalResult(
+    preflight,
+    adapterResult,
+    adapterError,
+    startedAt,
+    setupResults,
+    judgeResults,
+    judgeError,
+    teardownResults,
+    teardownError,
+    diff,
+    changedFiles,
+    diffPrecision,
+    cancelled,
+    success,
+    context
+  );
+}
+
 export async function runBenchmark(options: BenchmarkOptions): Promise<BenchmarkRun> {
   const cancellation = options.cancellation;
   const safeProgress = async (event: BenchmarkProgressEvent): Promise<void> => {
@@ -854,15 +1113,16 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
     ? path.resolve(options.outputPath)
     : path.join(userRepoPath, ".agentarena", "runs");
   const outputPath = path.join(outputRootPath, runId);
-  const workspaceRootPath = path.join(tmpdir(), "agentarena-workspaces", runId);
+  const workspaceRootPath = await fs.mkdtemp(
+    path.join(tmpdir(), `agentarena-workspaces-${runId.replace(/[^a-zA-Z0-9_-]+/g, "-")}-`)
+  );
   const selections = normalizeSelections(options);
-  const workspacePaths: string[] = [];
+  const workspacePaths = new Set<string>();
 
   throwIfAborted(cancellation?.signal, createCancellationSummary("startup"));
 
   await ensureDirectory(outputRootPath);
   await ensureDirectory(outputPath);
-  await ensureDirectory(workspaceRootPath);
   await safeProgress({
     phase: "starting",
     message: `Created run ${runId}.`,
@@ -907,7 +1167,7 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
     async (preflight) => {
       throwIfAborted(cancellation?.signal, createCancellationSummary("agent scheduling"));
       const workspacePath = path.join(workspaceRootPath, preflight.variantId);
-      workspacePaths.push(workspacePath);
+      workspacePaths.add(workspacePath);
 
       await safeProgress({
         phase: "agent-start",
@@ -959,6 +1219,17 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
     }
   );
 
+  // Handle preflights that didn't produce results (due to isolated errors in mapWithConcurrency)
+  const processedVariantIds = new Set(results.map((r) => r.variantId));
+  for (const preflight of preflights) {
+    if (!processedVariantIds.has(preflight.variantId)) {
+      const fallbackPath = path.join(outputPath, "agents", preflight.variantId, "trace.jsonl");
+      const fallbackResult = createSkippedRunResult(preflight, fallbackPath, path.join(workspaceRootPath, preflight.variantId));
+      fallbackResult.summary = "Agent was not executed due to a concurrent execution error.";
+      results.push(fallbackResult);
+    }
+  }
+
   const cleanupResults: WorkspaceCleanupResult[] = [];
   if (options.cleanupWorkspaces) {
     for (const workspacePath of workspacePaths) {
@@ -969,7 +1240,11 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
       }
     }
     // Clean up the parent workspace root directory
-    await fs.rm(workspaceRootPath, { recursive: true, force: true }).catch(() => {});
+    const rootCleanupResult = await cleanupWorkspace(workspaceRootPath, 1);
+    cleanupResults.push(rootCleanupResult);
+    if (!rootCleanupResult.success) {
+      console.warn(`Warning: Failed to cleanup workspace root ${workspaceRootPath}: ${rootCleanupResult.error}`);
+    }
   }
 
   const completedWithCancellation = aborted || results.some((value) => value.status === "cancelled");

@@ -1,3 +1,5 @@
+import { renderBarChart, renderRadarChart } from "../components/charts.js";
+
 export function createDashboardModule(deps) {
   const {
     state,
@@ -27,7 +29,9 @@ export function createDashboardModule(deps) {
     summarizeRun,
     getRunCompareRows,
     getRunToRunAgentDiff,
+    getRunTrustSummary,
     getAgentTrendRows,
+    getSelectionTrustSummary,
     getRunVerdict,
     getCompareResults,
     findPreviousComparableRun,
@@ -50,6 +54,25 @@ export function createDashboardModule(deps) {
     buildShareCard,
     buildLeaderboard
   } = deps;
+
+/**
+ * Render an enhanced empty state with icon, title, message, and optional CTA button
+ * @param {Object} options
+ * @param {string} options.title - Main title text
+ * @param {string} options.message - Descriptive message
+ * @param {string} [options.ctaText] - Optional CTA button text
+ * @param {string} [options.ctaAction] - Optional CTA button action (data attribute)
+ * @returns {string} HTML string
+ */
+function renderEmptyState({ title, message, ctaText, ctaAction }) {
+  return `
+    <div class="empty-state-content">
+      <h3 class="empty-state-title">${escapeHtml(title)}</h3>
+      <p class="empty-state-message">${escapeHtml(message)}</p>
+      ${ctaText ? `<button class="btn btn-primary empty-state-cta" ${ctaAction ? `data-action="${ctaAction}"` : ''}>${escapeHtml(ctaText)}</button>` : ''}
+    </div>
+  `;
+}
 
 function renderRunInfo(run) {
   const intent = taskIntentSummary(run.task);
@@ -214,7 +237,11 @@ function renderExcludedRuns(excludedRows, t, escapeHtml) {
 
 function renderRunCompareTable() {
   if (state.runs.length === 0) {
-    elements.runCompareTable.innerHTML = `<p class="empty-state">${escapeHtml(t("noRunsLoaded"))}</p>`;
+    elements.runCompareTable.innerHTML = renderEmptyState({
+      title: t("noRunsLoaded"),
+      message: t("noRunsLoadedHint"),
+      ctaText: t("loadData")
+    });
     return;
   }
 
@@ -228,13 +255,18 @@ function renderRunCompareTable() {
 
   if (comparableRows.length === 0) {
     elements.runCompareTable.innerHTML =
-      `<p class="empty-state">${escapeHtml(t("runCompareNoComparable"))}</p>` +
+      renderEmptyState({
+        title: t("runCompareNoComparable"),
+        message: t("runCompareNoComparableHint")
+      }) +
       renderExcludedRuns(excludedRows, t, escapeHtml);
     return;
   }
 
+  const selectionTrust = getSelectionTrustSummary({ comparableRuns: comparableRows.map(r => r.run), excludedRuns: excludedRows.map(r => r.run), runs: state.runs });
   const tableHtml = `
     <p class="muted run-compare-fair-note">${escapeHtml(comparableRows.length === 1 ? t("runCompareSingleComparable") : t("runCompareFairOnlyDescription"))}</p>
+    ${selectionTrust.level === "caution" ? `<p class="trust-hint warning-text">${escapeHtml(t("trustSelectionCautionExcluded"))}</p>` : ""}
     <table class="compare-table">
       <thead>
         <tr>
@@ -281,7 +313,10 @@ function renderRunDiffTableV2() {
 
   const { previousRun, rows } = getRunToRunAgentDiff(state.runs, state.run);
   if (!previousRun || rows.length === 0) {
-    elements.runDiffTable.innerHTML = `<p class="empty-state">${escapeHtml(localText("没有可对比的历史 run。", "No previous comparable run found."))}</p>`;
+    elements.runDiffTable.innerHTML = renderEmptyState({
+      title: localText("没有可对比的历史 run。", "No previous comparable run found."),
+      message: localText("尝试加载更多历史运行以进行对比。", "Try loading more historical runs for comparison.")
+    });
     return;
   }
 
@@ -331,7 +366,10 @@ function renderAgentTrendTableV2(run) {
 
   const rows = getAgentTrendRows(state.runs, run, state.selectedAgentId);
   if (rows.length === 0) {
-    elements.agentTrendTable.innerHTML = `<p class="empty-state">${escapeHtml(localText("没有趋势数据。", "No trend data available."))}</p>`;
+    elements.agentTrendTable.innerHTML = renderEmptyState({
+      title: localText("没有趋势数据。", "No trend data available."),
+      message: localText("加载多次运行以查看 agent 性能趋势。", "Load multiple runs to see agent performance trends over time.")
+    });
     return;
   }
 
@@ -472,7 +510,10 @@ function renderMarkdownPanel() {
           <pre>${escapeHtml(buildShareCard(state.run, { scoreWeights: state.scoreWeights, scoreModeLabel: getScoreModeLabel() }))}</pre>
         </section>
       `
-    : `<p class="empty-state">${escapeHtml(localText("先加载一个 run，才能看到摘要亮点。", "Load a run to see summary highlights."))}</p>`;
+    : renderEmptyState({
+        title: localText("先加载一个 run，才能看到摘要亮点。", "Load a run to see summary highlights."),
+        message: localText("选择一个运行记录以查看重点摘要和分享卡片。", "Select a run to see highlights and share card.")
+      });
   elements.markdownContent.innerHTML = renderMarkdownBlock(markdown);
 }
 
@@ -520,6 +561,7 @@ function generateVerdictSummary(run) {
 function renderVerdictHero(run) {
   const summary = summarizeRun(run);
   const verdict = getRunVerdict(run, { scoreWeights: state.scoreWeights });
+  const trustSummary = getRunTrustSummary(run);
   const best = verdict.bestAgent;
   const fastest = verdict.fastest;
   const cheapest = verdict.lowestKnownCost;
@@ -612,6 +654,7 @@ function renderVerdictHero(run) {
         <div class="verdict-badges">${badgeHtml}</div>
         <p class="verdict-text">${escapeHtml(verdictText)}</p>
         <p class="score-scope-hint muted">${escapeHtml(localText("⚠️ 分数仅用于本次 run 内部比较，不代表绝对排名。", "⚠️ Scores compare variants within this run only — not absolute rankings."))}</p>
+        <p class="trust-hint ${trustSummary.level === "caution" ? "warning-text" : "muted"}">${escapeHtml(trustSummary.level === "strong" ? t("trustRunStrong") : t("trustRunCaution"))}</p>
         <div class="stats-row">
           <div class="stat-item">
             <span class="stat-label">${escapeHtml(t("metrics.agents"))}</span>
@@ -729,8 +772,45 @@ function renderComparisonBars(run) {
         <div class="bar-chart-title">${escapeHtml(localText("Diff 精准度", "Diff Precision"))}</div>
         ${precisionRows}
       </div>
+      <div id="score-bar-chart" class="score-chart-container"></div>
+      <div id="score-radar-chart" class="score-chart-container"></div>
     </div>
   `;
+
+  // Render new SVG bar chart for score dimensions
+  const scoreBarContainer = elements.comparisonBars.querySelector("#score-bar-chart");
+  if (scoreBarContainer && state.scoreWeights) {
+    const chartData = [{
+      group: getScoreModeLabel ? getScoreModeLabel() : "Current",
+      dimensions: Object.entries(state.scoreWeights).map(([name, weight]) => ({
+        name,
+        value: weight * 100,
+        weight
+      }))
+    }];
+    renderBarChart(scoreBarContainer, chartData, { width: 600, height: 200 });
+  }
+
+  // Render radar chart for agent comparison
+  const radarContainer = elements.comparisonBars.querySelector("#score-radar-chart");
+  if (radarContainer && results.length > 0) {
+    const radarData = results.slice(0, 3).map(r => ({
+      name: resultLabel(r),
+      dimensions: [
+        { name: "Status", value: r.status === "success" ? 100 : 0 },
+        { name: "Tests", value: r.judgeResults.filter(j => j.success).length / Math.max(r.judgeResults.length, 1) * 100 },
+        { name: "Duration", value: Math.max(0, 100 - (r.durationMs || 0) / 1000) },
+        { name: "Precision", value: Math.max(diffPrecisionScore(r), 0) * 100 }
+      ]
+    }));
+    if (radarData.length > 0) {
+      const canvas = document.createElement("canvas");
+      canvas.width = 300;
+      canvas.height = 300;
+      radarContainer.appendChild(canvas);
+      renderRadarChart(canvas, radarData[0], { width: 300, height: 300 });
+    }
+  }
 }
 
 function renderFailures(run) {
@@ -777,7 +857,10 @@ function renderCompareTableV2(run) {
   elements.compareSortHint.textContent = sortHintMap[compareFilters.sort] ?? sortHintMap.status;
 
   if (results.length === 0) {
-    elements.compareTable.innerHTML = `<p class="empty-state">${escapeHtml(localText("没有 variant 符合当前筛选条件。", "No variants match the current compare filters."))}</p>`;
+    elements.compareTable.innerHTML = renderEmptyState({
+      title: localText("没有 variant 符合当前筛选条件。", "No variants match the current compare filters."),
+      message: localText("尝试调整筛选条件或切换排序方式。", "Try adjusting the filter conditions or changing the sort method.")
+    });
     return;
   }
 
@@ -1027,7 +1110,10 @@ function renderLeaderboard(run) {
   if (leaderboard.rows.length === 0) {
     setHidden(elements.leaderboardSection, false);
     elements.leaderboardTitle.textContent = t("leaderboardTitle");
-    elements.leaderboardContent.innerHTML = `<p class="empty-state">${escapeHtml(t("leaderboardNoData"))}</p>`;
+    elements.leaderboardContent.innerHTML = renderEmptyState({
+      title: t("leaderboardNoData"),
+      message: t("leaderboardNoDataHint")
+    });
     return;
   }
 

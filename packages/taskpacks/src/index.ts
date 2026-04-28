@@ -3,6 +3,8 @@ import path from "node:path";
 import {
   type CommandExecutionSpec,
   type CommandJudge,
+  type CompilationJudge,
+  type DirectoryExistsJudge,
   type FileContainsJudge,
   type FileCountJudge,
   type FileExistsJudge,
@@ -11,6 +13,7 @@ import {
   type JsonValueJudge,
   type LintCheckJudge,
   type PatchValidationJudge,
+  type RegexMatchJudge,
   type SnapshotJudge,
   TASK_PACK_SCHEMA_V1,
   type TaskJudge,
@@ -225,7 +228,7 @@ function normalizeMetadata(value: unknown): TaskPackMetadata | undefined {
     differentiator: assertOptionalString(metadata.differentiator, "metadata.differentiator"),
 
     // === SWE-Bench Extensions ===
-    githubIssue: metadata.githubIssue === undefined ? undefined : assertObject(metadata.githubIssue, "metadata.githubIssue") as TaskPackMetadata["githubIssue"],
+    githubIssue: metadata.githubIssue === undefined ? undefined : normalizeGithubIssue(metadata.githubIssue),
     failToPassTests: assertStringArray(metadata.failToPassTests, "metadata.failToPassTests"),
     passToPassTests: assertStringArray(metadata.passToPassTests, "metadata.passToPassTests"),
 
@@ -237,8 +240,38 @@ function normalizeMetadata(value: unknown): TaskPackMetadata | undefined {
 
     // === LiveBench Extensions ===
     taskCategories: assertStringArray(metadata.taskCategories, "metadata.taskCategories"),
-    antiContamination: metadata.antiContamination === undefined ? undefined : assertObject(metadata.antiContamination, "metadata.antiContamination") as TaskPackMetadata["antiContamination"],
-    difficultyEvolution: metadata.difficultyEvolution === undefined ? undefined : assertObject(metadata.difficultyEvolution, "metadata.difficultyEvolution") as TaskPackMetadata["difficultyEvolution"]
+    antiContamination: metadata.antiContamination === undefined ? undefined : normalizeAntiContamination(metadata.antiContamination),
+    difficultyEvolution: metadata.difficultyEvolution === undefined ? undefined : normalizeDifficultyEvolution(metadata.difficultyEvolution)
+  };
+}
+
+function normalizeGithubIssue(value: unknown): NonNullable<TaskPackMetadata["githubIssue"]> {
+  const obj = assertObject(value, "metadata.githubIssue");
+  return {
+    owner: assertOptionalString(obj.owner, "metadata.githubIssue.owner") ?? "",
+    repo: assertOptionalString(obj.repo, "metadata.githubIssue.repo") ?? "",
+    issueNumber: assertOptionalPositiveInteger(obj.issueNumber, "metadata.githubIssue.issueNumber") ?? assertOptionalPositiveInteger(obj.number, "metadata.githubIssue.number") ?? 0,
+    baseCommit: assertOptionalString(obj.baseCommit, "metadata.githubIssue.baseCommit") ?? "",
+    testCommit: assertOptionalString(obj.testCommit, "metadata.githubIssue.testCommit") ?? "",
+    patchPath: assertOptionalString(obj.patchPath, "metadata.githubIssue.patchPath")
+  };
+}
+
+function normalizeAntiContamination(value: unknown): NonNullable<TaskPackMetadata["antiContamination"]> {
+  const obj = assertObject(value, "metadata.antiContamination");
+  return {
+    rotationId: assertString(obj.rotationId, "metadata.antiContamination.rotationId"),
+    createdAt: assertString(obj.createdAt, "metadata.antiContamination.createdAt"),
+    expiresAt: assertOptionalString(obj.expiresAt, "metadata.antiContamination.expiresAt"),
+    sourceTimestamp: assertOptionalString(obj.sourceTimestamp, "metadata.antiContamination.sourceTimestamp")
+  };
+}
+
+function normalizeDifficultyEvolution(value: unknown): NonNullable<TaskPackMetadata["difficultyEvolution"]> {
+  const obj = assertObject(value, "metadata.difficultyEvolution");
+  return {
+    generation: assertOptionalNonNegativeInteger(obj.generation, "metadata.difficultyEvolution.generation") ?? 0,
+    predecessorTaskId: assertOptionalString(obj.predecessorTaskId, "metadata.difficultyEvolution.predecessorTaskId")
   };
 }
 
@@ -250,7 +283,54 @@ function normalizeMetadata(value: unknown): TaskPackMetadata | undefined {
  * - 其他类型默认 non-critical
  */
 function isJudgeCriticalByDefault(type: string): boolean {
-  return type === "test-result" || type === "json-schema";
+  // Critical by default: failures indicate clear correctness violations
+  return type === "test-result" || type === "json-schema" || type === "compilation";
+}
+
+const COMMON_JUDGE_FIELDS = new Set(["id", "label", "type", "critical", "weight"]);
+const COMMAND_JUDGE_FIELDS = new Set([...COMMON_JUDGE_FIELDS, "command", "cwd", "timeoutMs", "envAllowList", "env"]);
+const TEST_RESULT_FIELDS = new Set([...COMMAND_JUDGE_FIELDS, "format", "reportFile", "passOnNoTests"]);
+const LINT_CHECK_FIELDS = new Set([...COMMAND_JUDGE_FIELDS, "format", "reportFile", "maxWarnings"]);
+const FILE_EXISTS_FIELDS = new Set([...COMMON_JUDGE_FIELDS, "path"]);
+const FILE_CONTAINS_FIELDS = new Set([...COMMON_JUDGE_FIELDS, "path", "pattern", "regex", "flags"]);
+const JSON_VALUE_FIELDS = new Set([...COMMON_JUDGE_FIELDS, "path", "pointer", "expected"]);
+const GLOB_FIELDS = new Set([...COMMON_JUDGE_FIELDS, "pattern", "minMatches", "maxMatches"]);
+const FILE_COUNT_FIELDS = new Set([...COMMON_JUDGE_FIELDS, "pattern", "equals", "min", "max"]);
+const SNAPSHOT_FIELDS = new Set([...COMMON_JUDGE_FIELDS, "path", "snapshotPath"]);
+const JSON_SCHEMA_FIELDS = new Set([...COMMON_JUDGE_FIELDS, "path", "schema", "schemaPath"]);
+const PATCH_VALIDATION_FIELDS = new Set([...COMMAND_JUDGE_FIELDS, "testSuite", "failToPassTests", "passToPassTests"]);
+const TOKEN_EFFICIENCY_FIELDS = new Set([...COMMON_JUDGE_FIELDS, "tokenBudget"]);
+const DIRECTORY_EXISTS_FIELDS = new Set([...COMMON_JUDGE_FIELDS, "path"]);
+const REGEX_MATCH_FIELDS = new Set([...COMMON_JUDGE_FIELDS, "path", "pattern", "flags", "shouldNotMatch", "minMatches", "maxMatches"]);
+const COMPILATION_FIELDS = new Set([...COMMAND_JUDGE_FIELDS, "tool", "buildArgs"]);
+
+const JUDGE_TYPE_FIELDS: Record<string, Set<string>> = {
+  command: COMMAND_JUDGE_FIELDS,
+  "test-result": TEST_RESULT_FIELDS,
+  "lint-check": LINT_CHECK_FIELDS,
+  "file-exists": FILE_EXISTS_FIELDS,
+  "file-contains": FILE_CONTAINS_FIELDS,
+  "json-value": JSON_VALUE_FIELDS,
+  glob: GLOB_FIELDS,
+  "file-count": FILE_COUNT_FIELDS,
+  snapshot: SNAPSHOT_FIELDS,
+  "json-schema": JSON_SCHEMA_FIELDS,
+  "patch-validation": PATCH_VALIDATION_FIELDS,
+  "token-efficiency": TOKEN_EFFICIENCY_FIELDS,
+  "directory-exists": DIRECTORY_EXISTS_FIELDS,
+  "regex-match": REGEX_MATCH_FIELDS,
+  compilation: COMPILATION_FIELDS
+};
+
+function assertNoUnknownFields(value: Record<string, unknown>, allowedFields: Set<string>, context: string): void {
+  const unknownFields = Object.keys(value).filter((key) => !allowedFields.has(key));
+  if (unknownFields.length > 0) {
+    throw new Error(
+      `${context} contains ${unknownFields.length} unrecognized field(s): ` +
+      `"${unknownFields.join('", "')}". ` +
+      `Allowed fields: ${Array.from(allowedFields).sort().join(", ")}.`
+    );
+  }
 }
 
 function normalizeJudge(
@@ -260,6 +340,13 @@ function normalizeJudge(
 ): TaskJudge {
   const rawType = value.type;
   const type = rawType === undefined || rawType === null ? "command" : String(rawType);
+
+  // Validate no unknown fields for this judge type
+  const allowedFields = JUDGE_TYPE_FIELDS[type];
+  if (allowedFields) {
+    assertNoUnknownFields(value, allowedFields, `Judge "${type}" at index ${index}`);
+  }
+
   const id =
     assertOptionalString(value.id, `judges[${index}].id`) ??
     `${defaultIdPrefix}-${index + 1}`;
@@ -473,6 +560,72 @@ function normalizeJudge(
     return judge;
   }
 
+  if (type === "directory-exists") {
+    const judge: DirectoryExistsJudge = {
+      id,
+      label,
+      type: "directory-exists",
+      critical,
+      path: assertString(value.path, `judges[${index}].path`)
+    };
+    return judge;
+  }
+
+  if (type === "regex-match") {
+    const judge: RegexMatchJudge = {
+      id,
+      label,
+      type: "regex-match",
+      critical,
+      path: assertString(value.path, `judges[${index}].path`),
+      pattern: assertString(value.pattern, `judges[${index}].pattern`),
+      flags: assertOptionalString(value.flags, `judges[${index}].flags`),
+      shouldNotMatch: assertOptionalBoolean(value.shouldNotMatch, `judges[${index}].shouldNotMatch`),
+      minMatches: assertOptionalNonNegativeInteger(value.minMatches, `judges[${index}].minMatches`),
+      maxMatches: assertOptionalNonNegativeInteger(value.maxMatches, `judges[${index}].maxMatches`)
+    };
+
+    if (judge.minMatches !== undefined && judge.maxMatches !== undefined && judge.maxMatches > 0 && judge.minMatches > judge.maxMatches) {
+      throw new Error(
+        `Task pack judge at index ${index}: minMatches (${judge.minMatches}) must be <= maxMatches (${judge.maxMatches}).`
+      );
+    }
+    return judge;
+  }
+
+  if (type === "compilation") {
+    const validTools = ["auto", "npm", "pnpm", "yarn", "cargo", "go", "make", "gradle", "maven"];
+    const tool = assertOptionalString(value.tool, `judges[${index}].tool`) as CompilationJudge["tool"] | undefined;
+    if (tool && !validTools.includes(tool)) {
+      throw new Error(
+        `Task pack judge at index ${index}: invalid compilation tool "${tool}". ` +
+        `Valid options: ${validTools.join(", ")}.`
+      );
+    }
+
+    const command = assertOptionalString(value.command, `judges[${index}].command`);
+    const cwd = assertOptionalString(value.cwd, `judges[${index}].cwd`);
+    const timeoutMs = assertOptionalPositiveInteger(value.timeoutMs, `judges[${index}].timeoutMs`);
+    const envAllowList = assertStringArray(value.envAllowList, `judges[${index}].envAllowList`);
+    const env = assertStringRecord(value.env, `judges[${index}].env`);
+    const buildArgs = assertStringArray(value.buildArgs, `judges[${index}].buildArgs`);
+
+    const judge: CompilationJudge = {
+      id,
+      label,
+      type: "compilation",
+      critical,
+      ...(command ? { command } : {}),
+      ...(cwd ? { cwd } : {}),
+      ...(timeoutMs ? { timeoutMs } : {}),
+      ...(envAllowList.length > 0 ? { envAllowList } : {}),
+      ...(env ? { env } : {}),
+      ...(tool ? { tool } : {}),
+      ...(buildArgs.length > 0 ? { buildArgs } : {})
+    };
+    return judge;
+  }
+
   const supportedTypes = [
     "command",
     "test-result",
@@ -485,7 +638,10 @@ function normalizeJudge(
     "snapshot",
     "json-schema",
     "patch-validation",
-    "token-efficiency"
+    "token-efficiency",
+    "directory-exists",
+    "regex-match",
+    "compilation"
   ];
   throw new Error(
     `Task pack judge at index ${index} has unsupported type "${String(type)}". ` +
@@ -584,6 +740,34 @@ export async function loadTaskPack(taskPath: string): Promise<TaskPack> {
     );
   }
 
+  // Strict schema validation: reject unknown top-level fields
+  const ALLOWED_TOP_LEVEL_FIELDS = new Set([
+    "schemaVersion",
+    "id",
+    "title",
+    "description",
+    "prompt",
+    "metadata",
+    "repoSource",
+    "expectedChangedPaths",
+    "envAllowList",
+    "setupCommands",
+    "judges",
+    "teardownCommands",
+    // Legacy field for backward compatibility
+    "successCommands"
+  ]);
+
+  const unknownFields = Object.keys(parsed).filter((key) => !ALLOWED_TOP_LEVEL_FIELDS.has(key));
+  if (unknownFields.length > 0) {
+    console.warn(
+      `Task pack contains ${unknownFields.length} unrecognized top-level field(s): ` +
+      `"${unknownFields.join('", "')}". ` +
+      `Allowed fields: ${Array.from(ALLOWED_TOP_LEVEL_FIELDS).sort().join(", ")}. ` +
+      `These fields will be ignored.`
+    );
+  }
+
   if (parsed.judges !== undefined && parsed.judges !== null && !Array.isArray(parsed.judges)) {
     throw new Error(
       `Task pack field "judges" must be an array. ` +
@@ -638,4 +822,81 @@ export async function loadTaskPack(taskPath: string): Promise<TaskPack> {
       );
     })
   };
+}
+
+/**
+ * Conflict detected between multiple task packs.
+ */
+export interface TaskPackConflict {
+  /** IDs of the conflicting task packs. */
+  taskPackIds: string[];
+  /** Type of conflict. */
+  type: "duplicate-id" | "conflicting-setup" | "conflicting-teardown" | "env-allowlist-mismatch";
+  /** Human-readable description of the conflict. */
+  message: string;
+}
+
+/**
+ * Detect potential conflicts when combining multiple task packs.
+ * Useful for validating task pack combinations before running benchmarks.
+ */
+export function detectTaskPackConflicts(taskPacks: Array<{ id: string; setupCommands: Array<{ id: string; command: string }>; teardownCommands: Array<{ id: string; command: string }>; envAllowList: string[] }>): TaskPackConflict[] {
+  const conflicts: TaskPackConflict[] = [];
+
+  // Check for duplicate IDs
+  const idCounts = new Map<string, string[]>();
+  for (const pack of taskPacks) {
+    const existing = idCounts.get(pack.id) ?? [];
+    existing.push(pack.id);
+    idCounts.set(pack.id, existing);
+  }
+  for (const [id, ids] of idCounts) {
+    if (ids.length > 1) {
+      conflicts.push({
+        taskPackIds: ids,
+        type: "duplicate-id",
+        message: `Multiple task packs share the same id "${id}". Each task pack must have a unique id.`
+      });
+    }
+  }
+
+  // Check for conflicting setup command IDs
+  const setupIds = new Map<string, string[]>();
+  for (const pack of taskPacks) {
+    for (const cmd of pack.setupCommands) {
+      const existing = setupIds.get(cmd.id) ?? [];
+      existing.push(pack.id);
+      setupIds.set(cmd.id, existing);
+    }
+  }
+  for (const [id, ids] of setupIds) {
+    if (ids.length > 1) {
+      conflicts.push({
+        taskPackIds: [...new Set(ids)],
+        type: "conflicting-setup",
+        message: `Setup command id "${id}" is used by multiple task packs: ${[...new Set(ids)].join(", ")}. This may cause unexpected behavior when combined.`
+      });
+    }
+  }
+
+  // Check for conflicting teardown command IDs
+  const teardownIds = new Map<string, string[]>();
+  for (const pack of taskPacks) {
+    for (const cmd of pack.teardownCommands) {
+      const existing = teardownIds.get(cmd.id) ?? [];
+      existing.push(pack.id);
+      teardownIds.set(cmd.id, existing);
+    }
+  }
+  for (const [id, ids] of teardownIds) {
+    if (ids.length > 1) {
+      conflicts.push({
+        taskPackIds: [...new Set(ids)],
+        type: "conflicting-teardown",
+        message: `Teardown command id "${id}" is used by multiple task packs: ${[...new Set(ids)].join(", ")}. This may cause unexpected behavior when combined.`
+      });
+    }
+  }
+
+  return conflicts;
 }

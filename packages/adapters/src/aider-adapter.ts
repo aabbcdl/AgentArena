@@ -117,9 +117,17 @@ export class AiderAdapter implements AgentAdapter {
     // Aider requires a git repository; initialize one if needed
     const gitDir = path.join(context.workspacePath, ".git");
     try {
-      await fs.access(gitDir);
+      const stat = await fs.stat(gitDir);
+      // Check if .git is a valid directory (not a broken symlink or file)
+      if (!stat.isDirectory()) {
+        throw new Error(".git exists but is not a directory");
+      }
     } catch {
-      await runProcess("git", ["init"], context.workspacePath, 10_000, context.environment);
+      // Initialize git repo, but handle gracefully if git is not installed
+      const gitResult = await runProcess("git", ["init"], context.workspacePath, 30_000, context.environment);
+      if (gitResult.exitCode !== 0) {
+        console.warn(`Warning: Could not initialize git in workspace. Aider may not work correctly: ${gitResult.stderr}`);
+      }
     }
 
     const args = [

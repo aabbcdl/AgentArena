@@ -150,6 +150,24 @@ function extractVersionToken(value: string): string | undefined {
   return looseMatch?.[0];
 }
 
+function normalizeModelName(model: string | null | undefined): string | undefined {
+  if (model == null) {
+    return undefined;
+  }
+  const trimmed = model.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function resolveEffectiveModel(...candidates: (string | null | undefined)[]): string | undefined {
+  for (const candidate of candidates) {
+    const normalized = normalizeModelName(candidate);
+    if (normalized != null) {
+      return normalized;
+    }
+  }
+  return undefined;
+}
+
 async function readPackageVersion(startPath: string): Promise<string | undefined> {
   let currentPath = path.resolve(startPath);
   const { root } = path.parse(currentPath);
@@ -176,7 +194,12 @@ let adaptersPackageVersionPromise: Promise<string | undefined> | null = null;
 
 export async function getAdaptersPackageVersion(): Promise<string | undefined> {
   if (!adaptersPackageVersionPromise) {
-    adaptersPackageVersionPromise = readPackageVersion(path.join(import.meta.dirname, ".."));
+    adaptersPackageVersionPromise = readPackageVersion(path.join(import.meta.dirname, "..")).catch((error) => {
+      // Reset the promise on failure so subsequent calls can retry
+      adaptersPackageVersionPromise = null;
+      console.warn(`Warning: Failed to read adapters package version: ${error instanceof Error ? error.message : String(error)}`);
+      return undefined;
+    });
   }
 
   return await adaptersPackageVersionPromise;
@@ -353,25 +376,37 @@ export async function readCodexConfigDefaults(): Promise<CodexConfigDefaults> {
   }
 }
 
+function normalizeReasoningEffort(effort: string | null | undefined): string | undefined {
+  if (effort == null) {
+    return undefined;
+  }
+  const trimmed = effort.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
 export async function resolveCodexRuntime(context: {
   requestedConfig?: AdapterExecutionContext["selection"]["config"];
   configSource?: AdapterExecutionContext["selection"]["configSource"];
 }): Promise<AgentResolvedRuntime> {
   const requestedConfig = context.requestedConfig ?? {};
-  if (requestedConfig.model || requestedConfig.reasoningEffort) {
+  const normalizedRequestedModel = normalizeModelName(requestedConfig.model);
+  const normalizedRequestedEffort = normalizeReasoningEffort(requestedConfig.reasoningEffort);
+  if (normalizedRequestedModel || normalizedRequestedEffort) {
     return {
-      effectiveModel: requestedConfig.model,
-      effectiveReasoningEffort: requestedConfig.reasoningEffort,
+      effectiveModel: normalizedRequestedModel,
+      effectiveReasoningEffort: normalizedRequestedEffort,
       source: context.configSource ?? "ui",
       verification: "inferred",
       notes: ["Using explicit AgentArena Codex configuration."]
     };
   }
 
-  if (process.env.AGENTARENA_CODEX_MODEL?.trim() || process.env.AGENTARENA_CODEX_REASONING_EFFORT?.trim()) {
+  const normalizedEnvModel = normalizeModelName(process.env.AGENTARENA_CODEX_MODEL);
+  const normalizedEnvEffort = normalizeReasoningEffort(process.env.AGENTARENA_CODEX_REASONING_EFFORT);
+  if (normalizedEnvModel || normalizedEnvEffort) {
     return {
-      effectiveModel: process.env.AGENTARENA_CODEX_MODEL?.trim() || undefined,
-      effectiveReasoningEffort: process.env.AGENTARENA_CODEX_REASONING_EFFORT?.trim() || undefined,
+      effectiveModel: normalizedEnvModel,
+      effectiveReasoningEffort: normalizedEnvEffort,
       source: "env",
       verification: "inferred",
       notes: ["Using AGENTARENA_CODEX_* environment overrides."]
@@ -379,10 +414,12 @@ export async function resolveCodexRuntime(context: {
   }
 
   const configDefaults = await readCodexConfigDefaults();
-  if (configDefaults.model || configDefaults.reasoningEffort) {
+  const normalizedConfigModel = normalizeModelName(configDefaults.model);
+  const normalizedConfigEffort = normalizeReasoningEffort(configDefaults.reasoningEffort);
+  if (normalizedConfigModel || normalizedConfigEffort) {
     return {
-      effectiveModel: configDefaults.model,
-      effectiveReasoningEffort: configDefaults.reasoningEffort,
+      effectiveModel: normalizedConfigModel,
+      effectiveReasoningEffort: normalizedConfigEffort,
       source: "codex-config",
       verification: "inferred",
       notes: ["Using defaults from ~/.codex/config.toml."]
@@ -405,7 +442,7 @@ export async function resolveClaudeRuntime(context: {
   const requestedConfig = context.requestedConfig ?? {};
   const profile = await getClaudeProviderProfile(requestedConfig.providerProfileId);
   const runtime: AgentResolvedRuntime = {
-    effectiveModel: requestedConfig.model?.trim() || profile.primaryModel?.trim() || undefined,
+    effectiveModel: resolveEffectiveModel(requestedConfig.model, profile.primaryModel),
     effectiveReasoningEffort: undefined,
     providerProfileId: profile.id,
     providerProfileName: profile.name,
@@ -498,6 +535,15 @@ export async function probeClaudeLikeAuth(
     };
   }
 
+  // Check for errors in the parsed events even if exit code is 0
+  if (parsed.error) {
+    return {
+      status: "blocked",
+      summary: `CLI exited successfully but reported an error: ${parsed.error}`,
+      details: [execution.stderr.trim()].filter(Boolean)
+    };
+  }
+
   if (execution.exitCode === 0) {
     return {
       status: "ready",
@@ -526,7 +572,16 @@ export async function probeClaudeProfileAuth(
   try {
     const workspacePath = path.join(probeRoot, "workspace");
     await ensureDirectory(workspacePath);
-    const providerRuntime = await writeClaudeWorkspaceSettings(workspacePath, profileId, requestedModel);
+    let providerRuntime: Awaited<ReturnType<typeof writeClaudeWorkspaceSettings>>;
+    try {
+      providerRuntime = await writeClaudeWorkspaceSettings(workspacePath, profileId, requestedModel);
+    } catch (error) {
+      return {
+        status: "blocked",
+        summary: "Failed to write workspace settings for auth probe.",
+        details: [error instanceof Error ? error.message : String(error)]
+      };
+    }
     return await probeClaudeLikeAuth(
       invocation,
       workspacePath,

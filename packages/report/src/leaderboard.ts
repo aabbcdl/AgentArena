@@ -247,7 +247,7 @@ export function buildLeaderboard(
 
     const lastSeenAt = agentRuns
       .map((r) => r.createdAt)
-      .sort()
+      .sort((a, b) => new Date(a).getTime() - new Date(b).getTime())
       .reverse()[0] ?? new Date().toISOString();
 
     // 样本充足性：至少 3 次 run 才算稳定

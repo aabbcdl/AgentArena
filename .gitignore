@@ -1,8 +1,12 @@
 node_modules/
 dist/
-.agentarena/
+build/
 .agentarena/
 *.tsbuildinfo
+
+# Build caches
+node_modules/.cache/
+.turbo/
 
 # Environment and secrets
 .env
@@ -23,3 +27,28 @@ pnpm-debug.log*
 
 # Test coverage
 coverage/
+.gitnexus
+
+# AI Assistant local configs
+.agents/
+.claude/
+.codebuddy/
+.codex/
+.iflow/
+.kilocode/
+.qoder/
+.qwen/
+.trae/
+skills/
+specs/
+.trae/
+
+# Local planning docs
+task_plan.md
+progress.md
+findings.md
+OPTIMIZATION_PLAN.md
+CODE_REVIEW.md
+BeszelTray.spec
+task-packs.json
+demo-page.png

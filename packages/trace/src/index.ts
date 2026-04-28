@@ -7,6 +7,7 @@ import { ensureDirectory, type TraceEvent } from "@agentarena/core";
 
 export interface TraceFilter {
   agentId?: string;
+  runId?: string;
   type?: string | string[];
   startTime?: string;
   endTime?: string;
@@ -22,6 +23,9 @@ export interface TraceQueryOptions {
 
 function matchesFilter(event: TraceEvent, filter: TraceFilter): boolean {
   if (filter.agentId && event.agentId !== filter.agentId) {
+    return false;
+  }
+  if (filter.runId && event.runId !== filter.runId) {
     return false;
   }
   if (filter.type) {
@@ -45,10 +49,16 @@ function matchesFilter(event: TraceEvent, filter: TraceFilter): boolean {
 export class JsonlTraceRecorder {
   private directoryEnsured = false;
   private writeQueue: Promise<void> = Promise.resolve();
+  private writeFailed = false;
 
   constructor(private readonly filePath: string) {}
 
   async record(event: TraceEvent): Promise<void> {
+    // If a previous write failed, don't queue more - fail fast
+    if (this.writeFailed) {
+      throw new Error(`Trace recording failed for ${this.filePath}. Previous write failed, refusing to queue more events.`);
+    }
+
     // Queue writes to prevent race conditions
     this.writeQueue = this.writeQueue.then(async () => {
       if (!this.directoryEnsured) {
@@ -56,12 +66,19 @@ export class JsonlTraceRecorder {
         this.directoryEnsured = true;
       }
       await fs.appendFile(this.filePath, `${JSON.stringify(event)}\n`, "utf8");
+    }).catch((error) => {
+      this.writeFailed = true;
+      throw error;
     });
     await this.writeQueue;
   }
 
   async recordBatch(events: TraceEvent[]): Promise<void> {
     if (events.length === 0) return;
+
+    if (this.writeFailed) {
+      throw new Error(`Trace recording failed for ${this.filePath}. Previous write failed, refusing to queue more events.`);
+    }
 
     this.writeQueue = this.writeQueue.then(async () => {
       if (!this.directoryEnsured) {
@@ -70,6 +87,9 @@ export class JsonlTraceRecorder {
       }
       const lines = events.map((event) => JSON.stringify(event)).join("\n") + "\n";
       await fs.appendFile(this.filePath, lines, "utf8");
+    }).catch((error) => {
+      this.writeFailed = true;
+      throw error;
     });
     await this.writeQueue;
   }
@@ -83,7 +103,8 @@ export class JsonlTraceRecorder {
         try {
           events.push(JSON.parse(line) as TraceEvent);
         } catch {
-          // Skip malformed lines
+          // Log malformed lines for debugging instead of silently skipping
+          console.warn(`[trace] Skipping malformed line in ${this.filePath}: ${line.slice(0, 100)}`);
         }
       }
     } catch (error) {
@@ -107,7 +128,7 @@ export class JsonlTraceRecorder {
         try {
           parsedEvents.push(JSON.parse(line) as TraceEvent);
         } catch {
-          // Skip malformed lines
+          console.warn(`[trace] Skipping malformed line in ${this.filePath}: ${line.slice(0, 100)}`);
         }
       }
 
@@ -172,15 +193,22 @@ export class JsonlTraceRecorder {
 
   async compress(): Promise<string> {
     const compressedPath = `${this.filePath}.gz`;
-    const sourceStream = createReadStream(this.filePath);
-    const gzipStream = createGzip();
-    const fileHandle = await fs.open(compressedPath, "w");
+    let fileHandle: import("node:fs/promises").FileHandle | undefined;
+
     try {
+      const sourceStream = createReadStream(this.filePath);
+      const gzipStream = createGzip();
+      fileHandle = await fs.open(compressedPath, "w");
       const destinationStream = fileHandle.createWriteStream();
       await pipeline(sourceStream, gzipStream, destinationStream);
+    } catch (error) {
+      // Clean up incomplete compressed file on failure
+      await fs.rm(compressedPath, { force: true }).catch(() => {});
+      throw error;
     } finally {
-      await fileHandle.close();
+      await fileHandle?.close().catch(() => {});
     }
+
     return compressedPath;
   }
 
@@ -208,7 +236,7 @@ export class JsonlTraceRecorder {
           try {
             events.push(JSON.parse(line) as TraceEvent);
           } catch {
-            // Skip malformed lines
+            console.warn(`[trace] Skipping malformed line in ${compressedPath}: ${line.slice(0, 100)}`);
           }
         }
       }
@@ -273,3 +301,14 @@ export class InMemoryTraceRecorder {
     return Array.from(agentIds).sort();
   }
 }
+
+// Trace replay exports
+export {
+  buildTraceTimeline,
+  loadTraceEvents,
+  type TraceComparison,
+  TraceReplayer,
+  type TraceReplayOptions,
+  type TraceStep,
+  type TraceTimeline
+} from "./replay.js";

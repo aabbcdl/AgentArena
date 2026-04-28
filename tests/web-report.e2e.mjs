@@ -64,6 +64,23 @@ async function startUiServer(cwd) {
   };
 }
 
+async function loadChromiumOrSkip(t) {
+  if (process.env.AGENTARENA_RUN_BROWSER_SMOKE !== "1") {
+    t.skip("Set AGENTARENA_RUN_BROWSER_SMOKE=1 to run browser smoke tests.");
+    return null;
+  }
+
+  try {
+    const { chromium } = await import("playwright");
+    const probe = await chromium.launch({ headless: true });
+    await probe.close();
+    return chromium;
+  } catch (error) {
+    t.skip(`Playwright is unavailable: ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  }
+}
+
 async function expandLauncherIfNeeded(page) {
   const launcherBody = page.locator("#launcher-body");
   if (await launcherBody.isVisible()) {
@@ -173,10 +190,10 @@ async function injectTestRun(page) {
 }
 
 test("web-report browser smoke renders launcher and supports zh/en switching", {
-  skip: process.env.AGENTARENA_RUN_BROWSER_SMOKE !== "1",
   timeout: 120000
-}, async () => {
-  const { chromium } = await import("playwright");
+}, async (t) => {
+  const chromium = await loadChromiumOrSkip(t);
+  if (!chromium) return;
   const cwd = path.resolve(".");
   const uiServer = await startUiServer(cwd);
   const browser = await chromium.launch({ headless: true });
@@ -216,10 +233,10 @@ test("web-report browser smoke renders launcher and supports zh/en switching", {
 });
 
 test("mobile sidebar opens and closes via toggle and backdrop", {
-  skip: process.env.AGENTARENA_RUN_BROWSER_SMOKE !== "1",
   timeout: 120000
-}, async () => {
-  const { chromium } = await import("playwright");
+}, async (t) => {
+  const chromium = await loadChromiumOrSkip(t);
+  if (!chromium) return;
   const cwd = path.resolve(".");
   const uiServer = await startUiServer(cwd);
   const browser = await chromium.launch({ headless: true });
@@ -253,10 +270,10 @@ test("mobile sidebar opens and closes via toggle and backdrop", {
 });
 
 test("wrong results file shows a visible error and run list items stay valid", {
-  skip: process.env.AGENTARENA_RUN_BROWSER_SMOKE !== "1",
   timeout: 120000
-}, async () => {
-  const { chromium } = await import("playwright");
+}, async (t) => {
+  const chromium = await loadChromiumOrSkip(t);
+  if (!chromium) return;
   const cwd = path.resolve(".");
   const uiServer = await startUiServer(cwd);
   const browser = await chromium.launch({ headless: true });
@@ -307,11 +324,57 @@ test("wrong results file shows a visible error and run list items stay valid", {
   }
 });
 
-test("clicking a comparison bar row selects the agent", {
-  skip: process.env.AGENTARENA_RUN_BROWSER_SMOKE !== "1",
+test("web-report preserves selected agent and language across reload", {
   timeout: 120000
-}, async () => {
-  const { chromium } = await import("playwright");
+}, async (t) => {
+  const chromium = await loadChromiumOrSkip(t);
+  if (!chromium) return;
+  const cwd = path.resolve(".");
+  const uiServer = await startUiServer(cwd);
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
+
+  try {
+    await page.goto(`http://127.0.0.1:${uiServer.port}/`, {
+      waitUntil: "networkidle",
+      timeout: 30000
+    });
+
+    await injectTestRun(page);
+    const selectedAgentKey = "agent-b@@unknown";
+    await page.locator(`[data-compare-agent-id="${selectedAgentKey}"]`).click();
+    await page.selectOption("#language-select", "en");
+    await page.waitForFunction(() => new URLSearchParams(window.location.search).get("lang") === "en");
+
+    const beforeReloadUrl = page.url();
+    assert.match(beforeReloadUrl, /run=test-run-001/);
+    assert.match(beforeReloadUrl, /agent=agent-b%40%40unknown/);
+
+    await page.reload({ waitUntil: "networkidle", timeout: 30000 });
+    await page.waitForFunction(() => {
+      const dashboard = document.getElementById("dashboard");
+      const selectedAgent = document.querySelector("[data-compare-agent-id='agent-b@@unknown']");
+      return Boolean(
+        dashboard &&
+          !dashboard.classList.contains("hidden") &&
+          selectedAgent?.classList.contains("active") &&
+          document.getElementById("app-title")?.textContent === "Web Report"
+      );
+    });
+
+    const appTitle = await page.locator("#app-title").textContent();
+    assert.equal(appTitle, "Web Report");
+  } finally {
+    await browser.close();
+    await uiServer.stop();
+  }
+});
+
+test("clicking a comparison bar row selects the agent", {
+  timeout: 120000
+}, async (t) => {
+  const chromium = await loadChromiumOrSkip(t);
+  if (!chromium) return;
   const cwd = path.resolve(".");
   const uiServer = await startUiServer(cwd);
   const browser = await chromium.launch({ headless: true });
@@ -342,10 +405,10 @@ test("clicking a comparison bar row selects the agent", {
 });
 
 test("clicking the selected compare table row toggles inline detail", {
-  skip: process.env.AGENTARENA_RUN_BROWSER_SMOKE !== "1",
   timeout: 120000
-}, async () => {
-  const { chromium } = await import("playwright");
+}, async (t) => {
+  const chromium = await loadChromiumOrSkip(t);
+  if (!chromium) return;
   const cwd = path.resolve(".");
   const uiServer = await startUiServer(cwd);
   const browser = await chromium.launch({ headless: true });

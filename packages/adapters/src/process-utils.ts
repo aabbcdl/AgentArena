@@ -103,6 +103,17 @@ export async function runProcess(
     let resolved = false;
     let closeSignal: NodeJS.Signals | undefined;
     let processError: string | undefined;
+    let timeoutHandle: NodeJS.Timeout | undefined;
+    let sigkillHandle: NodeJS.Timeout | undefined;
+
+    const finish = (result: ProcessResult) => {
+      if (resolved) return;
+      resolved = true;
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+      if (sigkillHandle) clearTimeout(sigkillHandle);
+      signal?.removeEventListener("abort", onAbort);
+      resolve(result);
+    };
 
     const cleanup = () => {
       if (child && !child.killed && child.pid) {
@@ -115,12 +126,13 @@ export async function runProcess(
             } catch {
               if (child) child.kill("SIGTERM");
             }
-            setTimeout(() => {
+            sigkillHandle = setTimeout(() => {
               try {
                 process.kill(-pid, "SIGKILL");
               } catch {
                 if (child && !child.killed) child.kill("SIGKILL");
               }
+              sigkillHandle = undefined;
             }, 2000);
           } else {
             // Use taskkill to kill the process tree on Windows
@@ -136,14 +148,6 @@ export async function runProcess(
       }
     };
 
-    const finish = (result: ProcessResult) => {
-      if (resolved) return;
-      resolved = true;
-      clearTimeout(timeoutHandle);
-      signal?.removeEventListener("abort", onAbort);
-      resolve(result);
-    };
-
     const onAbort = () => {
       cleanup();
       finish({
@@ -156,20 +160,10 @@ export async function runProcess(
       });
     };
 
-    const timeoutHandle = setTimeout(() => {
+    const onTimeout = () => {
       timedOut = true;
       cleanup();
-      // Wait a bit for the process to actually terminate
-      setTimeout(() => {
-        finish({
-          exitCode: null,
-          stdout,
-          stderr: `${stderr}\n${formatTimeoutMessage(timeoutMs)}`.trim(),
-          timedOut: true,
-          signal: "SIGTERM"
-        });
-      }, 1000);
-    }, timeoutMs);
+    };
 
     try {
       child = spawn(command, args, {
@@ -187,7 +181,6 @@ export async function runProcess(
       }
       signal?.addEventListener("abort", onAbort, { once: true });
     } catch (error) {
-      clearTimeout(timeoutHandle);
       const errorMessage = error instanceof Error ? error.message : String(error);
       finish({
         exitCode: -1,
@@ -198,6 +191,8 @@ export async function runProcess(
       });
       return;
     }
+
+    timeoutHandle = setTimeout(onTimeout, timeoutMs);
 
     let stdoutBytes = 0;
     let stderrBytes = 0;
@@ -229,7 +224,6 @@ export async function runProcess(
     });
 
     child.on("error", (error: ProcessError) => {
-      clearTimeout(timeoutHandle);
       processError = error.message;
       finish({
         exitCode: error.exitCode ?? -1,
@@ -242,7 +236,6 @@ export async function runProcess(
     });
 
     child.on("close", (exitCode, closeSignalValue) => {
-      clearTimeout(timeoutHandle);
       closeSignal = closeSignalValue ?? undefined;
       const timeoutSuffix = timedOut ? `\n${formatTimeoutMessage(timeoutMs)}` : "";
       const errorSuffix = processError ? `\nProcess error: ${processError}` : "";
@@ -255,7 +248,6 @@ export async function runProcess(
       });
     });
 
-    // Handle process not responding
     child.on("disconnect", () => {
       if (!resolved) {
         stderr += "\nProcess disconnected unexpectedly.";

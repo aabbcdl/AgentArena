@@ -33,6 +33,9 @@ export interface ParsedArgs {
   tokenBudget?: number;
   categories?: string[];
   rotationId?: string;
+  welcome?: boolean;
+  verbose?: boolean;
+  format?: 'human' | 'json';
 }
 
 export function printHelp(): void {
@@ -65,6 +68,7 @@ Run Command:
     --cleanup-workspaces       Remove agent workspace directories after run
     --max-concurrency <n>      Maximum number of agents to run in parallel (default: 1)
     --json                     Output results as JSON
+    --verbose, -v              Show verbose error messages with stack traces
 
   Scoring Options:
     --score-mode <mode>        Scoring mode (practical, balanced, issue-resolution, efficiency-first, rotating-tasks, comprehensive)
@@ -143,6 +147,9 @@ UI Command:
     --port <port>              Server port (default: 4320)
     --no-open                  Don't open browser automatically
 
+Global Options:
+  -w, --welcome                Show welcome message with getting started tips
+
 Examples:
   # Run a basic benchmark with demo adapters
   agentarena run --repo . --task examples/taskpacks/demo-repo-health.json --agents demo-fast,demo-thorough
@@ -192,11 +199,26 @@ export function parseArgs(argv: string[]): ParsedArgs {
     updateSnapshots: false,
     cleanupWorkspaces: false,
     json: false,
-    force: false
+    force: false,
+    verbose: false,
+    format: 'human' as const,
+    welcome: false
   };
 
   const args = [...argv];
-  parsed.command = args.shift();
+
+  // 找到 command（第一个不以 "-" 开头的参数）
+  let commandIndex = -1;
+  for (let i = 0; i < args.length; i++) {
+    if (!args[i].startsWith("-")) {
+      commandIndex = i;
+      break;
+    }
+  }
+
+  if (commandIndex >= 0) {
+    parsed.command = args.splice(commandIndex, 1)[0];
+  }
 
   while (args.length > 0) {
     const token = args.shift();
@@ -326,9 +348,6 @@ export function parseArgs(argv: string[]): ParsedArgs {
       case "--cleanup-workspaces":
         parsed.cleanupWorkspaces = true;
         break;
-      case "--json":
-        parsed.json = true;
-        break;
       case "--template":
         parsed.templateName = args.shift();
         if (!parsed.templateName) {
@@ -432,13 +451,33 @@ export function parseArgs(argv: string[]): ParsedArgs {
         }
         break;
       }
+      case "--verbose":
+      case "-v":
+        parsed.verbose = true;
+        break;
+      case "--format": {
+        const formatValue = args.shift();
+        if (!formatValue || (formatValue !== 'json' && formatValue !== 'human')) {
+          throw new Error("--format requires 'json' or 'human'. Example: --format json");
+        }
+        parsed.format = formatValue;
+        parsed.json = formatValue === 'json';
+        break;
+      }
+      case "--json":
+        parsed.format = 'json';
+        parsed.json = true;
+        break;
+      case "--welcome":
+      case "-w":
+        parsed.welcome = true;
+        break;
       case "--help":
       case "-h":
         printHelp();
         process.exit(0);
         break; // eslint-disable-line no-fallthrough
       case "--version":
-      case "-v":
         parsed.command = "version";
         return parsed;
       default:

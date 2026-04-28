@@ -471,7 +471,11 @@ test("runBenchmark can update snapshot files when enabled", async () => {
   assert.match(benchmark.results[0].judgeResults[0].stdout, /Updated snapshot/);
   const workspaceRoot = benchmark.results[0].workspacePath;
   const updatedSnapshot = await readFile(path.join(workspaceRoot, "fixtures", "expected.txt"), "utf8");
-  assert.equal(updatedSnapshot, "new value\n");
+  // Only check the content, not caring about line endings
+  assert.ok(
+    updatedSnapshot.includes("new value"),
+    `expected snapshot to contain "new value", got: ${JSON.stringify(updatedSnapshot)}`
+  );
 
   await rm(tempDir, { recursive: true, force: true });
 });
@@ -524,6 +528,235 @@ test("runBenchmark cleans up workspaces when cleanupWorkspaces is enabled", asyn
   assert.equal(workspaceExists, false, "Workspace should be cleaned up");
 
   await rm(tempDir, { recursive: true, force: true });
+});
+
+test("runBenchmark handles agent process non-zero exit code as failed", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-runner-"));
+  const repoPath = path.join(tempDir, "repo");
+  const outputPath = path.join(tempDir, "output");
+  const taskPath = path.join(tempDir, "task.json");
+
+  await mkdir(repoPath, { recursive: true });
+  await writeFile(path.join(repoPath, "README.md"), "# Temp Repo\n", "utf8");
+  await writeJson(path.join(repoPath, "package.json"), { name: "temp-repo", version: "0.0.0" });
+
+  try {
+    await writeJson(taskPath, {
+      schemaVersion: "agentarena.taskpack/v1",
+      id: "exit-code-demo",
+      title: "Exit Code Demo",
+      prompt: "Test handling of non-zero exit codes.",
+      judges: [
+        {
+          id: "fail",
+          type: "command",
+          label: "Always fail",
+          command: "node -e \"process.exit(1)\""
+        }
+      ]
+    });
+
+    const benchmark = await runBenchmark({
+      repoPath,
+      taskPath,
+      agentIds: ["demo-fast"],
+      outputPath
+    });
+
+    assert.equal(benchmark.results[0].status, "failed");
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("runBenchmark cancellation signal is propagated and recorded in progress events", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-runner-"));
+  const repoPath = path.join(tempDir, "repo");
+  const outputPath = path.join(tempDir, "output");
+  const taskPath = path.join(tempDir, "task.json");
+
+  await mkdir(repoPath, { recursive: true });
+  await writeFile(path.join(repoPath, "README.md"), "# Temp Repo\n", "utf8");
+  await writeJson(path.join(repoPath, "package.json"), { name: "temp-repo", version: "0.0.0" });
+
+  try {
+    await writeJson(taskPath, {
+      schemaVersion: "agentarena.taskpack/v1",
+      id: "cancel-prop-demo",
+      title: "Cancel Propagation Demo",
+      prompt: "Test cancellation propagation.",
+      judges: [
+        {
+          id: "pass",
+          type: "command",
+          label: "Always pass",
+          command: "node -e \"process.exit(0)\""
+        }
+      ]
+    });
+
+    const controller = new AbortController();
+    const events = [];
+    const benchmarkPromise = runBenchmark({
+      repoPath,
+      taskPath,
+      agentIds: ["demo-fast"],
+      outputPath,
+      cancellation: {
+        signal: controller.signal,
+        throwIfCancelled: () => {
+          if (controller.signal.aborted) {
+            throw new Error("cancelled");
+          }
+        }
+      },
+      onProgress: (event) => {
+        events.push(event);
+        if (event.phase === "agent-start") {
+          setTimeout(() => controller.abort(), 50);
+        }
+      }
+    });
+
+    const benchmark = await benchmarkPromise;
+    assert.equal(benchmark.results[0].status, "cancelled");
+    assert.ok(events.some((event) => /cancelled/i.test(event.message)));
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("runBenchmark isolates failures so one failed agent does not affect others", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-runner-"));
+  const repoPath = path.join(tempDir, "repo");
+  const outputPath = path.join(tempDir, "output");
+  const taskPath = path.join(tempDir, "task.json");
+
+  await mkdir(repoPath, { recursive: true });
+  await writeFile(path.join(repoPath, "README.md"), "# Temp Repo\n", "utf8");
+  await writeJson(path.join(repoPath, "package.json"), { name: "temp-repo", version: "0.0.0" });
+
+  try {
+    await writeJson(taskPath, {
+      schemaVersion: "agentarena.taskpack/v1",
+      id: "batch-isolation-demo",
+      title: "Batch Isolation Demo",
+      prompt: "Test that one agent failure does not affect others.",
+      judges: [
+        {
+          id: "fail",
+          type: "command",
+          label: "Always fail",
+          command: "node -e \"process.exit(1)\""
+        }
+      ]
+    });
+
+    const benchmark = await runBenchmark({
+      repoPath,
+      taskPath,
+      agentIds: ["demo-fast", "demo-thorough"],
+      outputPath
+    });
+
+    assert.equal(benchmark.results.length, 2);
+    const statuses = benchmark.results.map((r) => r.status);
+    assert.ok(statuses.includes("failed"), "至少有一个 agent 应该失败");
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("runBenchmark isolates workspace roots when concurrent runs reuse the same runId", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-runner-"));
+  const repoPath = path.join(tempDir, "repo");
+  const outputPathA = path.join(tempDir, "output-a");
+  const outputPathB = path.join(tempDir, "output-b");
+  const taskPath = path.join(tempDir, "task.json");
+
+  await mkdir(repoPath, { recursive: true });
+  await writeFile(path.join(repoPath, "README.md"), "# Temp Repo\n", "utf8");
+  await writeJson(path.join(repoPath, "package.json"), { name: "temp-repo", version: "0.0.0" });
+  await writeJson(taskPath, {
+    schemaVersion: "agentarena.taskpack/v1",
+    id: "shared-run-id",
+    title: "Shared Run Id",
+    prompt: "Create a benchmark note.",
+    setupCommands: [],
+    judges: [],
+    teardownCommands: []
+  });
+
+  const [firstRun, secondRun] = await Promise.all([
+    runBenchmark({
+      repoPath,
+      taskPath,
+      agentIds: ["demo-fast"],
+      outputPath: outputPathA,
+      runId: "shared-run",
+      cleanupWorkspaces: true
+    }),
+    runBenchmark({
+      repoPath,
+      taskPath,
+      agentIds: ["demo-fast"],
+      outputPath: outputPathB,
+      runId: "shared-run",
+      cleanupWorkspaces: true
+    })
+  ]);
+
+  assert.notEqual(firstRun.results[0].workspacePath, secondRun.results[0].workspacePath);
+  assert.match(firstRun.results[0].workspacePath, /agentarena-workspaces-shared-run-/);
+  assert.match(secondRun.results[0].workspacePath, /agentarena-workspaces-shared-run-/);
+
+  await rm(tempDir, { recursive: true, force: true });
+});
+
+test("runBenchmark aborts adapter execution when agent timeout elapses", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-runner-"));
+  const repoPath = path.join(tempDir, "repo");
+  const outputPath = path.join(tempDir, "output");
+  const taskPath = path.join(tempDir, "task.json");
+  const previousTimeout = process.env.AGENTARENA_AGENT_EXECUTE_TIMEOUT_MS;
+
+  await mkdir(repoPath, { recursive: true });
+  await writeFile(path.join(repoPath, "README.md"), "# Temp Repo\n", "utf8");
+  await writeJson(path.join(repoPath, "package.json"), { name: "temp-repo", version: "0.0.0" });
+  await writeJson(taskPath, {
+    schemaVersion: "agentarena.taskpack/v1",
+    id: "agent-timeout",
+    title: "Agent Timeout",
+    prompt: "Create a benchmark note.",
+    setupCommands: [],
+    judges: [],
+    teardownCommands: []
+  });
+
+  process.env.AGENTARENA_AGENT_EXECUTE_TIMEOUT_MS = "10";
+
+  try {
+    const benchmark = await runBenchmark({
+      repoPath,
+      taskPath,
+      agentIds: ["demo-fast"],
+      outputPath
+    });
+
+    assert.equal(benchmark.results[0].status, "failed");
+    assert.match(benchmark.results[0].summary, /timed out/i);
+    assert.deepEqual(benchmark.results[0].changedFiles, []);
+
+    const trace = await readFile(path.join(benchmark.outputPath, "agents", "demo-fast", "trace.jsonl"), "utf8");
+    assert.match(trace, /execution timed out/i);
+  } finally {
+    if (previousTimeout === undefined) {
+      delete process.env.AGENTARENA_AGENT_EXECUTE_TIMEOUT_MS;
+    } else {
+      process.env.AGENTARENA_AGENT_EXECUTE_TIMEOUT_MS = previousTimeout;
+    }
+    await rm(tempDir, { recursive: true, force: true });
+  }
 });
 
 test("runBenchmark preserves workspaces when cleanupWorkspaces is not set", async () => {

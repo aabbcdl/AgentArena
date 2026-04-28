@@ -66,8 +66,24 @@ async function resolveCopilotRuntime(config: {
 }
 
 function estimateTokenUsage(text: string): number {
-  // Rough estimate: 1 token ≈ 4 characters for English
-  return Math.ceil(text.length / 4);
+  // Rough estimate: 1 token ≈ 4 characters for English text
+  // Filter out likely non-LLM content (progress bars, ANSI codes, etc.)
+  const cleanedText = text
+    .replace(/\r/g, "") // Remove carriage returns
+    .replace(/[^\x20-\x7E\n]/g, "") // Keep only printable ASCII + newlines
+    .split("\n")
+    .filter(line => {
+      // Skip lines that look like progress bars or terminal artifacts
+      const trimmed = line.trim();
+      if (trimmed.length === 0) return false;
+      if (/^[█▓░▒▀▄■●▪▫▬►◄▲▼]+/.test(trimmed)) return false; // Progress bar chars
+      if (/^\d+%/.test(trimmed)) return false; // Percentage lines
+      if (/^\[.*\]/.test(trimmed) && trimmed.length < 50) return false; // Short bracket expressions
+      return true;
+    })
+    .join("\n");
+
+  return Math.ceil(cleanedText.length / 4);
 }
 
 export class CopilotAdapter implements AgentAdapter {
@@ -240,8 +256,8 @@ export class CopilotAdapter implements AgentAdapter {
     // Detect changed files
     const changedFilesHint: string[] = [];
     try {
-      const { execSync } = await import("node:child_process");
-      const gitDiff = execSync("git diff --name-only", {
+      const { execFileSync } = await import("node:child_process");
+      const gitDiff = execFileSync("git", ["diff", "--name-only"], {
         cwd: context.workspacePath,
         encoding: "utf8"
       }).trim();

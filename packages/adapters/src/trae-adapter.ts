@@ -279,8 +279,8 @@ export class TraeAdapter implements AgentAdapter {
 
     if (changedFilesHint.length === 0) {
       try {
-        const { execSync } = await import("node:child_process");
-        const gitDiff = execSync("git diff --name-only", {
+        const { execFileSync } = await import("node:child_process");
+        const gitDiff = execFileSync("git", ["diff", "--name-only"], {
           cwd: context.workspacePath,
           encoding: "utf8"
         }).trim();

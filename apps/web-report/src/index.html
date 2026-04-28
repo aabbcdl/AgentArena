@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -6,13 +6,16 @@
     <title>AgentArena Web Report</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;510;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="./styles.css" />
     <link rel="icon" href="./icon.svg" type="image/svg+xml" />
     <link rel="manifest" href="./manifest.json" />
     <meta name="theme-color" content="#6366f1" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   </head>
   <body>
+    <a id="skip-link" href="#dashboard" class="skip-link">Skip to main content</a>
     <!-- SVG图标系统 -->
     <svg style="display: none;">
       <symbol id="icon-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -103,6 +106,12 @@
     </svg>
 
     <div class="shell">
+      <!-- Update prompt banner -->
+      <div id="update-banner" class="update-banner hidden" role="alert" aria-live="polite">
+        <span id="update-banner-text" data-i18n="updateAvailable">A new version is available.</span>
+        <button id="update-reload" class="btn btn-sm btn-primary" type="button" data-i18n="reloadNow">Reload</button>
+      </div>
+
       <button id="sidebar-toggle" class="sidebar-toggle" type="button" aria-label="Toggle sidebar">
         <svg class="icon"><use href="#icon-menu"/></svg>
       </button>
@@ -137,36 +146,8 @@
               <span id="theme-label">Light</span>
             </button>
           </div>
-          <p id="app-description" class="muted brand-description">Load linked `summary.json` and `summary.md` files to inspect benchmark results interactively.</p>
+          <p id="app-description" class="muted brand-description">Benchmark the coding agents you already run locally, then inspect which setup actually performs better on your real repository tasks.</p>
         </div>
-
-        <details id="result-loader-panel" class="panel result-loader-panel">
-          <summary id="result-loader-summary">Open Existing Results (Fallback)</summary>
-          <p id="result-loader-message" class="muted result-loader-message" hidden></p>
-          <div id="loading-indicator" class="loading-indicator hidden">
-            <div class="loading-spinner"></div>
-            <span id="loading-message" class="muted">Loading results...</span>
-          </div>
-          <label class="file-picker recommended-picker">
-            <strong id="runs-folder-title">Recommended: Load Run Folder</strong>
-            <p id="runs-folder-hint" class="muted picker-help">Select one AgentArena run folder or the whole `.agentarena` results folder.</p>
-            <input id="runs-folder" type="file" webkitdirectory directory multiple />
-          </label>
-
-          <label class="file-picker">
-            <strong id="summary-file-title">Load Summary JSON</strong>
-            <p id="summary-file-hint" class="muted picker-help">Use this only if you want to open a single `summary.json` file.</p>
-            <input id="summary-file" type="file" accept=".json,application/json" />
-          </label>
-
-          <label class="file-picker">
-            <strong id="markdown-file-title">Optional: Load Markdown Summary</strong>
-            <p id="markdown-file-hint" class="muted picker-help">Adds share text, PR table, and markdown panel for the selected run.</p>
-            <input id="markdown-file" type="file" accept=".md,text/markdown,text/plain" />
-          </label>
-        </details>
-
-        <div id="run-info" class="panel hidden"></div>
 
         <section class="panel">
           <div class="panel-header">
@@ -190,108 +171,214 @@
       </aside>
 
       <main class="content">
-        <section id="launcher-panel" class="detail-card hidden">
-          <div class="panel-header">
-            <div>
-              <h2 id="launcher-title">Run Benchmark</h2>
-              <p id="launcher-compact-summary" class="muted"></p>
-            </div>
-            <div class="actions">
-              <span id="launcher-mode" class="muted">Local service</span>
-              <button id="launcher-toggle" type="button">
-                <svg class="icon"><use href="#icon-settings"/></svg>
-                Hide Setup
-              </button>
-            </div>
-          </div>
-          <div id="launcher-body">
-            <p id="launcher-description" class="muted"></p>
-            <div class="launcher-grid">
-              <label class="field">
-                <span id="launcher-repo-label">Repository Path</span>
-                <input id="launcher-repo-path" type="text" />
-              </label>
-              <label class="field">
-                <span id="launcher-task-select-label">Official Task Pack</span>
-                <select id="launcher-task-select"></select>
-              </label>
-              <div id="task-pack-detail" class="task-pack-detail hidden"></div>
-              <label class="field">
-                <span id="launcher-task-path-label">Task Pack Path</span>
-                <input id="launcher-task-path" type="text" />
-              </label>
-                            <label class="field field-wide" id="launcher-adhoc-prompt-field" style="display:none">
-                <span id="launcher-adhoc-prompt-label">Custom Prompt</span>
-                <textarea id="launcher-adhoc-prompt" rows="6" placeholder="Describe the task you want the selected agents to run."></textarea>
-                <span class="muted" id="launcher-adhoc-prompt-hint">Enter a prompt and AgentArena will create a temporary task pack for the selected agents.</span>
-              </label>
-              <label class="field" style="display:none">
-                <span id="launcher-output-label">Output Folder</span>
-                <input id="launcher-output-path" type="text" />
-              </label>
-            </div>
-            <section class="field">
-              <span id="launcher-agents-label">Agents</span>
-              <div id="launcher-agents" class="launcher-agents-container"></div>
+        <section class="workspace-home">
+          <div class="workspace-home-grid">
+            <section id="launcher-panel" class="detail-card workspace-card workspace-card-primary hidden">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow" id="launcher-eyebrow">Benchmark cockpit</p>
+                  <h2 id="launcher-title">Run Benchmark</h2>
+                  <p id="launcher-description" class="muted">Bring your own local agents, run them on the same repository task, and turn the result into a comparable report.</p>
+                </div>
+                <div class="actions">
+                  <span id="launcher-mode" class="muted">Local service</span>
+                  <button id="launcher-toggle" type="button">
+                    <svg class="icon"><use href="#icon-settings"/></svg>
+                    Hide Setup
+                  </button>
+                </div>
+              </div>
+              <p id="launcher-compact-summary" class="muted launcher-summary"></p>
+              <div class="launcher-grid launcher-grid-primary">
+                <label class="field">
+                  <span id="launcher-repo-label">Repository Path</span>
+                  <input id="launcher-repo-path" type="text" />
+                </label>
+                <label class="field">
+                  <span id="launcher-task-select-label">Official Task Pack</span>
+                  <select id="launcher-task-select"></select>
+                </label>
+                <label class="field">
+                  <span id="launcher-task-path-label">Task Pack Path</span>
+                  <input id="launcher-task-path" type="text" />
+                </label>
+                <div id="task-pack-detail" class="task-pack-detail hidden"></div>
+              </div>
+              <section class="field launcher-agents-field">
+                <div class="launcher-field-header">
+                  <span id="launcher-agents-label">Agents</span>
+                  <span class="muted" id="launcher-agents-note">Choose the local agents you want to benchmark in this run.</span>
+                </div>
+                <div id="launcher-agents" class="launcher-agents-container"></div>
+              </section>
+              <div class="launcher-actions launcher-actions-primary">
+                <div class="launcher-inline-options">
+                  <label class="checkbox">
+                    <input id="launcher-probe-auth" type="checkbox" checked />
+                    <span id="launcher-probe-auth-label">Probe auth before run</span>
+                  </label>
+                  <label class="field launcher-inline-field">
+                    <span id="launcher-concurrency-label">Concurrency</span>
+                    <input id="launcher-concurrency" type="number" min="1" max="10" value="1" />
+                  </label>
+                </div>
+                <button id="launcher-run" type="button" class="launcher-run-btn">
+                  <svg class="icon"><use href="#icon-play"/></svg>
+                  <span id="launcher-run-btn-label">Run Benchmark</span>
+                </button>
+              </div>
+              <p id="launcher-status" class="muted launcher-status"></p>
+              <div id="launcher-body" class="launcher-advanced">
+                <div class="launcher-advanced-grid">
+                  <div class="launcher-field">
+                    <label for="launcher-score-mode" class="launcher-label">
+                      <span data-i18n="scoringModeLabel">评分模式</span>
+                    </label>
+                    <select id="launcher-score-mode" class="launcher-select">
+                      <option value="practical" data-i18n="scorePresetPractical">🎯 实用模式 (默认)</option>
+                      <option value="balanced" data-i18n="scorePresetBalanced">⚖️ 平衡模式</option>
+                      <option value="issue-resolution" data-i18n="scorePresetIssueResolution">🎯 Issue Resolution</option>
+                      <option value="efficiency-first" data-i18n="scorePresetEfficiencyFirst">⚡ 效率优先</option>
+                      <option value="rotating-tasks" data-i18n="scorePresetRotatingTasks">🔄 Rotating Tasks</option>
+                      <option value="comprehensive" data-i18n="scorePresetComprehensive">🔬 综合评估</option>
+                    </select>
+                  </div>
+                  <label class="field field-wide" id="launcher-adhoc-prompt-field" style="display:none">
+                    <span id="launcher-adhoc-prompt-label">Custom Prompt</span>
+                    <textarea id="launcher-adhoc-prompt" rows="6" placeholder="Describe the task you want the selected agents to run."></textarea>
+                    <span class="muted" id="launcher-adhoc-prompt-hint">Enter a prompt and AgentArena will create a temporary task pack for the selected agents.</span>
+                  </label>
+                  <label class="field launcher-output-field" style="display:none">
+                    <span id="launcher-output-label">Output Folder</span>
+                    <input id="launcher-output-path" type="text" />
+                  </label>
+                </div>
+                <div id="launcher-validation" class="launcher-validation"></div>
+              </div>
+              <section id="launcher-progress" class="launcher-progress hidden">
+                <div class="panel-header">
+                  <h3 id="launcher-progress-title">Live Progress</h3>
+                </div>
+                <p id="launcher-current-agent" class="muted"></p>
+                <div id="launcher-log-list" class="launcher-log-list"></div>
+              </section>
             </section>
-            <div class="launcher-field">
-              <label for="launcher-score-mode" class="launcher-label">
-                <span data-i18n="scoringModeLabel">评分模式</span>
+            <details id="result-loader-panel" class="detail-card workspace-card workspace-card-secondary workspace-loader" open>
+              <summary id="result-loader-summary">Open Existing Results</summary>
+              <p id="result-loader-message" class="muted result-loader-message" hidden></p>
+              <div id="loading-indicator" class="loading-indicator hidden">
+                <div class="loading-spinner"></div>
+                <span id="loading-message" class="muted">Loading results...</span>
+              </div>
+              <label class="file-picker recommended-picker">
+                <strong id="runs-folder-title">Recommended: Load Run Folder</strong>
+                <p id="runs-folder-hint" class="muted picker-help">Load an existing run when you want to compare earlier baselines or inspect a saved result again.</p>
+                <input id="runs-folder" type="file" webkitdirectory directory multiple />
               </label>
-              <select id="launcher-score-mode" class="launcher-select">
-                <option value="practical" data-i18n="scorePresetPractical">🎯 实用模式 (默认)</option>
-                <option value="balanced" data-i18n="scorePresetBalanced">⚖️ 平衡模式</option>
-                <option value="issue-resolution" data-i18n="scorePresetIssueResolution">🎯 Issue Resolution</option>
-                <option value="efficiency-first" data-i18n="scorePresetEfficiencyFirst">⚡ 效率优先</option>
-                <option value="rotating-tasks" data-i18n="scorePresetRotatingTasks">🔄 Rotating Tasks</option>
-                <option value="comprehensive" data-i18n="scorePresetComprehensive">🔬 综合评估</option>
-              </select>
-            </div>
-            <div class="launcher-actions">
-              <label class="checkbox">
-                <input id="launcher-probe-auth" type="checkbox" checked />
-                <span id="launcher-probe-auth-label">Probe auth before run</span>
+              <label class="file-picker">
+                <strong id="summary-file-title">Load Summary JSON</strong>
+                <p id="summary-file-hint" class="muted picker-help">Use this only if you want to open a single `summary.json` file.</p>
+                <input id="summary-file" type="file" accept=".json,application/json" />
               </label>
-              <label class="field" style="display:inline-flex;align-items:center;gap:6px;min-width:auto">
-                <span id="launcher-concurrency-label" style="white-space:nowrap">Concurrency</span>
-                <input id="launcher-concurrency" type="number" min="1" max="10" value="1" style="width:60px" />
+              <label class="file-picker">
+                <strong id="markdown-file-title">Optional: Load Markdown Summary</strong>
+                <p id="markdown-file-hint" class="muted picker-help">Adds share text, PR table, and markdown panel for the selected run.</p>
+                <input id="markdown-file" type="file" accept=".md,text/markdown,text/plain" />
               </label>
-              <!-- Single primary action button -->
-              <button id="launcher-run" type="button" class="launcher-run-btn">
-                <svg class="icon"><use href="#icon-play"/></svg>
-                <span id="launcher-run-btn-label">Run Benchmark</span>
-              </button>
-            </div>
-            <div id="launcher-validation" class="launcher-validation"></div>
+            </details>
           </div>
-          <p id="launcher-status" class="muted"></p>
-          <section id="launcher-progress" class="launcher-progress hidden">
-            <div class="panel-header">
-              <h3 id="launcher-progress-title">Live Progress</h3>
-            </div>
-            <p id="launcher-current-agent" class="muted"></p>
-            <div id="launcher-log-list" class="launcher-log-list"></div>
-          </section>
         </section>
 
-        <section id="empty-state" class="hero hidden">
-          <p id="hero-eyebrow" class="eyebrow">AgentArena</p>
-          <h2 id="hero-title">Inspect one run without scrolling through a giant static page.</h2>
-          <p id="hero-description" class="muted">
-            AgentArena compares AI coding agents on the same repository task, then turns the result into a reviewable, shareable report.
-          </p>
-          <div class="hero-grid">
-            <article class="detail-card">
-              <h3 id="hero-what-title">What this page is for</h3>
-              <p id="hero-what-body" class="muted"></p>
-            </article>
-            <article class="detail-card">
-              <h3 id="hero-how-title">How to start</h3>
-              <ol id="hero-how-list" class="workflow-list"></ol>
-            </article>
+        <section id="empty-state" class="workspace-support hidden">
+          <div class="welcome-container">
+            <!-- Value Proposition -->
+            <div class="welcome-hero">
+              <div class="welcome-icon">
+                <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <rect width="64" height="64" rx="16" fill="url(#welcome-grad)"/>
+                  <path d="M16 44V22l16-8 16 8v16l-16 8-16-8z" stroke="#fff" stroke-width="2.5" fill="none" opacity="0.9"/>
+                  <path d="M16 22l16 8 16-8M32 30v16" stroke="#fff" stroke-width="2.5" opacity="0.6"/>
+                  <circle cx="32" cy="26" r="4" fill="#fff" opacity="0.9"/>
+                  <circle cx="20" cy="38" r="3" fill="#10b981" opacity="0.8"/>
+                  <circle cx="44" cy="38" r="3" fill="#818cf8" opacity="0.8"/>
+                  <defs><linearGradient id="welcome-grad" x1="0" y1="0" x2="64" y2="64"><stop stop-color="#6366f1"/><stop offset="1" stop-color="#4f46e5"/></linearGradient></defs>
+                </svg>
+              </div>
+              <p id="hero-eyebrow" class="eyebrow">AgentArena</p>
+              <h2 id="hero-title">Benchmark the local coding agents you already trust with your real work.</h2>
+              <p id="hero-description" class="muted">
+                Use the same repository, the same task, and the same judges to compare local agent setups or to baseline one agent over time.
+              </p>
+            </div>
+
+            <!-- Quick Start Steps -->
+            <div class="welcome-steps">
+              <h3 id="hero-how-title">Quick Start</h3>
+              <ol id="hero-how-list" class="workflow-list">
+                <li>
+                  <span class="step-number">1</span>
+                  <div>
+                    <strong>Load Existing Results</strong>
+                    <p class="muted">Click "Open Existing Results" below and select a run folder or summary.json file</p>
+                  </div>
+                </li>
+                <li>
+                  <span class="step-number">2</span>
+                  <div>
+                    <strong>Or Run a New Benchmark</strong>
+                    <p class="muted">Use the "Run Benchmark" panel to set up and execute a new comparison</p>
+                  </div>
+                </li>
+                <li>
+                  <span class="step-number">3</span>
+                  <div>
+                    <strong>Compare & Analyze</strong>
+                    <p class="muted">Review verdict cards, agent comparisons, and trace replays</p>
+                  </div>
+                </li>
+              </ol>
+            </div>
+
+            <!-- Demo Button -->
+            <div class="welcome-demo">
+              <button id="try-demo-btn" class="btn btn-primary btn-lg" type="button">
+                <svg class="icon"><use href="#icon-play"/></svg>
+                <span id="try-demo-text">Try Demo</span>
+              </button>
+              <p class="muted demo-hint" id="demo-hint">Load sample data to explore the interface</p>
+            </div>
+
+            <!-- What AgentArena Gives You -->
+            <div class="welcome-features">
+              <h3 id="hero-what-title">What AgentArena Gives You</h3>
+              <div class="features-grid">
+                <div class="feature-item">
+                  <span class="feature-icon">🎯</span>
+                  <div>
+                    <strong>Fair Comparison</strong>
+                    <p class="muted">Same repo, same task, same judges for all agents</p>
+                  </div>
+                </div>
+                <div class="feature-item">
+                  <span class="feature-icon">📊</span>
+                  <div>
+                    <strong>Rich Reports</strong>
+                    <p class="muted">Verdict cards, diff views, judge details, and trace replays</p>
+                  </div>
+                </div>
+                <div class="feature-item">
+                  <span class="feature-icon">🔄</span>
+                  <div>
+                    <strong>History Tracking</strong>
+                    <p class="muted">Track agent performance across multiple runs</p>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
-          <article class="detail-card" id="inspiration-credits" style="margin-top: var(--space-6);">
-            <h3 data-i18n="inspirationCreditsTitle">评分系统设计灵感来源</h3>
+
+          <details class="detail-card support-notes" id="inspiration-credits">
+            <summary data-i18n="inspirationCreditsTitle">评分系统设计灵感来源</summary>
             <div class="credits-grid">
               <div class="credit-item">
                 <span class="credit-icon">🎯</span>
@@ -316,19 +403,19 @@
               </div>
             </div>
             <p class="muted credit-disclaimer" data-i18n="creditDisclaimer">本实现完全独立，与上述项目无官方关联</p>
-          </article>
+          </details>
         </section>
 
         <section id="error-state" class="hero hidden">
-          <p class="eyebrow">Error</p>
+          <p class="eyebrow" data-i18n="failedToLoad">Error</p>
           <h2 id="error-title">Failed to load results</h2>
           <p id="error-message" class="muted"></p>
           <div class="hero-actions">
             <button id="error-retry" class="btn btn-primary" type="button">
               <svg class="icon"><use href="#icon-refresh"/></svg>
-              Try Again
+              <span data-i18n="tryAgain">Try Again</span>
             </button>
-            <button id="error-back" class="btn" type="button">Back to Start</button>
+            <button id="error-back" class="btn" type="button"><span data-i18n="backToStart">Back to Start</span></button>
           </div>
         </section>
 
@@ -359,113 +446,188 @@
             <button id="share-export-html-btn" type="button" class="btn btn-sm">🌐 <span data-i18n="exportHtml">导出 HTML</span></button>
             <button id="share-copy-link-btn" type="button" class="btn btn-sm">🔗 <span data-i18n="copyLink">复制分享链接</span></button>
             <button id="share-copy-summary-btn" type="button" class="btn btn-sm">📋 <span data-i18n="copySummary">复制摘要</span></button>
+            <button id="share-export-json-btn" type="button" class="btn btn-sm">💾 <span data-i18n="exportJson">导出 JSON</span></button>
+            <button id="share-import-json-btn" type="button" class="btn btn-sm">📂 <span data-i18n="importJson">导入 JSON</span></button>
+            <input type="file" id="import-json-file" accept=".json,.json.gz" style="display:none">
           </div>
           <p id="clipboard-status" class="muted"></p>
 
-          <!-- 首屏：结论区 -->
-          <section id="verdict-hero"></section>
-
-          <!-- 团队成本计算器 -->
-          <article class="detail-card" id="team-cost-section">
-            <h3>
-              <button class="section-toggle" type="button" data-section="team-cost">
-                💰 <span data-i18n="teamCostCalculatorTitle">团队成本计算器</span>
-              </button>
-            </h3>
-            <div class="section-content" id="team-cost-content" style="display: none;">
-              <div class="cost-calculator-controls">
-                <div class="cost-input-group">
-                  <label>
-                    <span data-i18n="teamSizeLabel">团队人数</span>
-                    <input type="number" id="team-size-input" value="10" min="1" max="100" />
-                  </label>
-                  <label>
-                    <span data-i18n="dailyRunsLabel">每日运行次数</span>
-                    <input type="number" id="daily-runs-input" value="5" min="1" max="50" />
-                  </label>
-                  <button id="recalculate-cost-btn" type="button" class="btn btn-sm" data-i18n="recalculateBtn">重新计算</button>
-                </div>
-              </div>
-              <div id="team-cost-table" class="cost-table"></div>
-            </div>
-          </article>
-
-          <!-- 历史排行榜 -->
-          <section id="leaderboard-section" class="detail-card hidden">
-            <div class="panel-header">
-              <h3 id="leaderboard-title">Historical Leaderboard</h3>
-            </div>
-            <div id="leaderboard-content"></div>
+          <section class="report-zone report-zone-summary">
+            <section id="verdict-hero"></section>
           </section>
 
-          <!-- 核心对比表 -->
-          <section id="agent-compare-section" class="detail-card">
-            <div class="panel-header">
-              <h3 id="agent-compare-title">Agent Compare</h3>
+          <section class="report-zone report-zone-compare">
+            <div class="report-zone-header">
+              <div>
+                <p class="eyebrow" id="compare-zone-eyebrow">Core comparison</p>
+                <h3 id="compare-zone-title">Core Comparison</h3>
+                <p id="compare-zone-description" class="muted">Review the current ranking first, then drill into why each agent won or failed.</p>
+              </div>
             </div>
-            <section class="detail-card" style="margin-bottom:1rem">
+            <section id="agent-compare-section" class="detail-card">
               <div class="panel-header">
-                <h4 id="score-weights-title">Score Weights</h4>
-                <button id="score-weights-reset" type="button">
-                  <svg class="icon"><use href="#icon-refresh"/></svg>
-                  Reset
-                </button>
+                <h3 id="agent-compare-title">Agent Compare</h3>
               </div>
-              <div class="filter-bar" id="score-weight-presets">
-                <span class="preset-label">评分预设:</span>
-                <button type="button" data-score-preset="practical" class="preset-btn active">🎯 实用模式</button>
-                <button type="button" data-score-preset="balanced" class="preset-btn">⚖️ 平衡模式</button>
-                <button type="button" data-score-preset="issue-resolution" class="preset-btn">🎯 Issue Resolution</button>
-                <button type="button" data-score-preset="efficiency-first" class="preset-btn">⚡ 效率优先</button>
-                <button type="button" data-score-preset="rotating-tasks" class="preset-btn">🔄 Rotating Tasks</button>
-                <button type="button" data-score-preset="comprehensive" class="preset-btn">🔬 综合评估</button>
+              <section class="detail-card compare-settings-card">
+                <div class="panel-header">
+                  <h4 id="score-weights-title">Score Weights</h4>
+                  <button id="score-weights-reset" type="button">
+                    <svg class="icon"><use href="#icon-refresh"/></svg>
+                    Reset
+                  </button>
+                </div>
+                <div class="filter-bar" id="score-weight-presets">
+                  <span class="preset-label">评分预设:</span>
+                  <button type="button" data-score-preset="practical" class="preset-btn active">🎯 实用模式</button>
+                  <button type="button" data-score-preset="balanced" class="preset-btn">⚖️ 平衡模式</button>
+                  <button type="button" data-score-preset="issue-resolution" class="preset-btn">🎯 Issue Resolution</button>
+                  <button type="button" data-score-preset="efficiency-first" class="preset-btn">⚡ 效率优先</button>
+                  <button type="button" data-score-preset="rotating-tasks" class="preset-btn">🔄 Rotating Tasks</button>
+                  <button type="button" data-score-preset="comprehensive" class="preset-btn">🔬 综合评估</button>
+                </div>
+                <div class="weight-slider-section">
+                  <details open>
+                    <summary>⚙️ 自定义权重（高级）</summary>
+                    <div class="weight-sliders" id="weight-sliders"></div>
+                  </details>
+                </div>
+              </section>
+              <div class="filter-bar">
+                <select id="compare-status-filter" aria-label="Filter by status">
+                  <option value="all">All Statuses</option>
+                  <option value="success">Success</option>
+                  <option value="failed">Failed</option>
+                </select>
+                <select id="compare-sort" aria-label="Sort agents">
+                  <option value="status">Status</option>
+                  <option value="duration">Duration (fastest first)</option>
+                  <option value="tokens">Tokens (high to low)</option>
+                  <option value="cost">Cost (low to high)</option>
+                  <option value="changed">Changed Files (high to low)</option>
+                  <option value="judges">Judge Pass Rate (high to low)</option>
+                  <option value="precision">Diff Precision (high to low)</option>
+                </select>
               </div>
+              <p id="compare-sort-hint" class="muted"></p>
+              <div id="compare-table" class="compare-table-wrap"></div>
+            </section>
+            <section id="comparison-bars" class="detail-card report-support-card"></section>
+            <section id="failures-section" class="detail-card hidden"></section>
+          </section>
 
-              <div class="weight-slider-section">
-                <details open>
-                  <summary>⚙️ 自定义权重（高级）</summary>
-                  <div class="weight-sliders" id="weight-sliders">
-                    <!-- Sliders will be generated dynamically by JS -->
-                  </div>
-                </details>
+          <section class="report-zone report-zone-diagnostics">
+            <div class="report-zone-header">
+              <div>
+                <p class="eyebrow" id="diagnostics-zone-eyebrow">Diagnostics</p>
+                <h3 id="diagnostics-zone-title">Failure Diagnosis</h3>
+                <p id="diagnostics-zone-description" class="muted">Inspect judge failures, changed files, trace steps, and side-by-side code differences.</p>
+              </div>
+            </div>
+            <section class="detail-card">
+              <div class="panel-header">
+                <h3 id="judge-filters-title">Judge Filters</h3>
+              </div>
+              <div class="filter-bar">
+                <input id="judge-search" type="search" placeholder="Search label, target, expectation" />
+                <select id="judge-type-filter" aria-label="Filter by judge type">
+                  <option value="all">All Types</option>
+                </select>
+                <select id="judge-status-filter" aria-label="Filter by judge status">
+                  <option value="all">All Statuses</option>
+                  <option value="pass">Pass</option>
+                  <option value="fail">Fail</option>
+                </select>
               </div>
             </section>
-            <div class="filter-bar">
-              <select id="compare-status-filter" aria-label="Filter by status">
-                <option value="all">All Statuses</option>
-                <option value="success">Success</option>
-                <option value="failed">Failed</option>
-              </select>
-              <select id="compare-sort" aria-label="Sort agents">
-                <option value="status">Status</option>
-                <option value="duration">Duration (fastest first)</option>
-                <option value="tokens">Tokens (high to low)</option>
-                <option value="cost">Cost (low to high)</option>
-                <option value="changed">Changed Files (high to low)</option>
-                <option value="judges">Judge Pass Rate (high to low)</option>
-                <option value="precision">Diff Precision (high to low)</option>
-              </select>
-            </div>
-            <p id="compare-sort-hint" class="muted"></p>
-            <div id="compare-table" class="compare-table-wrap"></div>
+            <section class="result-layout">
+              <div id="result-summary" class="card result-summary"></div>
+              <div id="result-details" class="result-details"></div>
+            </section>
+            <section id="trace-replay-section" class="detail-card hidden">
+              <div class="panel-header">
+                <h3 id="trace-replay-title">Trace Replay</h3>
+                <div class="trace-replay-controls">
+                  <button id="trace-replay-prev" type="button" class="btn btn-sm" disabled title="Previous Step">
+                    <svg class="icon"><use href="#icon-refresh"/></svg>
+                    Prev
+                  </button>
+                  <span id="trace-replay-step" class="muted">Step 0/0</span>
+                  <button id="trace-replay-next" type="button" class="btn btn-sm" disabled title="Next Step">
+                    Next
+                    <svg class="icon"><use href="#icon-refresh"/></svg>
+                  </button>
+                  <button id="trace-replay-play" type="button" class="btn btn-sm" title="Auto Play">
+                    <svg class="icon"><use href="#icon-play"/></svg>
+                    Play
+                  </button>
+                </div>
+              </div>
+              <div id="trace-replay-timeline" class="trace-replay-timeline">
+                <div class="timeline-track"></div>
+                <div class="timeline-progress"></div>
+                <div class="timeline-markers"></div>
+              </div>
+              <div id="trace-replay-summary" class="trace-replay-summary">
+                <div class="summary-grid">
+                  <div class="summary-item"><span class="summary-label">Total Events</span><strong id="trace-total-events">0</strong></div>
+                  <div class="summary-item"><span class="summary-label">Duration</span><strong id="trace-duration">0ms</strong></div>
+                  <div class="summary-item"><span class="summary-label">Errors</span><strong id="trace-errors">0</strong></div>
+                  <div class="summary-item"><span class="summary-label">Agent</span><strong id="trace-agent">-</strong></div>
+                </div>
+              </div>
+              <div id="trace-replay-content" class="trace-replay-content">
+                <div class="trace-empty-state">
+                  <p>Select a run to view trace replay</p>
+                </div>
+              </div>
+            </section>
+            <article class="detail-card" id="code-review-section">
+              <h3>
+                <button class="section-toggle" type="button" data-section="code-review">
+                  🔍 <span data-i18n="codeReviewTitle">代码变更对比 (Code Review)</span>
+                </button>
+              </h3>
+              <div class="section-content" id="code-review-content" style="display: none;">
+                <div class="code-review-controls">
+                  <label data-i18n="codeReviewSelectLabel">选择 Agent 对比:</label>
+                  <div id="code-review-agent-selector" class="agent-checkboxes">
+                    <!-- Checkboxes will be added dynamically -->
+                  </div>
+                  <button id="code-review-compare-btn" type="button" class="btn btn-primary" disabled data-i18n="codeReviewCompareBtn">开始对比</button>
+                </div>
+                <div id="code-review-diff-viewer" class="diff-viewer-container">
+                  <div class="diff-empty-state">
+                    <p data-i18n="codeReviewEmptyState">选择至少 2 个 Agent 进行对比</p>
+                  </div>
+                </div>
+              </div>
+            </article>
+            <section id="markdown-panel" class="detail-card hidden">
+              <div class="panel-header">
+                <h3 id="markdown-summary-title">Markdown Summary</h3>
+                <span id="markdown-status" class="muted">Not loaded</span>
+              </div>
+              <div class="markdown-grid">
+                <div id="markdown-highlights" class="markdown-highlights"></div>
+                <div id="markdown-content" class="markdown-render"></div>
+              </div>
+            </section>
           </section>
 
-          <!-- 横向条形对比图 -->
-          <section id="comparison-bars"></section>
-
-          <!-- 失败与风险区 -->
-          <section id="failures-section" class="hidden"></section>
-
-          <!-- 高级分析（折叠） -->
           <details id="advanced-analysis" class="advanced-details">
             <summary id="advanced-analysis-summary">Advanced Analysis</summary>
-
-            <section id="task-brief" class="detail-card"></section>
-
-            <section id="run-compare-section" class="detail-card">
-              <div class="panel-header">
-                <h3 id="run-compare-title">Run Compare</h3>
-              </div>
+            <div class="history-layout">
+              <div class="history-main">
+                <section id="leaderboard-section" class="detail-card hidden">
+                  <div class="panel-header">
+                    <h3 id="leaderboard-title">Historical Leaderboard</h3>
+                  </div>
+                  <div id="leaderboard-content"></div>
+                </section>
+                <section id="run-compare-section" class="detail-card">
+                  <div class="panel-header">
+                    <h3 id="run-compare-title">Run Compare</h3>
+                  </div>
               <div class="filter-bar">
                 <select id="run-compare-scope" aria-label="Run compare scope">
                   <option value="current-task">Current Task Only</option>
@@ -481,10 +643,10 @@
               <div id="run-compare-table" class="compare-table-wrap"></div>
             </section>
 
-            <section id="cross-run-compare-section" class="detail-card">
-              <div class="panel-header">
-                <h3 id="cross-run-compare-title">Cross-Run Compare</h3>
-                <button id="cross-run-toggle-select" type="button">
+                <section id="cross-run-compare-section" class="detail-card">
+                  <div class="panel-header">
+                    <h3 id="cross-run-compare-title">Cross-Run Compare</h3>
+                    <button id="cross-run-toggle-select" type="button">
                   <svg class="icon"><use href="#icon-list"/></svg>
                   Select Runs to Compare
                 </button>
@@ -518,18 +680,18 @@
               </div>
             </section>
 
-            <section id="run-diff-section" class="detail-card">
-              <div class="panel-header">
-                <h3 id="run-diff-title">Run-to-Run Agent Diff</h3>
-              </div>
+                <section id="run-diff-section" class="detail-card">
+                  <div class="panel-header">
+                    <h3 id="run-diff-title">Run-to-Run Agent Diff</h3>
+                  </div>
               <p id="run-diff-description" class="muted">Compare the selected run against the previous run with the same task title.</p>
               <div id="run-diff-table" class="compare-table-wrap"></div>
             </section>
 
-            <section id="agent-trend-section" class="detail-card">
-              <div class="panel-header">
-                <h3 id="agent-trend-title">Agent Trend</h3>
-              </div>
+                <section id="agent-trend-section" class="detail-card">
+                  <div class="panel-header">
+                    <h3 id="agent-trend-title">Agent Trend</h3>
+                  </div>
               <p id="agent-trend-description" class="muted">Track the selected agent across runs for the current task title.</p>
               <div id="agent-trend-chart" class="agent-trend-chart">
                 <canvas id="trend-canvas" width="600" height="200"></canvas>
@@ -537,69 +699,41 @@
               <div id="agent-trend-table" class="compare-table-wrap"></div>
             </section>
 
-            <section id="preflight-section" class="detail-card">
-              <div class="panel-header">
-                <h3 id="preflight-title">Adapter Preflight</h3>
               </div>
-              <div id="preflights" class="preflights"></div>
-            </section>
-
-            <section class="detail-card">
-              <div class="panel-header">
-                <h3 id="judge-filters-title">Judge Filters</h3>
-              </div>
-              <div class="filter-bar">
-                <input id="judge-search" type="search" placeholder="Search label, target, expectation" />
-                <select id="judge-type-filter" aria-label="Filter by judge type">
-                  <option value="all">All Types</option>
-                </select>
-                <select id="judge-status-filter" aria-label="Filter by judge status">
-                  <option value="all">All Statuses</option>
-                  <option value="pass">Pass</option>
-                  <option value="fail">Fail</option>
-                </select>
-              </div>
-            </section>
-
-            <section class="result-layout">
-              <div id="result-summary" class="card result-summary"></div>
-              <div id="result-details" class="result-details"></div>
-            </section>
-
-            <section id="markdown-panel" class="detail-card hidden">
-              <div class="panel-header">
-                <h3 id="markdown-summary-title">Markdown Summary</h3>
-                <span id="markdown-status" class="muted">Not loaded</span>
-              </div>
-              <div class="markdown-grid">
-                <div id="markdown-highlights" class="markdown-highlights"></div>
-                <div id="markdown-content" class="markdown-render"></div>
-              </div>
-            </section>
-
-            <!-- Code Review Section -->
-            <article class="detail-card" id="code-review-section">
-              <h3>
-                <button class="section-toggle" type="button" data-section="code-review">
-                  🔍 <span data-i18n="codeReviewTitle">代码变更对比 (Code Review)</span>
-                </button>
-              </h3>
-              <div class="section-content" id="code-review-content" style="display: none;">
-                <div class="code-review-controls">
-                  <label data-i18n="codeReviewSelectLabel">选择 Agent 对比:</label>
-                  <div id="code-review-agent-selector" class="agent-checkboxes">
-                    <!-- Checkboxes will be added dynamically -->
+              <aside class="history-side">
+                <div id="run-info" class="detail-card hidden"></div>
+                <section id="task-brief" class="detail-card"></section>
+                <section id="preflight-section" class="detail-card">
+                  <div class="panel-header">
+                    <h3 id="preflight-title">Adapter Preflight</h3>
                   </div>
-                  <button id="code-review-compare-btn" type="button" class="btn btn-primary" disabled data-i18n="codeReviewCompareBtn">开始对比</button>
-                </div>
-                <div id="code-review-diff-viewer" class="diff-viewer-container">
-                  <!-- Side-by-side diff will be rendered here -->
-                  <div class="diff-empty-state">
-                    <p data-i18n="codeReviewEmptyState">选择至少 2 个 Agent 进行对比</p>
+                  <div id="preflights" class="preflights"></div>
+                </section>
+                <article class="detail-card" id="team-cost-section">
+                  <h3>
+                    <button class="section-toggle" type="button" data-section="team-cost">
+                      💰 <span data-i18n="teamCostCalculatorTitle">团队成本计算器</span>
+                    </button>
+                  </h3>
+                  <div class="section-content" id="team-cost-content" style="display: none;">
+                    <div class="cost-calculator-controls">
+                      <div class="cost-input-group">
+                        <label>
+                          <span data-i18n="teamSizeLabel">团队人数</span>
+                          <input type="number" id="team-size-input" value="10" min="1" max="100" />
+                        </label>
+                        <label>
+                          <span data-i18n="dailyRunsLabel">每日运行次数</span>
+                          <input type="number" id="daily-runs-input" value="5" min="1" max="50" />
+                        </label>
+                        <button id="recalculate-cost-btn" type="button" class="btn btn-sm" data-i18n="recalculateBtn">重新计算</button>
+                      </div>
+                    </div>
+                    <div id="team-cost-table" class="cost-table"></div>
                   </div>
-                </div>
-              </div>
-            </article>
+                </article>
+              </aside>
+            </div>
           </details>
         </section>
       </main>
@@ -607,8 +741,47 @@
 
     <script type="module" src="./app.js"></script>
     <script>
+      window.__agentarenaSwRegistration = null;
       if ("serviceWorker" in navigator) {
-        navigator.serviceWorker.register("./sw.js").catch(() => {});
+        navigator.serviceWorker.register("./sw.js").then((registration) => {
+          window.__agentarenaSwRegistration = registration;
+          const showUpdatePrompt = () => {
+            window.__agentarenaSwRegistration = registration;
+            if (typeof showUpdateBanner === "function") {
+              showUpdateBanner(registration);
+            } else {
+              const banner = document.getElementById("update-banner");
+              if (banner) banner.classList.remove("hidden");
+            }
+          };
+
+          if (registration.waiting && navigator.serviceWorker.controller) {
+            showUpdatePrompt();
+          }
+
+          // Listen for updates
+          registration.addEventListener("updatefound", () => {
+            const newWorker = registration.installing;
+            if (!newWorker) {
+              return;
+            }
+            newWorker.addEventListener("statechange", () => {
+              if (newWorker.state === "installed" && navigator.serviceWorker.controller) {
+                showUpdatePrompt();
+              }
+            });
+          });
+        }).catch(() => {});
+
+        // Handle skipped waiting activation
+        let refreshing = false;
+        navigator.serviceWorker.addEventListener("controllerchange", () => {
+          if (refreshing) {
+            return;
+          }
+          refreshing = true;
+          window.location.reload();
+        });
       }
     </script>
   </body>

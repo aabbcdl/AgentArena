@@ -70,7 +70,7 @@ test("folder loader attaches trace file handles to run results", async () => {
 
   const loaders = createResultLoaders({
     state,
-    localText: (zh, en) => en,
+    localText: (_zh, en) => en,
     render: () => {},
     renderMarkdownPanel: () => {},
     applySingleRun: () => {},

@@ -378,10 +378,6 @@ export function createLauncherModule(deps) {
     // Use empty defaults when service info is missing
     setHidden(elements.launcherPanel, false);
     
-    if (!state.run && !state.runInProgress) {
-      state.launcherExpanded = true;
-    }
-
     const info = state.serviceInfo || {};
     
     // Restore saved config once on first render
@@ -491,9 +487,10 @@ export function createLauncherModule(deps) {
       elements.launcherTaskSelect.value = matching ? matching.path : "";
     }
   
-    const selectedTaskPack =
-      state.availableTaskPacks.find((taskPack) => taskPack.path === elements.launcherTaskPath.value) ?? null;
-  
+    // Get selected task pack from select value first (for dropdown changes), then from task path
+    const selectedTaskPackPath = elements.launcherTaskSelect.value || elements.launcherTaskPath.value;
+    const selectedTaskPack = state.availableTaskPacks.find((taskPack) => taskPack.path === selectedTaskPackPath) ?? null;
+
     renderTaskPackDetail(selectedTaskPack);
   
     const realAdapters = state.availableAdapters.filter(
@@ -1525,6 +1522,7 @@ export function createLauncherModule(deps) {
       syncLauncherVariantsWithAdapters,
       summarizeLauncherSelection,
       renderTaskPackDetail,
+      saveLauncherConfig,
       renderLauncher,
       detectService,
       pollRunStatus,

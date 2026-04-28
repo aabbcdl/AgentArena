@@ -1,3 +1,5 @@
+import { resultStore } from "../utils/storage.js";
+
 export function createDetailFragments({
   state,
   judgeFilters,
@@ -11,7 +13,8 @@ export function createDetailFragments({
   formatCompositeScore,
   formatTestMetric,
   formatLintMetric,
-  baseAgentLabel
+  baseAgentLabel,
+  render
 }) {
   function renderStepCards(title, steps) {
     const content =
@@ -395,6 +398,9 @@ export function createDetailFragments({
     const exportHtmlBtn = container.querySelector("#share-export-html-btn");
     const copyLinkBtn = container.querySelector("#share-copy-link-btn");
     const copySummaryBtn = container.querySelector("#share-copy-summary-btn");
+    const exportJsonBtn = container.querySelector("#share-export-json-btn");
+    const importJsonBtn = container.querySelector("#share-import-json-btn");
+    const importJsonFile = container.querySelector("#import-json-file");
 
     exportMdBtn?.addEventListener("click", () => {
       const mdContent = decisionReport
@@ -426,6 +432,53 @@ export function createDetailFragments({
       } catch {
         showToast(localText("复制失败，请手动复制", "Copy failed, please copy manually"));
       }
+    });
+
+    // Export JSON (all runs)
+    exportJsonBtn?.addEventListener("click", async () => {
+      try {
+        const blob = await resultStore.export({ compress: false });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `agentarena-export-${new Date().toISOString().slice(0, 10)}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        showToast(localText("数据导出成功", "Data exported successfully"));
+      } catch (err) {
+        showToast(localText("导出失败: ", "Export failed: ") + err.message);
+      }
+    });
+
+    // Import JSON
+    importJsonBtn?.addEventListener("click", () => {
+      importJsonFile?.click();
+    });
+
+    importJsonFile?.addEventListener("change", async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      try {
+        const result = await resultStore.import(file);
+        if (result.success) {
+          showToast(localText(`导入成功: ${result.count} 条数据`, `Import successful: ${result.count} runs`));
+          // Reload runs from storage
+          const runs = await resultStore.getAllRuns();
+          if (runs.length > 0) {
+            state.runs = runs;
+            render();
+          }
+        } else {
+          showToast(localText("导入失败: ", "Import failed: ") + (result.error || "Unknown error"));
+        }
+      } catch (err) {
+        showToast(localText("导入失败: ", "Import failed: ") + err.message);
+      }
+      // Reset file input
+      e.target.value = "";
     });
   }
 

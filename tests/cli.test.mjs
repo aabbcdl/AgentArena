@@ -188,7 +188,7 @@ test("agentarena doctor exits with code 0 in strict mode when all adapters are r
   );
 
   assert.equal(result.code, 0);
-  assert.match(result.stdout, /status=ready/);
+  assert.match(result.stdout, /✓ ready/);
 });
 
 test("agentarena doctor exits with code 1 in strict mode when any adapter is not ready", async () => {
@@ -201,8 +201,8 @@ test("agentarena doctor exits with code 1 in strict mode when any adapter is not
   );
 
   assert.equal(result.code, 1);
-  assert.match(result.stdout, /- cursor/);
-  assert.match(result.stdout, /status=missing|status=blocked|status=unverified/);
+  assert.match(result.stdout, /cursor/);
+  assert.match(result.stdout, /✗ missing|✗ blocked|≈ unverified/);
 });
 
 test("agentarena run can update snapshots from the CLI", async () => {

@@ -23,6 +23,13 @@ export function folderOf(file) {
   return segments.join("/");
 }
 
+function normalizeRelativePath(inputPath) {
+  return String(inputPath ?? "")
+    .replace(/\\/g, "/")
+    .replace(/^\.\//, "")
+    .replace(/^\/+/, "");
+}
+
 export async function readRunFromFile(file, { localText }) {
   try {
     return JSON.parse(await file.text());
@@ -44,7 +51,7 @@ export function createResultLoaders({ state, localText, render, renderMarkdownPa
     }
 
     try {
-      showLoading?.("Loading results...");
+      showLoading?.(localText("正在加载结果...", "Loading results..."));
       const run = await readRunFromFile(file, { localText });
       state.notice = localText(
         "已加载单个 summary.json。现在可以直接查看结果，或者继续加载 summary.md。",
@@ -65,7 +72,7 @@ export function createResultLoaders({ state, localText, render, renderMarkdownPa
     }
 
     try {
-      showLoading?.("Loading markdown...");
+      showLoading?.(localText("正在加载 Markdown...", "Loading markdown..."));
       state.standaloneMarkdown = await file.text();
       state.notice = localText(
         "Markdown 已加载。如果当前也有 run，分享摘要会自动出现。",
@@ -82,6 +89,9 @@ export function createResultLoaders({ state, localText, render, renderMarkdownPa
 
   async function handleFolderSelection(event) {
     const files = Array.from(event.target.files ?? []);
+    const filesByRelativePath = new Map(
+      files.map((file) => [normalizeRelativePath(file.webkitRelativePath || file.name), file])
+    );
     const summaryFiles = files.filter((file) => file.name.toLowerCase() === "summary.json");
     if (summaryFiles.length === 0) {
       showError?.(localText(
@@ -93,7 +103,7 @@ export function createResultLoaders({ state, localText, render, renderMarkdownPa
     }
 
     try {
-      showLoading?.("Loading results...");
+      showLoading?.(localText("正在加载结果...", "Loading results..."));
       const markdownByFolder = new Map();
       for (const file of files.filter((entry) => entry.name.toLowerCase() === "summary.md")) {
         markdownByFolder.set(folderOf(file), await file.text());
@@ -104,6 +114,18 @@ export function createResultLoaders({ state, localText, render, renderMarkdownPa
       for (const file of summaryFiles) {
         try {
           const run = await readRunFromFile(file, { localText });
+          const runFolder = normalizeRelativePath(folderOf(file));
+          for (const result of run.results ?? []) {
+            if (!result?.tracePath) continue;
+            const traceCandidates = [
+              normalizeRelativePath(`${runFolder}/${result.tracePath}`),
+              normalizeRelativePath(result.tracePath)
+            ];
+            const traceFile = traceCandidates.map((candidate) => filesByRelativePath.get(candidate)).find(Boolean);
+            if (traceFile) {
+              result.traceFile = traceFile;
+            }
+          }
           runs.push(run);
           const markdown = markdownByFolder.get(folderOf(file));
           if (markdown) {

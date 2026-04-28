@@ -14,6 +14,7 @@ export {
 } from "./claude-provider-profiles.js";
 
 import { parseClaudeEvents, parseCodexEvents, parseGeminiEvents } from "./event-parsers.js";
+import { agentTimeoutMs, formatTimeoutMessage, runProcess } from "./process-utils.js";
 import { readCodexConfigDefaults, resolveClaudeRuntime, resolveCodexRuntime } from "./shared.js";
 
 export const __testUtils = {
@@ -22,5 +23,8 @@ export const __testUtils = {
   parseGeminiEvents,
   resolveCodexRuntime,
   readCodexConfigDefaults,
-  resolveClaudeRuntime
+  resolveClaudeRuntime,
+  runProcessForTest: runProcess,
+  agentTimeoutMs,
+  formatTimeoutMessage
 };

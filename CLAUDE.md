@@ -17,8 +17,8 @@ AgentArena — local-first benchmark and replay tool for comparing AI coding age
 | `packages/cli` | CLI entry point: `ui`, `run`, `doctor`, `init-taskpack`, `init-ci`, `list-adapters` |
 | `packages/core` | Shared types and utilities |
 | `packages/runner` | Benchmark orchestrator |
-| `packages/adapters` | Agent adapters (demo-fast, demo-thorough, demo-budget, codex, claude-code, cursor) |
-| `packages/judges` | Judge implementations (command, file-exists, file-contains, glob, file-count, snapshot, json-value, json-schema) |
+| `packages/adapters` | Agent adapters (demo-fast, demo-thorough, demo-budget, codex, claude-code, cursor, gemini-cli, copilot, qwen-code, kilo-cli, opencode, trae, augment) |
+| `packages/judges` | Judge implementations (command, test-result, lint-check, file-exists, file-contains, regex-match, directory-exists, compilation, glob, file-count, snapshot, patch-validation, token-efficiency, json-value, json-schema) |
 | `packages/taskpacks` | Task pack loader and validator |
 | `packages/trace` | Execution trace recorder |
 | `packages/report` | Report generators (JSON, Markdown, HTML, badge) |

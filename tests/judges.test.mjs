@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -6,14 +7,8 @@ import test from "node:test";
 
 import { runCommandStep, runJudge, runJudges } from "../packages/judges/dist/index.js";
 
-// TODO: Add tests for:
-// - decision-report.ts (generateDecisionReport, formatDecisionReport)
-// - variance-analysis.ts (computeVarianceAnalysis, formatVarianceReport)
-// - patch-validation judge execution
-// - token-efficiency judge execution
-
 function tempDir() {
-  return path.join(tmpdir(), `agentarena-judges-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  return path.join(tmpdir(), `agentarena-judges-test-${randomUUID()}`);
 }
 
 async function setupWorkspace() {
@@ -360,4 +355,235 @@ test("command step respects timeout", async () => {
   assert.ok(result.stderr.includes("timed out") || result.exitCode !== 0);
 
   await fs.rm(workspace, { recursive: true, force: true });
+});
+
+// ===== token-efficiency judge tests =====
+
+import { runTokenEfficiencyJudgeWithUsage } from "../packages/judges/dist/index.js";
+
+test("token-efficiency judge returns neutral score when no budget and no usage", async () => {
+  const result = await runTokenEfficiencyJudgeWithUsage(
+    { id: "te-1", label: "TE no data", type: "token-efficiency" },
+    undefined,
+    undefined
+  );
+  assert.equal(result.success, true);
+  assert.ok(
+    result.stdout.includes("Token usage not provided") ||
+    result.stdout.includes("Token efficiency judge requires tokenUsage")
+  );
+});
+
+test("token-efficiency judge calculates score within budget", async () => {
+  const result = await runTokenEfficiencyJudgeWithUsage(
+    { id: "te-2", label: "TE within budget", type: "token-efficiency" },
+    500,
+    1000
+  );
+  assert.equal(result.success, true);
+  assert.ok(result.stdout.includes("Token efficiency"));
+  assert.ok(result.stdout.includes("100.0%") || result.stdout.includes("90.0%") || result.stdout.includes("80.0%"));
+});
+
+test("token-efficiency judge fails when over budget", async () => {
+  const result = await runTokenEfficiencyJudgeWithUsage(
+    { id: "te-3", label: "TE over budget", type: "token-efficiency" },
+    2000,
+    1000
+  );
+  assert.equal(result.success, false);
+  assert.ok(result.stdout.includes("Token efficiency"));
+  assert.ok(result.stderr.includes("exceeded budget"));
+});
+
+test("token-efficiency judge handles zero budget gracefully", async () => {
+  const result = await runTokenEfficiencyJudgeWithUsage(
+    { id: "te-4", label: "TE zero budget", type: "token-efficiency" },
+    100,
+    0
+  );
+  assert.equal(result.success, true);
+  assert.ok(result.stdout.includes("neutral score"));
+});
+
+test("token-efficiency judge handles zero usage", async () => {
+  const result = await runTokenEfficiencyJudgeWithUsage(
+    { id: "te-5", label: "TE zero usage", type: "token-efficiency" },
+    0,
+    1000
+  );
+  assert.equal(result.success, true);
+  assert.ok(result.stdout.includes("100.0%"));
+});
+
+// ===== patch-validation judge tests =====
+
+test("patch-validation judge fails when test suite command fails", async () => {
+  const workspace = await setupWorkspace();
+
+  const result = await runJudge(
+    {
+      id: "pv-1",
+      label: "Patch validation fail",
+      type: "patch-validation",
+      testSuite: "node -e \"process.exit(1)\""
+    },
+    workspace,
+    ALLOWED_NAMES
+  );
+  assert.equal(result.type, "patch-validation");
+  assert.equal(result.success, false);
+
+  await fs.rm(workspace, { recursive: true, force: true });
+});
+
+test("patch-validation judge passes when test suite command succeeds", async () => {
+  const workspace = await setupWorkspace();
+
+  const result = await runJudge(
+    {
+      id: "pv-2",
+      label: "Patch validation pass",
+      type: "patch-validation",
+      testSuite: "node -e \"console.log(JSON.stringify({tests:{passed:2,failed:0,total:2}}))\""
+    },
+    workspace,
+    ALLOWED_NAMES
+  );
+  assert.equal(result.type, "patch-validation");
+
+  await fs.rm(workspace, { recursive: true, force: true });
+});
+
+// ===== variance-analysis tests =====
+
+import { computeVarianceAnalysis, formatVarianceReport } from "../packages/report/dist/index.js";
+
+test("variance-analysis computes mean and stdDev correctly", () => {
+  const runs = [
+    {
+      results: [
+        { agentId: "demo-fast", compositeScore: 80, durationMs: 10000, estimatedCostUsd: 0.5, status: "success" }
+      ]
+    },
+    {
+      results: [
+        { agentId: "demo-fast", compositeScore: 90, durationMs: 12000, estimatedCostUsd: 0.6, status: "success" }
+      ]
+    }
+  ];
+  const report = computeVarianceAnalysis(runs);
+  const agent = report.agents.find((a) => a.agentId === "demo-fast");
+  assert.ok(agent);
+  assert.equal(agent.scoreMean, 85);
+  assert.ok(agent.scoreStdDev > 0);
+});
+
+test("variance-analysis handles single run gracefully", () => {
+  const runs = [
+    {
+      results: [
+        { agentId: "demo-fast", compositeScore: 80, durationMs: 10000, estimatedCostUsd: 0.5, status: "success" }
+      ]
+    }
+  ];
+  const report = computeVarianceAnalysis(runs);
+  const agent = report.agents.find((a) => a.agentId === "demo-fast");
+  assert.ok(agent);
+  assert.equal(agent.scoreStdDev, 0);
+});
+
+test("variance-analysis handles empty data gracefully", () => {
+  const report = computeVarianceAnalysis([]);
+  assert.equal(report.agents.length, 0);
+  assert.ok(report.overallConfidence === "low" || report.overallConfidence === "high");
+});
+
+test("variance-analysis handles all-same values", () => {
+  const runs = [
+    {
+      results: [
+        { agentId: "demo-fast", compositeScore: 80, durationMs: 10000, estimatedCostUsd: 0.5, status: "success" }
+      ]
+    },
+    {
+      results: [
+        { agentId: "demo-fast", compositeScore: 80, durationMs: 10000, estimatedCostUsd: 0.5, status: "success" }
+      ]
+    }
+  ];
+  const report = computeVarianceAnalysis(runs);
+  const agent = report.agents.find((a) => a.agentId === "demo-fast");
+  assert.ok(agent);
+  assert.equal(agent.scoreStdDev, 0);
+  assert.equal(agent.scoreCV, 0);
+  assert.equal(agent.isStable, true);
+});
+
+test("formatVarianceReport generates markdown with expected sections", () => {
+  const runs = [
+    {
+      results: [
+        { agentId: "demo-fast", compositeScore: 80, durationMs: 10000, estimatedCostUsd: 0.5, status: "success", displayLabel: "Demo Fast" }
+      ]
+    }
+  ];
+  const report = computeVarianceAnalysis(runs);
+  const markdown = formatVarianceReport(report);
+  assert.ok(markdown.includes("Result Confidence Analysis"));
+  assert.ok(markdown.includes("Demo Fast"));
+});
+
+// ===== decision-report tests =====
+
+import { formatDecisionReport, generateDecisionReport } from "../packages/report/dist/index.js";
+
+test("decision-report generates correct structure", () => {
+  const run = {
+    repoPath: "/tmp/repo",
+    task: { id: "test-task", metadata: {} },
+    results: [
+      {
+        agentId: "demo-fast",
+        displayLabel: "Demo Fast",
+        status: "success",
+        compositeScore: 85,
+        costKnown: true,
+        estimatedCostUsd: 0.5,
+        durationMs: 30000,
+        judgeResults: [{ success: true }],
+        changedFiles: ["file1.js"]
+      }
+    ]
+  };
+  const report = generateDecisionReport(run);
+  assert.ok(report.generatedAt);
+  assert.equal(report.scenario, "General Coding Task");
+  assert.equal(report.recommendations.length, 1);
+  assert.equal(report.recommendations[0].agentId, "demo-fast");
+});
+
+test("decision-report format includes all markdown sections", () => {
+  const run = {
+    repoPath: "/tmp/repo",
+    task: { id: "test-task", metadata: {} },
+    results: [
+      {
+        agentId: "demo-fast",
+        displayLabel: "Demo Fast",
+        status: "success",
+        compositeScore: 85,
+        costKnown: true,
+        estimatedCostUsd: 0.5,
+        durationMs: 30000,
+        judgeResults: [{ success: true }],
+        changedFiles: ["file1.js"]
+      }
+    ]
+  };
+  const report = generateDecisionReport(run);
+  const markdown = formatDecisionReport(report);
+  assert.ok(markdown.includes("AgentArena"));
+  assert.ok(markdown.includes("Demo Fast"));
+  assert.ok(markdown.includes("复现命令"));
 });

@@ -9,9 +9,15 @@ import { ClaudeLikeAdapter } from "./claude-adapter.js";
 import { findExecutableOnPath, pathExists } from "./process-utils.js";
 import { CURSOR_CAPABILITY, type InvocationSpec } from "./shared.js";
 
-function cursorAgentCliFromBinary(binaryPath: string): string {
+/**
+ * Try to derive the cursor-agent CLI path from a Cursor binary path.
+ * Multiple path patterns are attempted for version compatibility.
+ */
+async function cursorAgentCliFromBinary(binaryPath: string): Promise<string | undefined> {
   const binaryDir = path.dirname(binaryPath);
-  return path.resolve(
+
+  // Pattern 1: Current known structure
+  const pattern1 = path.resolve(
     binaryDir,
     "..",
     "extensions",
@@ -20,6 +26,35 @@ function cursorAgentCliFromBinary(binaryPath: string): string {
     "claude-agent-sdk",
     "cli.js"
   );
+  // Pattern 2: Alternative structure (older/newer versions)
+  const pattern2 = path.resolve(
+    binaryDir,
+    "..",
+    "resources",
+    "app",
+    "extensions",
+    "cursor-agent",
+    "dist",
+    "claude-agent-sdk",
+    "cli.js"
+  );
+  // Pattern 3: Flat structure
+  const pattern3 = path.resolve(
+    binaryDir,
+    "..",
+    "extensions",
+    "cursor-agent",
+    "cli.js"
+  );
+
+  // Return the first existing path, or undefined if none exist
+  const patterns = [pattern1, pattern2, pattern3];
+  for (const p of patterns) {
+    if (await pathExists(p)) {
+      return p;
+    }
+  }
+  return undefined;
 }
 
 async function resolveCursorAgentCliPath(): Promise<string | undefined> {
@@ -34,8 +69,8 @@ async function resolveCursorAgentCliPath(): Promise<string | undefined> {
     process.platform === "win32" ? ["cursor.cmd", "cursor.exe", "cursor"] : ["cursor"]
   );
   if (pathBinary) {
-    const derivedCliPath = cursorAgentCliFromBinary(pathBinary);
-    if (await pathExists(derivedCliPath)) {
+    const derivedCliPath = await cursorAgentCliFromBinary(pathBinary);
+    if (derivedCliPath && await pathExists(derivedCliPath)) {
       return derivedCliPath;
     }
   }
@@ -43,11 +78,13 @@ async function resolveCursorAgentCliPath(): Promise<string | undefined> {
   const installRoots = process.platform === "win32"
     ? [
         path.join(process.env.LOCALAPPDATA ?? "", "Programs", "Cursor", "resources", "app", "bin", "cursor.cmd"),
-        path.join(process.env.ProgramFiles ?? "", "Cursor", "resources", "app", "bin", "cursor.exe")
+        path.join(process.env.ProgramFiles ?? "", "Cursor", "resources", "app", "bin", "cursor.exe"),
+        path.join(process.env.LOCALAPPDATA ?? "", "Programs", "Cursor", "bin", "cursor.cmd")
       ]
     : [
         "/Applications/Cursor.app/Contents/Resources/app/bin/cursor",
-        path.join(process.env.HOME ?? "", ".local", "bin", "cursor")
+        path.join(process.env.HOME ?? "", ".local", "bin", "cursor"),
+        path.join(process.env.HOME ?? "", ".cursor", "bin", "cursor")
       ];
 
   for (const candidate of installRoots) {
@@ -55,8 +92,8 @@ async function resolveCursorAgentCliPath(): Promise<string | undefined> {
       continue;
     }
 
-    const derivedCliPath = cursorAgentCliFromBinary(candidate);
-    if (await pathExists(derivedCliPath)) {
+    const derivedCliPath = await cursorAgentCliFromBinary(candidate);
+    if (derivedCliPath && await pathExists(derivedCliPath)) {
       return derivedCliPath;
     }
   }

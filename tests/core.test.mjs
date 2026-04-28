@@ -115,20 +115,20 @@ test("normalizePath converts backslashes to forward slashes", () => {
   assert.equal(normalizePath("/already/posix"), "/already/posix");
 });
 
-test("isPathInsideWorkspace detects path traversal", () => {
-  assert.equal(isPathInsideWorkspace("/workspace", "/workspace/src/file.ts"), true);
-  assert.equal(isPathInsideWorkspace("/workspace", "/workspace/../etc/passwd"), false);
-  assert.equal(isPathInsideWorkspace("/workspace", "/workspace"), true);
-  assert.equal(isPathInsideWorkspace("/workspace", "/workspace/src"), true);
-  assert.equal(isPathInsideWorkspace("/workspace", "/etc/passwd"), false);
-  assert.equal(isPathInsideWorkspace("/workspace", "/workspace/src/../../etc/passwd"), false);
+test("isPathInsideWorkspace detects path traversal", async () => {
+  assert.equal(await isPathInsideWorkspace("/workspace", "/workspace/src/file.ts"), true);
+  assert.equal(await isPathInsideWorkspace("/workspace", "/workspace/../etc/passwd"), false);
+  assert.equal(await isPathInsideWorkspace("/workspace", "/workspace"), true);
+  assert.equal(await isPathInsideWorkspace("/workspace", "/workspace/src"), true);
+  assert.equal(await isPathInsideWorkspace("/workspace", "/etc/passwd"), false);
+  assert.equal(await isPathInsideWorkspace("/workspace", "/workspace/src/../../etc/passwd"), false);
 });
 
-test("safePathJoin throws on path traversal", () => {
-  assert.throws(() => safePathJoin("/workspace", "..", "etc", "passwd"), /Path traversal detected/);
-  assert.equal(safePathJoin("/workspace", "src", "file.ts").replace(/\\/g, "/"), "/workspace/src/file.ts");
-  assert.equal(safePathJoin("/workspace", "src").replace(/\\/g, "/"), "/workspace/src");
-  assert.equal(safePathJoin("/workspace").replace(/\\/g, "/"), "/workspace");
+test("safePathJoin throws on path traversal", async () => {
+  await assert.rejects(() => safePathJoin("/workspace", "..", "etc", "passwd"), /Path traversal detected/);
+  assert.equal((await safePathJoin("/workspace", "src", "file.ts")).replace(/\\/g, "/"), "/workspace/src/file.ts");
+  assert.equal((await safePathJoin("/workspace", "src")).replace(/\\/g, "/"), "/workspace/src");
+  assert.equal((await safePathJoin("/workspace")).replace(/\\/g, "/"), "/workspace");
 });
 
 test("portableRelativePath returns relative paths with forward slashes", () => {

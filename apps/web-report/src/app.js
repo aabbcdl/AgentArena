@@ -128,6 +128,9 @@ const elements = {
   errorBack: document.querySelector("#error-back"),
   themeToggle: document.querySelector("#theme-toggle"),
   themeLabel: document.querySelector("#theme-label"),
+  tryDemoBtn: document.querySelector("#try-demo-btn"),
+  tryDemoText: document.querySelector("#try-demo-text"),
+  demoHint: document.querySelector("#demo-hint"),
   dashboard: document.querySelector("#dashboard"),
   taskTitle: document.querySelector("#task-title"),
   taskMeta: document.querySelector("#task-meta"),
@@ -1795,6 +1798,29 @@ elements.errorBack?.addEventListener("click", () => {
   render();
 });
 
+// Demo button event listener
+if (elements.tryDemoBtn) {
+  elements.tryDemoBtn.addEventListener("click", () => {
+    loadDemoData();
+  });
+} else {
+  console.warn('try-demo-btn not found, retrying after DOM ready');
+  document.addEventListener('DOMContentLoaded', () => {
+    const btn = document.querySelector("#try-demo-btn");
+    if (btn) {
+      btn.addEventListener("click", () => {
+        loadDemoData();
+      });
+      console.log('Demo button event listener added after DOM ready');
+    }
+  });
+}
+
+// Expose for debugging and HTML onclick
+window.loadDemoData = loadDemoData;
+window.applyRuns = applyRuns;
+window.state = state;
+
 // Theme toggle
 const savedTheme = readStorage("theme") || "dark";
 document.documentElement.setAttribute('data-theme', savedTheme);
@@ -1859,6 +1885,150 @@ window.addEventListener("popstate", () => {
   updateCurrentRun();
   render();
 });
+
+/**
+ * Load demo data to showcase the UI functionality
+ * Creates a simulated benchmark run with sample agents and results
+ */
+function loadDemoData() {
+  if (elements.tryDemoBtn) {
+    elements.tryDemoText.textContent = t("loadingDemo");
+    elements.tryDemoBtn.disabled = true;
+  }
+
+  // Create demo run data
+  const demoRun = {
+    runId: `demo-${Date.now()}`,
+    createdAt: new Date().toISOString(),
+    task: {
+      id: "demo-task-fix-auth-bug",
+      title: "Fix Authentication Bug",
+      description: "Fix the authentication middleware to properly handle expired tokens and return appropriate error responses.",
+      schemaVersion: "agentarena.taskpack/v1",
+      metadata: {
+        objective: "Fix the authentication bug where expired tokens are not properly rejected",
+        judgeRationale: "The fix should properly validate token expiration and return 401 Unauthorized",
+        repoTypes: ["node", "express"],
+        difficulty: "medium"
+      },
+      judges: [
+        {
+          id: "test-auth",
+          type: "test-result",
+          label: "Auth Tests Pass",
+          expectation: "all tests pass"
+        },
+        {
+          id: "lint-check",
+          type: "lint-check",
+          label: "No Lint Errors",
+          expectation: "no errors"
+        },
+        {
+          id: "file-exists",
+          type: "file-exists",
+          label: "Auth Middleware Exists",
+          target: "src/middleware/auth.js"
+        }
+      ]
+    },
+    scoreWeights: { ...DEFAULT_SCORE_WEIGHTS },
+    scoreMode: "practical",
+    results: [
+      {
+        agentId: "demo-fast",
+        agentLabel: "Demo Fast",
+        status: "success",
+        durationMs: 45000,
+        estimatedCostUsd: 0.15,
+        costKnown: true,
+        tokensUsed: 2500,
+        filesChanged: 3,
+        diffPrecision: 0.85,
+        testPassRate: 0.95,
+        lintPassRate: 1.0,
+        judgeResults: [
+          { judgeId: "test-auth", status: "pass", message: "All auth tests pass" },
+          { judgeId: "lint-check", status: "pass", message: "No lint errors found" },
+          { judgeId: "file-exists", status: "pass", message: "Auth middleware exists" }
+        ],
+        compositeScore: 0.92,
+        baseAgent: "demo-fast",
+        variant: "default",
+        runtime: {
+          verification: "local",
+          source: "demo"
+        }
+      },
+      {
+        agentId: "demo-thorough",
+        agentLabel: "Demo Thorough",
+        status: "success",
+        durationMs: 78000,
+        estimatedCostUsd: 0.28,
+        costKnown: true,
+        tokensUsed: 4800,
+        filesChanged: 5,
+        diffPrecision: 0.92,
+        testPassRate: 0.98,
+        lintPassRate: 1.0,
+        judgeResults: [
+          { judgeId: "test-auth", status: "pass", message: "All auth tests pass" },
+          { judgeId: "lint-check", status: "pass", message: "No lint errors found" },
+          { judgeId: "file-exists", status: "pass", message: "Auth middleware exists" }
+        ],
+        compositeScore: 0.95,
+        baseAgent: "demo-thorough",
+        variant: "default",
+        runtime: {
+          verification: "local",
+          source: "demo"
+        }
+      },
+      {
+        agentId: "demo-budget",
+        agentLabel: "Demo Budget",
+        status: "failed",
+        durationMs: 32000,
+        estimatedCostUsd: 0.08,
+        costKnown: true,
+        tokensUsed: 1200,
+        filesChanged: 1,
+        diffPrecision: 0.45,
+        testPassRate: 0.65,
+        lintPassRate: 0.85,
+        judgeResults: [
+          { judgeId: "test-auth", status: "fail", message: "2 auth tests failing" },
+          { judgeId: "lint-check", status: "pass", message: "No lint errors found" },
+          { judgeId: "file-exists", status: "pass", message: "Auth middleware exists" }
+        ],
+        compositeScore: 0.58,
+        baseAgent: "demo-budget",
+        variant: "default",
+        runtime: {
+          verification: "local",
+          source: "demo"
+        }
+      }
+    ]
+  };
+
+  // Apply the demo data
+  setTimeout(() => {
+    console.log('setTimeout callback, applying demo data');
+    applyRuns([demoRun]);
+    console.log('applyRuns called');
+    state.notice = localText(
+      "演示数据已加载。这是一个模拟的 benchmark 结果，展示了 AgentArena 的主要功能。",
+      "Demo data loaded. This is a simulated benchmark result showcasing AgentArena's main features."
+    );
+    
+    if (elements.tryDemoBtn) {
+      elements.tryDemoText.textContent = t("tryDemo");
+      elements.tryDemoBtn.disabled = false;
+    }
+  }, 500); // Small delay for UX
+}
 
 // Initialize new modules
 async function initNewModules() {

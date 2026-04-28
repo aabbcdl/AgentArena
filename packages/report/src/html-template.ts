@@ -176,13 +176,17 @@ function renderAgentCards(run: BenchmarkRun): string {
           </div>
           <h3>Files</h3>
           <ul>
-            <li><strong>Added:</strong></ul>
-            <ul>${addedFiles}</ul>
-            <li><strong>Changed:</strong></ul>
-            <ul>${changedDiffFiles}</ul>
-            <li><strong>Removed:</strong></ul>
-            <ul>${removedFiles}</ul>
+            <li><strong>Added:</strong></li>
           </ul>
+          <ul>${addedFiles}</ul>
+          <ul>
+            <li><strong>Changed:</strong></li>
+          </ul>
+          <ul>${changedDiffFiles}</ul>
+          <ul>
+            <li><strong>Removed:</strong></li>
+          </ul>
+          <ul>${removedFiles}</ul>
           ${renderJudgeList(result)}
           ${
             result.setupResults.length > 0
@@ -301,7 +305,7 @@ export function renderHtml(run: BenchmarkRun, locale: Locale, leaderboard?: Lead
     <title>${escapeHtml(copy.htmlReportTitlePrefix)} ${escapeHtml(run.task.title)}</title>
     <style>
       :root {
-        color-scheme: light;
+        color-scheme: light dark;
         --bg: #f5f1e8;
         --card: #fffdf7;
         --ink: #1f1b16;
@@ -312,6 +316,25 @@ export function renderHtml(run: BenchmarkRun, locale: Locale, leaderboard?: Lead
         --unverified: #946c14;
         --blocked: #8f3426;
         --missing: #5b5762;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #1a1a2e;
+          --card: #252540;
+          --ink: #e0ddd5;
+          --muted: #9a9590;
+          --accent: #d46a4a;
+          --border: #3a3a55;
+          --ready: #4a9e6e;
+          --unverified: #c4a44a;
+          --blocked: #c45a4a;
+          --missing: #8a85a0;
+        }
+        body {
+          background:
+            radial-gradient(circle at top left, rgba(212, 106, 74, 0.15), transparent 25%),
+            linear-gradient(180deg, #20203a 0%, var(--bg) 100%) !important;
+        }
       }
       * { box-sizing: border-box; }
       body {

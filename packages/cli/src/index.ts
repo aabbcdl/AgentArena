@@ -37,7 +37,7 @@ import { type BenchmarkProgressEvent, runBenchmark } from "@agentarena/runner";
 import { loadTaskPack } from "@agentarena/taskpacks";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { type ParsedArgs, parseArgs, printHelp } from "./args.js";
-import { buildBenchmarkOutputSummary, formatCapabilitySummary } from "./output.js";
+import { buildBenchmarkOutputSummary } from "./output.js";
 import {
   buildCiWorkflow,
   createAdhocLintCommand,
@@ -228,6 +228,98 @@ function normalizeUiSelections(payload: UiRunPayload): AgentSelection[] {
   );
 }
 
+function getTierEmoji(tier: string): string {
+  switch (tier) {
+    case "supported": return "✅";
+    case "experimental": return "⚠️";
+    case "blocked": return "❌";
+    default: return "❓";
+  }
+}
+
+/**
+ * 检测是否有可用的 adapter
+ * @returns 如果有可用的非 demo adapter 返回 true，否则返回 false
+ */
+async function hasAvailableAdapters(): Promise<boolean> {
+  const adapters = listAvailableAdapters().filter((a) => a.kind !== "demo");
+
+  if (adapters.length === 0) {
+    return false;
+  }
+
+  // 检查是否有任何 adapter 可用
+  for (const adapter of adapters) {
+    try {
+      const preflight = await adapter.preflight({ probeAuth: false });
+      if (preflight.status !== "missing") {
+        return true;
+      }
+    } catch {
+      // 继续检查下一个 adapter
+    }
+  }
+
+  return false;
+}
+
+/**
+ * 显示欢迎信息
+ */
+function showWelcomeMessage(): void {
+  console.log("\n🎉 欢迎使用 AgentArena！");
+  console.log("");
+  console.log("快速开始：");
+  console.log("  agentarena doctor    - 检查环境配置");
+  console.log("  agentarena ui        - 启动 Web 界面");
+  console.log("  agentarena run       - 开始基准测试");
+  console.log("");
+}
+
+function getAvailabilityEmoji(availability: string): string {
+  switch (availability) {
+    case "available": return "✅";
+    case "estimated": return "≈";
+    case "unavailable": return "❌";
+    default: return "❓";
+  }
+}
+
+interface GroupedItem<T> {
+  tier: string;
+  emoji: string;
+  label: string;
+  items: T[];
+}
+
+function groupByTier<T extends { capability: { supportTier: string } }>(items: T[]): GroupedItem<T>[] {
+  const groups = new Map<string, T[]>();
+
+  for (const item of items) {
+    const tier = item.capability.supportTier;
+    if (!groups.has(tier)) {
+      groups.set(tier, []);
+    }
+    groups.get(tier)?.push(item);
+  }
+
+  const tierOrder = ["supported", "experimental", "blocked"];
+  const tierLabels = new Map([
+    ["supported", "Supported Adapters"],
+    ["experimental", "Experimental Adapters"],
+    ["blocked", "Blocked Adapters"]
+  ]);
+
+  return tierOrder
+    .filter(tier => groups.has(tier))
+    .map(tier => ({
+      tier,
+      emoji: getTierEmoji(tier),
+      label: tierLabels.get(tier) || `${tier} Adapters`,
+      items: groups.get(tier) ?? []
+    }));
+}
+
 async function runDoctor(parsed: ParsedArgs): Promise<void> {
   const selections =
     parsed.agentIds.length > 0
@@ -242,33 +334,36 @@ async function runDoctor(parsed: ParsedArgs): Promise<void> {
           .sort((left, right) => left.baseAgentId.localeCompare(right.baseAgentId));
 
   const preflights = await preflightAdapters(selections, { probeAuth: parsed.probeAuth });
-  if (parsed.json) {
+  if (parsed.format === 'json') {
     console.log(JSON.stringify(preflights, null, 2));
   } else {
-    console.log("\nAgentArena doctor\n");
-    for (const preflight of preflights) {
-      console.log(
-        [
-          `- ${preflight.agentId}`,
-          `tier=${preflight.capability.supportTier}`,
-          `status=${preflight.status}`,
-          preflight.command ? `command=${preflight.command}` : "",
-          `summary=${preflight.summary}`
-        ]
-          .filter(Boolean)
-          .join(" | ")
-      );
-      for (const detail of preflight.details ?? []) {
-        console.log(`  detail: ${detail}`);
+    console.log("\n🏥 AgentArena Doctor\n");
+
+    const groups = groupByTier(preflights);
+
+    for (const group of groups) {
+      console.log(`${group.emoji} ${group.label} (${group.items.length})`);
+      for (const preflight of group.items) {
+        const statusIcon = preflight.status === "ready" ? "✓" : preflight.status === "unverified" ? "?" : "✗";
+        console.log(`   • ${preflight.agentId.padEnd(20)} ${preflight.capability.invocationMethod}`);
+        console.log(`     ${getAvailabilityEmoji(preflight.capability.tokenAvailability)} tokens | ${getAvailabilityEmoji(preflight.capability.costAvailability)} cost | ${getAvailabilityEmoji(preflight.capability.traceRichness)} trace`);
+        console.log(`     status: ${statusIcon} ${preflight.status} - ${preflight.summary}`);
+
+        if (preflight.command) {
+          console.log(`     command: ${preflight.command}`);
+        }
+        for (const detail of preflight.details ?? []) {
+          console.log(`     detail: ${detail}`);
+        }
+        if (preflight.capability.authPrerequisites.length > 0) {
+          console.log(`     auth: ${preflight.capability.authPrerequisites.join("; ")}`);
+        }
+        for (const limitation of preflight.capability.knownLimitations) {
+          console.log(`     limitation: ${limitation}`);
+        }
+        console.log(""); // Empty line between adapters
       }
-      console.log(`  capability: ${formatCapabilitySummary(preflight.capability)}`);
-      console.log(`  invocation: ${preflight.capability.invocationMethod}`);
-      if (preflight.capability.authPrerequisites.length > 0) {
-        console.log(`  auth: ${preflight.capability.authPrerequisites.join("; ")}`);
-      }
-      for (const limitation of preflight.capability.knownLimitations) {
-        console.log(`  limitation: ${limitation}`);
-      }
+      console.log(""); // Empty line between groups
     }
   }
 
@@ -287,23 +382,30 @@ async function runListAdapters(parsed: ParsedArgs): Promise<void> {
     }))
     .sort((left, right) => left.id.localeCompare(right.id));
 
-  if (parsed.json) {
+  if (parsed.format === 'json') {
     console.log(JSON.stringify(adapters, null, 2));
     return;
   }
 
-  console.log("\nAgentArena adapters\n");
-  for (const adapter of adapters) {
-    console.log(
-      `- ${adapter.id} | kind=${adapter.kind} | title=${adapter.title} | ${formatCapabilitySummary(adapter.capability)}`
-    );
-    console.log(`  invocation: ${adapter.capability.invocationMethod}`);
-    if (adapter.capability.authPrerequisites.length > 0) {
-      console.log(`  auth: ${adapter.capability.authPrerequisites.join("; ")}`);
+  console.log("\n🏥 AgentArena Adapters\n");
+
+  const groups = groupByTier(adapters);
+
+  for (const group of groups) {
+    console.log(`${group.emoji} ${group.label} (${group.items.length})`);
+    for (const adapter of group.items) {
+      console.log(`   • ${adapter.id.padEnd(20)} ${adapter.capability.invocationMethod}`);
+      console.log(`     ${getAvailabilityEmoji(adapter.capability.tokenAvailability)} tokens | ${getAvailabilityEmoji(adapter.capability.costAvailability)} cost | ${getAvailabilityEmoji(adapter.capability.traceRichness)} trace`);
+
+      if (adapter.capability.authPrerequisites.length > 0) {
+        console.log(`     auth: ${adapter.capability.authPrerequisites.join("; ")}`);
+      }
+      for (const limitation of adapter.capability.knownLimitations) {
+        console.log(`     limitation: ${limitation}`);
+      }
+      console.log(""); // Empty line between adapters
     }
-    for (const limitation of adapter.capability.knownLimitations) {
-      console.log(`  limitation: ${limitation}`);
-    }
+    console.log(""); // Empty line between groups
   }
 }
 
@@ -311,9 +413,11 @@ async function runInitTaskpack(parsed: ParsedArgs): Promise<void> {
   const templateName = parsed.templateName ?? "repo-health";
   const template = TASKPACK_TEMPLATES[templateName];
   if (!template) {
-    throw new Error(
-      `Unknown task pack template "${templateName}". Available templates: ${Object.keys(TASKPACK_TEMPLATES).join(", ")}`
-    );
+    console.error(`❌ 未知的任务包模板："${templateName}"`);
+    console.error(`原因：该模板不存在，无法创建任务包`);
+    console.error(`可用模板：${Object.keys(TASKPACK_TEMPLATES).join(", ")}`);
+    console.error(`使用方法：agentarena init-taskpack --template repo-health`);
+    process.exit(1);
   }
 
   const outputPath = path.resolve(parsed.outputPath ?? "agentarena.taskpack.yaml");
@@ -322,7 +426,10 @@ async function runInitTaskpack(parsed: ParsedArgs): Promise<void> {
   try {
     await fs.access(outputPath);
     if (!parsed.force) {
-      throw new Error(`Refusing to overwrite existing file: ${outputPath}. Use --force to replace it.`);
+      console.error(`❌ 文件已存在：${outputPath}`);
+      console.error(`原因：覆盖现有文件可能导致数据丢失`);
+      console.error(`解决方法：1) 换一个文件名  2) 加 --force 参数强制覆盖`);
+      process.exit(1);
     }
   } catch (error) {
     if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") {
@@ -333,7 +440,7 @@ async function runInitTaskpack(parsed: ParsedArgs): Promise<void> {
   await fs.mkdir(parentPath, { recursive: true });
   await fs.writeFile(outputPath, template, "utf8");
 
-  if (parsed.json) {
+  if (parsed.format === 'json') {
     console.log(JSON.stringify({ template: templateName, outputPath }, null, 2));
     return;
   }
@@ -349,7 +456,11 @@ async function runInitCi(parsed: ParsedArgs): Promise<void> {
   const agentIds = parsed.agentIds.length > 0 ? parsed.agentIds : ["demo-fast"];
   const ciTemplate = (parsed.ciTemplate ?? "pull-request") as "pull-request" | "smoke" | "nightly";
   if (!["pull-request", "smoke", "nightly"].includes(ciTemplate)) {
-    throw new Error('Unknown CI template. Use "pull-request", "smoke", or "nightly".');
+    console.error(`❌ 未知的 CI 模板："${ciTemplate}"`);
+    console.error(`原因：该模板不存在，无法创建 CI 工作流`);
+    console.error(`可用模板：pull-request, smoke, nightly`);
+    console.error(`使用方法：agentarena init-ci --ci-template=pull-request`);
+    process.exit(1);
   }
   const ciOutputDir = parsed.ciOutputDir ?? ".agentarena/ci-benchmark";
   const parentPath = path.dirname(workflowPath);
@@ -357,7 +468,10 @@ async function runInitCi(parsed: ParsedArgs): Promise<void> {
   try {
     await fs.access(workflowPath);
     if (!parsed.force) {
-      throw new Error(`Refusing to overwrite existing file: ${workflowPath}. Use --force to replace it.`);
+      console.error(`❌ 文件已存在：${workflowPath}`);
+      console.error(`原因：覆盖现有文件可能导致数据丢失`);
+      console.error(`解决方法：1) 换一个文件路径  2) 加 --force 参数强制覆盖`);
+      process.exit(1);
     }
   } catch (error) {
     if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") {
@@ -372,7 +486,7 @@ async function runInitCi(parsed: ParsedArgs): Promise<void> {
     "utf8"
   );
 
-  if (parsed.json) {
+  if (parsed.format === 'json') {
     console.log(JSON.stringify({ workflowPath, taskPath, agentIds, ciTemplate, ciOutputDir }, null, 2));
     return;
   }
@@ -1186,19 +1300,19 @@ async function runBenchmarkCommand(parsed: ParsedArgs): Promise<void> {
   }
 
   if (!parsed.taskPath) {
-    throw new Error(
-      "Missing required argument: --task\n" +
-      "Example: agentarena run --repo . --task taskpack.yaml --agents demo-fast\n" +
-      'Run "agentarena --help" for more information.'
-    );
+    console.error(`❌ 缺少必需参数：--task`);
+    console.error(`原因：需要指定任务包文件路径`);
+    console.error(`解决方法：agentarena run --repo . --task taskpack.yaml --agents demo-fast`);
+    console.error(`更多帮助：agentarena --help`);
+    process.exit(1);
   }
 
   if (parsed.agentIds.length === 0) {
-    throw new Error(
-      "Missing required argument: --agents\n" +
-      "Example: agentarena run --repo . --task taskpack.yaml --agents demo-fast,codex\n" +
-      'Run "agentarena --help" for more information.'
-    );
+    console.error(`❌ 缺少必需参数：--agents`);
+    console.error(`原因：需要指定至少一个要测试的 AI 代理`);
+    console.error(`解决方法：agentarena run --repo . --task taskpack.yaml --agents demo-fast`);
+    console.error(`查看可用代理：agentarena list-adapters`);
+    process.exit(1);
   }
 
   // Validate repo path exists
@@ -1209,7 +1323,10 @@ async function runBenchmarkCommand(parsed: ParsedArgs): Promise<void> {
     }
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      throw new Error(`--repo path does not exist: ${parsed.repoPath}`);
+      console.error(`❌ --repo 路径不存在：${parsed.repoPath}`);
+      console.error(`原因：指定的代码仓库路径不存在`);
+      console.error(`解决方法：检查路径是否正确，或先创建该目录`);
+      process.exit(1);
     }
     throw error;
   }
@@ -1219,7 +1336,10 @@ async function runBenchmarkCommand(parsed: ParsedArgs): Promise<void> {
     await fs.access(parsed.taskPath);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      throw new Error(`--task file does not exist: ${parsed.taskPath}`);
+      console.error(`❌ --task 文件不存在：${parsed.taskPath}`);
+      console.error(`原因：指定的任务包文件不存在`);
+      console.error(`解决方法：检查文件路径是否正确，或使用 agentarena init-taskpack 创建新任务包`);
+      process.exit(1);
     }
     throw error;
   }
@@ -1229,16 +1349,16 @@ async function runBenchmarkCommand(parsed: ParsedArgs): Promise<void> {
   const availableIds = availableAdapters.map((a) => a.id);
   const invalidAgents = parsed.agentIds.filter((id) => !availableIds.includes(id));
   if (invalidAgents.length > 0) {
-    throw new Error(
-      `Unknown agent(s): ${invalidAgents.join(", ")}\n` +
-      `Available agents: ${availableIds.join(", ")}\n` +
-      'Run "agentarena list-adapters" for more information.'
-    );
+    console.error(`❌ 未知的代理：${invalidAgents.join(", ")}`);
+    console.error(`原因：这些代理未安装或不存在`);
+    console.error(`可用代理：${availableIds.join(", ")}`);
+    console.error(`查看详情：agentarena list-adapters`);
+    process.exit(1);
   }
 
   const selections = normalizeCliSelections(parsed);
 
-  if (!parsed.json) {
+  if (parsed.format !== 'json') {
     console.log(`\nStarting AgentArena benchmark...`);
     console.log(`Repository: ${parsed.repoPath}`);
     console.log(`Task: ${parsed.taskPath}`);
@@ -1278,7 +1398,7 @@ async function runBenchmarkCommand(parsed: ParsedArgs): Promise<void> {
       tokenBudget: parsed.tokenBudget,
       categories: parsed.categories,
       cancellation,
-      onProgress: parsed.json
+      onProgress: parsed.format === 'json'
         ? undefined
         : (event: BenchmarkProgressEvent) => {
             const prefix = event.displayLabel ? `[${event.displayLabel}] ` : "";
@@ -1328,7 +1448,7 @@ async function runBenchmarkCommand(parsed: ParsedArgs): Promise<void> {
     // Ignore variance analysis errors - not critical for the benchmark run
   }
 
-  if (parsed.json) {
+  if (parsed.format === 'json') {
     console.log(JSON.stringify(buildBenchmarkOutputSummary(benchmark, report), null, 2));
   } else {
     console.log(`\nAgentArena run complete: ${scoredBenchmark.runId}`);
@@ -1486,8 +1606,21 @@ async function runInit(parsed: ParsedArgs): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  let parsed: ParsedArgs | undefined;
+
   try {
-    const parsed = parseArgs(process.argv.slice(2));
+    parsed = parseArgs(process.argv.slice(2));
+
+    // 检查是否需要显示欢迎信息
+    const shouldShowWelcome = parsed.welcome || (!parsed.command && !(await hasAvailableAdapters()));
+
+    if (shouldShowWelcome) {
+      showWelcomeMessage();
+      // 如果只有 --welcome 标志而没有命令，显示欢迎信息后退出
+      if (!parsed.command) {
+        return;
+      }
+    }
 
     if (!parsed.command) {
       printHelp();
@@ -1534,23 +1667,34 @@ async function main(): Promise<void> {
         break;
       }
       default:
-        throw new Error(
-          `Unknown command: ${parsed.command}\n` +
-          `Available commands: run, doctor, list-adapters, init, init-taskpack, init-ci, ui\n` +
-          'Run "agentarena --help" for usage information.'
-        );
+        console.error(`❌ 未知命令："${parsed.command}"`);
+        console.error(`原因：该命令不存在`);
+        console.error(`可用命令：run, doctor, list-adapters, init, init-taskpack, init-ci, ui`);
+        console.error(`使用方法：agentarena --help`);
+        process.exit(1);
     }
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
-    console.error(`\nError: ${message}`);
+
+    if (parsed?.verbose && error instanceof Error) {
+      console.error(`\n❌ 错误：${message}`);
+      console.error(`\n堆栈跟踪：`);
+      console.error(error.stack);
+    } else {
+      console.error(`\n❌ 错误：${message}`);
+    }
 
     // Provide helpful suggestions based on common errors
     if (message.includes("ENOENT") || message.includes("does not exist")) {
-      console.error("\nTip: Check that the file path is correct and the file exists.");
+      console.error("\n💡 提示：请检查文件路径是否正确，文件是否存在");
     } else if (message.includes("Unknown agent")) {
-      console.error('\nTip: Run "agentarena list-adapters" to see available agents.');
+      console.error('\n💡 提示：运行 agentarena list-adapters 查看可用代理');
     } else if (message.includes("Missing required")) {
-      console.error('\nTip: Run "agentarena --help" for usage information.');
+      console.error('\n💡 提示：运行 agentarena --help 查看使用信息');
+    }
+
+    if (!parsed?.verbose) {
+      console.error('\n💡 使用 --verbose 参数查看详细错误信息');
     }
 
     process.exitCode = 1;
