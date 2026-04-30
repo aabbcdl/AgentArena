@@ -20,7 +20,7 @@
     "@agentarena/report": "workspace:*",
     "@agentarena/runner": "workspace:*",
     "@agentarena/taskpacks": "workspace:*",
-    "yaml": "^2.8.2"
+    "yaml": "^2.8.3"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
