@@ -26,25 +26,25 @@ importers:
   packages/adapters:
     dependencies:
       '@agentarena/core':
-        specifier: workspace:*
+        specifier: 0.1.0
         version: link:../core
 
   packages/cli:
     dependencies:
       '@agentarena/adapters':
-        specifier: workspace:*
+        specifier: 0.1.0
         version: link:../adapters
       '@agentarena/core':
-        specifier: workspace:*
+        specifier: 0.1.0
         version: link:../core
       '@agentarena/report':
-        specifier: workspace:*
+        specifier: 0.1.0
         version: link:../report
       '@agentarena/runner':
-        specifier: workspace:*
+        specifier: 0.1.0
         version: link:../runner
       '@agentarena/taskpacks':
-        specifier: workspace:*
+        specifier: 0.1.0
         version: link:../taskpacks
       yaml:
         specifier: ^2.8.2
@@ -55,7 +55,7 @@ importers:
   packages/judges:
     dependencies:
       '@agentarena/core':
-        specifier: workspace:*
+        specifier: 0.1.0
         version: link:../core
       ajv:
         specifier: ^8.18.0
@@ -71,28 +71,28 @@ importers:
   packages/report:
     dependencies:
       '@agentarena/core':
-        specifier: workspace:*
+        specifier: 0.1.0
         version: link:../core
 
   packages/runner:
     dependencies:
       '@agentarena/adapters':
-        specifier: workspace:*
+        specifier: 0.1.0
         version: link:../adapters
       '@agentarena/core':
-        specifier: workspace:*
+        specifier: 0.1.0
         version: link:../core
       '@agentarena/judges':
-        specifier: workspace:*
+        specifier: 0.1.0
         version: link:../judges
       '@agentarena/report':
-        specifier: workspace:*
+        specifier: 0.1.0
         version: link:../report
       '@agentarena/taskpacks':
-        specifier: workspace:*
+        specifier: 0.1.0
         version: link:../taskpacks
       '@agentarena/trace':
-        specifier: workspace:*
+        specifier: 0.1.0
         version: link:../trace
       picomatch:
         specifier: ^4.0.3
@@ -105,7 +105,7 @@ importers:
   packages/taskpacks:
     dependencies:
       '@agentarena/core':
-        specifier: workspace:*
+        specifier: 0.1.0
         version: link:../core
       yaml:
         specifier: ^2.8.2
@@ -114,7 +114,7 @@ importers:
   packages/trace:
     dependencies:
       '@agentarena/core':
-        specifier: workspace:*
+        specifier: 0.1.0
         version: link:../core
 
 packages:
@@ -141,28 +141,24 @@ packages:
     engines: {node: '>=14.21.3'}
     cpu: [arm64]
     os: [linux]
-    libc: [musl]
 
   '@biomejs/cli-linux-arm64@2.4.8':
     resolution: {integrity: sha512-5CdrsJct76XG2hpKFwXnEtlT1p+4g4yV+XvvwBpzKsTNLO9c6iLlAxwcae2BJ7ekPGWjNGw9j09T5KGPKKxQig==}
     engines: {node: '>=14.21.3'}
     cpu: [arm64]
     os: [linux]
-    libc: [glibc]
 
   '@biomejs/cli-linux-x64-musl@2.4.8':
     resolution: {integrity: sha512-Gi8quv8MEuDdKaPFtS2XjEnMqODPsRg6POT6KhoP+VrkNb+T2ywunVB+TvOU0LX1jAZzfBr+3V1mIbBhzAMKvw==}
     engines: {node: '>=14.21.3'}
     cpu: [x64]
     os: [linux]
-    libc: [musl]
 
   '@biomejs/cli-linux-x64@2.4.8':
     resolution: {integrity: sha512-PdKXspVEaMCQLjtZCn6vfSck/li4KX9KGwSDbZdgIqlrizJ2MnMcE3TvHa2tVfXNmbjMikzcfJpuPWH695yJrw==}
     engines: {node: '>=14.21.3'}
     cpu: [x64]
     os: [linux]
-    libc: [glibc]
 
   '@biomejs/cli-win32-arm64@2.4.8':
     resolution: {integrity: sha512-LoFatS0tnHv6KkCVpIy3qZCih+MxUMvdYiPWLHRri7mhi2vyOOs8OrbZBcLTUEWCS+ktO72nZMy4F96oMhkOHQ==}

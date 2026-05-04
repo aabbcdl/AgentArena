@@ -19,5 +19,8 @@ RUN apt-get update \
 
 WORKDIR /workspace
 
+RUN useradd -m -s /bin/sh agentarena
+USER agentarena
+
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["bash"]

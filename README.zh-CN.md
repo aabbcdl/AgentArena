@@ -16,6 +16,53 @@ AgentArena 不是教你“怎么开始装 agent”的工具，而是帮已经在
 
 AgentArena 默认是本地优先。你提供自己的仓库、任务包和本地已经装好的 agent CLI，AgentArena 负责统一执行、judge、trace 和报告输出。
 
+## 60 秒体验
+
+不需要安装任何 agent CLI，clone 下来就能跑：
+
+```bash
+git clone https://github.com/aabbcdl/AgentArena.git
+cd AgentArena
+pnpm install
+pnpm build
+
+# 用内置 demo agent 跑一次 benchmark（不需要任何认证）
+node packages/cli/dist/index.js run \
+  --repo . \
+  --task examples/taskpacks/demo-repo-health.json \
+  --agents demo-fast,demo-thorough,demo-budget
+
+# 在浏览器里查看结果
+node packages/cli/dist/index.js ui
+```
+
+打开 `http://127.0.0.1:4320`，加载 `.agentarena/runs/` 下的结果，即可看到完整的 dashboard。
+
+等你想测真正的 agent 时，装好对应的 CLI 就行：
+
+```bash
+node packages/cli/dist/index.js run \
+  --repo . \
+  --task examples/taskpacks/official/repo-health.yaml \
+  --agents codex,claude-code,cursor \
+  --probe-auth
+```
+
+## 和其他 Benchmark 的区别
+
+| | SWE-bench | HumanEval | BigCodeBench | **AgentArena** |
+|---|---|---|---|---|
+| 本地运行 | ❌ 云端 | ❌ 云端 | ❌ 云端 | **✅ 完全本地** |
+| 测自己的仓库 | ❌ 固定仓库 | ❌ 合成数据 | ❌ 合成数据 | **✅ 任意仓库** |
+| 自定义任务 | ❌ | ❌ | ❌ | **✅ YAML/JSON 任务包** |
+| 支持任意 agent | ❌ 仅 SWE-agent | ❌ | ❌ | **✅ 12+ 适配器** |
+| 离线可用 | ❌ | ❌ | ❌ | **✅ 无需联网** |
+| 内置 UI | ❌ | ❌ | ❌ | **✅ Web 仪表盘** |
+| CI 集成 | ❌ | ❌ | ❌ | **✅ GitHub Actions** |
+| Diff + Trace | ❌ | ❌ | ❌ | **✅ 完整审计链路** |
+
+AgentArena 不是 SWE-bench 的替代品。它填补的是另一个空白：**在你自己的代码库上，本地、可重复、agent 无关的基准测试**。
+
 ## 它最适合谁
 
 - 已经在日常开发里使用 coding agent 的人
@@ -200,6 +247,53 @@ node packages/cli/dist/index.js init-ci --task agentarena.taskpack.yaml --agents
 npx playwright install --with-deps chromium
 pnpm test:web-report:e2e
 ```
+
+## 官方任务包库
+
+23 个任务包覆盖常见开发场景：
+
+**质量与测试**
+- `test-coverage` — 提升现有模块的测试覆盖率
+- `failing-test-fix` — 修复失败的测试
+- `lint-clean` — 修复 lint 错误和警告
+
+**Bug 修复与重构**
+- `react-bugfix` — 修复 React 组件 bug
+- `small-refactor` — 小规模重构
+- `cross-module-refactor` — 跨模块重构
+- `multi-file-rename` — 跨文件重命名
+- `config-repair` — 修复配置问题
+
+**API 与后端**
+- `python-api` — 添加 Python API 端点
+- `go-microservice` — 添加 Go 微服务功能
+- `json-api` — 构建 JSON API
+- `json-contract-repair` — 修复 JSON schema 问题
+
+**DevOps 与基础设施**
+- `docker-setup` — 创建或改进 Docker 配置
+- `dependency-update` — 更新过时的依赖
+
+**安全与可靠性**
+- `security-hardening` — 应用安全最佳实践
+- `error-handling` — 改进错误处理
+- `input-validation` — 添加输入验证
+
+**可观测性与文档**
+- `logging-improvement` — 添加结构化日志
+- `api-documentation` — 添加 OpenAPI 文档
+
+**评分模式**
+- `issue-resolution` — SWE-Bench 风格评分
+- `efficiency-first` — CursorBench 风格评分
+- `rotating-tasks` — LiveBench 风格评分
+
+**通用**
+- `repo-health` — 综合仓库健康检查
+- `performance-optimize` — 优化性能瓶颈
+- `snapshot-fix` — 修复快照问题
+
+所有官方任务包在 [`examples/taskpacks/official/`](./examples/taskpacks/official/README.md)。
 
 ## 文档
 

@@ -18,6 +18,53 @@ It helps answer questions like:
 
 AgentArena is local-first by default. You point it at your own repository, task pack, and locally installed agent CLIs. AgentArena handles shared setup, execution, judges, traces, and reports.
 
+## Try It in 60 Seconds
+
+No agent CLI needed. Just clone and run:
+
+```bash
+git clone https://github.com/aabbcdl/AgentArena.git
+cd AgentArena
+pnpm install
+pnpm build
+
+# Run a benchmark with built-in demo agents (no auth required)
+node packages/cli/dist/index.js run \
+  --repo . \
+  --task examples/taskpacks/demo-repo-health.json \
+  --agents demo-fast,demo-thorough,demo-budget
+
+# View the results in your browser
+node packages/cli/dist/index.js ui
+```
+
+Open `http://127.0.0.1:4320`, load the result from `.agentarena/runs/`, and explore the dashboard.
+
+When you're ready to benchmark real agents, just install their CLIs and run:
+
+```bash
+node packages/cli/dist/index.js run \
+  --repo . \
+  --task examples/taskpacks/official/repo-health.yaml \
+  --agents codex,claude-code,cursor \
+  --probe-auth
+```
+
+## How AgentArena Compares
+
+| | SWE-bench | HumanEval | BigCodeBench | **AgentArena** |
+|---|---|---|---|---|
+| Runs locally | ❌ cloud only | ❌ cloud only | ❌ cloud only | **✅ fully local** |
+| Your own repo | ❌ fixed repos | ❌ synthetic | ❌ synthetic | **✅ any repo** |
+| Custom tasks | ❌ | ❌ | ❌ | **✅ YAML/JSON task packs** |
+| Any agent CLI | ❌ SWE-agent only | ❌ | ❌ | **✅ 12+ adapters** |
+| Offline capable | ❌ | ❌ | ❌ | **✅ no internet needed** |
+| Built-in UI | ❌ | ❌ | ❌ | **✅ web dashboard** |
+| CI integration | ❌ | ❌ | ❌ | **✅ GitHub Actions** |
+| Diff + trace | ❌ | ❌ | ❌ | **✅ full audit trail** |
+
+AgentArena is not a replacement for SWE-bench or HumanEval. It fills a different gap: **local, repeatable, agent-agnostic benchmarking on your own codebase**.
+
 ## Why This Exists
 
 Most agent users are already past "how do I install an agent?" and into "which setup actually performs better on my work?"
@@ -222,14 +269,51 @@ pnpm test:web-report:e2e
 
 ## Official Task Pack Library
 
-Starter templates:
+23 task packs covering common development scenarios:
 
-- `repo-health`
-- `json-api`
-- `snapshot`
-- `compilation-check`
-- `directory-structure`
-- `full-e2e`
+**Quality & Testing**
+- `test-coverage` — increase test coverage for existing modules
+- `failing-test-fix` — fix a failing test suite
+- `lint-clean` — fix lint errors and warnings
+
+**Bug Fixes & Refactoring**
+- `react-bugfix` — fix a React component bug
+- `small-refactor` — refactor a small module
+- `cross-module-refactor` — refactor across multiple modules
+- `multi-file-rename` — rename symbols across files
+- `config-repair` — fix broken configuration
+
+**API & Backend**
+- `python-api` — add a Python API endpoint
+- `go-microservice` — add a Go microservice feature
+- `json-api` — build a JSON API endpoint
+- `json-contract-repair` — fix JSON schema/contract issues
+
+**DevOps & Infrastructure**
+- `docker-setup` — create or improve Docker configuration
+- `dependency-update` — update outdated dependencies
+
+**Security & Reliability**
+- `security-hardening` — apply security best practices
+- `error-handling` — improve error handling
+- `input-validation` — add input validation
+
+**Observability & Docs**
+- `logging-improvement` — add structured logging
+- `api-documentation` — add OpenAPI documentation
+
+**Scoring Modes**
+- `issue-resolution` — SWE-Bench style scoring
+- `efficiency-first` — CursorBench style scoring
+- `rotating-tasks` — LiveBench style scoring
+
+**General**
+- `repo-health` — comprehensive repository health check
+- `performance-optimize` — optimize performance bottlenecks
+- `snapshot-fix` — fix snapshot-related issues
+- `compilation-check` — verify build passes
+- `directory-structure` — verify directory structure
+- `full-e2e` — end-to-end validation
 
 Official task packs live under [`examples/taskpacks/official/`](./examples/taskpacks/official/README.md).
 

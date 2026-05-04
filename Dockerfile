@@ -19,6 +19,9 @@ COPY --from=builder /app/apps/web-report/dist ./apps/web-report/dist
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN corepack enable && pnpm install --frozen-lockfile --prod
 
+RUN useradd -m -s /bin/sh agentarena
+USER agentarena
+
 EXPOSE 4320
 ENTRYPOINT ["node", "packages/cli/dist/index.js"]
 CMD ["ui", "--host", "0.0.0.0"]
