@@ -15,7 +15,8 @@ const CORE_ASSETS = [
   "./report/dashboard.js",
   "./report/cross-run.js",
   "./report/detail-fragments.js",
-  "./results/loaders.js"
+  "./results/loaders.js",
+  "./view-model/community.js"
 ];
 
 // Install: cache all core assets
@@ -52,6 +53,22 @@ serviceWorker.addEventListener("fetch", (event) => {
 
   // Skip non-GET requests
   if (event.request.method !== "GET") return;
+
+  // Community data from GitHub raw: network-first with cache fallback
+  if (url.hostname === "raw.githubusercontent.com" && url.pathname.includes("/leaderboard-data/")) {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          if (response.ok) {
+            const clone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+          }
+          return response;
+        })
+        .catch(async () => (await caches.match(event.request)) ?? new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }))
+    );
+    return;
+  }
 
   // For HTML, JS, CSS, and manifest, use network-first strategy so local UI changes
   // become visible immediately instead of waiting for a cache-first asset refresh.

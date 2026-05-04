@@ -6,18 +6,37 @@ import { createLauncherModule } from "./launcher/module.js";
 import { createCrossRunRenders } from "./report/cross-run.js";
 import { createDashboardModule } from "./report/dashboard.js";
 import { createDetailFragments } from "./report/detail-fragments.js";
+import {
+  persistCachedRuns as persistCachedRunsImpl,
+  readStorage,
+  restoreCachedRuns as restoreCachedRunsImpl,
+  restoreRunsFromIndexedDB,
+  writeStorage
+} from "./result-cache.js";
 import { createResultLoaders } from "./results/loaders.js";
+import {
+  applyScorePreset as applyScorePresetImpl,
+  getArchivedScoreModeLabel as getArchivedScoreModeLabelImpl,
+  getScoreModeLabel as getScoreModeLabelImpl,
+  renderScoreWeightsControls as renderScoreWeightsControlsImpl,
+  renderWeightSliders as renderWeightSlidersImpl,
+  saveScoreConfig as saveScoreConfigImpl,
+  updateScoreWeight as updateScoreWeightImpl
+} from "./score-config.js";
 import { createTraceReplayModule } from "./trace-replay.js";
 import { formatDuration } from "./utils/format.js";
 import { resultStore } from "./utils/storage.js";
 import {
   baseAgentLabel,
-  buildLeaderboard, 
+  buildLeaderboard,
   buildPrTable,
   buildShareCard,
   buildShareCardSvg,
+  clearCachedCommunityData,
   DEFAULT_SCORE_WEIGHTS,
   diffPrecisionScore,
+  fetchCommunityIndex,
+  findCommunityRank,
   findJudgeByType,
   findPreviousComparableRun,
   formatCompositeScore,
@@ -25,21 +44,22 @@ import {
   formatLintMetric,
   formatTestMetric,
   getAgentTrendRows,
+  getCachedCommunityData,
   getCompareResults,
   getCompositeScoreReasons,
   getCrossRunCompareRows,
   getCrossRunRecommendation,
-  getMatchingScorePresetId,
   getRunCompareRows,
   getRunToRunAgentDiff,
   getRunTrustSummary,
   getRunVerdict,
-  getScoreWeightPreset,
   getSelectionTrustSummary,
   normalizeScoreWeights,
+  renderCommunityLeaderboard,
   resultLabel,
   resultRecordKey,
   runtimeIdentity,
+  setCachedCommunityData,
   summarizeRun
 } from "./view-model.js";
 
@@ -74,6 +94,10 @@ const state = {
   crossRunSelectedIds: new Set(),
   crossRunCompareData: null,
   expandedCompareAgentId: null,
+  communityTaskPackId: null,
+  communityData: null,
+  communityLoading: false,
+  communityError: null,
   sidebarOpen: false,
   scoreWeights: /** @type {Record<string, number>} */ ({ ...DEFAULT_SCORE_WEIGHTS }),
   runSearchQuery: ""
@@ -195,6 +219,13 @@ const elements = {
   crossRunCompareSummary: document.querySelector("#cross-run-compare-summary"),
   crossRunCloseCompare: document.querySelector("#cross-run-close-compare"),
   crossRunCompareTable: document.querySelector("#cross-run-compare-table"),
+  communitySection: document.querySelector("#community-section"),
+  communityEyebrow: document.querySelector("#community-eyebrow"),
+  communityTitle: document.querySelector("#community-title"),
+  communityDescription: document.querySelector("#community-description"),
+  communityRefresh: document.querySelector("#community-refresh"),
+  communityStatus: document.querySelector("#community-status"),
+  communityContent: document.querySelector("#community-content"),
   advancedAnalysisSummary: document.querySelector("#advanced-analysis-summary"),
   sidebarToggle: document.querySelector("#sidebar-toggle"),
   sidebarBackdrop: document.querySelector("#sidebar-backdrop"),
@@ -220,33 +251,8 @@ const runCompareFilters = {
   scope: "current-task"
 };
 
-const RUN_CACHE_STORAGE_KEY = "agentarena.webReport.cachedRuns.v1";
-const RUN_CACHE_MAX_BYTES = 1_500_000;
-
-function readStorage(key) {
-  try {
-    return localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-
-function writeStorage(key, value) {
-  try {
-    localStorage.setItem(key, value);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function removeStorage(key) {
-  try {
-    localStorage.removeItem(key);
-  } catch {
-    // ignore localStorage failures
-  }
-}
+const _RUN_CACHE_STORAGE_KEY = "agentarena.webReport.cachedRuns.v1";
+const _RUN_CACHE_MAX_BYTES = 1_500_000;
 
 function readLocationState() {
   const params = new URLSearchParams(window.location.search);
@@ -290,50 +296,11 @@ function syncLocationState(mode = "replace") {
 }
 
 function restoreCachedRuns() {
-  const raw = readStorage(RUN_CACHE_STORAGE_KEY);
-  if (!raw) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed?.runs)) {
-      return null;
-    }
-
-    const markdownEntries = parsed.markdownEntries;
-    return {
-      runs: parsed.runs,
-      markdownByRunId: new Map(
-        Array.isArray(markdownEntries)
-          ? markdownEntries.filter((entry) => Array.isArray(entry) && entry.length === 2)
-          : []
-      ),
-      standaloneMarkdown: typeof parsed.standaloneMarkdown === "string" ? parsed.standaloneMarkdown : null
-    };
-  } catch {
-    return null;
-  }
+  return restoreCachedRunsImpl();
 }
 
 function persistCachedRuns() {
-  if (state.runs.length === 0) {
-    removeStorage(RUN_CACHE_STORAGE_KEY);
-    return;
-  }
-
-  const payload = {
-    version: 1,
-    runs: state.runs,
-    markdownEntries: Array.from(state.markdownByRunId.entries()),
-    standaloneMarkdown: state.standaloneMarkdown
-  };
-  const serialized = JSON.stringify(payload);
-  if (serialized.length > RUN_CACHE_MAX_BYTES) {
-    removeStorage(RUN_CACHE_STORAGE_KEY);
-    return;
-  }
-  writeStorage(RUN_CACHE_STORAGE_KEY, serialized);
+  persistCachedRunsImpl(state);
 }
 
 function debounce(fn, delayMs) {
@@ -358,7 +325,7 @@ const scoreWeightElements = {
 };
 
 // Weight name mapping for slider labels — now uses i18n keys
-const WEIGHT_NAMES = {
+const _WEIGHT_NAMES = {
   status: 'scoreWeightStatus',
   tests: 'scoreWeightTests',
   criticalJudges: 'scoreWeightCriticalJudges',
@@ -443,17 +410,12 @@ function formatCost(result) {
   return result.costKnown ? `$${result.estimatedCostUsd.toFixed(2)}` : "n/a";
 }
 
-function getNormalizedScoreWeights() {
+function _getNormalizedScoreWeights() {
   return normalizeScoreWeights(state.scoreWeights);
 }
 
 function saveScoreConfig() {
-  writeStorage(
-    "agentarena.webReport.scoreConfig",
-    JSON.stringify({
-      scoreWeights: state.scoreWeights
-    })
-  );
+  saveScoreConfigImpl(state);
 }
 
 function loadScoreConfig() {
@@ -466,145 +428,21 @@ function loadScoreConfig() {
 }
 
 function getScoreModeLabel() {
-  const presetId = getMatchingScorePresetId(state.scoreWeights);
-  switch (presetId) {
-    case "balanced":
-      return t("scorePresetBalanced");
-    case "correctness-first":
-      return t("scorePresetCorrectness");
-    case "speed-first":
-      return t("scorePresetSpeed");
-    case "cost-first":
-      return t("scorePresetCost");
-    case "scope-discipline":
-      return t("scorePresetScope");
-    case "issue-resolution":
-      return t("scorePresetIssueResolution");
-    case "efficiency-first":
-      return t("scorePresetEfficiencyFirst");
-    case "rotating-tasks":
-      return t("scorePresetRotatingTasks");
-    case "comprehensive":
-      return t("scorePresetComprehensive");
-    default:
-      return t("customWeights");
-  }
+  return getScoreModeLabelImpl(state, t);
 }
 
 function getArchivedScoreModeLabel(run) {
-  const mode = run?.scoreMode ?? "balanced";
-  switch (mode) {
-    case "balanced":
-      return t("scorePresetBalanced");
-    case "correctness-first":
-      return t("scorePresetCorrectness");
-    case "speed-first":
-      return t("scorePresetSpeed");
-    case "cost-first":
-      return t("scorePresetCost");
-    case "scope-discipline":
-      return t("scorePresetScope");
-    case "issue-resolution":
-      return t("scorePresetIssueResolution");
-    case "efficiency-first":
-      return t("scorePresetEfficiencyFirst");
-    case "rotating-tasks":
-      return t("scorePresetRotatingTasks");
-    case "comprehensive":
-      return t("scorePresetComprehensive");
-    default:
-      return mode;
-  }
+  return getArchivedScoreModeLabelImpl(run, t);
 }
 
 function renderScoreWeightsControls() {
-  const normalized = getNormalizedScoreWeights();
-  for (const [key, elementName] of Object.entries(scoreWeightElements)) {
-    if (elements[elementName]) {
-      elements[elementName].value = String(state.scoreWeights[key]);
-    }
-  }
-
-  if (elements.scoreWeightsSummary) {
-    elements.scoreWeightsSummary.textContent = t(
-      "scoreWeightsSummary",
-      normalized
-    );
-  }
-
-  if (elements.scoreWeightPresets) {
-    const activePreset = getMatchingScorePresetId(state.scoreWeights);
-
-    for (const button of elements.scoreWeightPresets.querySelectorAll("button[data-score-preset]")) {
-      button.classList.toggle("active", button.dataset.scorePreset === activePreset);
-    }
-  }
-  
-  // Update weight sliders if they exist
-  renderWeightSliders(state.scoreWeights);
+  renderScoreWeightsControlsImpl(state, elements, t);
 }
 
 function updateScoreWeight(key, value) {
-  state.scoreWeights[key] = Number.isFinite(value) && value >= 0 ? value : 0;
-  saveScoreConfig();
-  renderScoreWeightsControls();
-  if (state.run) {
-    renderVerdictHero(state.run);
-    renderComparisonBars(state.run);
-    renderCompareTableV2(state.run);
-    renderSelectedAgentV2();
-    renderRecommendationCard(state.run);
-    renderMarkdownPanel();
-  }
-}
-
-function applyScorePreset(presetId) {
-  state.scoreWeights = /** @type {Record<string, number>} */ ({ ...getScoreWeightPreset(presetId) });
-  saveScoreConfig();
-  renderScoreWeightsControls();
-  renderWeightSliders(state.scoreWeights);
-  if (state.run) {
-    renderVerdictHero(state.run);
-    renderComparisonBars(state.run);
-    renderCompareTableV2(state.run);
-    renderSelectedAgentV2();
-    renderRecommendationCard(state.run);
-    renderMarkdownPanel();
-  }
-}
-
-// Weight slider generation
-function renderWeightSliders(weights) {
-  const container = document.getElementById('weight-sliders');
-  if (!container) return;
-  
-  container.innerHTML = '';
-  
-  for (const [key, value] of Object.entries(weights)) {
-    if (value === 0) continue; // Skip zero weights
-    
-    const slider = document.createElement('div');
-    slider.className = 'weight-slider';
-    
-    const label = document.createElement('label');
-    const weightName = WEIGHT_NAMES[key] || key;
-    const percentage = (value * 100).toFixed(0);
-    label.innerHTML = `${weightName} <span class="weight-value">${percentage}%</span>`;
-    
-    const input = document.createElement('input');
-    input.type = 'range';
-    input.min = '0';
-    input.max = '100';
-    input.value = percentage;
-    input.dataset.weight = key;
-    
-    input.addEventListener('input', (e) => {
-      const newWeight = parseInt(e.target.value, 10) / 100;
-      state.scoreWeights[key] = newWeight;
-      label.querySelector('.weight-value').textContent = `${(newWeight * 100).toFixed(0)}%`;
-      saveScoreConfig();
-      // Update preset buttons active state (will be none if custom)
-      renderScoreWeightsControls();
+  updateScoreWeightImpl(state, key, value, {
+    renderScoreWeightsControls,
+    renderAll: () => {
       if (state.run) {
         renderVerdictHero(state.run);
         renderComparisonBars(state.run);
@@ -613,12 +451,30 @@ function renderWeightSliders(weights) {
         renderRecommendationCard(state.run);
         renderMarkdownPanel();
       }
-    });
-    
-    slider.appendChild(label);
-    slider.appendChild(input);
-    container.appendChild(slider);
-  }
+    }
+  });
+}
+
+function applyScorePreset(presetId) {
+  applyScorePresetImpl(state, presetId, {
+    renderScoreWeightsControls,
+    renderWeightSliders: () => renderWeightSlidersImpl(state.scoreWeights),
+    renderAll: () => {
+      if (state.run) {
+        renderVerdictHero(state.run);
+        renderComparisonBars(state.run);
+        renderCompareTableV2(state.run);
+        renderSelectedAgentV2();
+        renderRecommendationCard(state.run);
+        renderMarkdownPanel();
+      }
+    }
+  });
+}
+
+// Weight slider generation
+function renderWeightSliders(weights) {
+  renderWeightSlidersImpl(weights);
 }
 
 function recordKey(record) {
@@ -1095,6 +951,7 @@ function statusClass(status) {
 }
 
 function setHidden(element, hidden) {
+  if (!element) return;
   element.classList.toggle("hidden", hidden);
 }
 
@@ -1149,6 +1006,75 @@ function applySingleRun(run, markdown = null) {
   }
 }
 
+async function renderCommunityView() {
+  if (!elements.communitySection) return;
+  if (!state.run) {
+    setHidden(elements.communitySection, true);
+    return;
+  }
+
+  const taskPackId = state.run.task?.id;
+  if (!taskPackId) {
+    setHidden(elements.communitySection, true);
+    return;
+  }
+
+  setHidden(elements.communitySection, false);
+  elements.communityEyebrow.textContent = t("communityEyebrow");
+  elements.communityTitle.textContent = t("communityTitle");
+  elements.communityDescription.textContent = t("communityDescription");
+
+  // Check if we already have data for this task pack
+  if (state.communityTaskPackId === taskPackId && state.communityData) {
+    elements.communityStatus.textContent = "";
+    renderCommunityLeaderboard(elements.communityContent, state.communityData, t, state.language);
+    return;
+  }
+
+  // Try cache first
+  const cached = getCachedCommunityData(taskPackId);
+  if (cached) {
+    state.communityTaskPackId = taskPackId;
+    state.communityData = cached;
+    elements.communityStatus.textContent = "";
+    renderCommunityLeaderboard(elements.communityContent, cached, t, state.language);
+    return;
+  }
+
+  // Fetch from network
+  if (!navigator.onLine) {
+    elements.communityStatus.textContent = t("communityOffline");
+    elements.communityContent.innerHTML = `<p class="community-empty">${t("communityNoData")}</p>`;
+    return;
+  }
+
+  state.communityLoading = true;
+  elements.communityStatus.textContent = t("communityLoading");
+  elements.communityContent.innerHTML = "";
+
+  try {
+    const data = await fetchCommunityIndex(taskPackId);
+    state.communityTaskPackId = taskPackId;
+    state.communityData = data;
+    state.communityLoading = false;
+    state.communityError = null;
+
+    if (data) {
+      setCachedCommunityData(taskPackId, data);
+      elements.communityStatus.textContent = "";
+      renderCommunityLeaderboard(elements.communityContent, data, t, state.language);
+    } else {
+      elements.communityStatus.textContent = "";
+      elements.communityContent.innerHTML = `<p class="community-empty">${t("communityNoData")}</p><p class="community-hint">${t("communityPublishHint")}</p>`;
+    }
+  } catch (error) {
+    state.communityLoading = false;
+    state.communityError = error?.message ?? "Unknown error";
+    elements.communityStatus.textContent = t("communityError");
+    elements.communityContent.innerHTML = `<p class="community-empty">${t("communityNoData")}</p>`;
+  }
+}
+
 function render() {
   renderStaticText();
   if (elements.resultLoaderMessage) {
@@ -1162,6 +1088,8 @@ function render() {
     setHidden(elements.runInfo, true);
     setHidden(elements.emptyState, false);
     setHidden(elements.dashboard, true);
+    setHidden(elements.communitySection, true);
+    traceReplay.hide(); // Clean up setInterval when navigating away
     elements.agentCount.textContent = "0";
     elements.agentList.className = "agent-list empty-state";
     elements.agentList.textContent = t("noReportLoaded");
@@ -1174,6 +1102,7 @@ function render() {
   }
 
   renderDashboard(state.run);
+  renderCommunityView();
 }
 
 async function handleFileSelection(event) {
@@ -1222,6 +1151,122 @@ elements.launcherTaskSelect.addEventListener("change", (event) => {
 elements.launcherRepoPath.addEventListener("input", () => saveLauncherConfig());
 elements.launcherTaskPath.addEventListener("input", () => saveLauncherConfig());
 elements.launcherOutputPath.addEventListener("input", () => saveLauncherConfig());
+
+function extractAgentConfigFromCard(buttonEl) {
+  const card = buttonEl.closest(".variant-card");
+  const role = buttonEl.getAttribute("data-role");
+
+  // Real agent (no card container)
+  if (role === "real-agent-test") {
+    const agentId = buttonEl.getAttribute("data-agent-id");
+    return { baseAgentId: agentId, displayLabel: agentId, config: {} };
+  }
+
+  if (!card) return null;
+
+  // Determine agent type from card data attributes
+  if (card.hasAttribute("data-codex-variant-id")) {
+    return {
+      baseAgentId: "codex",
+      displayLabel: card.querySelector('[data-role="variant-label"]')?.value?.trim() || "Codex CLI",
+      config: {
+        model: card.querySelector('[data-role="variant-model"]')?.value?.trim() || undefined,
+        reasoningEffort: card.querySelector('[data-role="variant-reasoning"]')?.value?.trim() || undefined,
+      },
+    };
+  }
+  if (card.hasAttribute("data-claude-variant-id")) {
+    return {
+      baseAgentId: "claude-code",
+      displayLabel: card.querySelector('[data-role="claude-variant-label"]')?.value?.trim() || "Claude Code",
+      config: {
+        model: card.querySelector('[data-role="claude-variant-model"]')?.value?.trim() || undefined,
+        providerProfileId: card.getAttribute("data-profile-id") || undefined,
+      },
+    };
+  }
+  if (card.hasAttribute("data-gemini-variant-id")) {
+    return {
+      baseAgentId: "gemini-cli",
+      displayLabel: card.querySelector('[data-role="gemini-variant-label"]')?.value?.trim() || "Gemini CLI",
+      config: { model: card.querySelector('[data-role="gemini-variant-model"]')?.value?.trim() || undefined },
+    };
+  }
+  if (card.hasAttribute("data-aider-variant-id")) {
+    return {
+      baseAgentId: "aider",
+      displayLabel: card.querySelector('[data-role="aider-variant-label"]')?.value?.trim() || "Aider",
+      config: { model: card.querySelector('[data-role="aider-variant-model"]')?.value?.trim() || undefined },
+    };
+  }
+  if (card.hasAttribute("data-kilo-variant-id")) {
+    return {
+      baseAgentId: "kilo-cli",
+      displayLabel: card.querySelector('[data-role="kilo-variant-label"]')?.value?.trim() || "Kilo CLI",
+      config: { model: card.querySelector('[data-role="kilo-variant-model"]')?.value?.trim() || undefined },
+    };
+  }
+  if (card.hasAttribute("data-opencode-variant-id")) {
+    return {
+      baseAgentId: "opencode",
+      displayLabel: card.querySelector('[data-role="opencode-variant-label"]')?.value?.trim() || "OpenCode",
+      config: { model: card.querySelector('[data-role="opencode-variant-model"]')?.value?.trim() || undefined },
+    };
+  }
+
+  return null;
+}
+
+function showPreflightToast(buttonEl, status, summary) {
+  // Remove any existing toast on this card
+  const existingToast = buttonEl.parentElement?.querySelector(".preflight-toast");
+  if (existingToast) existingToast.remove();
+
+  const toast = document.createElement("span");
+  toast.className = `preflight-toast ${status}`;
+  const icon = status === "ready" ? "✓" : status === "unverified" ? "?" : "✗";
+  const labelKey = `testConnection${status.charAt(0).toUpperCase() + status.slice(1)}`;
+  toast.textContent = `${icon} ${t(labelKey)}`;
+  if (summary) toast.title = summary;
+  buttonEl.parentElement?.appendChild(toast);
+
+  // Auto-remove after 5 seconds
+  setTimeout(() => toast.remove(), 5000);
+}
+
+async function handleTestConnection(buttonEl) {
+  const agentConfig = extractAgentConfigFromCard(buttonEl);
+  if (!agentConfig) return;
+
+  // Loading state with spinner
+  const originalText = buttonEl.textContent;
+  buttonEl.innerHTML = `<span class="spinner"></span> ${escapeHtml(t("testConnectionTesting"))}`;
+  buttonEl.disabled = true;
+  buttonEl.classList.add("testing");
+
+  try {
+    const response = await fetch("/api/preflight", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(agentConfig),
+    });
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      showPreflightToast(buttonEl, "error", err.error || `HTTP ${response.status}`);
+      return;
+    }
+
+    const result = await response.json();
+    showPreflightToast(buttonEl, result.status, result.summary);
+  } catch (error) {
+    showPreflightToast(buttonEl, "error", error?.message || "Network error");
+  } finally {
+    buttonEl.textContent = originalText;
+    buttonEl.disabled = false;
+    buttonEl.classList.remove("testing");
+  }
+}
 elements.launcherProbeAuth.addEventListener("change", () => saveLauncherConfig());
 elements.launcherScoreMode?.addEventListener("change", (event) => {
   state.launcherScoreMode = event.target.value;
@@ -1368,6 +1413,12 @@ elements.launcherAgents.addEventListener("click", (event) => {
       state.launcherOpencodeVariants = [defaultOpencodeVariant()];
     }
     renderLauncher();
+  }
+
+  // Test connection buttons
+  const testRole = target.getAttribute("data-role");
+  if (testRole?.endsWith("-variant-test") || testRole === "real-agent-test") {
+    handleTestConnection(target);
   }
 });
 elements.launcherRun.addEventListener("click", handleLauncherRun);
@@ -1677,9 +1728,10 @@ elements.downloadShareSvg.addEventListener("click", () => {
     return;
   }
 
+  const communityRank = state.communityData ? findCommunityRank(state.run, state.communityData) : null;
   downloadTextFile(
     `agentarena-${state.run.runId}.svg`,
-    buildShareCardSvg(state.run, { scoreWeights: state.scoreWeights, scoreModeLabel: getScoreModeLabel() }),
+    buildShareCardSvg(state.run, { scoreWeights: state.scoreWeights, scoreModeLabel: getScoreModeLabel(), communityRank }),
     "image/svg+xml"
   );
   elements.clipboardStatus.textContent = t("svgDownloaded");
@@ -1699,6 +1751,18 @@ if (restoredCache) {
   state.standaloneMarkdown = restoredCache.standaloneMarkdown;
   applyRuns(restoredCache.runs, restoredCache.markdownByRunId);
   state.notice = localText("已恢复最近一次缓存结果，可离线查看。", "Restored the latest cached report for offline viewing.");
+} else {
+  // localStorage 无缓存时，尝试从 IndexedDB 恢复
+  restoreRunsFromIndexedDB().then((idbData) => {
+    if (idbData && idbData.runs.length > 0 && state.runs.length === 0) {
+      applyRuns(idbData.runs, idbData.markdownByRunId);
+      state.notice = localText(
+        "已从 IndexedDB 恢复历史数据。",
+        "Restored history from IndexedDB."
+      );
+      render();
+    }
+  });
 }
 
 // 跨运行对比功能
@@ -1753,6 +1817,15 @@ elements.crossRunCloseCompare.addEventListener("click", () => {
   state.crossRunCompareData = null;
   state.crossRunSelectedIds.clear();
   renderCrossRunCompare();
+});
+
+elements.communityRefresh?.addEventListener("click", async () => {
+  if (state.communityTaskPackId) {
+    clearCachedCommunityData(state.communityTaskPackId);
+    state.communityData = null;
+    state.communityTaskPackId = null;
+  }
+  await renderCommunityView();
 });
 
 function renderCrossRunCompare() {
@@ -1816,10 +1889,12 @@ if (elements.tryDemoBtn) {
   });
 }
 
-// Expose for debugging and HTML onclick
-window.loadDemoData = loadDemoData;
-window.applyRuns = applyRuns;
-window.state = state;
+// Expose for debugging and HTML onclick (localhost only)
+if (location.hostname === "localhost" || location.hostname === "127.0.0.1") {
+  window.loadDemoData = loadDemoData;
+  window.applyRuns = applyRuns;
+  window.state = state;
+}
 
 // Theme toggle
 const savedTheme = readStorage("theme") || "dark";
@@ -2050,15 +2125,25 @@ async function initNewModules() {
 function showIndexedDBWarning() {
   const notice = document.createElement('div');
   notice.className = 'indexeddb-warning';
-  notice.innerHTML = `
-    <span class="warning-icon">⚠️</span>
-    <span class="warning-text">${state.language === 'zh-CN' 
-      ? '当前处于隐私模式，数据不会持久化保存。建议切换到普通模式以使用完整功能。' 
-      : 'You are in private mode. Data will not be persisted. Please switch to normal mode for full functionality.'}</span>
-    <button class="warning-close" onclick="this.parentElement.remove()">×</button>
-  `;
+
+  const icon = document.createElement('span');
+  icon.className = 'warning-icon';
+  icon.textContent = '⚠️';
+
+  const text = document.createElement('span');
+  text.className = 'warning-text';
+  text.textContent = state.language === 'zh-CN'
+    ? '当前处于隐私模式，数据不会持久化保存。建议切换到普通模式以使用完整功能。'
+    : 'You are in private mode. Data will not be persisted. Please switch to normal mode for full functionality.';
+
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'warning-close';
+  closeBtn.textContent = '×';
+  closeBtn.addEventListener('click', () => notice.remove());
+
+  notice.append(icon, text, closeBtn);
   document.body.appendChild(notice);
-  
+
   // Auto-remove after 10 seconds
   setTimeout(() => notice.remove(), 10000);
 }

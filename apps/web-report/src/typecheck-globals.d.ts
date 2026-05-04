@@ -27,6 +27,9 @@ interface Element {
   dataset: DOMStringMap;
   getContext?(contextId: string): CanvasRenderingContext2D | null;
   click?(): void;
+  _chartResizeObserver?: ResizeObserver;
+  _radarResizeBound?: boolean;
+  _multiRadarResizeBound?: boolean;
 }
 
 interface Window {

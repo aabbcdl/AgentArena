@@ -371,13 +371,55 @@ const en = {
   issueResolutionCreditLabel: "Issue Resolution Mode",
   efficiencyFirstCreditLabel: "Efficiency First Mode",
   rotatingTasksCreditLabel: "Rotating Tasks Mode",
+
+  // Test connection
+  testConnection: "Test",
+  testConnectionTesting: "Testing...",
+  testConnectionReady: "Ready",
+  testConnectionMissing: "CLI not found",
+  testConnectionBlocked: "Blocked",
+  testConnectionUnverified: "Unverified",
+  testConnectionError: "Test failed",
+
+  // Community leaderboard
+  communityEyebrow: "Community",
+  communityTitle: "Community Leaderboard",
+  communityDescription: "See how your agent compares to others running the same task pack.",
+  communityRefresh: "Refresh",
+  communityLoading: "Loading community data...",
+  communityError: "Failed to load community data.",
+  communityOffline: "You are offline. Showing cached data.",
+  communityNoData: "No community data available for this task pack yet. Be the first to publish!",
+  communityBasedOn: (count) => `Based on ${count} published run${count === 1 ? "" : "s"}`,
+  communityAgent: "Agent",
+  communityModel: "Model",
+  communityAvgScore: "Avg Score",
+  communitySuccessRate: "Success",
+  communityRuns: "Runs",
+  communityLastSeen: "Last Seen",
+  communityRank: "Your Rank",
+  communityPublishHint: "Run `agentarena publish <summary.json>` to share your results with the community.",
+
   trace: {
     step: 'Step {step}',
     stepProgress: 'Step {current}/{total}',
     play: 'Play',
     pause: 'Pause',
     selectRun: 'Select a run to view trace replay'
-  }
+  },
+
+  // Chart components
+  chartComparisonTitle: 'Score Dimensions Comparison',
+  chartRadarTitle: 'Agent Capability Profile',
+  chartCodeQuality: 'Code Quality',
+  chartSpeed: 'Speed',
+  chartTokenEfficiency: 'Token Efficiency',
+  chartDebugAbility: 'Debug Ability',
+  chartRefactorAbility: 'Refactor Ability',
+  chartDocsAbility: 'Docs Ability',
+  chartWeightTotal: 'Total Weight',
+  chartWeightWarning: 'Total weight should be 100%',
+  chartNoData: 'No chart data available.'
 };
 
 const zhCN = {
@@ -944,13 +986,55 @@ const zhCN = {
   scoreLabel: "分数",
   durationLabel2: "耗时",
   noSuccessResults: (title) => `任务 "${title}" 没有成功结果。`,
+
+  // Test connection
+  testConnection: "测试",
+  testConnectionTesting: "测试中...",
+  testConnectionReady: "连接正常",
+  testConnectionMissing: "CLI 未安装",
+  testConnectionBlocked: "不可用",
+  testConnectionUnverified: "未验证",
+  testConnectionError: "测试失败",
+
+  // Community leaderboard
+  communityEyebrow: "社区",
+  communityTitle: "社区排行榜",
+  communityDescription: "看看你的 agent 在相同任务包上与其他人的表现对比。",
+  communityRefresh: "刷新",
+  communityLoading: "正在加载社区数据...",
+  communityError: "加载社区数据失败。",
+  communityOffline: "当前处于离线状态，显示缓存数据。",
+  communityNoData: "该任务包暂无社区数据，成为第一个发布的人吧！",
+  communityBasedOn: (count) => `基于 ${count} 个已发布的 run`,
+  communityAgent: "Agent",
+  communityModel: "模型",
+  communityAvgScore: "平均分",
+  communitySuccessRate: "成功率",
+  communityRuns: "运行次数",
+  communityLastSeen: "最近发布",
+  communityRank: "你的排名",
+  communityPublishHint: "运行 `agentarena publish <summary.json>` 将你的结果分享到社区。",
+
   trace: {
     step: '步骤 {step}',
     stepProgress: '步骤 {current}/{total}',
     play: '播放',
     pause: '暂停',
     selectRun: '选择要查看跟踪回放的运行'
-  }
+  },
+
+  // Chart components
+  chartComparisonTitle: '评分维度对比',
+  chartRadarTitle: 'Agent 能力画像',
+  chartCodeQuality: '代码质量',
+  chartSpeed: '速度',
+  chartTokenEfficiency: 'Token 效率',
+  chartDebugAbility: 'Debug 能力',
+  chartRefactorAbility: '重构能力',
+  chartDocsAbility: '文档能力',
+  chartWeightTotal: '总权重',
+  chartWeightWarning: '总权重应为 100%',
+  chartNoData: '暂无图表数据。'
 };
 
 export const MESSAGES = {

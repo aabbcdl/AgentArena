@@ -1,9 +1,50 @@
 import {
-  getComparableRuns, 
-  getLeaderboardIdentity,
-  serializeLeaderboardIdentity
+  getComparableRuns,
+  runtimeIdentity
 } from "./comparison.js";
 
+/**
+ * Build the identity tuple for a leaderboard entry.
+ * @param {Object} run
+ * @param {Object} result
+ * @returns {{ taskId: string, scoreMode: string, baseAgentId: string, providerProfile: string, model: string, version: string }}
+ */
+export function getLeaderboardIdentity(run, result) {
+  const runtime = runtimeIdentity(result);
+  const taskId = run.task?.id || run.task?.title || "unknown-task";
+  const scoreMode = run.scoreMode || "balanced";
+
+  return {
+    taskId,
+    scoreMode,
+    baseAgentId: result.baseAgentId || result.agentId,
+    providerProfile: runtime.provider,
+    model: runtime.model,
+    version: runtime.version
+  };
+}
+
+/**
+ * Serialize a leaderboard identity to a stable string key.
+ * @param {Object} identity
+ * @returns {string}
+ */
+export function serializeLeaderboardIdentity(identity) {
+  return JSON.stringify([
+    identity.taskId,
+    identity.scoreMode,
+    identity.baseAgentId,
+    identity.providerProfile,
+    identity.model,
+    identity.version
+  ]);
+}
+
+/**
+ * Compute the median of a numeric array.
+ * @param {number[]} values
+ * @returns {number}
+ */
 function median(values) {
   if (values.length === 0) return 0;
   const sorted = [...values].sort((a, b) => a - b);
@@ -13,6 +54,12 @@ function median(values) {
     : sorted[mid];
 }
 
+/**
+ * Build a leaderboard from historical runs comparable to the current run.
+ * @param {Object[]} runs
+ * @param {Object} currentRun
+ * @returns {Object}
+ */
 export function buildLeaderboard(runs, currentRun) {
   const comparableRuns = getComparableRuns(runs, currentRun);
   const excludedRuns = runs.filter((run) => !comparableRuns.includes(run));
@@ -141,6 +188,12 @@ export function buildLeaderboard(runs, currentRun) {
   };
 }
 
+/**
+ * Get human-readable leaderboard explanation texts.
+ * @param {Object} leaderboard
+ * @param {string} [locale]
+ * @returns {string[]}
+ */
 export function getLeaderboardExplanation(leaderboard, locale = "en") {
   if (locale === "zh-CN") {
     return [

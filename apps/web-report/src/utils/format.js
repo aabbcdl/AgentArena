@@ -57,14 +57,16 @@ export function formatFileSize(bytes) {
 /**
  * 格式化日期
  * @param {string|number|Date} timestamp - 时间戳或日期对象
+ * @param {string} [locale] - 语言区域设置，默认从 document.documentElement.lang 获取
  * @returns {string} 格式化后的日期字符串
  */
-export function formatDate(timestamp) {
+export function formatDate(timestamp, locale) {
   if (!timestamp) return '-';
   const date = new Date(timestamp);
   if (Number.isNaN(date.getTime())) return '-';
-  
-  return date.toLocaleString('zh-CN', {
+
+  const resolvedLocale = locale || document.documentElement.lang || 'en';
+  return date.toLocaleString(resolvedLocale, {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -90,9 +92,10 @@ export function truncate(str, maxLen, suffix = '...') {
  * @param {number} num - 数字
  * @returns {string} 格式化后的数字
  */
-export function formatNumber(num) {
+export function formatNumber(num, locale) {
   if (num == null) return '-';
-  return num.toLocaleString('zh-CN');
+  const resolvedLocale = locale || document.documentElement.lang || 'en';
+  return num.toLocaleString(resolvedLocale);
 }
 
 /**
@@ -112,9 +115,10 @@ export function formatPercent(value, decimals = 1) {
  * @param {string} [currency='USD'] - 货币类型
  * @returns {string} 格式化后的金额
  */
-export function formatCurrency(value, currency = 'USD') {
+export function formatCurrency(value, currency = 'USD', locale = undefined) {
   if (value == null) return '-';
-  return new Intl.NumberFormat('zh-CN', {
+  const resolvedLocale = locale || document.documentElement.lang || 'en';
+  return new Intl.NumberFormat(resolvedLocale, {
     style: 'currency',
     currency,
     minimumFractionDigits: 2

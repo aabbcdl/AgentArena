@@ -1,4 +1,8 @@
-import { renderBarChart, renderRadarChart } from "../components/charts.js";
+import { renderBarChart, renderComparisonBarChart, renderRadarChart } from "../components/charts.js";
+import { createVirtualList } from "../utils/virtual-list.js";
+
+const VIRTUAL_LIST_THRESHOLD = 50;
+let runListVirtual = null;
 
 export function createDashboardModule(deps) {
   const {
@@ -145,6 +149,35 @@ function renderTaskBrief(run) {
   `;
 }
 
+function renderRunListItem(run) {
+  const active = run.runId === state.selectedRunId ? "active" : "";
+  const successCount = run.results.filter((result) => result.status === "success").length;
+  const hasMarkdown = state.markdownByRunId.has(run.runId);
+
+  return `
+    <div class="run-button ${active}" role="button" tabindex="0" data-run-id="${escapeHtml(run.runId)}" aria-label="${escapeHtml(run.task.title)}">
+      <strong>${escapeHtml(run.task.title)}</strong>
+      <div class="meta">${escapeHtml(run.createdAt)}</div>
+      <div class="meta">${successCount}/${run.results.length} ${localText("成功", "success")} | ${escapeHtml(run.runId)}</div>
+      <div class="meta">${hasMarkdown ? escapeHtml(t("linkedMarkdown")) : escapeHtml(t("jsonOnly"))}</div>
+      <div class="run-actions">
+        <button type="button" class="run-select-btn" data-role="select-run" data-run-id="${escapeHtml(run.runId)}" title="${escapeHtml(localText("打开这个 run", "Open this run"))}" aria-label="${escapeHtml(localText("打开这个 run", "Open this run"))}">
+          <svg class="icon"><use href="#icon-open"/></svg>
+          ${escapeHtml(localText("查看", "Open"))}
+        </button>
+        <button type="button" class="run-action-btn" data-role="export-run" data-run-id="${escapeHtml(run.runId)}" title="${escapeHtml(localText("导出 JSON", "Export JSON"))}" aria-label="${escapeHtml(localText("导出 JSON", "Export JSON"))}">
+          <svg class="icon"><use href="#icon-export"/></svg>
+          ${escapeHtml(localText("导出", "Export"))}
+        </button>
+        <button type="button" class="run-action-btn" data-role="delete-run" data-run-id="${escapeHtml(run.runId)}" title="${escapeHtml(localText("从列表移除", "Remove from list"))}" aria-label="${escapeHtml(localText("从列表移除", "Remove from list"))}">
+          <svg class="icon"><use href="#icon-delete"/></svg>
+          ${escapeHtml(localText("移除", "Remove"))}
+        </button>
+      </div>
+    </div>
+  `;
+}
+
 function renderRunList() {
   const query = state.runSearchQuery || "";
   const filteredRuns = query
@@ -158,48 +191,50 @@ function renderRunList() {
   elements.runCount.textContent = `${filteredRuns.length} / ${state.runs.length}`;
 
   if (state.runs.length === 0) {
+    if (runListVirtual) {
+      runListVirtual.destroy();
+      runListVirtual = null;
+    }
     elements.runList.className = "run-list empty-state";
     elements.runList.textContent = t("noRunsLoaded");
     return;
   }
 
   if (filteredRuns.length === 0) {
+    if (runListVirtual) {
+      runListVirtual.destroy();
+      runListVirtual = null;
+    }
     elements.runList.className = "run-list empty-state";
     elements.runList.innerHTML = `<p>${escapeHtml(t("noRunsMatchSearch") || "No runs match your search.")}</p>`;
     return;
   }
 
   elements.runList.className = "run-list";
-  elements.runList.innerHTML = filteredRuns
-    .map((run) => {
-      const active = run.runId === state.selectedRunId ? "active" : "";
-      const successCount = run.results.filter((result) => result.status === "success").length;
-      const hasMarkdown = state.markdownByRunId.has(run.runId);
 
-      return `
-        <div class="run-button ${active}" role="button" tabindex="0" data-run-id="${escapeHtml(run.runId)}" aria-label="${escapeHtml(run.task.title)}">
-          <strong>${escapeHtml(run.task.title)}</strong>
-          <div class="meta">${escapeHtml(run.createdAt)}</div>
-          <div class="meta">${successCount}/${run.results.length} ${localText("成功", "success")} | ${escapeHtml(run.runId)}</div>
-          <div class="meta">${hasMarkdown ? escapeHtml(t("linkedMarkdown")) : escapeHtml(t("jsonOnly"))}</div>
-          <div class="run-actions">
-            <button type="button" class="run-select-btn" data-role="select-run" data-run-id="${escapeHtml(run.runId)}" title="${escapeHtml(localText("打开这个 run", "Open this run"))}" aria-label="${escapeHtml(localText("打开这个 run", "Open this run"))}">
-              <svg class="icon"><use href="#icon-open"/></svg>
-              ${escapeHtml(localText("查看", "Open"))}
-            </button>
-            <button type="button" class="run-action-btn" data-role="export-run" data-run-id="${escapeHtml(run.runId)}" title="${escapeHtml(localText("导出 JSON", "Export JSON"))}" aria-label="${escapeHtml(localText("导出 JSON", "Export JSON"))}">
-              <svg class="icon"><use href="#icon-export"/></svg>
-              ${escapeHtml(localText("导出", "Export"))}
-            </button>
-            <button type="button" class="run-action-btn" data-role="delete-run" data-run-id="${escapeHtml(run.runId)}" title="${escapeHtml(localText("从列表移除", "Remove from list"))}" aria-label="${escapeHtml(localText("从列表移除", "Remove from list"))}">
-              <svg class="icon"><use href="#icon-delete"/></svg>
-              ${escapeHtml(localText("移除", "Remove"))}
-            </button>
-          </div>
-        </div>
-      `;
-    })
-    .join("");
+  // 虚拟滚动：列表项超过阈值时启用
+  if (filteredRuns.length > VIRTUAL_LIST_THRESHOLD) {
+    if (!runListVirtual) {
+      runListVirtual = createVirtualList(elements.runList, {
+        itemHeight: 80,
+        overscan: 5,
+        className: 'run-list-virtual',
+        role: 'listbox'
+      });
+    }
+    runListVirtual.setItems(filteredRuns, renderRunListItem);
+    // 搜索/过滤后重置滚动位置
+    if (query) {
+      runListVirtual.scrollToTop();
+    }
+  } else {
+    // 列表较短时销毁虚拟滚动，直接渲染
+    if (runListVirtual) {
+      runListVirtual.destroy();
+      runListVirtual = null;
+    }
+    elements.runList.innerHTML = filteredRuns.map(renderRunListItem).join("");
+  }
 }
 
 function translateFairComparisonReason(reason, t) {
@@ -773,6 +808,7 @@ function renderComparisonBars(run) {
         ${precisionRows}
       </div>
       <div id="score-bar-chart" class="score-chart-container"></div>
+      <div id="score-comparison-chart" class="score-chart-container"></div>
       <div id="score-radar-chart" class="score-chart-container"></div>
     </div>
   `;
@@ -789,6 +825,31 @@ function renderComparisonBars(run) {
       }))
     }];
     renderBarChart(scoreBarContainer, chartData, { width: 600, height: 200 });
+  }
+
+  // Render comparison bar chart across agents
+  const comparisonContainer = elements.comparisonBars.querySelector("#score-comparison-chart");
+  if (comparisonContainer && results.length > 0 && state.scoreWeights) {
+    const dimKeys = Object.keys(state.scoreWeights).filter(k => state.scoreWeights[k] > 0);
+    const agentsData = results.slice(0, 6).map(r => ({
+      label: resultLabel(r),
+      dimensions: dimKeys.map(key => {
+        let value = 0;
+        if (key === 'status') value = r.status === 'success' ? 100 : 0;
+        else if (key === 'tests') value = (r.judgeResults?.filter(j => j.success).length / Math.max(r.judgeResults?.length || 1, 1)) * 100;
+        else if (key === 'duration') value = Math.max(0, 100 - Math.min((r.durationMs || 0) / 60000, 1) * 100);
+        else if (key === 'cost') value = r.estimatedCostUsd ? Math.max(0, 100 - Math.min(r.estimatedCostUsd, 1) * 100) : 50;
+        else if (key === 'precision') value = Math.max(diffPrecisionScore(r), 0) * 100;
+        else if (key === 'lint') value = 100; // placeholder
+        else value = (state.scoreWeights[key] || 0) * 100;
+        return { key, name: key, value, max: 100, weight: state.scoreWeights[key] };
+      })
+    }));
+    renderComparisonBarChart(comparisonContainer, agentsData, null, {
+      width: 600,
+      title: 'Score Dimensions Comparison',
+      animation: true
+    });
   }
 
   // Render radar chart for agent comparison
@@ -943,6 +1004,29 @@ function renderCompareTableV2(run) {
       </tbody>
     </table>
   `;
+
+  // Render radar charts for expanded agent detail panels
+  const radarContainers = elements.compareTable?.querySelectorAll?.('.agent-radar-chart') || [];
+  radarContainers.forEach(container => {
+    const agentId = container.dataset.agentId;
+    const result = run.results.find(r => r.agentId === agentId);
+    if (!result) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = 200;
+    canvas.height = 200;
+    container.appendChild(canvas);
+    const radarData = {
+      dimensions: [
+        { name: 'Code Quality', value: result.judgeResults?.filter(j => j.success).length / Math.max(result.judgeResults?.length || 1, 1) * 100 },
+        { name: 'Speed', value: Math.max(0, 100 - Math.min((result.durationMs || 0) / 60000, 1) * 100) },
+        { name: 'Token Eff.', value: result.tokenUsage ? Math.max(0, 100 - Math.min(result.tokenUsage / 100000, 1) * 100) : 50 },
+        { name: 'Debug', value: result.status === 'success' ? 80 : 20 },
+        { name: 'Refactor', value: Math.max(diffPrecisionScore(result), 0) * 100 },
+        { name: 'Docs', value: 50 }
+      ]
+    };
+    renderRadarChart(canvas, radarData, { width: 200, height: 200, padding: 30 });
+  });
 }
 
 

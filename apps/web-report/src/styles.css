@@ -196,6 +196,12 @@ body {
   font-variation-settings: "opsz" 14;
 }
 
+/* Fix select option colors in all themes */
+select option {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
 /* 图标系统 */
 .icon {
   width: 16px;
@@ -327,11 +333,16 @@ button .icon {
 .language-control select {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  background: var(--surface);
+  background: var(--bg-elevated);
   color: var(--text-primary);
   padding: 8px 12px;
   cursor: pointer;
   transition: all var(--transition-fast);
+}
+
+.language-control select option {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
 }
 
 .language-control select:hover {
@@ -466,6 +477,24 @@ button .icon {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+/* Inline spinner for buttons */
+.spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  vertical-align: middle;
+  margin-right: 4px;
+}
+
+.btn-test-connection.testing {
+  opacity: 0.8;
+  cursor: wait;
 }
 
 /* === Hero Actions (Error State) === */
@@ -964,11 +993,16 @@ button .icon {
   width: 100%;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  background: var(--surface);
+  background: var(--bg-elevated);
   color: var(--text-primary);
   padding: 12px 14px;
   font-size: var(--text-lg);
   transition: all var(--transition-fast);
+}
+
+.filter-bar select option {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
 }
 
 .filter-bar input:focus,
@@ -1144,6 +1178,8 @@ button .icon {
   background: var(--bg-secondary);
   cursor: pointer;
   transition: all var(--transition-fast);
+  content-visibility: auto;
+  contain-intrinsic-size: auto 52px;
 }
 
 .compare-table tbody tr:hover {
@@ -1553,6 +1589,8 @@ button .icon {
   background: var(--bg-secondary);
   cursor: pointer;
   transition: all var(--transition-fast);
+  content-visibility: auto;
+  contain-intrinsic-size: auto 72px;
 }
 
 .cross-run-item:hover {
@@ -3266,6 +3304,11 @@ details.launcher-section > *:not(summary) {
   font-size: 0.85rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
+}
+
+.leaderboard-table tbody tr {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 44px;
 }
 
 .leaderboard-table tr:hover {

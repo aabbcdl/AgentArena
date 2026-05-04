@@ -467,17 +467,35 @@ export function createLauncherModule(deps) {
       syncLauncherVariantsWithAdapters();
     }
 
-    const options = [
-      `<option value="">${escapeHtml(t("taskPackCustom"))}</option>`,
-      ...state.availableTaskPacks.map(
-        (taskPack) => {
-          const diff = taskPack.difficulty ? ` [${translateDifficulty(taskPack.difficulty)}]` : "";
-          const tpTitle = taskPackI18n(taskPack, "title") || taskPack.title;
-          return `<option value="${escapeHtml(taskPack.path)}">${escapeHtml(tpTitle)}${escapeHtml(diff)}</option>`;
-        }
-      )
-    ];
-    elements.launcherTaskSelect.innerHTML = options.join("");
+    // Group taskpacks by difficulty
+    const difficultyOrder = { easy: 0, medium: 1, hard: 2 };
+    const grouped = { easy: [], medium: [], hard: [], other: [] };
+    for (const tp of state.availableTaskPacks) {
+      const key = tp.difficulty && grouped[tp.difficulty] ? tp.difficulty : "other";
+      grouped[key].push(tp);
+    }
+    // Sort within each group by title
+    for (const arr of Object.values(grouped)) {
+      arr.sort((a, b) => (taskPackI18n(a, "title") || a.title).localeCompare(taskPackI18n(b, "title") || b.title));
+    }
+
+    const customOption = `<option value="">${escapeHtml(t("taskPackCustom"))}</option>`;
+    const groupLabels = { easy: t("difficultyEasy") || "简单", medium: t("difficultyMedium") || "中等", hard: t("difficultyHard") || "困难", other: t("difficultyOther") || "其他" };
+    const optionHtml = [customOption];
+    for (const diffKey of ["easy", "medium", "hard", "other"]) {
+      const packs = grouped[diffKey];
+      if (packs.length === 0) continue;
+      optionHtml.push(`<optgroup label="${escapeHtml(groupLabels[diffKey])} (${packs.length})">`);
+      for (const tp of packs) {
+        const tpTitle = taskPackI18n(tp, "title") || tp.title;
+        optionHtml.push(`<option value="${escapeHtml(tp.path)}">${escapeHtml(tpTitle)}</option>`);
+      }
+      optionHtml.push(`</optgroup>`);
+    }
+
+    if (elements.launcherTaskSelect) {
+      elements.launcherTaskSelect.innerHTML = optionHtml.join("");
+    }
   
     if (!elements.launcherTaskPath.value && info.defaultTaskPath) {
       elements.launcherTaskPath.value = info.defaultTaskPath;
@@ -563,14 +581,17 @@ export function createLauncherModule(deps) {
             )} | ${escapeHtml(localText("可信度", "Verification"))}: ${escapeHtml(
               variant.verification
             )}</p>
-            <button type="button" class="variant-remove" data-role="variant-remove">${escapeHtml(
-              localText("删除这个 variant", "Remove variant")
-            )}</button>
+            <div class="inline-actions">
+              <button type="button" class="btn-test-connection" data-role="variant-test">${escapeHtml(t("testConnection"))}</button>
+              <button type="button" class="variant-remove" data-role="variant-remove">${escapeHtml(
+                localText("删除这个 variant", "Remove variant")
+              )}</button>
+            </div>
           </div>
         `
       )
       .join("");
-  
+
     const claudeVariants = state.launcherClaudeVariants
       .map((variant) => {
         const profile = state.availableProviderProfiles.find((entry) => entry.id === variant.profileId);
@@ -611,6 +632,7 @@ export function createLauncherModule(deps) {
                 : ""
             }
             <div class="inline-actions">
+              <button type="button" class="btn-test-connection" data-role="claude-variant-test">${escapeHtml(t("testConnection"))}</button>
               ${
                 profile?.isBuiltIn
                   ? `<span class="muted">${escapeHtml(localText("官方内置 Provider", "Built-in official provider"))}</span>`
@@ -725,14 +747,16 @@ export function createLauncherModule(deps) {
                 <input data-role="gemini-variant-model" type="text" value="${escapeHtml(variant.model)}" placeholder="gemini-2.5-pro" />
               </label>
             </div>
-            <button type="button" class="variant-remove" data-role="gemini-variant-remove">${escapeHtml(
-              localText("删除这个 variant", "Remove variant")
-            )}</button>
+            <div class="inline-actions">
+              <button type="button" class="btn-test-connection" data-role="gemini-variant-test">${escapeHtml(t("testConnection"))}</button>
+              <button type="button" class="variant-remove" data-role="gemini-variant-remove">${escapeHtml(
+                localText("删除这个 variant", "Remove variant")
+              )}</button>
+            </div>
           </div>
         `
       )
       .join("");
-  
     const aiderVariants = state.launcherAiderVariants
       .map(
         (variant) => `
@@ -751,9 +775,12 @@ export function createLauncherModule(deps) {
                 <input data-role="aider-variant-model" type="text" value="${escapeHtml(variant.model)}" placeholder="claude-sonnet-4-20250514" />
               </label>
             </div>
-            <button type="button" class="variant-remove" data-role="aider-variant-remove">${escapeHtml(
-              localText("删除这个 variant", "Remove variant")
-            )}</button>
+            <div class="inline-actions">
+              <button type="button" class="btn-test-connection" data-role="aider-variant-test">${escapeHtml(t("testConnection"))}</button>
+              <button type="button" class="variant-remove" data-role="aider-variant-remove">${escapeHtml(
+                localText("删除这个 variant", "Remove variant")
+              )}</button>
+            </div>
           </div>
         `
       )
@@ -777,9 +804,12 @@ export function createLauncherModule(deps) {
                 <input data-role="kilo-variant-model" type="text" value="${escapeHtml(variant.model)}" placeholder="gpt-5.4" />
               </label>
             </div>
-            <button type="button" class="variant-remove" data-role="kilo-variant-remove">${escapeHtml(
-              localText("删除这个 variant", "Remove variant")
-            )}</button>
+            <div class="inline-actions">
+              <button type="button" class="btn-test-connection" data-role="kilo-variant-test">${escapeHtml(t("testConnection"))}</button>
+              <button type="button" class="variant-remove" data-role="kilo-variant-remove">${escapeHtml(
+                localText("删除这个 variant", "Remove variant")
+              )}</button>
+            </div>
           </div>
         `
       )
@@ -803,9 +833,12 @@ export function createLauncherModule(deps) {
                 <input data-role="opencode-variant-model" type="text" value="${escapeHtml(variant.model)}" placeholder="gpt-5.4" />
               </label>
             </div>
-            <button type="button" class="variant-remove" data-role="opencode-variant-remove">${escapeHtml(
-              localText("删除这个 variant", "Remove variant")
-            )}</button>
+            <div class="inline-actions">
+              <button type="button" class="btn-test-connection" data-role="opencode-variant-test">${escapeHtml(t("testConnection"))}</button>
+              <button type="button" class="variant-remove" data-role="opencode-variant-remove">${escapeHtml(
+                localText("删除这个 variant", "Remove variant")
+              )}</button>
+            </div>
           </div>
         `
       )
@@ -829,10 +862,13 @@ export function createLauncherModule(deps) {
             .map((adapter) => {
               const checked = state.launcherSelectedAgentIds.includes(adapter.id) ? "checked" : "";
               return `
-                <label class="checkbox">
-                  <input type="checkbox" data-role="real-agent" value="${escapeHtml(adapter.id)}" ${checked} />
-                  <span>${escapeHtml(adapter.title)}</span>
-                </label>
+                <div class="checkbox-with-test">
+                  <label class="checkbox">
+                    <input type="checkbox" data-role="real-agent" value="${escapeHtml(adapter.id)}" ${checked} />
+                    <span>${escapeHtml(adapter.title)}</span>
+                  </label>
+                  <button type="button" class="btn-test-connection" data-role="real-agent-test" data-agent-id="${escapeHtml(adapter.id)}">${escapeHtml(t("testConnection"))}</button>
+                </div>
               `;
             })
             .join("")}
@@ -1023,7 +1059,7 @@ export function createLauncherModule(deps) {
       state.runInProgress = false;
       state.runStatus = null;
     }
-  
+
     render();
   }
   

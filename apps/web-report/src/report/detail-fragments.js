@@ -1,3 +1,4 @@
+
 import { resultStore } from "../utils/storage.js";
 
 export function createDetailFragments({
@@ -231,6 +232,7 @@ export function createDetailFragments({
           <div class="summary-row"><span>${escapeHtml(localText("Lint", "Lint"))}</span><strong>${escapeHtml(formatLintMetric(result))}</strong></div>
           <div class="summary-row"><span>${escapeHtml(localText("Diff 精准度", "Diff Precision"))}</span><strong>${escapeHtml(formatDiffPrecisionMetric(result))}</strong></div>
         </div>
+        <div class="agent-radar-chart" data-agent-id="${escapeHtml(result.agentId)}" style="margin-top:12px;"></div>
       </div>
       <div class="agent-summary-text">
         <span>${escapeHtml(result.summary || "")}</span>

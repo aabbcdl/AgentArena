@@ -1,16 +1,28 @@
 import {
   baseAgentLabel,
-  formatCompositeScore,
-  formatDiffPrecisionMetric,
-  formatLintMetric,
-  formatTestMetric,
-  getRunVerdict, 
+  getRunVerdict,
   resultLabel,
   runtimeIdentity,
   summarizeRun
 } from "./comparison.js";
-import { DEFAULT_SCORE_WEIGHTS } from "./scoring.js";
+import {
+  DEFAULT_SCORE_WEIGHTS,
+  formatCompositeScore,
+  formatDiffPrecisionMetric,
+  formatLintMetric,
+  formatTestMetric
+} from "./scoring.js";
 
+export { summarizeRun };
+
+/**
+ * Build a plain-text share card for a run.
+ * @param {Object} run
+ * @param {Object} [options]
+ * @param {Record<string, number>} [options.scoreWeights]
+ * @param {string} [options.scoreModeLabel]
+ * @returns {string}
+ */
 export function buildShareCard(run, options = {}) {
   const summary = summarizeRun(run);
   const scoreWeights = options.scoreWeights ?? DEFAULT_SCORE_WEIGHTS;
@@ -42,10 +54,20 @@ export function buildShareCard(run, options = {}) {
   return lines.join("\n");
 }
 
+/**
+ * Build an SVG share card for a run.
+ * @param {Object} run
+ * @param {Object} [options]
+ * @param {Record<string, number>} [options.scoreWeights]
+ * @param {string} [options.scoreModeLabel]
+ * @param {number|null} [options.communityRank]
+ * @returns {string}
+ */
 export function buildShareCardSvg(run, options = {}) {
   const summary = summarizeRun(run);
   const scoreWeights = options.scoreWeights ?? DEFAULT_SCORE_WEIGHTS;
   const scoreModeLabel = options.scoreModeLabel ?? null;
+  const communityRank = options.communityRank ?? null;
   const verdict = getRunVerdict(run, { scoreWeights });
   const esc = (value) =>
     String(value)
@@ -158,10 +180,19 @@ export function buildShareCardSvg(run, options = {}) {
 
   <rect x="0" y="590" width="1200" height="40" fill="#08080d" />
   <text x="68" y="616" fill="#475569" font-family="${font}" font-size="13">Run ${esc(truncate(run.runId, 30))} · ${esc(run.createdAt)}</text>
+  ${communityRank ? `<rect x="880" y="594" width="100" height="28" rx="6" fill="#6366f1" opacity="0.2" /><text x="930" y="614" fill="#818cf8" font-family="${font}" font-size="13" text-anchor="middle" font-weight="700">#${communityRank} Community</text>` : ""}
   <text x="1132" y="616" fill="#6366f1" font-family="${font}" font-size="13" text-anchor="end" font-weight="600">agentarena.dev</text>
 </svg>`;
 }
 
+/**
+ * Build a markdown PR table for a run.
+ * @param {Object} run
+ * @param {Object} [options]
+ * @param {Record<string, number>} [options.scoreWeights]
+ * @param {string} [options.scoreModeLabel]
+ * @returns {string}
+ */
 export function buildPrTable(run, options = {}) {
   const scoreWeights = options.scoreWeights ?? DEFAULT_SCORE_WEIGHTS;
   const scoreModeLabel = options.scoreModeLabel ?? null;

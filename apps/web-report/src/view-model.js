@@ -1,18 +1,18 @@
 export {
+  clearCachedCommunityData,
+  fetchCommunityIndex,
+  findCommunityRank,
+  getCachedCommunityData,
+  renderCommunityLeaderboard,
+  setCachedCommunityData
+} from "./view-model/community.js";
+export {
   baseAgentLabel,
-  diffPrecisionScore,
   fairComparisonIdentity,
-  findJudgeByType,
   findPreviousComparableRun,
-  formatCompositeScore,
-  formatDiffPrecisionMetric,
-  formatLintMetric,
-  formatTestMetric,
   getAgentTrendRows,
   getComparableRuns,
   getCompareResults,
-  getCompositeScoreDetails,
-  getCompositeScoreReasons,
   getCrossRunCompareRows,
   getCrossRunRecommendation,
   getFairComparisonExclusionReasons,
@@ -20,8 +20,7 @@ export {
   getRunToRunAgentDiff,
   getRunTrustSummary,
   getRunVerdict,
-  getSelectionTrustSummary, 
-  judgePassRatio,
+  getSelectionTrustSummary,
   missingCoreComparisonData,
   resultLabel,
   resultRecordKey,
@@ -29,11 +28,10 @@ export {
   summarizeRun
 } from "./view-model/comparison.js";
 export {
-  buildPrTable, 
+  buildPrTable,
   buildShareCard,
   buildShareCardSvg
 } from "./view-model/export-formatters.js";
-
 export {
   buildLeaderboard,
   getLeaderboardExplanation
@@ -41,10 +39,19 @@ export {
 export {
   DEFAULT_SCORE_WEIGHTS,
   DEPRECATED_SCORE_PRESETS,
-  getAllScorePresets, 
+  diffPrecisionScore,
+  findJudgeByType,
+  formatCompositeScore,
+  formatDiffPrecisionMetric,
+  formatLintMetric,
+  formatTestMetric,
+  getAllScorePresets,
+  getCompositeScoreDetails,
+  getCompositeScoreReasons,
   getMatchingScorePresetId,
   getScoreWeightPreset,
-  normalizeScoreWeights,
+  judgePassRatio,
+  normalizeScoreWeights, 
   SCORE_WEIGHT_PRESETS
 } from "./view-model/scoring.js";
 
