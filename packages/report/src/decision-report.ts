@@ -34,6 +34,15 @@ export interface DecisionReport {
 }
 
 /**
+ * Escape a string for safe use in a shell command.
+ * Uses single-quote wrapping with embedded single-quote escaping.
+ */
+function shellEscape(value: string): string {
+  // Wrap in single quotes; replace internal single quotes with '\''
+  return "'" + value.replace(/'/g, "'\\''") + "'";
+}
+
+/**
  * Generate a decision report from benchmark results
  */
 export function generateDecisionReport(
@@ -59,7 +68,7 @@ export function generateDecisionReport(
     teamEstimates,
     keyInsights,
     warnings,
-    reproduceCommand: `agentarena run --repo ${run.repoPath} --task ${run.task.id} --agents ${run.results.map((r) => r.agentId).join(",")}`
+    reproduceCommand: `agentarena run --repo ${shellEscape(run.repoPath)} --task ${shellEscape(run.task.id)} --agents ${run.results.map((r) => shellEscape(r.agentId)).join(",")}`
   };
 }
 

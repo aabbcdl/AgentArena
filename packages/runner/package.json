@@ -8,13 +8,16 @@
   "files": [
     "dist"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "dependencies": {
-    "@agentarena/adapters": "workspace:*",
-    "@agentarena/core": "workspace:*",
-    "@agentarena/judges": "workspace:*",
-    "@agentarena/report": "workspace:*",
-    "@agentarena/taskpacks": "workspace:*",
-    "@agentarena/trace": "workspace:*",
+    "@agentarena/adapters": "0.1.0",
+    "@agentarena/core": "0.1.0",
+    "@agentarena/judges": "0.1.0",
+    "@agentarena/report": "0.1.0",
+    "@agentarena/taskpacks": "0.1.0",
+    "@agentarena/trace": "0.1.0",
     "picomatch": "^4.0.3"
   },
   "scripts": {

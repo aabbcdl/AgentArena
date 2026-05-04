@@ -367,6 +367,11 @@ export interface AdapterExecutionContext {
   task: TaskPack;
   signal?: AbortSignal;
   trace: (event: Omit<TraceEvent, "agentId" | "timestamp">) => Promise<void>;
+  /** Sandbox helper for validating file paths stay within workspace */
+  sandbox?: {
+    validate: (targetPath: string, context: string) => Promise<boolean>;
+    validateOrThrow: (targetPath: string, context: string) => Promise<void>;
+  };
 }
 
 export interface AdapterExecutionResult {
@@ -637,4 +642,73 @@ export interface Leaderboard {
   entries: LeaderboardEntry[];
   rotations: TaskRotation[];
   categories: string[];
+}
+
+/**
+ * Single agent result within a community run entry.
+ * Contains sanitized score and performance data safe for public sharing.
+ */
+export interface CommunityAgentResult {
+  agentId: string;
+  baseAgentId: string;
+  variantId: string;
+  displayLabel: string;
+  model: string;
+  provider: string;
+  version: string;
+  status: "success" | "failed" | "cancelled";
+  compositeScore: number;
+  durationMs: number;
+  tokenUsage: number;
+  estimatedCostUsd: number;
+  costKnown: boolean;
+  judgePassRate: number;
+}
+
+/**
+ * A sanitized benchmark run published to the community leaderboard.
+ * All local paths and commands are stripped before publication.
+ */
+export interface CommunityRunEntry {
+  schemaVersion: "agentarena.community-run/v1";
+  runId: string;
+  publishedAt: string;
+  publishedBy: string;
+  taskPackId: string;
+  taskTitle: string;
+  scoreMode: string;
+  agentResults: CommunityAgentResult[];
+}
+
+/**
+ * Aggregated leaderboard entry for a single agent across multiple community runs.
+ */
+export interface CommunityLeaderboardEntry {
+  agentId: string;
+  baseAgentId: string;
+  displayLabel: string;
+  model: string;
+  provider: string;
+  version: string;
+  runCount: number;
+  avgScore: number;
+  bestScore: number;
+  winRate: number;
+  successRate: number;
+  medianDurationMs: number;
+  medianCostUsd: number | null;
+  lastPublishedAt: string;
+}
+
+/**
+ * Per-task-pack community leaderboard index.
+ * Rebuilt on each publish for fast client-side loading.
+ */
+export interface CommunityLeaderboardIndex {
+  schemaVersion: "agentarena.community-leaderboard/v1";
+  taskPackId: string;
+  taskTitle: string;
+  updatedAt: string;
+  totalRuns: number;
+  entries: CommunityLeaderboardEntry[];
 }

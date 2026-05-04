@@ -7,6 +7,7 @@ import { renderMarkdown, renderPrComment } from "./markdown-template.js";
 import { buildBadgePayload, type Locale, sanitizeRun } from "./report-helpers.js";
 import { enrichRunWithScores } from "./scoring.js";
 
+export { generateCsv } from "./csv-export.js";
 export {
   type DecisionRecommendation,
   type DecisionReport, 
@@ -25,9 +26,10 @@ export {
 export type { AggregatedAgentStats, MultiRunComparison } from "./multi-run.js";
 export { aggregateMultiRuns, formatMultiRunReport } from "./multi-run.js";
 export type { Locale, ReportCopy, ScoredResult, ScoredRun } from "./report-helpers.js";
+export { sanitizeRun } from "./report-helpers.js";
 export { computeCompositeScore, computeScoreReasons, enrichRunWithScores, getDefaultWeights } from "./scoring.js";
 export {
-  type AgentVarianceStats, 
+  type AgentVarianceStats,
   computeVarianceAnalysis,
   formatVarianceReport,
   type VarianceReport
@@ -77,11 +79,13 @@ export async function writeReport(
     }
   };
   
-  await fs.writeFile(jsonPath, JSON.stringify(exportData, null, 2), "utf8");
-  await fs.writeFile(htmlPath, renderHtml(publicRun, locale, leaderboard), "utf8");
-  await fs.writeFile(markdownPath, renderMarkdown(publicRun, locale, leaderboard), "utf8");
-  await fs.writeFile(badgePath, JSON.stringify(buildBadgePayload(publicRun), null, 2), "utf8");
-  await fs.writeFile(prCommentPath, renderPrComment(publicRun, locale, leaderboard), "utf8");
+  await Promise.all([
+    fs.writeFile(jsonPath, JSON.stringify(exportData, null, 2), "utf8"),
+    fs.writeFile(htmlPath, renderHtml(publicRun, locale, leaderboard), "utf8"),
+    fs.writeFile(markdownPath, renderMarkdown(publicRun, locale, leaderboard), "utf8"),
+    fs.writeFile(badgePath, JSON.stringify(buildBadgePayload(publicRun), null, 2), "utf8"),
+    fs.writeFile(prCommentPath, renderPrComment(publicRun, locale, leaderboard), "utf8")
+  ]);
 
   return { htmlPath, jsonPath, markdownPath, badgePath, prCommentPath };
 }

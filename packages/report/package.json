@@ -8,8 +8,11 @@
   "files": [
     "dist"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "dependencies": {
-    "@agentarena/core": "workspace:*"
+    "@agentarena/core": "0.1.0"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

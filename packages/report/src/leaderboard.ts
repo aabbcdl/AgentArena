@@ -238,10 +238,13 @@ export function buildLeaderboard(
     const winRate = totalComparisons > 0 ? winCount / totalComparisons : 0;
     const successRate = results.length > 0 ? successCount / results.length : 0;
     
-    // 计算首次通过率：每个 run 的第一个结果是否成功
+    // 计算首次通过率：该 agent 在每个 run 中是否首次尝试就成功
     const firstPassCount = agentRuns.filter((run) => {
-      const firstResult = run.results[0];
-      return firstResult && firstResult.status === "success";
+      const agentResult = run.results.find((r) => {
+        const identity = getLeaderboardIdentity(run, r);
+        return serializeLeaderboardIdentity(identity) === key;
+      });
+      return agentResult && agentResult.status === "success";
     }).length;
     const firstPassRate = agentRuns.length > 0 ? firstPassCount / agentRuns.length : 0;
 

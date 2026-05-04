@@ -152,7 +152,7 @@ export function renderMarkdown(run: BenchmarkRun, locale: Locale, leaderboard?: 
 
   for (const result of scoredResults) {
     const runtime = formatRuntimeIdentity(result);
-    lines.push("", `### ${result.displayLabel} (\`${result.variantId}\`)`, "");
+    lines.push("", `### ${escapeMdCell(result.displayLabel ?? result.agentId)} (\`${result.variantId}\`)`, "");
     lines.push(`- Summary: ${result.summary}`);
     lines.push(`- Preflight: ${result.preflight.status} - ${result.preflight.summary}`);
     lines.push(

@@ -38,9 +38,13 @@ export async function isPathInsideWorkspace(workspacePath: string, targetPath: s
     const realWorkspace = await fs.realpath(resolvedWorkspace);
     const realRelativePath = path.relative(realWorkspace, realTarget);
     return !realRelativePath.startsWith("..") && !path.isAbsolute(realRelativePath);
-  } catch {
-    // If path doesn't exist or can't be resolved, fall back to basic check
-    return true;
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      // Target doesn't exist yet — basic string check
+      return !relativePath.startsWith("..") && !path.isAbsolute(relativePath);
+    }
+    // Other errors (EACCES, etc.) — fail closed
+    return false;
   }
 }
 

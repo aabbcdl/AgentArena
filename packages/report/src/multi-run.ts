@@ -1,4 +1,5 @@
 import type { AgentRunResult, BenchmarkRun } from "@agentarena/core";
+import { escapeMdCell } from "./report-helpers.js";
 
 export interface AggregatedAgentStats {
   agentId: string;
@@ -93,7 +94,7 @@ export function formatMultiRunReport(comparison: MultiRunComparison): string {
   for (const agent of comparison.agents) {
     const trendEmoji = agent.trend === "improving" ? "up" : agent.trend === "declining" ? "down" : "stable";
     lines.push(
-      `| ${agent.displayLabel} | ${agent.runCount} | ${agent.avgScore.toFixed(1)} | ${agent.scoreStdDev.toFixed(1)} | ${(agent.successRate * 100).toFixed(0)}% | ${(agent.avgDurationMs / 1000).toFixed(0)}s | $${agent.avgCostUsd.toFixed(2)} | ${trendEmoji} |`
+      `| ${escapeMdCell(agent.displayLabel)} | ${agent.runCount} | ${agent.avgScore.toFixed(1)} | ${agent.scoreStdDev.toFixed(1)} | ${(agent.successRate * 100).toFixed(0)}% | ${(agent.avgDurationMs / 1000).toFixed(0)}s | $${agent.avgCostUsd.toFixed(2)} | ${trendEmoji} |`
     );
   }
 

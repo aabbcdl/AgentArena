@@ -62,7 +62,7 @@ function hasCriticalJudgeFailure(result: BenchmarkRun["results"][number]): boole
 function failToPassScore(result: BenchmarkRun["results"][number]): number {
   const judges = result.judgeResults ?? [];
   const patchValidationJudges = judges.filter(j => j.type === "patch-validation");
-  if (patchValidationJudges.length === 0) return 1; // 无 judge 时默认 1
+  if (patchValidationJudges.length === 0) return 0; // 无 judge 时默认 0
   // 如果存在 patch-validation judge，使用其成功率
   const successCount = patchValidationJudges.filter(j => j.success).length;
   return successCount / patchValidationJudges.length;
@@ -73,8 +73,12 @@ function failToPassScore(result: BenchmarkRun["results"][number]): number {
  * 当前使用 patch-validation 成功率作为代理
  */
 function passToPassScore(result: BenchmarkRun["results"][number]): number {
-  // 与 failToPassScore 相同逻辑 - 使用 patch-validation 成功率作为代理
-  return failToPassScore(result);
+  // pass-to-pass: check if previously-passing tests still pass
+  const judge = findJudgeByType(result, "test-result");
+  if (!judge || typeof judge.totalCount !== "number" || judge.totalCount === 0) {
+    return 0; // 无数据时默认 0
+  }
+  return (judge.passedCount ?? 0) / judge.totalCount;
 }
 
 /**
@@ -159,7 +163,8 @@ const PRACTICAL_WEIGHTS = {
 const BALANCED_WEIGHTS = {
   status: 0.3,
   tests: 0.25,
-  judges: 0.15,
+  criticalJudges: 0.10,
+  nonCriticalJudges: 0.05,
   lint: 0.1,
   precision: 0.1,
   duration: 0.06,
@@ -240,7 +245,7 @@ function tokenEfficiencyScoreComponent(result: BenchmarkRun["results"][number]):
  * 衡量 agent 生成内容被直接接受的比例
  */
 function acceptanceRateScore(result: BenchmarkRun["results"][number]): number {
-  return result.acceptanceRate ?? 1;
+  return result.acceptanceRate ?? 0;
 }
 
 /**
@@ -366,7 +371,7 @@ export function computeCompositeScore(
 /**
  * 计算分数原因
  */
-export function computeScoreReasons(result: BenchmarkRun["results"][number], run: BenchmarkRun, _scoreMode?: string): string[] {
+export function computeScoreReasons(result: BenchmarkRun["results"][number], run: BenchmarkRun): string[] {
   const reasons: string[] = [];
   
   if (result.status !== "success") {
@@ -427,7 +432,7 @@ export function enrichRunWithScores(run: BenchmarkRun): ScoredRun {
     results: run.results.map((result) => ({
       ...result,
       compositeScore: computeCompositeScore(result, run, scoreWeights, scoreMode),
-      scoreReasons: computeScoreReasons(result, run, scoreMode)
+      scoreReasons: computeScoreReasons(result, run)
     }))
   };
 }

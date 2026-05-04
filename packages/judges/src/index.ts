@@ -32,6 +32,29 @@ import picomatch from "picomatch";
 
 const DEFAULT_JUDGE_TIMEOUT_MS = 5 * 60 * 1_000;
 
+/** Maximum bytes to accumulate from stdout/stderr before truncating (50 MB). */
+const MAX_PROCESS_OUTPUT_BYTES = 50 * 1024 * 1024;
+
+/**
+ * Detect regex patterns prone to catastrophic backtracking (ReDoS).
+ * Checks for nested quantifiers like (a+)+, (a*)*, (a+)* etc.
+ */
+function hasReDoSRisk(pattern: string): boolean {
+  // Nested quantifiers: ( ... + or * ) followed by + or *
+  if (/\([^)]*[+*][^)]*\)[+*?]/.test(pattern)) return true;
+  // Overlapping alternation with quantifier: (a|a)+ or (.|.)*
+  if (/\([^)]*\|[^)]*\)[+*]/.test(pattern)) return true;
+  return false;
+}
+
+async function readTextFileSafe(filePath: string, label: string, maxSize = 50 * 1024 * 1024): Promise<string> {
+  const stat = await fs.stat(filePath);
+  if (stat.size > maxSize) {
+    throw new Error(`${label}: file too large (${stat.size} bytes, max ${maxSize})`);
+  }
+  return fs.readFile(filePath, "utf8");
+}
+
 /** Create a fresh Ajv instance per validation to avoid accumulating compiled schemas in memory. */
 function createAjv(): InstanceType<typeof Ajv> {
   return new Ajv({ allErrors: true, strict: false });
@@ -102,17 +125,6 @@ function createGlobMatcher(pattern: string): (value: string) => boolean {
   return picomatch(pattern, { dot: true });
 }
 
-/**
- * Escape regex metacharacters in a string before using it in a RegExp.
- */
-function escapeRegExp(string: string): string {
-  const MAX_PATTERN_LENGTH = 10000;
-  if (string.length > MAX_PATTERN_LENGTH) {
-    console.warn(`escapeRegExp: Pattern length ${string.length} exceeds maximum ${MAX_PATTERN_LENGTH}, truncating`);
-    string = string.slice(0, MAX_PATTERN_LENGTH);
-  }
-  return string.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
-}
 
 /**
  * Parse a command string into [cmd, ...args] for safe execution without shell.
@@ -165,7 +177,10 @@ export function parseCommand(command: string): [string, string[]] {
     current += ch;
   }
 
-  if (current.length > 0) {
+  if (escaped) {
+    // Preserve trailing backslash that was never consumed
+    args.push(current || "\\");
+  } else if (current.length > 0) {
     args.push(current);
   }
 
@@ -349,6 +364,10 @@ async function executeCommand(
     let timedOut = false;
     let cancelled = false;
     let settled = false;
+    let stdoutBytes = 0;
+    let stderrBytes = 0;
+    let stdoutTruncated = false;
+    let stderrTruncated = false;
 
     const settle = () => {
       if (settled) return false;
@@ -390,11 +409,27 @@ async function executeCommand(
     signal?.addEventListener("abort", cancelExecution, { once: true });
 
     child.stdout.on("data", (chunk: Buffer) => {
-      stdout += chunk.toString();
+      if (stdoutTruncated) return;
+      stdoutBytes += chunk.length;
+      if (stdoutBytes > MAX_PROCESS_OUTPUT_BYTES) {
+        stdout += chunk.toString("utf8").slice(0, MAX_PROCESS_OUTPUT_BYTES - (stdoutBytes - chunk.length));
+        stdout += `\n[stdout truncated at ${MAX_PROCESS_OUTPUT_BYTES} bytes]`;
+        stdoutTruncated = true;
+      } else {
+        stdout += chunk.toString("utf8");
+      }
     });
 
     child.stderr.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString();
+      if (stderrTruncated) return;
+      stderrBytes += chunk.length;
+      if (stderrBytes > MAX_PROCESS_OUTPUT_BYTES) {
+        stderr += chunk.toString("utf8").slice(0, MAX_PROCESS_OUTPUT_BYTES - (stderrBytes - chunk.length));
+        stderr += `\n[stderr truncated at ${MAX_PROCESS_OUTPUT_BYTES} bytes]`;
+        stderrTruncated = true;
+      } else {
+        stderr += chunk.toString("utf8");
+      }
     });
 
     child.on("close", (exitCode) => {
@@ -613,18 +648,15 @@ function checkRequiredTests(
 
   for (const pattern of requiredPatterns) {
     // Support glob patterns and exact matches
+    const matcher = pattern.includes("*") ? picomatch(pattern, { dot: true }) : null;
     const matched = tests.filter(test => {
       // Exact match
       if (test.name === pattern || test.fullName === pattern) {
         return true;
       }
-      // Glob pattern match (simple * and ** support)
-      if (pattern.includes("*")) {
-        // First escape regex metacharacters, then convert glob patterns
-        const escaped = escapeRegExp(pattern)
-          .replace(/\\*\\*/g, ".*")  // ** -> .*
-          .replace(/\\\*/g, "[^/]*");  // * -> [^/]*
-        return new RegExp(`^${escaped}$`).test(test.fullName) || new RegExp(`^${escaped}$`).test(test.name);
+      // Glob pattern match
+      if (matcher) {
+        return matcher(test.fullName) || matcher(test.name);
       }
       return false;
     });
@@ -875,7 +907,7 @@ async function runFileContainsJudge(judge: FileContainsJudge, workspacePath: str
   const targetPath = resolveWorkspacePath(workspacePath, judge.path, `Judge "${judge.id}" path`);
 
   try {
-    const content = await fs.readFile(targetPath, "utf8");
+    const content = await readTextFileSafe(targetPath, `Judge "${judge.id}"`);
 
     // Validate regex flags - only allow valid JavaScript regex flags
     const validFlags = /^[gimsuy]*$/;
@@ -889,6 +921,14 @@ async function runFileContainsJudge(judge: FileContainsJudge, workspacePath: str
       throw new Error(
         `File-contains judge pattern too long: ${judge.pattern.length} chars (max 1000). ` +
         `Large patterns can cause performance issues.`
+      );
+    }
+
+    // Detect patterns prone to catastrophic backtracking
+    if (judge.regex && hasReDoSRisk(judge.pattern)) {
+      throw new Error(
+        `Regex pattern may cause catastrophic backtracking: /${judge.pattern}/. ` +
+        `Nested quantifiers detected.`
       );
     }
 
@@ -936,7 +976,11 @@ async function runJsonValueJudge(judge: JsonValueJudge, workspacePath: string): 
   const expectation = stringifyExpectation(judge.expected);
 
   try {
-    const parsed = JSON.parse(await fs.readFile(targetPath, "utf8")) as unknown;
+    const rawText = await readTextFileSafe(targetPath, `Judge "${judge.id}"`);
+    const parsed = JSON.parse(rawText);
+    if (typeof parsed !== "object" || parsed === null) {
+      throw new Error(`Judge "${judge.id}": expected JSON object or array, got ${typeof parsed}`);
+    }
     const actual = resolveJsonPointer(parsed, judge.pointer);
     const matched = isDeepStrictEqual(actual, judge.expected);
 
@@ -1087,8 +1131,8 @@ async function runSnapshotJudgeWithOptions(
 
   try {
     const [actual, expected] = await Promise.all([
-      fs.readFile(targetPath, "utf8"),
-      fs.readFile(snapshotPath, "utf8")
+      readTextFileSafe(targetPath, `Judge "${judge.id}"`),
+      readTextFileSafe(snapshotPath, `Judge "${judge.id}" snapshotPath`)
     ]);
     const normalizedActual = actual.replaceAll("\r\n", "\n");
     const normalizedExpected = expected.replaceAll("\r\n", "\n");
@@ -1138,15 +1182,44 @@ async function runJsonSchemaJudge(judge: JsonSchemaJudge, workspacePath: string)
   const targetPath = resolveWorkspacePath(workspacePath, judge.path, `Judge "${judge.id}" path`);
 
   try {
-    const schema =
-      judge.schema ??
-      (JSON.parse(
-        await fs.readFile(
-          resolveWorkspacePath(workspacePath, judge.schemaPath ?? "", `Judge "${judge.id}" schemaPath`),
-          "utf8"
-        )
-      ) as Record<string, unknown>);
-    const payload = JSON.parse(await fs.readFile(targetPath, "utf8")) as unknown;
+    if (judge.schema === undefined && !judge.schemaPath) {
+      return {
+        judgeId: judge.id,
+        label: judge.label,
+        type: "json-schema",
+        target: judge.path,
+        expectation: "inline-schema",
+        exitCode: 1,
+        success: false,
+        stdout: "",
+        stderr: `Judge "${judge.id}" requires either a schema or schemaPath.`,
+        durationMs: Date.now() - startedAt,
+        critical: judge.critical ?? false
+      };
+    }
+
+    let schema: Record<string, unknown>;
+    if (judge.schema) {
+      schema = judge.schema;
+    } else if (judge.schemaPath) {
+      const schemaText = await readTextFileSafe(
+        resolveWorkspacePath(workspacePath, judge.schemaPath, `Judge "${judge.id}" schemaPath`),
+        `Judge "${judge.id}" schemaPath`
+      );
+      const parsedSchema = JSON.parse(schemaText);
+      if (typeof parsedSchema !== "object" || parsedSchema === null) {
+        throw new Error(`Judge "${judge.id}" schemaPath: expected JSON object, got ${typeof parsedSchema}`);
+      }
+      schema = parsedSchema as Record<string, unknown>;
+    } else {
+      throw new Error(`Judge "${judge.id}": either "schema" or "schemaPath" must be provided.`);
+    }
+    const rawPayload = await readTextFileSafe(targetPath, `Judge "${judge.id}"`);
+    const parsedPayload = JSON.parse(rawPayload);
+    if (typeof parsedPayload !== "object" || parsedPayload === null) {
+      throw new Error(`Judge "${judge.id}": expected JSON object or array, got ${typeof parsedPayload}`);
+    }
+    const payload = parsedPayload;
     const ajv = createAjv();
     const validate = ajv.compile(schema);
     const success = Boolean(validate(payload));
@@ -1322,11 +1395,9 @@ async function runTokenEfficiencyJudge(
       type: "token-efficiency",
       target: "tokenUsage",
       expectation: effectiveBudget ? `budget=${effectiveBudget}` : "no budget",
-      exitCode: 0,
-      success: true,
-      stdout: effectiveBudget
-        ? `Token usage not provided. Budget: ${effectiveBudget}.`
-        : "Token efficiency judge requires tokenUsage from runner context.",
+      exitCode: 1,
+      success: false,
+      stdout: "Token usage data not available.",
       stderr: "",
       durationMs: Date.now() - startedAt,
       critical: judge.critical ?? false
@@ -1429,7 +1500,7 @@ async function runRegexMatchJudge(
   const targetPath = resolveWorkspacePath(workspacePath, judge.path, `Judge "${judge.id}" path`);
 
   try {
-    const content = await fs.readFile(targetPath, "utf8");
+    const content = await readTextFileSafe(targetPath, `Judge "${judge.id}"`);
 
     // Validate regex flags
     const validFlags = /^[gimsuy]*$/;
@@ -1437,6 +1508,11 @@ async function runRegexMatchJudge(
     if (!validFlags.test(flags)) {
       throw new Error(`Invalid regex flags: "${flags}". Only g, i, m, s, u, y are allowed.`);
     }
+
+    // Auto-add 'g' flag when minMatches > 1 so String.match() returns all results
+    const effectiveFlags = (judge.minMatches && judge.minMatches > 1 && !flags.includes("g"))
+      ? flags + "g"
+      : flags;
 
     // Validate pattern length
     if (judge.pattern.length > 2000) {
@@ -1446,10 +1522,18 @@ async function runRegexMatchJudge(
       );
     }
 
+    // Detect patterns prone to catastrophic backtracking
+    if (hasReDoSRisk(judge.pattern)) {
+      throw new Error(
+        `Regex pattern may cause catastrophic backtracking: /${judge.pattern}/. ` +
+        `Nested quantifiers detected.`
+      );
+    }
+
     // Compile regex with timeout protection via manual check
     let regex: RegExp;
     try {
-      regex = new RegExp(judge.pattern, flags);
+      regex = new RegExp(judge.pattern, effectiveFlags);
     } catch (error) {
       throw new Error(`Invalid regex pattern "${judge.pattern}": ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -1478,7 +1562,7 @@ async function runRegexMatchJudge(
       label: judge.label,
       type: "regex-match",
       target: judge.path,
-      expectation: shouldNotMatch ? `regex should not match: /${judge.pattern}/${flags}` : `regex: /${judge.pattern}/${flags}`,
+      expectation: shouldNotMatch ? `regex should not match: /${judge.pattern}/${effectiveFlags}` : `regex: /${judge.pattern}/${effectiveFlags}`,
       exitCode: success ? 0 : 1,
       success,
       stdout: success ? `${matchDetail}.` : `${matchDetail}.`,
@@ -1729,43 +1813,3 @@ export async function runCommandSteps(
   return results;
 }
 
-/**
- * Run a single token-efficiency judge with explicit token usage.
- *
- * Note: Exported for potential future use in external orchestration scenarios.
- * Currently token efficiency is calculated directly in the runner (runAgent function)
- * rather than going through this function. This export is kept for API completeness
- * and potential future refactoring where external systems may want to orchestrate
- * token-efficiency evaluation separately.
- */
-export async function runTokenEfficiencyJudgeWithUsage(
-  judge: TokenEfficiencyJudge,
-  tokenUsage: number,
-  tokenBudget?: number
-): Promise<JudgeResult> {
-  return await runTokenEfficiencyJudge(judge, tokenUsage, tokenBudget);
-}
-
-/**
- * Run token-efficiency judges with a given token usage value.
- *
- * Note: This function is exported for potential future use in external orchestration.
- * Currently, token efficiency is calculated directly in the runner (runAgent function)
- * rather than going through this function. This export is kept for API completeness
- * and potential future refactoring where external systems may want to orchestrate
- * token-efficiency evaluation separately.
- */
-export async function runTokenEfficiencyJudges(
-  judges: TaskJudge[],
-  tokenUsage: number
-): Promise<JudgeResult[]> {
-  const results: JudgeResult[] = [];
-
-  for (const judge of judges) {
-    if (judge.type === "token-efficiency") {
-      results.push(await runTokenEfficiencyJudgeWithUsage(judge, tokenUsage));
-    }
-  }
-
-  return results;
-}

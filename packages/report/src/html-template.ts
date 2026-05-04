@@ -168,8 +168,8 @@ function renderAgentCards(run: BenchmarkRun): string {
             <div><strong>Status</strong><span>${escapeHtml(result.status)}</span></div>
             <div><strong>Composite Score</strong><span>${escapeHtml(String((result.compositeScore ?? 0).toFixed(1)))}</span></div>
             <div><strong>Duration</strong><span>${escapeHtml(formatDuration(result.durationMs))}</span></div>
-            <div><strong>Tokens</strong><span>${result.tokenUsage}</span></div>
-            <div><strong>Cost</strong><span>${result.costKnown ? `$${result.estimatedCostUsd.toFixed(4)}` : "n/a"}</span></div>
+            <div><strong>Tokens</strong><span>${escapeHtml(String(result.tokenUsage ?? "N/A"))}</span></div>
+            <div><strong>Cost</strong><span>${escapeHtml(result.costKnown ? `$${result.estimatedCostUsd.toFixed(4)}` : "n/a")}</span></div>
             <div><strong>Tests</strong><span>${escapeHtml(formatTestMetric(result))}</span></div>
             <div><strong>Lint</strong><span>${escapeHtml(formatLintMetric(result))}</span></div>
             <div><strong>Diff Precision</strong><span>${escapeHtml(formatDiffPrecisionMetric(result))}</span></div>
@@ -250,13 +250,13 @@ function renderLeaderboardSection(_run: BenchmarkRun, leaderboard: LeaderboardDa
           <td>${escapeHtml(identity.providerProfile)}</td>
           <td>${escapeHtml(identity.model)}</td>
           <td>${escapeHtml(identity.version)}</td>
-          <td>${stats.runCount}</td>
-          <td>${stats.averageScore.toFixed(1)}</td>
-          <td>${(stats.winRate * 100).toFixed(1)}% (${row.winCount}/${row.totalComparisons})${sampleWarning}</td>
-          <td>${(stats.successRate * 100).toFixed(1)}%</td>
-          <td>${(stats.firstPassRate * 100).toFixed(1)}%</td>
+          <td>${escapeHtml(String(stats.runCount))}</td>
+          <td>${escapeHtml(stats.averageScore.toFixed(1))}</td>
+          <td>${escapeHtml(`${(stats.winRate * 100).toFixed(1)}%`)} (${row.winCount}/${row.totalComparisons})${sampleWarning}</td>
+          <td>${escapeHtml(`${(stats.successRate * 100).toFixed(1)}%`)}</td>
+          <td>${escapeHtml(`${(stats.firstPassRate * 100).toFixed(1)}%`)}</td>
           <td>${escapeHtml(formatDuration(stats.medianDurationMs))}</td>
-          <td>${stats.medianCostUsd !== null ? `$${stats.medianCostUsd.toFixed(4)}` : "n/a"}</td>
+          <td>${escapeHtml(stats.medianCostUsd !== null ? `$${stats.medianCostUsd.toFixed(4)}` : "n/a")}</td>
           <td class="last-seen">${escapeHtml(stats.lastSeenAt.slice(0, 10))}</td>
         </tr>
       `;

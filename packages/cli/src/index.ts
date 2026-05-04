@@ -38,6 +38,16 @@ import { loadTaskPack } from "@agentarena/taskpacks";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { type ParsedArgs, parseArgs, printHelp } from "./args.js";
 import { buildBenchmarkOutputSummary } from "./output.js";
+import { runPublish } from "./publish.js";
+import {
+  checkRateLimit,
+  generateAuthToken,
+  HttpError,
+  jsonResponse,
+  readRequestBody,
+  startRateLimitCleanup,
+  textResponse
+} from "./server.js";
 import {
   buildCiWorkflow,
   createAdhocLintCommand,
@@ -137,12 +147,19 @@ interface ParsedAdhocTaskPackFile {
   prompt?: unknown;
 }
 
+function validateProviderProfilePayload(payload: UiProviderProfilePayload): string | null {
+  if (!payload.name?.trim()) return "name is required.";
+  if (!payload.kind?.trim()) return "kind is required (e.g. 'official', 'anthropic-compatible', 'openai-proxy').";
+  if (!payload.apiFormat?.trim()) return "apiFormat is required (e.g. 'anthropic-messages', 'openai-chat-via-proxy').";
+  return null;
+}
+
 const CLI_PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const WORKSPACE_ROOT = path.resolve(CLI_PACKAGE_ROOT, "..", "..");
 const WEB_REPORT_DIST_ROOT = path.join(WORKSPACE_ROOT, "apps", "web-report", "dist");
 const OFFICIAL_TASKPACK_ROOT = path.join(WORKSPACE_ROOT, "examples", "taskpacks", "official");
 const DEFAULT_UI_PORT = 4320;
-const MAX_REQUEST_BODY_BYTES = 1_048_576;
+const _MAX_REQUEST_BODY_BYTES = 1_048_576;
 const MAX_UI_LOG_ENTRIES = 30;
 
 function resolveReportLocale(value?: string): ReportLocale {
@@ -499,61 +516,6 @@ async function runInitCi(parsed: ParsedArgs): Promise<void> {
   console.log(`output=${ciOutputDir}`);
 }
 
-function jsonResponse(data: unknown, statusCode = 200): { statusCode: number; body: string; headers: Record<string, string> } {
-  return {
-    statusCode,
-    body: JSON.stringify(data, null, 2),
-    headers: {
-      "Content-Type": "application/json; charset=utf-8",
-      "Cache-Control": "no-store"
-    }
-  };
-}
-
-function textResponse(
-  body: string,
-  statusCode = 200,
-  contentType = "text/plain; charset=utf-8"
-): { statusCode: number; body: string; headers: Record<string, string> } {
-  return {
-    statusCode,
-    body,
-    headers: {
-      "Content-Type": contentType,
-      "Cache-Control": "no-store"
-    }
-  };
-}
-
-class HttpError extends Error {
-  constructor(
-    message: string,
-    readonly statusCode: number
-  ) {
-    super(message);
-    this.name = "HttpError";
-  }
-}
-
-function createHttpError(message: string, statusCode: number): HttpError {
-  return new HttpError(message, statusCode);
-}
-
-async function readRequestBody(request: http.IncomingMessage): Promise<string> {
-  const chunks: Buffer[] = [];
-  let totalBytes = 0;
-  for await (const chunk of request) {
-    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    totalBytes += buffer.length;
-    if (totalBytes > MAX_REQUEST_BODY_BYTES) {
-      throw createHttpError("Request body too large.", 413);
-    }
-    chunks.push(buffer);
-  }
-
-  return Buffer.concat(chunks).toString("utf8");
-}
-
 async function listOfficialTaskPacks(): Promise<
   Array<{
     id: string;
@@ -580,7 +542,16 @@ async function listOfficialTaskPacks(): Promise<
 
     const taskPacks = await Promise.all(
       files.map(async (filePath) => {
+        // Read file once, parse once — reuse the same parsed data for both
+        // loadTaskPack and i18n extraction to avoid redundant I/O.
+        const raw = await fs.readFile(filePath, "utf8");
         const taskPack = await loadTaskPack(filePath);
+        let i18n: unknown;
+        try {
+          const parsed = (filePath.endsWith(".json") ? JSON.parse(raw) : parseYaml(raw)) as ParsedTaskPackMetadataFile;
+          i18n = parsed.metadata?.i18n ?? undefined;
+        } catch { /* i18n extraction is best-effort */ }
+
         return {
           id: taskPack.id,
           title: taskPack.title,
@@ -595,13 +566,7 @@ async function listOfficialTaskPacks(): Promise<
           judges: taskPack.judges.map((j) => ({ id: j.id, type: j.type, label: j.label })),
           difficulty: taskPack.metadata?.difficulty,
           differentiator: taskPack.metadata?.differentiator,
-          i18n: await (async () => {
-            try {
-              const raw = await fs.readFile(filePath, "utf8");
-              const parsed = (filePath.endsWith(".json") ? JSON.parse(raw) : parseYaml(raw)) as ParsedTaskPackMetadataFile;
-              return parsed.metadata?.i18n ?? undefined;
-            } catch { return undefined; }
-          })()
+          i18n
         };
       })
     );
@@ -633,6 +598,7 @@ function detectContentType(filePath: string): string {
   }
 }
 
+
 async function maybeOpenBrowser(url: string): Promise<void> {
   const platform = process.platform;
   const command =
@@ -662,7 +628,15 @@ async function maybeOpenBrowser(url: string): Promise<void> {
 async function runUi(parsed: ParsedArgs): Promise<void> {
   const host = parsed.host ?? "127.0.0.1";
   const port = parsed.port ?? DEFAULT_UI_PORT;
+  const isLocalhost = host === "127.0.0.1" || host === "localhost" || host === "::1" || host === "::ffff:127.0.0.1";
+  // Token priority: --auth-token > AGENTARENA_AUTH_TOKEN env > auto-generated
+  const authToken = parsed.authToken?.trim() || process.env.AGENTARENA_AUTH_TOKEN?.trim() || generateAuthToken();
   let activeRun: ActiveUiRun | null = null;
+  // Mutex flag: set synchronously when a run request begins processing (before any await),
+  // preventing concurrent requests from bypassing the activeRun check during the
+  // async gap between check and assignment. Cleared when activeRun is fully assigned
+  // or if the request fails before starting the run.
+  let runStarting = false;
   const codexDefaults = await getCodexDefaultResolvedRuntime();
   let activeRunStatus: UiRunStatus = {
     state: "idle",
@@ -691,9 +665,31 @@ async function runUi(parsed: ParsedArgs): Promise<void> {
     };
   };
 
+  // Periodically clean up stale rate limit entries to prevent memory leaks
+  const rateLimitCleanupInterval = startRateLimitCleanup();
+
   const server = http.createServer(async (request, response) => {
     try {
       const requestUrl = new URL(request.url ?? "/", `http://${host}:${port}`);
+
+      // Rate limiting: check before processing API requests
+      if (requestUrl.pathname.startsWith("/api/")) {
+        const clientIp = request.socket.remoteAddress ?? "unknown";
+        const rateLimitResult = checkRateLimit(clientIp, requestUrl.pathname);
+        if (!rateLimitResult.allowed) {
+          const retryAfterSeconds = Math.ceil((rateLimitResult.retryAfterMs ?? 1000) / 1000);
+          response.writeHead(429, {
+            "Content-Type": "application/json; charset=utf-8",
+            "Retry-After": String(retryAfterSeconds),
+            "Cache-Control": "no-store"
+          });
+          response.end(JSON.stringify({
+            error: "Rate limit exceeded. Please wait before retrying.",
+            retryAfterSeconds
+          }));
+          return;
+        }
+      }
 
       // CORS protection: reject cross-origin requests
       const origin = request.headers.origin;
@@ -712,6 +708,19 @@ async function runUi(parsed: ParsedArgs): Promise<void> {
           const forbidden = jsonResponse({ error: "Cross-origin requests are not allowed." }, 403);
           response.writeHead(forbidden.statusCode, forbidden.headers);
           response.end(forbidden.body);
+          return;
+        }
+      }
+
+      // Token authentication: required for non-localhost connections
+      if (!isLocalhost && requestUrl.pathname.startsWith("/api/")) {
+        const authHeader = request.headers.authorization ?? "";
+        const tokenFromQuery = requestUrl.searchParams.get("token");
+        const providedToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : tokenFromQuery;
+        if (providedToken !== authToken) {
+          const unauthorized = jsonResponse({ error: "Authentication required. Pass token via Authorization: Bearer <token> header or ?token= query parameter." }, 401);
+          response.writeHead(unauthorized.statusCode, unauthorized.headers);
+          response.end(unauthorized.body);
           return;
         }
       }
@@ -739,7 +748,9 @@ async function runUi(parsed: ParsedArgs): Promise<void> {
               riskNotice:
                 "Provider-switched Claude Code variants use compatibility settings and may behave differently from official Claude Code.",
               host,
-              port
+              port,
+              authRequired: !isLocalhost,
+              authToken: isLocalhost ? undefined : authToken
             },
             null,
             2
@@ -761,6 +772,43 @@ async function runUi(parsed: ParsedArgs): Promise<void> {
         return;
       }
 
+      if (request.method === "POST" && requestUrl.pathname === "/api/preflight") {
+        const rawBody = await readRequestBody(request);
+        let body: { baseAgentId?: string; displayLabel?: string; config?: { model?: string; reasoningEffort?: string; providerProfileId?: string } };
+        try {
+          body = JSON.parse(rawBody);
+        } catch {
+          const invalid = jsonResponse({ error: "Invalid JSON." }, 400);
+          response.writeHead(invalid.statusCode, invalid.headers);
+          response.end(invalid.body);
+          return;
+        }
+        if (!body.baseAgentId) {
+          const invalid = jsonResponse({ error: "Missing baseAgentId." }, 400);
+          response.writeHead(invalid.statusCode, invalid.headers);
+          response.end(invalid.body);
+          return;
+        }
+        try {
+          const selection = createAgentSelection({
+            baseAgentId: body.baseAgentId,
+            displayLabel: body.displayLabel,
+            config: body.config,
+            configSource: "ui"
+          });
+          const results = await preflightAdapters([selection], { probeAuth: true });
+          const payload = jsonResponse(results[0]);
+          response.writeHead(payload.statusCode, payload.headers);
+          response.end(payload.body);
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : String(err);
+          const errorPayload = jsonResponse({ error: message }, 500);
+          response.writeHead(errorPayload.statusCode, errorPayload.headers);
+          response.end(errorPayload.body);
+        }
+        return;
+      }
+
       if (request.method === "GET" && requestUrl.pathname === "/api/provider-profiles") {
         const profiles = await listClaudeProviderProfiles();
         const payload = jsonResponse(profiles);
@@ -776,6 +824,13 @@ async function runUi(parsed: ParsedArgs): Promise<void> {
           payload = JSON.parse(rawBody) as UiProviderProfilePayload;
         } catch {
           const invalid = jsonResponse({ error: "Invalid JSON in request body." }, 400);
+          response.writeHead(invalid.statusCode, invalid.headers);
+          response.end(invalid.body);
+          return;
+        }
+        const validationError = validateProviderProfilePayload(payload);
+        if (validationError) {
+          const invalid = jsonResponse({ error: validationError }, 400);
           response.writeHead(invalid.statusCode, invalid.headers);
           response.end(invalid.body);
           return;
@@ -806,6 +861,13 @@ async function runUi(parsed: ParsedArgs): Promise<void> {
             payload = JSON.parse(rawBody) as UiProviderProfilePayload;
           } catch {
             const invalid = jsonResponse({ error: "Invalid JSON in request body." }, 400);
+            response.writeHead(invalid.statusCode, invalid.headers);
+            response.end(invalid.body);
+            return;
+          }
+          const validationError = validateProviderProfilePayload(payload);
+          if (validationError) {
+            const invalid = jsonResponse({ error: validationError }, 400);
             response.writeHead(invalid.statusCode, invalid.headers);
             response.end(invalid.body);
             return;
@@ -1027,18 +1089,32 @@ async function runUi(parsed: ParsedArgs): Promise<void> {
       }
 
       if (request.method === "POST" && requestUrl.pathname === "/api/run") {
-        if (activeRun) {
+        // Mutex guard: In Node.js's single-threaded event loop, the check and assignment
+        // below are atomic within a single synchronous block. However, the await for
+        // readRequestBody() yields control, during which another request could pass the
+        // activeRun check. We use the runStarting flag set synchronously before any await
+        // to prevent this race condition.
+        if (activeRun || runStarting) {
           const payload = jsonResponse({ error: "A benchmark run is already in progress." }, 409);
           response.writeHead(payload.statusCode, payload.headers);
           response.end(payload.body);
           return;
         }
+        // Synchronously acquire the mutex before any async operations
+        runStarting = true;
 
-        const rawBody = await readRequestBody(request);
+        let rawBody: string;
+        try {
+          rawBody = await readRequestBody(request);
+        } catch (readError) {
+          runStarting = false;
+          throw readError;
+        }
         let runPayload: UiRunPayload;
         try {
           runPayload = JSON.parse(rawBody) as UiRunPayload;
         } catch {
+          runStarting = false;
           const invalid = jsonResponse({ error: "Invalid JSON in request body." }, 400);
           response.writeHead(invalid.statusCode, invalid.headers);
           response.end(invalid.body);
@@ -1046,6 +1122,7 @@ async function runUi(parsed: ParsedArgs): Promise<void> {
         }
         const selections = normalizeUiSelections(runPayload);
         if (!runPayload.repoPath || !runPayload.taskPath || selections.length === 0) {
+          runStarting = false;
           const invalid = jsonResponse(
             { error: "repoPath, taskPath, and at least one agent selection are required." },
             400
@@ -1082,6 +1159,8 @@ async function runUi(parsed: ParsedArgs): Promise<void> {
         activeRun = {
           cancel: () => cancellationController.abort(),
           promise: (async () => {
+          // Mutex is now transferred to activeRun; clear the starting flag
+          runStarting = false;
           try {
             const uiRunId = createRunId();
             const outputPath = runPayload.outputPath
@@ -1273,6 +1352,12 @@ async function runUi(parsed: ParsedArgs): Promise<void> {
   console.log(`\nAgentArena UI server running`);
   console.log(`url=${url}`);
   console.log(`repo=${process.cwd()}`);
+  if (!isLocalhost) {
+    console.log(`auth_token=${authToken}`);
+    console.log(`\n  Non-localhost access requires authentication.`);
+    console.log(`  Pass the token via header: Authorization: Bearer ${authToken}`);
+    console.log(`  Or query parameter: ${url}/api/ui-info?token=${authToken}\n`);
+  }
 
   if (!parsed.noOpen) {
     await maybeOpenBrowser(url);
@@ -1280,6 +1365,7 @@ async function runUi(parsed: ParsedArgs): Promise<void> {
 
   await new Promise<void>((resolve) => {
     const closeServer = () => {
+      clearInterval(rateLimitCleanupInterval);
       server.close(() => resolve());
     };
 
@@ -1300,18 +1386,17 @@ async function runBenchmarkCommand(parsed: ParsedArgs): Promise<void> {
   }
 
   if (!parsed.taskPath) {
-    console.error(`❌ 缺少必需参数：--task`);
-    console.error(`原因：需要指定任务包文件路径`);
+    console.error(`❌ 缺少必需参数：--task / Missing required argument: --task`);
+    console.error(`原因：需要指定任务包文件路径 / A task pack file path is required`);
     console.error(`解决方法：agentarena run --repo . --task taskpack.yaml --agents demo-fast`);
-    console.error(`更多帮助：agentarena --help`);
     process.exit(1);
   }
 
   if (parsed.agentIds.length === 0) {
-    console.error(`❌ 缺少必需参数：--agents`);
-    console.error(`原因：需要指定至少一个要测试的 AI 代理`);
+    console.error(`❌ 缺少必需参数：--agents / Missing required argument: --agents`);
+    console.error(`原因：需要指定至少一个要测试的 AI 代理 / At least one agent is required`);
     console.error(`解决方法：agentarena run --repo . --task taskpack.yaml --agents demo-fast`);
-    console.error(`查看可用代理：agentarena list-adapters`);
+    console.error(`查看可用代理 / List available: agentarena list-adapters`);
     process.exit(1);
   }
 
@@ -1323,9 +1408,9 @@ async function runBenchmarkCommand(parsed: ParsedArgs): Promise<void> {
     }
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      console.error(`❌ --repo 路径不存在：${parsed.repoPath}`);
-      console.error(`原因：指定的代码仓库路径不存在`);
-      console.error(`解决方法：检查路径是否正确，或先创建该目录`);
+      console.error(`❌ --repo 路径不存在：${parsed.repoPath} / --repo path not found: ${parsed.repoPath}`);
+      console.error(`原因：指定的代码仓库路径不存在 / The specified repository path does not exist`);
+      console.error(`解决方法：检查路径是否正确，或先创建该目录 / Check the path or create the directory`);
       process.exit(1);
     }
     throw error;
@@ -1336,9 +1421,9 @@ async function runBenchmarkCommand(parsed: ParsedArgs): Promise<void> {
     await fs.access(parsed.taskPath);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      console.error(`❌ --task 文件不存在：${parsed.taskPath}`);
-      console.error(`原因：指定的任务包文件不存在`);
-      console.error(`解决方法：检查文件路径是否正确，或使用 agentarena init-taskpack 创建新任务包`);
+      console.error(`❌ --task 文件不存在：${parsed.taskPath} / --task file not found: ${parsed.taskPath}`);
+      console.error(`原因：指定的任务包文件不存在 / The specified task pack file does not exist`);
+      console.error(`解决方法：检查文件路径，或运行 agentarena init-taskpack 创建新任务包`);
       process.exit(1);
     }
     throw error;
@@ -1349,10 +1434,10 @@ async function runBenchmarkCommand(parsed: ParsedArgs): Promise<void> {
   const availableIds = availableAdapters.map((a) => a.id);
   const invalidAgents = parsed.agentIds.filter((id) => !availableIds.includes(id));
   if (invalidAgents.length > 0) {
-    console.error(`❌ 未知的代理：${invalidAgents.join(", ")}`);
-    console.error(`原因：这些代理未安装或不存在`);
-    console.error(`可用代理：${availableIds.join(", ")}`);
-    console.error(`查看详情：agentarena list-adapters`);
+    console.error(`❌ 未知的代理：${invalidAgents.join(", ")} / Unknown agents: ${invalidAgents.join(", ")}`);
+    console.error(`原因：这些代理未安装或不存在 / These agents are not installed or do not exist`);
+    console.error(`可用代理 / Available: ${availableIds.join(", ")}`);
+    console.error(`查看详情 / Details: agentarena list-adapters`);
     process.exit(1);
   }
 
@@ -1397,6 +1482,7 @@ async function runBenchmarkCommand(parsed: ParsedArgs): Promise<void> {
       scoreMode: parsed.scoreMode,
       tokenBudget: parsed.tokenBudget,
       categories: parsed.categories,
+      debug: parsed.debug,
       cancellation,
       onProgress: parsed.format === 'json'
         ? undefined
@@ -1411,6 +1497,11 @@ async function runBenchmarkCommand(parsed: ParsedArgs): Promise<void> {
 
   const report = await writeReport(benchmark, { locale: reportLocale });
   const scoredBenchmark = enrichRunWithScores(benchmark);
+
+  // Generate CSV export
+  const { generateCsv } = await import("@agentarena/report");
+  const csvPath = path.join(benchmark.outputPath, "results.csv");
+  await fs.writeFile(csvPath, generateCsv(benchmark), "utf8");
 
   // Generate decision report
   const decisionReport = generateDecisionReport(benchmark, {
@@ -1521,6 +1612,7 @@ async function runBenchmarkCommand(parsed: ParsedArgs): Promise<void> {
     console.log(`  Badge:              ${report.badgePath}`);
     console.log(`  PR comment:         ${report.prCommentPath}`);
     console.log(`  Decision report:    ${decisionReportPath}`);
+    console.log(`  CSV export:         ${csvPath}`);
 
     // Print variance report if available
     if (varianceReportText) {
@@ -1646,6 +1738,9 @@ async function main(): Promise<void> {
       case "init-ci":
         await runInitCi(parsed);
         break;
+      case "publish":
+        await runPublish(parsed);
+        break;
       case "ui":
         await runUi(parsed);
         break;
@@ -1667,10 +1762,10 @@ async function main(): Promise<void> {
         break;
       }
       default:
-        console.error(`❌ 未知命令："${parsed.command}"`);
-        console.error(`原因：该命令不存在`);
-        console.error(`可用命令：run, doctor, list-adapters, init, init-taskpack, init-ci, ui`);
-        console.error(`使用方法：agentarena --help`);
+        console.error(`❌ 未知命令：${parsed.command}`);
+        console.error(`   Unknown command: ${parsed.command}`);
+        console.error(`原因：该命令不存在 / This command does not exist`);
+        console.error(`解决方法：运行 agentarena --help 查看可用命令`);
         process.exit(1);
     }
   } catch (error: unknown) {
@@ -1678,7 +1773,7 @@ async function main(): Promise<void> {
 
     if (parsed?.verbose && error instanceof Error) {
       console.error(`\n❌ 错误：${message}`);
-      console.error(`\n堆栈跟踪：`);
+      console.error(`\n堆栈跟踪 / Stack trace：`);
       console.error(error.stack);
     } else {
       console.error(`\n❌ 错误：${message}`);
@@ -1686,15 +1781,15 @@ async function main(): Promise<void> {
 
     // Provide helpful suggestions based on common errors
     if (message.includes("ENOENT") || message.includes("does not exist")) {
-      console.error("\n💡 提示：请检查文件路径是否正确，文件是否存在");
+      console.error("\n💡 提示：请检查文件路径是否正确 / Hint: check if the file path is correct");
     } else if (message.includes("Unknown agent")) {
-      console.error('\n💡 提示：运行 agentarena list-adapters 查看可用代理');
+      console.error('\n💡 提示：运行 agentarena list-adapters 查看可用代理 / Run agentarena list-adapters');
     } else if (message.includes("Missing required")) {
-      console.error('\n💡 提示：运行 agentarena --help 查看使用信息');
+      console.error('\n💡 提示：运行 agentarena --help 查看使用信息 / Run agentarena --help');
     }
 
     if (!parsed?.verbose) {
-      console.error('\n💡 使用 --verbose 参数查看详细错误信息');
+      console.error('\n💡 使用 --verbose 参数查看详细错误信息 / Use --verbose for detailed error info');
     }
 
     process.exitCode = 1;

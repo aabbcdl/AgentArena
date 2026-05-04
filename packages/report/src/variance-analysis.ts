@@ -1,4 +1,5 @@
 import type { AgentRunResult, BenchmarkRun } from "@agentarena/core";
+import { escapeMdCell } from "./report-helpers.js";
 
 export interface AgentVarianceStats {
   agentId: string;
@@ -71,7 +72,7 @@ export function computeVarianceAnalysis(
   const warnings: string[] = [];
   for (const agent of agents) {
     if (agent.runCount < minRunsForConfidence) {
-      warnings.push(`${agent.displayLabel}: only ${agent.runCount} run(s); need ${minRunsForConfidence} for reliable statistics.`);
+      warnings.push(`${escapeMdCell(agent.displayLabel)}: only ${agent.runCount} run(s); need ${minRunsForConfidence} for reliable statistics.`);
     }
   }
 
@@ -139,7 +140,7 @@ export function formatVarianceReport(report: VarianceReport): string {
   for (const agent of report.agents) {
     const stability = agent.isStable ? "stable" : "volatile";
     lines.push(
-      `| ${agent.displayLabel} | ${agent.runCount} | ${agent.scoreMean.toFixed(1)} | ${agent.scoreStdDev.toFixed(1)} | ${(agent.scoreCV * 100).toFixed(1)}% | ${stability} |`
+      `| ${escapeMdCell(agent.displayLabel)} | ${agent.runCount} | ${agent.scoreMean.toFixed(1)} | ${agent.scoreStdDev.toFixed(1)} | ${(agent.scoreCV * 100).toFixed(1)}% | ${stability} |`
     );
   }
 

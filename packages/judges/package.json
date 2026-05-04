@@ -8,8 +8,11 @@
   "files": [
     "dist"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "dependencies": {
-    "@agentarena/core": "workspace:*",
+    "@agentarena/core": "0.1.0",
     "ajv": "^8.18.0",
     "picomatch": "^4.0.3"
   },

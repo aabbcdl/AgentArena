@@ -1,10 +1,14 @@
+import { execFile } from "node:child_process";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
+
 import { getAdapter, preflightAdapters } from "@agentarena/adapters";
 import {
   type AdapterPreflightResult,
-  type AgentResolvedRuntime,
   type AgentRunResult,
   type AgentSelection,
   type BenchmarkCancellation,
@@ -14,6 +18,7 @@ import {
   copyRepository,
   createAgentSelection,
   createRunId,
+  createWorkspaceSandbox,
   type DiffPrecisionSummary,
   type DiffSummary,
   diffSnapshots,
@@ -30,6 +35,14 @@ import { getDefaultWeights } from "@agentarena/report";
 import { loadTaskPack } from "@agentarena/taskpacks";
 import { JsonlTraceRecorder } from "@agentarena/trace";
 import picomatch from "picomatch";
+import {
+  buildChangedFiles,
+  createCancellationSummary,
+  createCancelledRunResult,
+  createSkippedRunResult,
+  mergeResolvedRuntime,
+  summarizeCommandStepFailure
+} from "./result-builder.js";
 
 export interface BenchmarkOptions {
   repoPath: string;
@@ -49,6 +62,8 @@ export interface BenchmarkOptions {
   scoreMode?: string;
   tokenBudget?: number;
   categories?: string[];
+  /** Enable detailed debug output */
+  debug?: boolean;
 }
 
 export interface BenchmarkProgressEvent {
@@ -88,6 +103,12 @@ function formatErrorMessage(error: unknown): string {
   return String(error);
 }
 
+function debugLog(enabled: boolean, ...args: unknown[]): void {
+  if (enabled) {
+    console.error("[debug]", ...args);
+  }
+}
+
 function formatErrorDetails(error: unknown): { message: string; stack?: string; code?: string } {
   if (error instanceof Error) {
     return {
@@ -97,6 +118,18 @@ function formatErrorDetails(error: unknown): { message: string; stack?: string; 
     };
   }
   return { message: String(error) };
+}
+
+async function collectChangedFiles(workspacePath: string): Promise<string[]> {
+  try {
+    const { stdout } = await execFileAsync("git", ["diff", "--name-only", "HEAD"], {
+      cwd: workspacePath,
+      timeout: 10000
+    });
+    return stdout.trim().split("\n").filter(Boolean);
+  } catch {
+    return [];
+  }
 }
 
 function resolvePositiveInt(value: string | undefined, fallback: number): number {
@@ -116,7 +149,7 @@ function agentExecuteTimeoutMs(): number {
 }
 
 interface MapWithConcurrencyResult<R> {
-  results: R[];
+  results: (R | Error)[];
   aborted: boolean;
 }
 
@@ -131,8 +164,7 @@ async function mapWithConcurrency<T, R>(
   }
 
   const safeLimit = Math.max(1, Math.min(limit, items.length));
-  const results = new Array<R | undefined>(items.length);
-  const errors = new Array<Error | unknown | undefined>(items.length);
+  const results = new Array<R | Error | undefined>(items.length);
   let nextIndex = 0;
   let aborted = false;
 
@@ -153,8 +185,8 @@ async function mapWithConcurrency<T, R>(
           aborted = true;
           return;
         }
-        // Isolate errors: record the failure but don't crash other workers
-        errors[currentIndex] = error;
+        // Isolate errors: store in results so callers can detect failures
+        results[currentIndex] = error instanceof Error ? error : new Error(String(error));
         console.error(`mapWithConcurrency: item[${currentIndex}] failed: ${formatErrorMessage(error)}`);
       }
     }
@@ -164,33 +196,8 @@ async function mapWithConcurrency<T, R>(
   await Promise.all(workers);
 
   return {
-    results: results.filter((value): value is R => value !== undefined),
+    results: results.filter((value): value is R | Error => value !== undefined),
     aborted
-  };
-}
-
-function buildChangedFiles(diff: DiffSummary, hints: string[]): string[] {
-  return uniqueSorted([...diff.added, ...diff.changed, ...diff.removed, ...hints]);
-}
-
-function mergeResolvedRuntime(
-  primary?: AgentResolvedRuntime,
-  fallback?: AgentResolvedRuntime
-): AgentResolvedRuntime | undefined {
-  if (!primary && !fallback) {
-    return undefined;
-  }
-
-  const merged = {
-    ...(fallback ?? {}),
-    ...(primary ?? {}),
-    notes: [...(fallback?.notes ?? []), ...(primary?.notes ?? [])].filter(Boolean)
-  };
-
-  return {
-    ...merged,
-    source: merged.source ?? "unknown",
-    verification: merged.verification ?? "unknown"
   };
 }
 
@@ -215,10 +222,6 @@ function buildDiffPrecision(
   };
 }
 
-function summarizeCommandStepFailure(stage: "setup" | "teardown", result: CommandStepResult): string {
-  return `${stage} command "${result.label}" failed with exit code ${result.exitCode}.`;
-}
-
 function wrapWithTimeout<T>(
   promise: Promise<T>,
   timeoutMs: number,
@@ -239,49 +242,6 @@ function wrapWithTimeout<T>(
         reject(error);
       });
   });
-}
-
-function createCancellationSummary(stage: string): string {
-  return `Benchmark cancelled during ${stage}.`;
-}
-
-function createCancelledRunResult(
-  preflight: AdapterPreflightResult,
-  tracePath: string,
-  workspacePath: string,
-  summary: string,
-  setupResults: CommandStepResult[] = [],
-  judgeResults: Awaited<ReturnType<typeof runJudges>> = [],
-  teardownResults: CommandStepResult[] = [],
-  diff: DiffSummary = { added: [], changed: [], removed: [] },
-  diffPrecision?: DiffPrecisionSummary
-): AgentRunResult {
-  return {
-    agentId: preflight.agentId,
-    baseAgentId: preflight.baseAgentId,
-    variantId: preflight.variantId,
-    displayLabel: preflight.displayLabel,
-    requestedConfig: preflight.requestedConfig,
-    resolvedRuntime: preflight.resolvedRuntime,
-    agentTitle: preflight.agentTitle,
-    adapterKind: preflight.adapterKind,
-    preflight,
-    status: "cancelled",
-    summary,
-    durationMs: 0,
-    tokenUsage: 0,
-    estimatedCostUsd: 0,
-    costKnown: false,
-    changedFiles: uniqueSorted([...diff.added, ...diff.changed, ...diff.removed]),
-    changedFilesHint: [],
-    setupResults,
-    judgeResults,
-    teardownResults,
-    tracePath,
-    workspacePath,
-    diff,
-    diffPrecision
-  };
 }
 
 function normalizeSelections(options: BenchmarkOptions): AgentSelection[] {
@@ -309,42 +269,6 @@ function normalizeSelections(options: BenchmarkOptions): AgentSelection[] {
       displayLabel: `${selection.displayLabel} #${occurrence}`
     };
   });
-}
-
-function createSkippedRunResult(
-  preflight: AdapterPreflightResult,
-  tracePath: string,
-  workspacePath: string
-): AgentRunResult {
-  return {
-    agentId: preflight.agentId,
-    baseAgentId: preflight.baseAgentId,
-    variantId: preflight.variantId,
-    displayLabel: preflight.displayLabel,
-    requestedConfig: preflight.requestedConfig,
-    resolvedRuntime: preflight.resolvedRuntime,
-    agentTitle: preflight.agentTitle,
-    adapterKind: preflight.adapterKind,
-    preflight,
-    status: "failed",
-    summary: preflight.summary,
-    durationMs: 0,
-    tokenUsage: 0,
-    estimatedCostUsd: 0,
-    costKnown: false,
-    changedFiles: [],
-    changedFilesHint: [],
-    setupResults: [],
-    judgeResults: [],
-    teardownResults: [],
-    tracePath,
-    workspacePath,
-    diff: {
-      added: [],
-      changed: [],
-      removed: []
-    }
-  };
 }
 
 async function cleanupWorkspace(workspacePath: string, retries = WORKSPACE_CLEANUP_MAX_RETRIES): Promise<WorkspaceCleanupResult> {
@@ -379,16 +303,16 @@ interface AgentRunContext {
   executionEnvironment: ReturnType<typeof buildExecutionEnvironment>;
   cancellation: Pick<BenchmarkOptions, "cancellation">["cancellation"];
   throwIfCancelled: (stage: string) => void;
+  debug: boolean;
 }
 
 async function createAgentRunContext(
   outputPath: string,
   workspaceRootPath: string,
-  taskPath: string,
+  task: Awaited<ReturnType<typeof loadTaskPack>>,
   preflight: AdapterPreflightResult,
-  options: Pick<BenchmarkOptions, "updateSnapshots" | "cancellation">
+  options: Pick<BenchmarkOptions, "updateSnapshots" | "cancellation" | "debug">
 ): Promise<AgentRunContext> {
-  const task = await loadTaskPack(taskPath);
   const adapter = getAdapter(preflight.baseAgentId);
   const agentOutputPath = path.join(outputPath, "agents", preflight.variantId);
   const workspacePath = path.join(workspaceRootPath, preflight.variantId);
@@ -408,7 +332,8 @@ async function createAgentRunContext(
     traceRecorder,
     executionEnvironment,
     cancellation,
-    throwIfCancelled
+    throwIfCancelled,
+    debug: options.debug ?? false
   };
 }
 
@@ -606,7 +531,7 @@ async function executeAgent(
   repoPath: string,
   context: AgentRunContext
 ): Promise<{ adapterResult: Awaited<ReturnType<typeof context.adapter.execute>> | undefined; adapterError: unknown; startedAt: number }> {
-  const { adapter, workspacePath, executionEnvironment, traceRecorder, cancellation, task } = context;
+  const { adapter, workspacePath, executionEnvironment, traceRecorder, cancellation, task, debug } = context;
   const startedAt = Date.now();
   let adapterResult: Awaited<ReturnType<typeof adapter.execute>> | undefined;
   let adapterError: unknown;
@@ -617,6 +542,9 @@ async function executeAgent(
   const forwardCancellation = () => {
     adapterAbortController.abort();
   };
+
+  debugLog(debug, `  [adapter] Executing ${adapter.title} (${adapter.kind})`);
+  debugLog(debug, `  [adapter] Timeout: ${adapterTimeoutMs}ms`);
 
   if (cancellation?.signal) {
     if (cancellation.signal.aborted) {
@@ -632,6 +560,7 @@ async function executeAgent(
       adapterAbortController.abort();
     }, adapterTimeoutMs);
 
+    debugLog(debug, `  [adapter] Starting execute...`);
     const executePromise = adapter.execute({
       agentId: preflight.agentId,
       selection: {
@@ -651,7 +580,14 @@ async function executeAgent(
           agentId: preflight.agentId,
           timestamp: new Date().toISOString()
         });
-      }
+      },
+      sandbox: createWorkspaceSandbox(workspacePath, async (event) => {
+        await traceRecorder.record({
+          ...event,
+          agentId: preflight.agentId,
+          timestamp: new Date().toISOString()
+        });
+      })
     });
 
     adapterResult = await wrapWithTimeout(
@@ -680,6 +616,15 @@ async function executeAgent(
       clearTimeout(adapterTimeoutHandle);
     }
     cancellation?.signal?.removeEventListener("abort", forwardCancellation);
+  }
+
+  const durationMs = Date.now() - startedAt;
+  debugLog(debug, `  [adapter] Completed in ${durationMs}ms`);
+  if (adapterResult) {
+    debugLog(debug, `  [adapter] Status: ${adapterResult.status}, tokens: ${adapterResult.tokenUsage}, cost: $${adapterResult.estimatedCostUsd}`);
+  }
+  if (adapterError) {
+    debugLog(debug, `  [adapter] Error: ${formatErrorMessage(adapterError)}`);
   }
 
   return { adapterResult, adapterError, startedAt };
@@ -840,6 +785,7 @@ function buildFinalResult(
   _teardownError: unknown,
   diff: DiffSummary,
   changedFiles: string[],
+  collectedFiles: string[],
   diffPrecision: DiffPrecisionSummary | undefined,
   cancelled: boolean,
   success: boolean,
@@ -863,7 +809,7 @@ function buildFinalResult(
       ),
       durationMs,
       changedFiles,
-      changedFilesHint: adapterResult?.changedFilesHint ?? []
+      changedFilesHint: collectedFiles
     };
   }
 
@@ -886,7 +832,7 @@ function buildFinalResult(
       estimatedCostUsd: 0,
       costKnown: false,
       changedFiles,
-      changedFilesHint: [],
+      changedFilesHint: collectedFiles,
       setupResults,
       judgeResults: [],
       teardownResults: [],
@@ -915,7 +861,7 @@ function buildFinalResult(
       estimatedCostUsd: 0,
       costKnown: false,
       changedFiles,
-      changedFilesHint: [],
+      changedFilesHint: collectedFiles,
       setupResults,
       judgeResults: [],
       teardownResults: [],
@@ -976,7 +922,7 @@ function buildFinalResult(
     estimatedCostUsd: adapterResult.estimatedCostUsd,
     costKnown: adapterResult.costKnown,
     changedFiles,
-    changedFilesHint: adapterResult.changedFilesHint,
+    changedFilesHint: collectedFiles,
     setupResults,
     judgeResults,
     teardownResults,
@@ -1001,11 +947,15 @@ async function runAgent(
   repoPath: string,
   outputPath: string,
   workspaceRootPath: string,
-  taskPath: string,
+  task: Awaited<ReturnType<typeof loadTaskPack>>,
   preflight: AdapterPreflightResult,
-  options: Pick<BenchmarkOptions, "updateSnapshots" | "cancellation">
+  options: Pick<BenchmarkOptions, "updateSnapshots" | "cancellation" | "debug">
 ): Promise<AgentRunResult> {
-  const context = await createAgentRunContext(outputPath, workspaceRootPath, taskPath, preflight, options);
+  const context = await createAgentRunContext(outputPath, workspaceRootPath, task, preflight, options);
+  debugLog(context.debug, `Starting agent ${preflight.displayLabel} (${preflight.variantId})`);
+  debugLog(context.debug, `  workspace: ${context.workspacePath}`);
+  debugLog(context.debug, `  trace: ${context.tracePath}`);
+  debugLog(context.debug, `  timeout: ${agentExecuteTimeoutMs()}ms`);
 
   // Step 1: Setup workspace and prechecks
   const earlyResult1 = await setupWorkspaceAndPrechecks(repoPath, preflight, context);
@@ -1025,6 +975,9 @@ async function runAgent(
   // Step 4: Execute agent
   const { adapterResult, adapterError, startedAt } = await executeAgent(preflight, repoPath, context);
 
+  // Step 4b: Collect changed files uniformly via git diff (overrides adapter-specific hints)
+  const collectedFiles = await collectChangedFiles(context.workspacePath);
+
   // Step 5: Run judges and create after snapshot
   const { judgeResults, judgeError, diff, changedFiles, diffPrecision } = await runJudgesAndAfterSnapshot(
     preflight,
@@ -1034,8 +987,28 @@ async function runAgent(
     context
   );
 
-  // Step 6: Run teardown commands
-  const { teardownResults, teardownError } = await runTeardownCommands(preflight, adapterError, judgeError, context);
+  // Step 6: Run teardown commands (with 30s timeout)
+  let teardownResults: CommandStepResult[] = [];
+  let teardownError: unknown;
+  const teardownTimeout = 30_000;
+  try {
+    ({ teardownResults, teardownError } = await Promise.race([
+      runTeardownCommands(preflight, adapterError, judgeError, context),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("Teardown timeout")), teardownTimeout)
+      )
+    ]));
+  } catch (timeoutError) {
+    teardownError = timeoutError;
+    const errorDetails = formatErrorDetails(timeoutError);
+    await context.traceRecorder.record({
+      agentId: preflight.agentId,
+      timestamp: new Date().toISOString(),
+      type: "teardown.error",
+      message: "Teardown commands timed out.",
+      metadata: errorDetails
+    });
+  }
 
   // Determine final status
   const cancelled =
@@ -1068,6 +1041,7 @@ async function runAgent(
     teardownError,
     diff,
     changedFiles,
+    collectedFiles,
     diffPrecision,
     cancelled,
     success,
@@ -1161,7 +1135,7 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
     }
   });
 
-  const { results, aborted } = await mapWithConcurrency(
+  const { results: rawResults, aborted } = await mapWithConcurrency(
     preflights,
     agentConcurrency(options),
     async (preflight) => {
@@ -1182,9 +1156,10 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
 
       let result: AgentRunResult;
       try {
-        result = await runAgent(repoPath, outputPath, workspaceRootPath, options.taskPath, preflight, {
+        result = await runAgent(repoPath, outputPath, workspaceRootPath, task, preflight, {
           updateSnapshots: options.updateSnapshots,
-          cancellation
+          cancellation,
+          debug: options.debug
         });
       } catch (error) {
         if (isAbortError(error)) {
@@ -1219,8 +1194,23 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
     }
   );
 
-  // Handle preflights that didn't produce results (due to isolated errors in mapWithConcurrency)
-  const processedVariantIds = new Set(results.map((r) => r.variantId));
+  // Convert Error results to failed AgentRunResult and handle preflights without results
+  const results: AgentRunResult[] = [];
+  const processedVariantIds = new Set<string>();
+  for (let i = 0; i < rawResults.length; i++) {
+    const raw = rawResults[i];
+    if (raw instanceof Error) {
+      const preflight = preflights[i];
+      const fallbackPath = path.join(outputPath, "agents", preflight.variantId, "trace.jsonl");
+      const fallbackResult = createSkippedRunResult(preflight, fallbackPath, path.join(workspaceRootPath, preflight.variantId));
+      fallbackResult.summary = `Agent execution error: ${raw.message}`;
+      results.push(fallbackResult);
+      processedVariantIds.add(preflight.variantId);
+    } else {
+      results.push(raw);
+      processedVariantIds.add(raw.variantId);
+    }
+  }
   for (const preflight of preflights) {
     if (!processedVariantIds.has(preflight.variantId)) {
       const fallbackPath = path.join(outputPath, "agents", preflight.variantId, "trace.jsonl");

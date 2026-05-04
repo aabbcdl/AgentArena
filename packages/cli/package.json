@@ -3,23 +3,26 @@
   "version": "0.1.0",
   "description": "CLI entry point for AgentArena — ui, run, doctor, init-taskpack, init-ci, list-adapters",
   "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
   "engines": {
     "node": ">=22.0.0"
   },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "bin": {
     "agentarena": "dist/index.js"
   },
   "files": [
     "dist"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "dependencies": {
-    "@agentarena/adapters": "workspace:*",
-    "@agentarena/core": "workspace:*",
-    "@agentarena/report": "workspace:*",
-    "@agentarena/runner": "workspace:*",
-    "@agentarena/taskpacks": "workspace:*",
+    "@agentarena/adapters": "0.1.0",
+    "@agentarena/core": "0.1.0",
+    "@agentarena/report": "0.1.0",
+    "@agentarena/runner": "0.1.0",
+    "@agentarena/taskpacks": "0.1.0",
     "yaml": "^2.8.2"
   },
   "scripts": {

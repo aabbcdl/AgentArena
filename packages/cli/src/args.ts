@@ -35,7 +35,11 @@ export interface ParsedArgs {
   rotationId?: string;
   welcome?: boolean;
   verbose?: boolean;
+  debug?: boolean;
+  authToken?: string;
   format?: 'human' | 'json';
+  resultFile?: string;
+  githubToken?: string;
 }
 
 export function printHelp(): void {
@@ -51,6 +55,7 @@ Commands:
   init             Quick start: detect agents, generate demo taskpack, and run
   init-taskpack    Create a new task pack from a template
   init-ci          Create a CI workflow file for automated benchmarks
+  publish          Publish a benchmark result to the community leaderboard
   ui               Start the web UI server
 
 Run Command:
@@ -69,6 +74,7 @@ Run Command:
     --max-concurrency <n>      Maximum number of agents to run in parallel (default: 1)
     --json                     Output results as JSON
     --verbose, -v              Show verbose error messages with stack traces
+    --debug                    Show detailed debug output (adapter comms, judge timing, trace events)
 
   Scoring Options:
     --score-mode <mode>        Scoring mode (practical, balanced, issue-resolution, efficiency-first, rotating-tasks, comprehensive)
@@ -139,12 +145,22 @@ Init CI Command:
     --ci-output-dir <path>     CI output directory (default: .agentarena/ci-benchmark)
     --force                    Overwrite existing file
 
+Publish Command:
+  agentarena publish <result-file> [options]
+
+  Required:
+    <result-file>              Path to summary.json from a benchmark run
+
+  Optional:
+    --token <token>            GitHub personal access token (default: gh auth token or GITHUB_TOKEN env)
+
 UI Command:
   agentarena ui [options]
 
   Options:
     --host <host>              Server host (default: 127.0.0.1)
     --port <port>              Server port (default: 4320)
+    --auth-token <token>       Custom auth token for non-localhost access (default: auto-generated)
     --no-open                  Don't open browser automatically
 
 Global Options:
@@ -401,6 +417,12 @@ export function parseArgs(argv: string[]): ParsedArgs {
       case "--no-open":
         parsed.noOpen = true;
         break;
+      case "--auth-token":
+        parsed.authToken = args.shift();
+        if (!parsed.authToken) {
+          throw new Error("--auth-token requires a value. Example: --auth-token my-secret-password");
+        }
+        break;
       case "--max-concurrency": {
         const concurrencyValue = args.shift();
         if (!concurrencyValue) {
@@ -455,6 +477,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
       case "-v":
         parsed.verbose = true;
         break;
+      case "--debug":
+        parsed.debug = true;
+        parsed.verbose = true;
+        break;
       case "--format": {
         const formatValue = args.shift();
         if (!formatValue || (formatValue !== 'json' && formatValue !== 'human')) {
@@ -467,6 +493,12 @@ export function parseArgs(argv: string[]): ParsedArgs {
       case "--json":
         parsed.format = 'json';
         parsed.json = true;
+        break;
+      case "--token":
+        parsed.githubToken = args.shift();
+        if (!parsed.githubToken) {
+          throw new Error("--token requires a GitHub personal access token. Example: --token ghp_xxxx");
+        }
         break;
       case "--welcome":
       case "-w":
@@ -481,6 +513,11 @@ export function parseArgs(argv: string[]): ParsedArgs {
         parsed.command = "version";
         return parsed;
       default:
+        // Positional argument: first non-flag arg after command is resultFile (for publish)
+        if (!token.startsWith("-") && parsed.command === "publish" && !parsed.resultFile) {
+          parsed.resultFile = token;
+          break;
+        }
         throw new Error(
           `Unknown argument: ${token}\n` +
           `Run "agentarena --help" for usage information.`
