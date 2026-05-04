@@ -492,7 +492,8 @@ async function runSetupCommands(
         diff: {
           added: [],
           changed: [],
-          removed: []
+          removed: [],
+          skippedLargeFiles: []
         }
       }
     };

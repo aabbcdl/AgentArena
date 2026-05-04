@@ -1682,10 +1682,12 @@ async function runCompilationJudge(
 
   let result: CommandExecutionCapture;
   if (judge.command) {
-    // User provided explicit command string, use original parseCommand approach
-    result = await executeCommand(command, cwd, environment, timeoutMs, "Compilation", options.signal);
+    // User provided explicit command string — parse it and append buildArgs
+    const [parsedCmd, parsedArgs] = parseCommand(command);
+    const allArgs = [...parsedArgs, ...args];
+    result = await executeCommand(parsedCmd, cwd, environment, timeoutMs, "Compilation", options.signal, allArgs);
   } else {
-    // Use already constructed command and args directly
+    // Auto-detected command with args array
     result = await executeCommand(command, cwd, environment, timeoutMs, "Compilation", options.signal, args);
   }
 

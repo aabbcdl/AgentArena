@@ -489,6 +489,8 @@ export interface DiffSummary {
   added: string[];
   changed: string[];
   removed: string[];
+  /** Files skipped during snapshot due to exceeding size threshold */
+  skippedLargeFiles: string[];
 }
 
 export interface AgentRunResult {

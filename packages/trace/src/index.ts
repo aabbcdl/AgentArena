@@ -1,9 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { createReadStream, promises as fs } from "node:fs";
 import path from "node:path";
+import { createInterface } from "node:readline";
 import { pipeline } from "node:stream/promises";
 import { createGunzip, createGzip } from "node:zlib";
 import { ensureDirectory, type TraceEvent } from "@agentarena/core";
+
 
 export interface TraceFilter {
   agentId?: string;
@@ -44,6 +46,30 @@ function matchesFilter(event: TraceEvent, filter: TraceFilter): boolean {
     return false;
   }
   return true;
+}
+
+/**
+ * Read trace events from a JSONL file using streaming to handle large files.
+ * Returns the events and a count of any malformed lines encountered.
+ */
+async function readTraceFileStreaming(filePath: string): Promise<{ events: TraceEvent[]; malformedCount: number }> {
+  const events: TraceEvent[] = [];
+  let malformedCount = 0;
+
+  const stream = createReadStream(filePath, { encoding: "utf8" });
+  const rl = createInterface({ input: stream, crlfDelay: Infinity });
+
+  for await (const line of rl) {
+    if (!line.trim()) continue;
+    try {
+      events.push(JSON.parse(line) as TraceEvent);
+    } catch {
+      malformedCount++;
+      console.warn(`[trace] Skipping malformed line in ${filePath}: ${line.slice(0, 100)}`);
+    }
+  }
+
+  return { events, malformedCount };
 }
 
 export class JsonlTraceRecorder {
@@ -95,62 +121,43 @@ export class JsonlTraceRecorder {
   }
 
   async readAll(): Promise<TraceEvent[]> {
-    const events: TraceEvent[] = [];
     try {
-      const content = await fs.readFile(this.filePath, "utf8");
-      const lines = content.split("\n").filter((line) => line.trim());
-      for (const line of lines) {
-        try {
-          events.push(JSON.parse(line) as TraceEvent);
-        } catch {
-          // Log malformed lines for debugging instead of silently skipping
-          console.warn(`[trace] Skipping malformed line in ${this.filePath}: ${line.slice(0, 100)}`);
-        }
-      }
+      const { events } = await readTraceFileStreaming(this.filePath);
+      return events;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
         throw error;
       }
+      return [];
     }
-    return events;
   }
 
   async query(options: TraceQueryOptions = {}): Promise<TraceEvent[]> {
-    const events: TraceEvent[] = [];
     const { limit, offset = 0, filter, reverse } = options;
 
     try {
-      const content = await fs.readFile(this.filePath, "utf8");
-      const lines = content.split("\n").filter((line) => line.trim());
-      
-      const parsedEvents: TraceEvent[] = [];
-      for (const line of lines) {
-        try {
-          parsedEvents.push(JSON.parse(line) as TraceEvent);
-        } catch {
-          console.warn(`[trace] Skipping malformed line in ${this.filePath}: ${line.slice(0, 100)}`);
-        }
-      }
+      // Use streaming to parse events (memory-efficient for large files)
+      const { events: allEvents } = await readTraceFileStreaming(this.filePath);
+
+      let result = allEvents;
 
       if (reverse) {
-        parsedEvents.reverse();
+        result = result.reverse();
       }
 
-      let filteredEvents = parsedEvents;
       if (filter) {
-        filteredEvents = parsedEvents.filter((event) => this.matchesFilter(event, filter));
+        result = result.filter((event) => this.matchesFilter(event, filter));
       }
 
       const start = offset;
       const end = limit !== undefined ? start + limit : undefined;
-      events.push(...filteredEvents.slice(start, end));
+      return result.slice(start, end);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
         throw error;
       }
+      return [];
     }
-
-    return events;
   }
 
   private matchesFilter(event: TraceEvent, filter: TraceFilter): boolean {
@@ -159,8 +166,13 @@ export class JsonlTraceRecorder {
 
   async getEventCount(): Promise<number> {
     try {
-      const content = await fs.readFile(this.filePath, "utf8");
-      return content.split("\n").filter((line) => line.trim()).length;
+      const stream = createReadStream(this.filePath, { encoding: "utf8" });
+      const rl = createInterface({ input: stream, crlfDelay: Infinity });
+      let count = 0;
+      for await (const line of rl) {
+        if (line.trim()) count++;
+      }
+      return count;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
         return 0;
@@ -225,21 +237,12 @@ export class JsonlTraceRecorder {
   }
 
   static async readCompressed(compressedPath: string): Promise<TraceEvent[]> {
-    const events: TraceEvent[] = [];
     const tempOutputPath = `${compressedPath}.${randomUUID()}.tmp.jsonl`;
 
     try {
       await JsonlTraceRecorder.decompress(compressedPath, tempOutputPath);
-      const content = await fs.readFile(tempOutputPath, "utf8");
-      for (const line of content.split("\n")) {
-        if (line.trim()) {
-          try {
-            events.push(JSON.parse(line) as TraceEvent);
-          } catch {
-            console.warn(`[trace] Skipping malformed line in ${compressedPath}: ${line.slice(0, 100)}`);
-          }
-        }
-      }
+      // Use streaming to read the decompressed temp file
+      const { events } = await readTraceFileStreaming(tempOutputPath);
       return events;
     } finally {
       await fs.rm(tempOutputPath, { force: true }).catch(() => {});

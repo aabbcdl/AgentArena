@@ -150,12 +150,25 @@ export function diffSnapshots(
   const added: string[] = [];
   const changed: string[] = [];
   const removed: string[] = [];
+  const skippedLargeFiles: string[] = [];
 
   for (const [relativePath, afterEntry] of after.entries()) {
     const beforeEntry = before.get(relativePath);
 
+    // Track files that were skipped during snapshot due to size
+    if (afterEntry.hash.startsWith("huge-file:")) {
+      skippedLargeFiles.push(relativePath);
+      continue;
+    }
+
     if (!beforeEntry) {
       added.push(relativePath);
+      continue;
+    }
+
+    // If before entry was a huge file hash, we can't accurately diff it
+    if (beforeEntry.hash.startsWith("huge-file:")) {
+      skippedLargeFiles.push(relativePath);
       continue;
     }
 
@@ -166,6 +179,14 @@ export function diffSnapshots(
 
   for (const relativePath of before.keys()) {
     if (!after.has(relativePath)) {
+      // Don't mark as removed if it was a huge file (already in skippedLargeFiles)
+      const beforeEntry = before.get(relativePath);
+      if (beforeEntry?.hash.startsWith("huge-file:")) {
+        if (!skippedLargeFiles.includes(relativePath)) {
+          skippedLargeFiles.push(relativePath);
+        }
+        continue;
+      }
       removed.push(relativePath);
     }
   }
@@ -173,6 +194,7 @@ export function diffSnapshots(
   return {
     added: added.sort(),
     changed: changed.sort(),
-    removed: removed.sort()
+    removed: removed.sort(),
+    skippedLargeFiles: skippedLargeFiles.sort()
   };
 }

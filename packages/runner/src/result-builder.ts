@@ -17,7 +17,7 @@ export function createCancelledRunResult(
   setupResults: CommandStepResult[] = [],
   judgeResults: JudgeResult[] = [],
   teardownResults: CommandStepResult[] = [],
-  diff: DiffSummary = { added: [], changed: [], removed: [] },
+  diff: DiffSummary = { added: [], changed: [], removed: [], skippedLargeFiles: [] },
   diffPrecision?: DiffPrecisionSummary
 ): AgentRunResult {
   return {
@@ -79,7 +79,8 @@ export function createSkippedRunResult(
     diff: {
       added: [],
       changed: [],
-      removed: []
+      removed: [],
+      skippedLargeFiles: []
     }
   };
 }

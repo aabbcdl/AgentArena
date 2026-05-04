@@ -34,8 +34,36 @@ test("diffSnapshots reports added, changed, and removed files", () => {
   assert.deepEqual(diffSnapshots(before, after), {
     added: ["src/new.ts"],
     changed: ["README.md"],
-    removed: []
+    removed: [],
+    skippedLargeFiles: []
   });
+});
+
+test("diffSnapshots marks huge-file entries as skippedLargeFiles", () => {
+  const before = new Map([
+    ["README.md", { relativePath: "README.md", hash: "old" }],
+    ["big.bin", { relativePath: "big.bin", hash: "huge-file:1234567890" }]
+  ]);
+  const after = new Map([
+    ["README.md", { relativePath: "README.md", hash: "new" }],
+    ["big.bin", { relativePath: "big.bin", hash: "huge-file:9876543210" }]
+  ]);
+
+  const result = diffSnapshots(before, after);
+  assert.ok(result.skippedLargeFiles.includes("big.bin"), "big.bin should be in skippedLargeFiles");
+  assert.ok(!result.changed.includes("big.bin"), "big.bin should not be in changed");
+  assert.deepEqual(result.changed, ["README.md"]);
+});
+
+test("diffSnapshots marks removed huge-file entries as skippedLargeFiles", () => {
+  const before = new Map([
+    ["big.bin", { relativePath: "big.bin", hash: "huge-file:1234567890" }]
+  ]);
+  const after = new Map();
+
+  const result = diffSnapshots(before, after);
+  assert.ok(result.skippedLargeFiles.includes("big.bin"), "removed big.bin should be in skippedLargeFiles");
+  assert.deepEqual(result.removed, []);
 });
 
 test("buildExecutionEnvironment includes only baseline and allowlisted variables", () => {
