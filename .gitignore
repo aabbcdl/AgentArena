@@ -11,6 +11,7 @@ node_modules/.cache/
 # Environment and secrets
 .env
 .env.*
+.npmrc
 
 # OS artifacts
 .DS_Store
@@ -42,6 +43,9 @@ coverage/
 skills/
 specs/
 .trae/
+
+# Python scripts (not part of this project)
+*.py
 
 # Local planning docs
 task_plan.md
