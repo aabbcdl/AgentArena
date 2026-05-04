@@ -1,0 +1,43 @@
+schemaVersion: agentarena.taskpack/v1
+id: api-documentation
+title: API Documentation
+description: Add or improve API documentation with OpenAPI/Swagger.
+metadata:
+  i18n:
+    zh-CN:
+      title: "API 文档"
+      description: "使用 OpenAPI/Swagger 添加或改进 API 文档"
+  source: official
+  owner: AgentArena
+  difficulty: easy
+  objective: Document API endpoints with request/response schemas and examples
+  judgeRationale: File existence and content checks verify documentation was created
+  repoTypes: ["node-js", "python", "go", "java"]
+  tags: ["documentation", "api", "openapi", "swagger"]
+  dependencies: []
+prompt: |
+  Add or improve API documentation for this project.
+
+  Requirements:
+  1. Create or update an OpenAPI/Swagger specification
+  2. Document all API endpoints with their methods, paths, and descriptions
+  3. Include request and response schemas with examples
+  4. Document error responses and status codes
+  5. Keep the documentation in sync with the actual API
+
+  Check if there's existing API documentation and update it, or create new documentation.
+envAllowList: []
+setupCommands: []
+judges:
+  - id: docs-exist
+    type: file-exists
+    label: API documentation file exists
+    path: docs/api.md
+  - id: docs-have-content
+    type: file-contains
+    label: Documentation has endpoint descriptions
+    path: docs/api.md
+    pattern: "endpoint|route|api"
+    regex: true
+    flags: "i"
+teardownCommands: []

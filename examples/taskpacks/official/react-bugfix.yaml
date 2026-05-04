@@ -1,0 +1,47 @@
+schemaVersion: agentarena.taskpack/v1
+id: react-bugfix
+title: React Component Bug Fix
+description: Fix a bug in a React component and verify the fix with tests.
+metadata:
+  i18n:
+    zh-CN:
+      title: "React 组件 Bug 修复"
+      description: "修复 React 组件中的 bug 并验证修复"
+  source: official
+  owner: AgentArena
+  difficulty: medium
+  objective: Identify and fix a bug in a React component while maintaining test coverage
+  judgeRationale: Combines test passage with compilation check to ensure the fix is correct and doesn't break the build
+  repoTypes: ["react", "nextjs", "frontend"]
+  tags: ["react", "bugfix", "frontend", "component"]
+  dependencies: ["npm"]
+prompt: |
+  There is a bug in this React application. Find the failing test, identify the root cause in the component code, and fix it.
+
+  Requirements:
+  1. All existing tests must pass after your fix
+  2. The application must still build successfully
+  3. Do not change the test expectations — fix the implementation
+
+  Start by running the tests to see what's failing, then fix the source code.
+envAllowList: []
+setupCommands:
+  - id: install-deps
+    label: Install dependencies
+    command: npm install
+    timeoutMs: 120000
+judges:
+  - id: tests-pass
+    type: test-result
+    label: All tests pass
+    command: npx jest --json --outputFile=.agentarena/test-results.json
+    format: jest
+    reportFile: .agentarena/test-results.json
+    timeoutMs: 120000
+    critical: true
+  - id: build-passes
+    type: compilation
+    label: Application builds
+    timeoutMs: 120000
+    critical: true
+teardownCommands: []

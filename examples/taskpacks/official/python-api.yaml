@@ -1,0 +1,47 @@
+schemaVersion: agentarena.taskpack/v1
+id: python-api
+title: Python API Endpoint
+description: Implement a new REST API endpoint in a Python web application.
+metadata:
+  i18n:
+    zh-CN:
+      title: "Python API 端点"
+      description: "在 Python Web 应用中实现新的 REST API 端点"
+  source: official
+  owner: AgentArena
+  difficulty: medium
+  objective: Add a new API endpoint with proper validation, error handling, and tests
+  judgeRationale: Tests verify correctness, lint ensures code quality
+  repoTypes: ["python", "fastapi", "flask", "django"]
+  tags: ["python", "api", "backend", "rest"]
+  dependencies: ["python", "pip"]
+prompt: |
+  Add a new API endpoint to this Python web application.
+
+  Requirements:
+  1. Follow the existing code patterns and conventions
+  2. Include proper input validation
+  3. Handle error cases gracefully
+  4. All existing tests must still pass
+  5. Lint must remain clean
+
+  Look at existing endpoints for the pattern to follow.
+envAllowList: []
+setupCommands:
+  - id: install-deps
+    label: Install dependencies
+    command: pip install -r requirements.txt
+    timeoutMs: 120000
+judges:
+  - id: tests-pass
+    type: test-result
+    label: All tests pass
+    command: python -m pytest --tb=short -q
+    timeoutMs: 120000
+    critical: true
+  - id: lint-clean
+    type: command
+    label: Lint passes
+    command: python -m flake8 --max-line-length=120
+    timeoutMs: 30000
+teardownCommands: []

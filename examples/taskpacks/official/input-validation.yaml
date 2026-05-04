@@ -1,0 +1,48 @@
+schemaVersion: agentarena.taskpack/v1
+id: input-validation
+title: Add Input Validation
+description: Add input validation to API endpoints or form handlers.
+metadata:
+  i18n:
+    zh-CN:
+      title: "添加输入验证"
+      description: "为 API 端点或表单添加输入验证"
+  source: official
+  owner: AgentArena
+  difficulty: easy
+  objective: Validate user input at system boundaries to prevent invalid data
+  judgeRationale: Tests verify validation logic works correctly
+  repoTypes: ["node-js", "typescript", "python", "go"]
+  tags: ["validation", "security", "api"]
+  dependencies: ["npm"]
+prompt: |
+  Add input validation to this application.
+
+  Requirements:
+  1. Identify all places where external input enters the system (API endpoints, form handlers, CLI args)
+  2. Add validation for required fields, types, ranges, and formats
+  3. Return clear error messages when validation fails
+  4. All existing tests must pass
+  5. Do not over-validate internal function calls
+
+  Focus on API endpoints and user-facing input first.
+envAllowList: []
+setupCommands:
+  - id: install-deps
+    label: Install dependencies
+    command: npm install
+    timeoutMs: 120000
+judges:
+  - id: tests-pass
+    type: test-result
+    label: All tests pass
+    command: npx jest --json --outputFile=.agentarena/test-results.json
+    format: jest
+    reportFile: .agentarena/test-results.json
+    timeoutMs: 120000
+    critical: true
+  - id: build-passes
+    type: compilation
+    label: Build succeeds
+    timeoutMs: 120000
+teardownCommands: []

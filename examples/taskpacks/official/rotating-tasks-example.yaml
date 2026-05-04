@@ -3,6 +3,10 @@ id: rotating-tasks-2026-04-example
 title: "Rotating Tasks Example (LiveBench Inspired)"
 description: "Demonstrates anti-contamination mechanism with task rotation"
 metadata:
+  i18n:
+    zh-CN:
+      title: "轮转任务示例（LiveBench 风格）"
+      description: "跨类别平衡评估编码代理"
   source: official
   owner: AgentArena
   difficulty: medium

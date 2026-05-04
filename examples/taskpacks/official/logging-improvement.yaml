@@ -1,0 +1,49 @@
+schemaVersion: agentarena.taskpack/v1
+id: logging-improvement
+title: Improve Logging
+description: Add structured logging to improve observability.
+metadata:
+  i18n:
+    zh-CN:
+      title: "改进日志"
+      description: "添加结构化日志以提升可观测性"
+  source: official
+  owner: AgentArena
+  difficulty: easy
+  objective: Replace console.log with structured logging and add appropriate log levels
+  judgeRationale: Build and tests ensure changes don't break functionality
+  repoTypes: ["node-js", "typescript", "python"]
+  tags: ["logging", "observability", "devops"]
+  dependencies: ["npm"]
+prompt: |
+  Improve the logging in this application.
+
+  Requirements:
+  1. Replace raw console.log/console.error with a structured logger
+  2. Use appropriate log levels (debug, info, warn, error)
+  3. Add context to log messages (request ID, user ID, operation name)
+  4. Remove or downgrade debug logs that shouldn't be in production
+  5. All existing tests must pass
+
+  Use a lightweight logging library (winston, pino, or similar) if one is already installed.
+envAllowList: []
+setupCommands:
+  - id: install-deps
+    label: Install dependencies
+    command: npm install
+    timeoutMs: 120000
+judges:
+  - id: build-passes
+    type: compilation
+    label: Build succeeds
+    timeoutMs: 120000
+    critical: true
+  - id: tests-pass
+    type: test-result
+    label: All tests pass
+    command: npx jest --json --outputFile=.agentarena/test-results.json
+    format: jest
+    reportFile: .agentarena/test-results.json
+    timeoutMs: 120000
+    critical: true
+teardownCommands: []

@@ -3,6 +3,10 @@ id: issue-resolution-example
 title: "Issue Resolution Example (SWE-Bench Inspired)"
 description: "Demonstrates patch-validation judge for GitHub issue fixing"
 metadata:
+  i18n:
+    zh-CN:
+      title: "问题解决示例（SWE-Bench 风格）"
+      description: "以问题解决率为核心评估编码代理"
   source: official
   owner: AgentArena
   difficulty: hard

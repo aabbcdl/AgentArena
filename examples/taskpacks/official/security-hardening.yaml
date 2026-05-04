@@ -1,0 +1,57 @@
+schemaVersion: agentarena.taskpack/v1
+id: security-hardening
+title: Security Hardening
+description: Apply security best practices to harden the application.
+metadata:
+  i18n:
+    zh-CN:
+      title: "安全加固"
+      description: "应用安全最佳实践加固应用"
+  source: official
+  owner: AgentArena
+  difficulty: hard
+  objective: Fix security vulnerabilities and apply security best practices
+  judgeRationale: Build and tests ensure security changes don't break functionality
+  repoTypes: ["node-js", "python", "go", "java"]
+  tags: ["security", "hardening", "owasp"]
+  dependencies: ["npm"]
+prompt: |
+  Harden the security of this application.
+
+  Requirements:
+  1. Check for common security issues (SQL injection, XSS, CSRF, path traversal)
+  2. Add input sanitization where needed
+  3. Use parameterized queries instead of string concatenation for database queries
+  4. Add proper authentication and authorization checks
+  5. Remove any hardcoded secrets or credentials
+  6. All existing tests must pass
+
+  Focus on the OWASP Top 10 vulnerabilities first.
+envAllowList: []
+setupCommands:
+  - id: install-deps
+    label: Install dependencies
+    command: npm install
+    timeoutMs: 120000
+judges:
+  - id: build-passes
+    type: compilation
+    label: Build succeeds
+    timeoutMs: 120000
+    critical: true
+  - id: tests-pass
+    type: test-result
+    label: All tests pass
+    command: npx jest --json --outputFile=.agentarena/test-results.json
+    format: jest
+    reportFile: .agentarena/test-results.json
+    timeoutMs: 120000
+    critical: true
+  - id: no-secrets
+    type: regex-match
+    label: No hardcoded secrets in env file
+    path: .env
+    pattern: "password|secret|api_key|token"
+    flags: "i"
+    shouldNotMatch: true
+teardownCommands: []

@@ -1,0 +1,49 @@
+schemaVersion: agentarena.taskpack/v1
+id: error-handling
+title: Improve Error Handling
+description: Add proper error handling to improve application robustness.
+metadata:
+  i18n:
+    zh-CN:
+      title: "改进错误处理"
+      description: "改进应用的错误处理机制"
+  source: official
+  owner: AgentArena
+  difficulty: medium
+  objective: Replace generic error handling with specific, user-friendly error messages
+  judgeRationale: Compilation and tests ensure the changes don't break existing functionality
+  repoTypes: ["node-js", "typescript", "javascript", "python"]
+  tags: ["error-handling", "robustness", "quality"]
+  dependencies: ["npm"]
+prompt: |
+  Improve error handling in this application.
+
+  Requirements:
+  1. Find places with generic try/catch blocks or missing error handling
+  2. Add specific error types and meaningful error messages
+  3. Ensure errors are properly logged
+  4. User-facing errors should be helpful, not technical
+  5. All existing tests must pass after changes
+
+  Focus on the most critical error paths first (API endpoints, file operations, external service calls).
+envAllowList: []
+setupCommands:
+  - id: install-deps
+    label: Install dependencies
+    command: npm install
+    timeoutMs: 120000
+judges:
+  - id: build-passes
+    type: compilation
+    label: Build succeeds
+    timeoutMs: 120000
+    critical: true
+  - id: tests-pass
+    type: test-result
+    label: All tests pass
+    command: npx jest --json --outputFile=.agentarena/test-results.json
+    format: jest
+    reportFile: .agentarena/test-results.json
+    timeoutMs: 120000
+    critical: true
+teardownCommands: []

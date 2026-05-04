@@ -1,0 +1,47 @@
+schemaVersion: agentarena.taskpack/v1
+id: docker-setup
+title: Docker Configuration
+description: Create or improve Docker configuration for a project.
+metadata:
+  i18n:
+    zh-CN:
+      title: "Docker 配置"
+      description: "创建或改进 Docker 配置"
+  source: official
+  owner: AgentArena
+  difficulty: medium
+  objective: Create a working Dockerfile and docker-compose.yml for the project
+  judgeRationale: File existence checks verify the configuration was created correctly
+  repoTypes: ["node-js", "python", "go", "java"]
+  tags: ["docker", "devops", "container"]
+  dependencies: ["docker"]
+prompt: |
+  Create or improve the Docker configuration for this project.
+
+  Requirements:
+  1. Create a Dockerfile that builds the application correctly
+  2. Use multi-stage builds to keep the final image small
+  3. Include only production dependencies in the final image
+  4. Set appropriate environment variables and ports
+  5. Create a .dockerignore file to exclude unnecessary files
+
+  Check if a Dockerfile already exists and improve it, or create one from scratch.
+envAllowList: []
+setupCommands: []
+judges:
+  - id: dockerfile-exists
+    type: file-exists
+    label: Dockerfile exists
+    path: Dockerfile
+    critical: true
+  - id: dockerignore-exists
+    type: file-exists
+    label: .dockerignore exists
+    path: .dockerignore
+  - id: dockerfile-contains-from
+    type: file-contains
+    label: Dockerfile has FROM instruction
+    path: Dockerfile
+    pattern: "FROM"
+    critical: true
+teardownCommands: []

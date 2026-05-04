@@ -1,0 +1,51 @@
+schemaVersion: agentarena.taskpack/v1
+id: test-coverage
+title: Increase Test Coverage
+description: Add tests to improve code coverage for an existing module.
+metadata:
+  i18n:
+    zh-CN:
+      title: "提升测试覆盖率"
+      description: "为现有模块添加测试以提升覆盖率"
+  source: official
+  owner: AgentArena
+  difficulty: easy
+  objective: Write meaningful tests that cover edge cases and error paths
+  judgeRationale: Tests must pass and cover the target module adequately
+  repoTypes: ["node-js", "typescript", "javascript"]
+  tags: ["testing", "coverage", "quality"]
+  dependencies: ["npm"]
+prompt: |
+  Improve test coverage for this project.
+
+  Requirements:
+  1. Identify modules with low or missing test coverage
+  2. Write tests that cover both happy paths and edge cases
+  3. Tests must be meaningful (not just asserting true)
+  4. All existing tests must continue to pass
+  5. Run the test suite to verify everything works
+
+  Focus on testing the most critical business logic first.
+envAllowList: []
+setupCommands:
+  - id: install-deps
+    label: Install dependencies
+    command: npm install
+    timeoutMs: 120000
+judges:
+  - id: tests-pass
+    type: test-result
+    label: All tests pass
+    command: npx jest --json --outputFile=.agentarena/test-results.json
+    format: jest
+    reportFile: .agentarena/test-results.json
+    timeoutMs: 120000
+    critical: true
+  - id: lint-clean
+    type: lint-check
+    label: Lint passes
+    command: npx eslint . --format json --output-file .agentarena/lint-results.json
+    format: eslint
+    reportFile: .agentarena/lint-results.json
+    timeoutMs: 60000
+teardownCommands: []

@@ -1,0 +1,49 @@
+schemaVersion: agentarena.taskpack/v1
+id: dependency-update
+title: Update Dependencies
+description: Update outdated dependencies to their latest compatible versions.
+metadata:
+  i18n:
+    zh-CN:
+      title: "依赖更新"
+      description: "将过时的依赖更新到最新兼容版本"
+  source: official
+  owner: AgentArena
+  difficulty: easy
+  objective: Update dependencies while maintaining compatibility and fixing any breaking changes
+  judgeRationale: Build and tests verify updates don't break the application
+  repoTypes: ["node-js", "python", "go", "java"]
+  tags: ["dependencies", "maintenance", "updates"]
+  dependencies: ["npm"]
+prompt: |
+  Update the dependencies in this project.
+
+  Requirements:
+  1. Check for outdated dependencies
+  2. Update to latest compatible versions (respect semver constraints)
+  3. Fix any breaking changes introduced by updates
+  4. Run tests to verify everything still works
+  5. Do not update to major versions unless absolutely necessary
+
+  Start by checking what's outdated, then update carefully.
+envAllowList: []
+setupCommands:
+  - id: install-deps
+    label: Install current dependencies
+    command: npm install
+    timeoutMs: 120000
+judges:
+  - id: build-passes
+    type: compilation
+    label: Build succeeds after update
+    timeoutMs: 120000
+    critical: true
+  - id: tests-pass
+    type: test-result
+    label: All tests pass
+    command: npx jest --json --outputFile=.agentarena/test-results.json
+    format: jest
+    reportFile: .agentarena/test-results.json
+    timeoutMs: 120000
+    critical: true
+teardownCommands: []

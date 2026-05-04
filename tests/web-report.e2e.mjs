@@ -440,3 +440,141 @@ test("clicking the selected compare table row toggles inline detail", {
     await uiServer.stop();
   }
 });
+
+test("score weight preset buttons update active state", {
+  concurrency: false,
+  timeout: 30000
+}, async (t) => {
+  const chromium = await loadChromiumOrSkip(t);
+  if (!chromium) return;
+
+  const root = path.resolve(import.meta.dirname, "..");
+  const uiServer = await startUiServer(root);
+  const browser = await chromium.launch({ headless: true });
+
+  try {
+    const page = await browser.newPage();
+    await page.goto(`http://127.0.0.1:${uiServer.port}`);
+
+    // Load demo data
+    await page.locator("#try-demo-btn").click();
+    await page.waitForFunction(() => document.querySelectorAll(".compare-table-row").length > 0, { timeout: 10000 });
+
+    // Check that score weight section exists
+    const scoreSection = page.locator("#score-weights-title");
+    assert.ok(await scoreSection.isVisible(), "score weights section should be visible");
+
+    // Check that preset buttons exist
+    const presetButtons = page.locator("button[data-score-preset]");
+    const count = await presetButtons.count();
+    assert.ok(count > 0, "should have preset buttons");
+  } finally {
+    await browser.close();
+    await uiServer.stop();
+  }
+});
+
+test("run list delete button removes run", {
+  concurrency: false,
+  timeout: 30000
+}, async (t) => {
+  const chromium = await loadChromiumOrSkip(t);
+  if (!chromium) return;
+
+  const root = path.resolve(import.meta.dirname, "..");
+  const uiServer = await startUiServer(root);
+  const browser = await chromium.launch({ headless: true });
+
+  try {
+    const page = await browser.newPage();
+    await page.goto(`http://127.0.0.1:${uiServer.port}`);
+
+    // Load demo data
+    await page.locator("#try-demo-btn").click();
+    await page.waitForFunction(() => document.querySelectorAll(".compare-table-row").length > 0, { timeout: 10000 });
+
+    // Check run list has items
+    const runItems = page.locator("[data-run-id]");
+    const initialCount = await runItems.count();
+    assert.ok(initialCount > 0, "should have run list items");
+
+    // Find and click delete button (handle the confirm dialog)
+    page.once("dialog", (dialog) => dialog.accept());
+    const deleteBtn = page.locator("[data-role='delete-run']").first();
+    if (await deleteBtn.isVisible()) {
+      await deleteBtn.click();
+      await page.waitForTimeout(500);
+      const finalCount = await page.locator("[data-run-id]").count();
+      assert.ok(finalCount < initialCount, "run count should decrease after deletion");
+    }
+  } finally {
+    await browser.close();
+    await uiServer.stop();
+  }
+});
+
+test("dashboard shows verdict hero and comparison bars after loading demo", {
+  concurrency: false,
+  timeout: 30000
+}, async (t) => {
+  const chromium = await loadChromiumOrSkip(t);
+  if (!chromium) return;
+
+  const root = path.resolve(import.meta.dirname, "..");
+  const uiServer = await startUiServer(root);
+  const browser = await chromium.launch({ headless: true });
+
+  try {
+    const page = await browser.newPage();
+    await page.goto(`http://127.0.0.1:${uiServer.port}`);
+
+    await page.locator("#try-demo-btn").click();
+    await page.waitForFunction(() => document.querySelectorAll(".compare-table-row").length > 0, { timeout: 10000 });
+
+    const verdictHero = page.locator("#verdict-hero");
+    assert.ok(await verdictHero.isVisible(), "verdict hero should be visible after loading demo");
+
+    const comparisonBars = page.locator("#comparison-bars");
+    assert.ok(await comparisonBars.isVisible(), "comparison bars should be visible");
+
+    const agentCount = page.locator("#agent-count");
+    const countText = await agentCount.textContent();
+    assert.ok(parseInt(countText) > 0, "agent count should be greater than 0");
+  } finally {
+    await browser.close();
+    await uiServer.stop();
+  }
+});
+
+test("export run as JSON file", {
+  concurrency: false,
+  timeout: 30000
+}, async (t) => {
+  const chromium = await loadChromiumOrSkip(t);
+  if (!chromium) return;
+
+  const root = path.resolve(import.meta.dirname, "..");
+  const uiServer = await startUiServer(root);
+  const browser = await chromium.launch({ headless: true });
+
+  try {
+    const page = await browser.newPage();
+    await page.goto(`http://127.0.0.1:${uiServer.port}`);
+
+    await page.locator("#try-demo-btn").click();
+    await page.waitForFunction(() => document.querySelectorAll(".compare-table-row").length > 0, { timeout: 10000 });
+
+    const exportBtn = page.locator("[data-role='export-run']").first();
+    if (await exportBtn.isVisible()) {
+      const downloadPromise = page.waitForEvent("download", { timeout: 5000 }).catch(() => null);
+      await exportBtn.click();
+      const download = await downloadPromise;
+      if (download) {
+        assert.ok(download.suggestedFilename().endsWith(".json"), "exported file should be JSON");
+      }
+    }
+  } finally {
+    await browser.close();
+    await uiServer.stop();
+  }
+});

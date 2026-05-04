@@ -359,26 +359,23 @@ test("command step respects timeout", async () => {
 
 // ===== token-efficiency judge tests =====
 
-import { runTokenEfficiencyJudgeWithUsage } from "../packages/judges/dist/index.js";
-
 test("token-efficiency judge returns neutral score when no budget and no usage", async () => {
-  const result = await runTokenEfficiencyJudgeWithUsage(
+  const result = await runJudge(
     { id: "te-1", label: "TE no data", type: "token-efficiency" },
-    undefined,
-    undefined
+    ".",
+    [],
+    { tokenUsage: undefined, tokenBudget: undefined }
   );
-  assert.equal(result.success, true);
-  assert.ok(
-    result.stdout.includes("Token usage not provided") ||
-    result.stdout.includes("Token efficiency judge requires tokenUsage")
-  );
+  assert.equal(result.success, false);
+  assert.ok(result.stdout.includes("Token usage data not available"));
 });
 
 test("token-efficiency judge calculates score within budget", async () => {
-  const result = await runTokenEfficiencyJudgeWithUsage(
+  const result = await runJudge(
     { id: "te-2", label: "TE within budget", type: "token-efficiency" },
-    500,
-    1000
+    ".",
+    [],
+    { tokenUsage: 500, tokenBudget: 1000 }
   );
   assert.equal(result.success, true);
   assert.ok(result.stdout.includes("Token efficiency"));
@@ -386,10 +383,11 @@ test("token-efficiency judge calculates score within budget", async () => {
 });
 
 test("token-efficiency judge fails when over budget", async () => {
-  const result = await runTokenEfficiencyJudgeWithUsage(
+  const result = await runJudge(
     { id: "te-3", label: "TE over budget", type: "token-efficiency" },
-    2000,
-    1000
+    ".",
+    [],
+    { tokenUsage: 2000, tokenBudget: 1000 }
   );
   assert.equal(result.success, false);
   assert.ok(result.stdout.includes("Token efficiency"));
@@ -397,20 +395,22 @@ test("token-efficiency judge fails when over budget", async () => {
 });
 
 test("token-efficiency judge handles zero budget gracefully", async () => {
-  const result = await runTokenEfficiencyJudgeWithUsage(
+  const result = await runJudge(
     { id: "te-4", label: "TE zero budget", type: "token-efficiency" },
-    100,
-    0
+    ".",
+    [],
+    { tokenUsage: 100, tokenBudget: 0 }
   );
   assert.equal(result.success, true);
   assert.ok(result.stdout.includes("neutral score"));
 });
 
 test("token-efficiency judge handles zero usage", async () => {
-  const result = await runTokenEfficiencyJudgeWithUsage(
+  const result = await runJudge(
     { id: "te-5", label: "TE zero usage", type: "token-efficiency" },
-    0,
-    1000
+    ".",
+    [],
+    { tokenUsage: 0, tokenBudget: 1000 }
   );
   assert.equal(result.success, true);
   assert.ok(result.stdout.includes("100.0%"));

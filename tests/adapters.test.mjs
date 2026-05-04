@@ -504,9 +504,12 @@ test("resolveClaudeRuntime and workspace settings respect provider profiles", as
       await readFile(path.join(workspacePath, ".claude", "settings.local.json"), "utf8")
     );
     assert.equal(workspaceSettings.profile.id, profileId);
-    assert.equal(settingsContent.env.ANTHROPIC_BASE_URL, "https://proxy.example.com/v1");
-    assert.equal(settingsContent.env.ANTHROPIC_MODEL, "gpt-5.4");
-    assert.equal(settingsContent.env.OPENAI_COMPAT_MODE, "1");
+    // Secrets are passed via environment, not written to file
+    assert.equal(workspaceSettings.environment.ANTHROPIC_BASE_URL, "https://proxy.example.com/v1");
+    assert.equal(workspaceSettings.environment.ANTHROPIC_MODEL, "gpt-5.4");
+    assert.equal(workspaceSettings.environment.OPENAI_COMPAT_MODE, "1");
+    // Settings file only contains permissions, no env vars
+    assert.ok(!settingsContent.env, "Settings file should not contain env vars");
     assert.equal(settingsContent.permissions.allow.length, 0);
     assert.equal(settingsContent.permissions.deny.length, 0);
   } finally {

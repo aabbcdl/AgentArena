@@ -3,6 +3,10 @@ id: efficiency-first-example
 title: "Efficiency First Example (CursorBench Inspired)"
 description: "Demonstrates token-efficiency judge for cost-effective coding"
 metadata:
+  i18n:
+    zh-CN:
+      title: "效率优先示例（CursorBench 风格）"
+      description: "以 token 效率为核心评估编码代理"
   source: official
   owner: AgentArena
   difficulty: medium
