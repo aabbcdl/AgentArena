@@ -143,3 +143,51 @@ test("unclosed double quote is treated as literal until end", () => {
   assert.equal(cmd, "echo");
   assert.deepEqual(args, ["unclosed"]);
 });
+
+test("dangerous command: netcat is rejected", () => {
+  assert.throws(() => parseCommand("nc -l 8080"), /rejected for security/i);
+});
+
+test("dangerous command: sudo is rejected", () => {
+  assert.throws(() => parseCommand("sudo rm -rf /"), /rejected for security.*sudo/i);
+});
+
+test("dangerous command: bash -c is rejected", () => {
+  assert.throws(() => parseCommand("bash -c 'echo pwned'"), /not allowed/i);
+});
+
+test("dangerous command: python -c is rejected", () => {
+  assert.throws(() => parseCommand("python3 -c 'import os'"), /not allowed/i);
+});
+
+test("dangerous command: chmod is rejected", () => {
+  assert.throws(() => parseCommand("chmod 777 /tmp"), /rejected for security.*chmod/i);
+});
+
+test("dangerous command: mkfifo is rejected", () => {
+  assert.throws(() => parseCommand("mkfifo /tmp/pipe"), /rejected for security.*mkfifo/i);
+});
+
+test("safe command: echo with dangerous words is allowed", () => {
+  const [cmd, _args] = parseCommand('echo "; rm -rf /"');
+  assert.equal(cmd, "echo");
+});
+
+test("safe command: node -e is allowed", () => {
+  const [cmd, _args] = parseCommand('node -e "console.log(1)"');
+  assert.equal(cmd, "node");
+});
+
+test("safe command: npm test is allowed", () => {
+  const [cmd, _args] = parseCommand("npm test");
+  assert.equal(cmd, "npm");
+});
+
+test("rejected command includes suggestion", () => {
+  try {
+    parseCommand("sudo apt install foo");
+    assert.fail("should have thrown");
+  } catch (err) {
+    assert.ok(err.message.includes("Suggestion") || err.message.includes("script file"), `Error message should include suggestion: ${err.message}`);
+  }
+});

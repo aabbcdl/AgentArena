@@ -15,7 +15,6 @@
     "@agentarena/adapters": "0.1.0",
     "@agentarena/core": "0.1.0",
     "@agentarena/judges": "0.1.0",
-    "@agentarena/report": "0.1.0",
     "@agentarena/taskpacks": "0.1.0",
     "@agentarena/trace": "0.1.0",
     "picomatch": "^4.0.3"

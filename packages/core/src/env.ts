@@ -1,5 +1,4 @@
 const BASELINE_ENV_NAMES = [
-  // Path and system
   "PATH",
   "Path",
   "PATHEXT",
@@ -12,7 +11,6 @@ const BASELINE_ENV_NAMES = [
   "USERPROFILE",
   "TMP",
   "TEMP",
-  // Locale and terminal
   "LANG",
   "TERM",
   "PWD",
@@ -20,61 +18,33 @@ const BASELINE_ENV_NAMES = [
   "USER",
   "USERNAME",
   "LOGNAME",
-  // Node.js runtime
-  "NODE_PATH",
-  "NODE_OPTIONS",
   "NVM_DIR",
   "NVM_BIN",
-  // npm/pnpm/yarn
   "npm_config_cache",
   "npm_config_prefix",
   "npm_config_user_agent",
   "npm_execpath",
   "npm_node_execpath",
   "INIT_CWD",
-  // SSL/TLS certificates
   "SSL_CERT_FILE",
   "NODE_EXTRA_CA_CERTS",
   "REQUESTS_CA_BUNDLE",
-  // Git operations
   "GIT_SSH_COMMAND",
   "GIT_ASKPASS",
   "GCM_INTERACTIVE",
-  // Editor/credential helpers
   "EDITOR",
   "VISUAL",
   "BROWSER"
 ];
 
-// Environment variable names that may contain sensitive values and should be
-// masked in logs. This is a subset of BASELINE_ENV_NAMES that could leak
-// credentials, tokens, or other secrets if logged verbatim.
-const SENSITIVE_ENV_NAMES = new Set([
-  "GIT_SSH_COMMAND",
-  "GIT_ASKPASS",
-  "GCM_INTERACTIVE",
-  "SSL_CERT_FILE",
-  "NODE_EXTRA_CA_CERTS",
-  "REQUESTS_CA_BUNDLE",
-  "npm_config_prefix",
-  "NVM_DIR",
-  "NVM_BIN"
+const BLOCKED_ENV_NAMES = new Set([
+  "LD_PRELOAD",
+  "LD_LIBRARY_PATH",
+  "DYLD_INSERT_LIBRARIES",
+  "NODE_OPTIONS",
+  "NODE_PATH",
+  "ELECTRON_RUN_AS_NODE",
 ]);
-
-const MASK_REPLACEMENT = "***";
-
-/**
- * Returns a sanitized copy of the environment object where values for
- * sensitive keys are replaced with `***`. Use this when logging the
- * execution environment to avoid leaking secrets.
- */
-export function sanitizeEnvironmentForLog(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  const sanitized: NodeJS.ProcessEnv = {};
-  for (const [key, value] of Object.entries(env)) {
-    sanitized[key] = SENSITIVE_ENV_NAMES.has(key) ? MASK_REPLACEMENT : value;
-  }
-  return sanitized;
-}
 
 export function buildExecutionEnvironment(
   allowedNames: string[],
@@ -83,6 +53,7 @@ export function buildExecutionEnvironment(
   const env: NodeJS.ProcessEnv = {};
 
   for (const name of [...BASELINE_ENV_NAMES, ...allowedNames]) {
+    if (BLOCKED_ENV_NAMES.has(name)) continue;
     const value = process.env[name];
     if (value !== undefined) {
       env[name] = value;
@@ -90,6 +61,7 @@ export function buildExecutionEnvironment(
   }
 
   for (const [name, value] of Object.entries(overrides)) {
+    if (BLOCKED_ENV_NAMES.has(name)) continue;
     env[name] = value;
   }
 

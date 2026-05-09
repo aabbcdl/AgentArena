@@ -32,7 +32,8 @@ function createRun(runId, taskTitle, overrides = {}) {
     createdAt: overrides.createdAt ?? "2026-03-14T00:00:00.000Z",
     task: {
       id: overrides.taskId ?? taskTitle.toLowerCase().replace(/\s+/g, "-"),
-      title: taskTitle
+      title: taskTitle,
+      expectedChangedPaths: overrides.expectedChangedPaths
     },
     scoreMode: overrides.scoreMode,
     scoreWeights: overrides.scoreWeights,
@@ -384,6 +385,8 @@ test.skip("getRunVerdict changes winner when custom weights favor speed", () => 
 
 test("score presets produce distinct winners for different benchmark goals", () => {
   const run = createRun("run-presets", "Task Presets", {
+    taskId: "task-presets",
+    expectedChangedPaths: ["src/a.ts"],
     results: [
       createResult("correct", {
         durationMs: 1800,

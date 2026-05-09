@@ -360,7 +360,8 @@ test("Claude provider profiles persist metadata without leaking secrets", async 
       extraEnv: {
         FOO: "bar"
       },
-      notes: "test profile"
+      notes: "test profile",
+      _confirmBaseUrlRisk: true
     });
     profileId = profile.id;
 
@@ -469,7 +470,8 @@ test("resolveClaudeRuntime and workspace settings respect provider profiles", as
       defaultSonnetModel: "gpt-5.4-mini",
       extraEnv: {
         OPENAI_COMPAT_MODE: "1"
-      }
+      },
+      _confirmBaseUrlRisk: true
     });
     profileId = profile.id;
 

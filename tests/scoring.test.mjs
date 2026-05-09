@@ -26,9 +26,8 @@ function createResult(overrides = {}) {
     tracePath: overrides.tracePath ?? "trace.jsonl",
     workspacePath: overrides.workspacePath ?? "workspace",
     diff: overrides.diff ?? { added: [], changed: [], removed: [] },
-    resolutionRate: overrides.resolutionRate,
-    tokenEfficiencyScore: overrides.tokenEfficiencyScore,
-    acceptanceRate: overrides.acceptanceRate,
+    sweBench: overrides.sweBench,
+    cursorBench: overrides.cursorBench,
     ...overrides
   };
 }
@@ -62,7 +61,7 @@ function createRun(overrides = {}) {
 test("computeCompositeScore works with issue-resolution mode", () => {
   const result = createResult({
     status: "success",
-    resolutionRate: 1.0,
+    sweBench: { resolutionRate: 1.0 },
     judgeResults: [
       {
         judgeId: "patch-validation",
@@ -93,14 +92,13 @@ test("computeCompositeScore works with issue-resolution mode", () => {
 test("computeCompositeScore works with issue-resolution mode - failed resolution", () => {
   const result = createResult({
     status: "success",
-    resolutionRate: 0.0,
+    sweBench: { resolutionRate: 0.0 },
     judgeResults: []
   });
   const run = createRun({ results: [result] });
 
   const score = computeCompositeScore(result, run, undefined, "issue-resolution");
   assert.ok(score >= 0 && score <= 100, `Score should be 0-100, got ${score}`);
-  // With zero resolution rate, score should be relatively low
   assert.ok(score < 60, `Score should be lower with zero resolution, got ${score}`);
 });
 
@@ -146,7 +144,7 @@ test("computeCompositeScore works with rotating-tasks mode", () => {
 test("computeCompositeScore works with comprehensive mode", () => {
   const result = createResult({
     status: "success",
-    resolutionRate: 1.0,
+    sweBench: { resolutionRate: 1.0 },
     tokenEfficiencyScore: 0.8,
     judgeResults: []
   });
@@ -237,7 +235,7 @@ test("computeCompositeScore handles empty results array", () => {
 test("computeCompositeScore resolution rate affects score in issue-resolution mode", () => {
   const resultHigh = createResult({
     status: "success",
-    resolutionRate: 1.0,
+    sweBench: { resolutionRate: 1.0 },
     durationMs: 1000,
     estimatedCostUsd: 0.1,
     costKnown: true,
@@ -245,7 +243,7 @@ test("computeCompositeScore resolution rate affects score in issue-resolution mo
   });
   const resultLow = createResult({
     status: "success",
-    resolutionRate: 0.0,
+    sweBench: { resolutionRate: 0.0 },
     durationMs: 1000,
     estimatedCostUsd: 0.1,
     costKnown: true,
@@ -318,7 +316,7 @@ test("computeCompositeScore with expectedChangedPaths enables precision scoring"
 test("computeCompositeScore acceptance rate affects efficiency-first mode", () => {
   const resultHigh = createResult({
     status: "success",
-    acceptanceRate: 1.0,
+    cursorBench: { acceptanceRate: 1.0 },
     durationMs: 1000,
     estimatedCostUsd: 0.1,
     costKnown: true,
@@ -326,7 +324,7 @@ test("computeCompositeScore acceptance rate affects efficiency-first mode", () =
   });
   const resultLow = createResult({
     status: "success",
-    acceptanceRate: 0.0,
+    cursorBench: { acceptanceRate: 0.0 },
     durationMs: 1000,
     estimatedCostUsd: 0.1,
     costKnown: true,

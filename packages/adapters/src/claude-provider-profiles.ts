@@ -1,9 +1,10 @@
 import { execFile } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createCipheriv, createDecipheriv, randomBytes, randomUUID, scryptSync } from "node:crypto";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { ClaudeProviderProfile, ClaudeProviderRiskFlag } from "@agentarena/core";
+import { isInternalUrl } from "@agentarena/core";
 
 interface ProfileRegistryFile {
   schemaVersion: 1;
@@ -25,6 +26,8 @@ export interface ClaudeProviderProfileInput {
   extraEnv?: Record<string, string>;
   writeCommonConfig?: boolean;
   notes?: string;
+  _confirmBaseUrlRisk?: boolean;
+  riskFlags?: ClaudeProviderRiskFlag[];
 }
 
 const BUILT_IN_OFFICIAL_PROFILE: ClaudeProviderProfile = {
@@ -229,7 +232,9 @@ try {
     $existing = $vault.Retrieve($resource, $user)
     $existing.RetrievePassword()
     $vault.Remove($existing)
-  } catch {}
+  } catch {
+    Write-Verbose "No existing credential to remove for $resource"
+  }
   $credential = New-Object Windows.Security.Credentials.PasswordCredential($resource, $user, $password)
   $vault.Add($credential)
   @{ ok = $true } | ConvertTo-Json -Compress
@@ -274,20 +279,53 @@ try {
   $credential = $vault.Retrieve($resource, $user)
   $credential.RetrievePassword()
   $vault.Remove($credential)
-} catch {}
+} catch {
+  Write-Verbose "No existing credential to remove for $resource"
+}
 @{ ok = $true } | ConvertTo-Json -Compress
 `;
   await runPowerShellJson(script);
 }
 
+const SECRET_ENCRYPTION_MARKER = "ENC1:";
+
+function deriveMachineKey(): Buffer {
+  const hostname = os.hostname();
+  const username = os.userInfo().username;
+  const salt = `agentarena-secret-${hostname}-${username}`;
+  return scryptSync(hostname + username, salt, 32);
+}
+
+function encryptSecret(plaintext: string): string {
+  const key = deriveMachineKey();
+  const iv = randomBytes(16);
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  const encrypted = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+  const authTag = cipher.getAuthTag();
+  return SECRET_ENCRYPTION_MARKER + Buffer.concat([iv, authTag, encrypted]).toString("base64");
+}
+
+function decryptSecret(encrypted: string): string | null {
+  if (!encrypted.startsWith(SECRET_ENCRYPTION_MARKER)) return null;
+  try {
+    const data = Buffer.from(encrypted.slice(SECRET_ENCRYPTION_MARKER.length), "base64");
+    const iv = data.subarray(0, 16);
+    const authTag = data.subarray(16, 32);
+    const ciphertext = data.subarray(32);
+    const key = deriveMachineKey();
+    const decipher = createDecipheriv("aes-256-gcm", key, iv);
+    decipher.setAuthTag(authTag);
+    return decipher.update(ciphertext) + decipher.final("utf8");
+  } catch {
+    return null;
+  }
+}
+
 async function setSecretFile(profileId: string, secret: string): Promise<void> {
   await fs.mkdir(secretDirectory(), { recursive: true });
   const filePath = secretFilePath(profileId);
-  // Store as base64 to avoid plaintext secrets on disk.
-  // This is NOT encryption — it only prevents casual exposure (e.g., grep, accidental cat).
-  // For stronger protection, use a platform keychain or external secret manager.
-  const encoded = Buffer.from(secret.trim(), "utf8").toString("base64");
-  await fs.writeFile(filePath, `${encoded}\n`, { encoding: "utf8", mode: 0o600 });
+  const encrypted = encryptSecret(secret.trim());
+  await fs.writeFile(filePath, `${encrypted}\n`, { encoding: "utf8", mode: 0o600 });
   await fs.chmod(filePath, 0o600).catch(() => {});
 }
 
@@ -295,10 +333,20 @@ async function getSecretFile(profileId: string): Promise<string | null> {
   try {
     const raw = (await fs.readFile(secretFilePath(profileId), "utf8")).trim();
     if (!raw) return null;
-    // Decode base64-encoded secret (supports legacy plaintext files too)
+    if (raw.startsWith(SECRET_ENCRYPTION_MARKER)) {
+      const decrypted = decryptSecret(raw);
+      if (decrypted === null) {
+        console.warn(
+          `[agentarena] Failed to decrypt secret for profile "${profileId}". ` +
+          `The secret was encrypted on a different machine (hostname+username derived key). ` +
+          `Please re-set the secret using: agentarena ui → Provider Profiles → Set Secret`
+        );
+        return null;
+      }
+      return decrypted;
+    }
     try {
       const decoded = Buffer.from(raw, "base64").toString("utf8");
-      // Heuristic: if re-encoding matches, it was base64; otherwise treat as legacy plaintext
       if (Buffer.from(decoded, "utf8").toString("base64") === raw) {
         return decoded || null;
       }
@@ -362,6 +410,39 @@ export async function getClaudeProviderProfile(profileId?: string): Promise<Clau
 export async function saveClaudeProviderProfile(input: ClaudeProviderProfileInput): Promise<ClaudeProviderProfile> {
   if (input.kind === "official") {
     throw new Error("The built-in official Claude profile cannot be replaced.");
+  }
+
+  if (input.baseUrl && isInternalUrl(input.baseUrl)) {
+    throw new Error("baseUrl cannot point to an internal/private address. This restriction prevents Server-Side Request Forgery (SSRF) attacks.");
+  }
+
+  if (input.baseUrl) {
+    let parsedHost: string;
+    try {
+      parsedHost = new URL(input.baseUrl).hostname.toLowerCase();
+    } catch {
+      throw new Error(`baseUrl "${input.baseUrl}" is not a valid URL.`);
+    }
+    const ALLOWED_API_HOSTS = new Set([
+      "api.anthropic.com",
+      "api.openai.com",
+      "generativelanguage.googleapis.com",
+      "dashscope.aliyuncs.com"
+    ]);
+    if (!ALLOWED_API_HOSTS.has(parsedHost)) {
+      const riskFlag: ClaudeProviderRiskFlag = "baseUrl-redirects-traffic";
+      if (!input._confirmBaseUrlRisk) {
+        throw new Error(
+          `baseUrl "${input.baseUrl}" points to a host that is not in the known API provider list. ` +
+          `This means your API key will be sent to a third-party server. ` +
+          `If you trust this provider, set _confirmBaseUrlRisk: true to acknowledge the risk. ` +
+          `Known hosts: ${[...ALLOWED_API_HOSTS].join(", ")}`
+        );
+      }
+      if (!input.riskFlags?.includes(riskFlag)) {
+        input.riskFlags = [...(input.riskFlags ?? []), riskFlag];
+      }
+    }
   }
 
   const registry = await tryReadRegistry();

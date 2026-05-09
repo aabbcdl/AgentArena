@@ -5,6 +5,7 @@ import {
   createAgentSelection,
   diffSnapshots,
   formatDuration,
+  isInternalUrl,
   isPathInsideWorkspace,
   isWindowsLikePath,
   normalizePath,
@@ -194,9 +195,75 @@ test("resolveRepoSource resolves builtin:// to builtin repos root", () => {
   assert.match(result.repoPath, /node-starter/);
 });
 
+test("resolveRepoSource resolves http(s) URLs to url kind", () => {
+  const result1 = resolveRepoSource("https://github.com/org/repo.git", "/user/repo", "/repos");
+  assert.equal(result1.kind, "url");
+  assert.match(result1.repoPath, /repo/);
+
+  const result2 = resolveRepoSource("http://example.com/project", "/user/repo", "/repos");
+  assert.equal(result2.kind, "url");
+  assert.match(result2.repoPath, /project/);
+});
+
 test("resolveRepoSource rejects invalid builtin names and unsupported schemes", () => {
   assert.throws(() => resolveRepoSource("builtin://", "/user/repo", "/repos"), /Invalid builtin repo name/);
   assert.throws(() => resolveRepoSource("builtin://..", "/user/repo", "/repos"), /Invalid builtin repo name/);
   assert.throws(() => resolveRepoSource("builtin://a/b", "/user/repo", "/repos"), /Invalid builtin repo name/);
-  assert.throws(() => resolveRepoSource("https://example.com/repo", "/user/repo", "/repos"), /Unsupported repoSource/);
+  assert.throws(() => resolveRepoSource("ftp://example.com/repo", "/user/repo", "/repos"), /Unsupported repoSource/);
+});
+
+test("isInternalUrl blocks localhost", () => {
+  assert.equal(isInternalUrl("http://localhost:3000/api"), true);
+});
+
+test("isInternalUrl blocks 127.0.0.1", () => {
+  assert.equal(isInternalUrl("http://127.0.0.1:3000/api"), true);
+});
+
+test("isInternalUrl blocks private IP 10.x.x.x", () => {
+  assert.equal(isInternalUrl("http://10.0.0.1/api"), true);
+});
+
+test("isInternalUrl blocks private IP 192.168.x.x", () => {
+  assert.equal(isInternalUrl("http://192.168.1.1/api"), true);
+});
+
+test("isInternalUrl blocks private IP 172.16.x.x", () => {
+  assert.equal(isInternalUrl("http://172.16.0.1/api"), true);
+});
+
+test("isInternalUrl blocks 0.0.0.0", () => {
+  assert.equal(isInternalUrl("http://0.0.0.0:3000/api"), true);
+});
+
+test("isInternalUrl blocks IPv6 loopback ::1", () => {
+  assert.equal(isInternalUrl("http://[::1]:3000/api"), true);
+});
+
+test("isInternalUrl blocks IPv6 unspecified [::]", () => {
+  assert.equal(isInternalUrl("http://[::]:3000/api"), true);
+});
+
+test("isInternalUrl blocks IPv6 mapped 127.0.0.1", () => {
+  assert.equal(isInternalUrl("http://[::ffff:127.0.0.1]:3000/api"), true);
+});
+
+test("isInternalUrl blocks IPv6 mapped private IP", () => {
+  assert.equal(isInternalUrl("http://[::ffff:192.168.1.1]:3000/api"), true);
+});
+
+test("isInternalUrl blocks .internal domain", () => {
+  assert.equal(isInternalUrl("http://metadata.internal/latest"), true);
+});
+
+test("isInternalUrl blocks .local domain", () => {
+  assert.equal(isInternalUrl("http://host.local/api"), true);
+});
+
+test("isInternalUrl allows public domain", () => {
+  assert.equal(isInternalUrl("https://api.github.com/repos"), false);
+});
+
+test("isInternalUrl allows public IP", () => {
+  assert.equal(isInternalUrl("https://8.8.8.8/dns-query"), false);
 });

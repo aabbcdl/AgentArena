@@ -1,3 +1,18 @@
+import { elements } from "./app-elements.js";
+import {
+  apiFetch,
+  clientRandomId,
+  debounce,
+  escapeHtml,
+  fetchWithTimeout,
+  formatElapsedDuration,
+  handleApiError,
+  providerDisplayName,
+  readLocationState,
+  setHidden,
+  syncLocationState
+} from "./app-helpers.js";
+import { state } from "./app-state.js";
 import { RUN_LOADED } from "./core/events.js";
 import { judgeRegistry } from "./core/judge-registry.js";
 import { stateManager } from "./core/state.js";
@@ -63,177 +78,9 @@ import {
   summarizeRun
 } from "./view-model.js";
 
-const state = {
-  runs: [],
-  run: null,
-  selectedRunId: null,
-  selectedAgentId: null,
-  markdownByRunId: new Map(),
-  standaloneMarkdown: null,
-  language: "zh-CN",
-  notice: null,
-  serviceInfo: null,
-  availableAdapters: [],
-  availableTaskPacks: [],
-  availableProviderProfiles: [],
-  runInProgress: false,
-  runStatus: null,
-  runStatusPollTimer: null,
-  runStatusRequestSeq: 0,
-  launcherSelectedAgentIds: [],
-  launcherCodexVariants: [],
-  launcherClaudeVariants: [],
-  launcherGeminiVariants: [],
-  launcherAiderVariants: [],
-  launcherKiloVariants: [],
-  launcherOpencodeVariants: [],
-  launcherProviderEditor: null,
-  launcherExpanded: false,
-  launcherScoreMode: "practical",
-  crossRunSelectMode: false,
-  crossRunSelectedIds: new Set(),
-  crossRunCompareData: null,
-  expandedCompareAgentId: null,
-  communityTaskPackId: null,
-  communityData: null,
-  communityLoading: false,
-  communityError: null,
-  sidebarOpen: false,
-  scoreWeights: /** @type {Record<string, number>} */ ({ ...DEFAULT_SCORE_WEIGHTS }),
-  runSearchQuery: ""
-};
+// state is imported from ./app-state.js
 
-const elements = {
-  fileInput: document.querySelector("#summary-file"),
-  markdownInput: document.querySelector("#markdown-file"),
-  folderInput: document.querySelector("#runs-folder"),
-  languageSelect: document.querySelector("#language-select"),
-  resultLoaderPanel: document.querySelector("#result-loader-panel"),
-  resultLoaderSummary: document.querySelector("#result-loader-summary"),
-  resultLoaderMessage: document.querySelector("#result-loader-message"),
-  launcherPanel: document.querySelector("#launcher-panel"),
-  launcherBody: document.querySelector("#launcher-body"),
-  launcherToggle: document.querySelector("#launcher-toggle"),
-  launcherCompactSummary: document.querySelector("#launcher-compact-summary"),
-  launcherRepoPath: document.querySelector("#launcher-repo-path"),
-  launcherTaskSelect: document.querySelector("#launcher-task-select"),
-  taskPackDetail: document.querySelector("#task-pack-detail"),
-  launcherTaskPath: document.querySelector("#launcher-task-path"),
-  launcherAdhocPromptField: document.querySelector("#launcher-adhoc-prompt-field"),
-  launcherAdhocPrompt: document.querySelector("#launcher-adhoc-prompt"),
-  launcherAdhocPromptLabel: document.querySelector("#launcher-adhoc-prompt-label"),
-  launcherAdhocPromptHint: document.querySelector("#launcher-adhoc-prompt-hint"),
-  launcherConcurrencyLabel: document.querySelector("#launcher-concurrency-label"),
-  launcherOutputPath: document.querySelector("#launcher-output-path"),
-  launcherAgents: document.querySelector("#launcher-agents"),
-  launcherProbeAuth: document.querySelector("#launcher-probe-auth"),
-  launcherScoreMode: document.querySelector("#launcher-score-mode"),
-  launcherRun: document.querySelector("#launcher-run"),
-  launcherStatus: document.querySelector("#launcher-status"),
-  launcherProgress: document.querySelector("#launcher-progress"),
-  launcherProgressTitle: document.querySelector("#launcher-progress-title"),
-  launcherCurrentAgent: document.querySelector("#launcher-current-agent"),
-  launcherLogList: document.querySelector("#launcher-log-list"),
-  launcherValidation: document.querySelector("#launcher-validation"),
-  taskBrief: document.querySelector("#task-brief"),
-  runInfo: document.querySelector("#run-info"),
-  runList: document.querySelector("#run-list"),
-  runCount: document.querySelector("#run-count"),
-  runSearch: document.querySelector("#run-search"),
-  loadingIndicator: document.querySelector("#loading-indicator"),
-  loadingMessage: document.querySelector("#loading-message"),
-  agentList: document.querySelector("#agent-list"),
-  agentCount: document.querySelector("#agent-count"),
-  emptyState: document.querySelector("#empty-state"),
-  errorState: document.querySelector("#error-state"),
-  errorTitle: document.querySelector("#error-title"),
-  errorMessage: document.querySelector("#error-message"),
-  errorRetry: document.querySelector("#error-retry"),
-  errorBack: document.querySelector("#error-back"),
-  themeToggle: document.querySelector("#theme-toggle"),
-  themeLabel: document.querySelector("#theme-label"),
-  tryDemoBtn: document.querySelector("#try-demo-btn"),
-  tryDemoText: document.querySelector("#try-demo-text"),
-  demoHint: document.querySelector("#demo-hint"),
-  dashboard: document.querySelector("#dashboard"),
-  taskTitle: document.querySelector("#task-title"),
-  taskMeta: document.querySelector("#task-meta"),
-  verdictHero: document.querySelector("#verdict-hero"),
-  leaderboardSection: document.querySelector("#leaderboard-section"),
-  leaderboardTitle: document.querySelector("#leaderboard-title"),
-  leaderboardContent: document.querySelector("#leaderboard-content"),
-  comparisonBars: document.querySelector("#comparison-bars"),
-  failuresSection: document.querySelector("#failures-section"),
-  advancedAnalysis: document.querySelector("#advanced-analysis"),
-  runCompareScope: document.querySelector("#run-compare-scope"),
-  runCompareSort: document.querySelector("#run-compare-sort"),
-  runCompareTable: document.querySelector("#run-compare-table"),
-  runCompareSection: document.querySelector("#run-compare-section"),
-  runDiffTable: document.querySelector("#run-diff-table"),
-  runDiffSection: document.querySelector("#run-diff-section"),
-  preflights: document.querySelector("#preflights"),
-  preflightSection: document.querySelector("#preflight-section"),
-  compareStatusFilter: document.querySelector("#compare-status-filter"),
-  compareSort: document.querySelector("#compare-sort"),
-  compareSortHint: document.querySelector("#compare-sort-hint"),
-  scoreWeightsTitle: document.querySelector("#score-weights-title"),
-  scoreWeightsReset: document.querySelector("#score-weights-reset"),
-  scoreWeightsSummary: document.querySelector("#score-weights-summary"),
-  scoreWeightStatus: document.querySelector("#score-weight-status"),
-  scoreWeightTests: document.querySelector("#score-weight-tests"),
-  scoreWeightJudges: document.querySelector("#score-weight-judges"),
-  scoreWeightLint: document.querySelector("#score-weight-lint"),
-  scoreWeightPrecision: document.querySelector("#score-weight-precision"),
-  scoreWeightDuration: document.querySelector("#score-weight-duration"),
-  scoreWeightCost: document.querySelector("#score-weight-cost"),
-  scoreWeightPresets: document.querySelector("#score-weight-presets"),
-  compareTable: document.querySelector("#compare-table"),
-  agentCompareSection: document.querySelector("#agent-compare-section"),
-  agentTrendTitle: document.querySelector("#agent-trend-title"),
-  agentTrendTable: document.querySelector("#agent-trend-table"),
-  agentTrendSection: document.querySelector("#agent-trend-section"),
-  preflightTitle: document.querySelector("#preflight-title"),
-  resultSummary: document.querySelector("#result-summary"),
-  resultDetails: document.querySelector("#result-details"),
-  judgeSearch: document.querySelector("#judge-search"),
-  judgeTypeFilter: document.querySelector("#judge-type-filter"),
-  judgeStatusFilter: document.querySelector("#judge-status-filter"),
-  markdownPanel: document.querySelector("#markdown-panel"),
-  markdownStatus: document.querySelector("#markdown-status"),
-  markdownHighlights: document.querySelector("#markdown-highlights"),
-  markdownContent: document.querySelector("#markdown-content"),
-  copyShareCard: document.querySelector("#copy-share-card"),
-  copyPrTable: document.querySelector("#copy-pr-table"),
-  downloadShareSvg: document.querySelector("#download-share-svg"),
-  clipboardStatus: document.querySelector("#clipboard-status"),
-  crossRunCompareSection: document.querySelector("#cross-run-compare-section"),
-  crossRunCompareTitle: document.querySelector("#cross-run-compare-title"),
-  crossRunDescription: document.querySelector("#cross-run-description"),
-  crossRunToggleSelect: document.querySelector("#cross-run-toggle-select"),
-  crossRunSelectionPanel: document.querySelector("#cross-run-selection-panel"),
-  crossRunSearch: document.querySelector("#cross-run-search"),
-  crossRunSelectionList: document.querySelector("#cross-run-selection-list"),
-  crossRunCompareBtn: document.querySelector("#cross-run-compare-btn"),
-  crossRunClearBtn: document.querySelector("#cross-run-clear-btn"),
-  crossRunCompareView: document.querySelector("#cross-run-compare-view"),
-  crossRunCompareSummary: document.querySelector("#cross-run-compare-summary"),
-  crossRunCloseCompare: document.querySelector("#cross-run-close-compare"),
-  crossRunCompareTable: document.querySelector("#cross-run-compare-table"),
-  communitySection: document.querySelector("#community-section"),
-  communityEyebrow: document.querySelector("#community-eyebrow"),
-  communityTitle: document.querySelector("#community-title"),
-  communityDescription: document.querySelector("#community-description"),
-  communityRefresh: document.querySelector("#community-refresh"),
-  communityStatus: document.querySelector("#community-status"),
-  communityContent: document.querySelector("#community-content"),
-  advancedAnalysisSummary: document.querySelector("#advanced-analysis-summary"),
-  sidebarToggle: document.querySelector("#sidebar-toggle"),
-  sidebarBackdrop: document.querySelector("#sidebar-backdrop"),
-  sidebar: document.querySelector(".sidebar"),
-  skipLink: document.querySelector("#skip-link"),
-  agentListHint: document.querySelector("#agent-list-hint"),
-  updateBannerText: document.querySelector("#update-banner-text")
-};
+// elements is imported from ./app-elements.js
 
 const judgeFilters = {
   search: "",
@@ -251,49 +98,8 @@ const runCompareFilters = {
   scope: "current-task"
 };
 
-const _RUN_CACHE_STORAGE_KEY = "agentarena.webReport.cachedRuns.v1";
-const _RUN_CACHE_MAX_BYTES = 1_500_000;
-
-function readLocationState() {
-  const params = new URLSearchParams(window.location.search);
-  const language = params.get("lang");
-  return {
-    language: language === "zh-CN" || language === "en" ? language : null,
-    runId: params.get("run"),
-    agentId: params.get("agent")
-  };
-}
-
-function syncLocationState(mode = "replace") {
-  const url = new URL(window.location.href);
-  if (state.language === "zh-CN" || state.language === "en") {
-    url.searchParams.set("lang", state.language);
-  } else {
-    url.searchParams.delete("lang");
-  }
-  if (state.selectedRunId) {
-    url.searchParams.set("run", state.selectedRunId);
-  } else {
-    url.searchParams.delete("run");
-  }
-  if (state.selectedAgentId) {
-    url.searchParams.set("agent", state.selectedAgentId);
-  } else {
-    url.searchParams.delete("agent");
-  }
-
-  const nextUrl = `${url.pathname}${url.search}${url.hash}`;
-  const currentUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-  if (nextUrl === currentUrl) {
-    return;
-  }
-
-  if (mode === "push") {
-    window.history.pushState(null, "", nextUrl);
-  } else {
-    window.history.replaceState(null, "", nextUrl);
-  }
-}
+// getAuthToken, handleApiError, apiFetch, readLocationState, syncLocationState
+// are imported from ./app-helpers.js
 
 function restoreCachedRuns() {
   return restoreCachedRunsImpl();
@@ -303,13 +109,7 @@ function persistCachedRuns() {
   persistCachedRunsImpl(state);
 }
 
-function debounce(fn, delayMs) {
-  let timer;
-  return (...args) => {
-    clearTimeout(timer);
-    timer = setTimeout(() => fn(...args), delayMs);
-  };
-}
+// debounce is imported from ./app-helpers.js
 
 const scoreWeightElements = {
   status: "scoreWeightStatus",
@@ -379,32 +179,9 @@ function renderList(element, items) {
   element.innerHTML = items.map((item) => `<li>${escapeHtml(item)}</li>`).join("");
 }
 
-function escapeHtml(value) {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
+// escapeHtml is imported from ./app-helpers.js
 
-// formatElapsedDuration uses imported utils from ./utils/format.js
-// The imported formatDuration is used directly by new code
-
-function formatElapsedDuration(durationMs) {
-  if (!Number.isFinite(durationMs) || durationMs <= 0) {
-    return "";
-  }
-
-  const totalSeconds = Math.floor(durationMs / 1000);
-  if (totalSeconds < 60) {
-    return `${totalSeconds}s`;
-  }
-
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${minutes}m ${seconds}s`;
-}
+// formatElapsedDuration is imported from ./app-helpers.js
 
 function formatCost(result) {
   return result.costKnown ? `$${result.estimatedCostUsd.toFixed(2)}` : "n/a";
@@ -502,20 +279,9 @@ function translateStatus(s) {
   return s;
 }
 
-function providerDisplayName(profile) {
-  if (!profile) {
-    return t("providerOfficial");
-  }
-  return profile.name;
-}
+// providerDisplayName is imported from ./app-helpers.js
 
-function clientRandomId() {
-  if (globalThis.crypto && typeof globalThis.crypto.randomUUID === "function") {
-    return globalThis.crypto.randomUUID();
-  }
-
-  return `id-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-}
+// clientRandomId is imported from ./app-helpers.js
 
 function taskIntentSummary(task) {
   const objective = task.metadata?.objective ?? task.description ?? "";
@@ -660,8 +426,10 @@ const {
   providerDisplayName,
   formatElapsedDuration,
   fetchWithTimeout,
-  baselineTaskWarning,
-  summarizeTaskPrompt,
+apiFetch,
+handleApiError,
+baselineTaskWarning,
+summarizeTaskPrompt,
   summarizeJudges,
   translateDifficulty,
   applySingleRun,
@@ -923,11 +691,7 @@ function renderStaticText() {
   renderWeightSliders(state.scoreWeights);
 }
 
-function fetchWithTimeout(url, options = {}, timeoutMs = 15_000) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
-}
+// fetchWithTimeout is imported from ./app-helpers.js
 
 function formatJudgeType(type) {
   const typeMap = {
@@ -950,10 +714,7 @@ function statusClass(status) {
   return `status-${status}`;
 }
 
-function setHidden(element, hidden) {
-  if (!element) return;
-  element.classList.toggle("hidden", hidden);
-}
+// setHidden is imported from ./app-helpers.js
 
 function sortRuns(runs) {
   return [...runs].sort((left, right) => right.createdAt.localeCompare(left.createdAt));
@@ -988,7 +749,7 @@ function applyRuns(runs, markdownByRunId = new Map()) {
   }
   updateCurrentRun();
   persistCachedRuns();
-  syncLocationState();
+  syncLocationState(state);
   render();
 }
 
@@ -1245,11 +1006,13 @@ async function handleTestConnection(buttonEl) {
   buttonEl.classList.add("testing");
 
   try {
-    const response = await fetch("/api/preflight", {
+    const response = await apiFetch("/api/preflight", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(agentConfig),
     });
+
+    if (handleApiError(response)) return;
 
     if (!response.ok) {
       const err = await response.json().catch(() => ({}));
@@ -1430,7 +1193,7 @@ elements.languageSelect.addEventListener("change", (event) => {
   state.language = String(event.target.value ?? "en");
   document.documentElement.lang = state.language === "zh-CN" ? "zh-CN" : "en";
   writeStorage("agentarena.webReport.language", state.language);
-  syncLocationState("push");
+  syncLocationState(state, "push");
   render();
 });
 
@@ -1448,7 +1211,7 @@ elements.runList.addEventListener("click", (event) => {
     }
     updateCurrentRun();
     persistCachedRuns();
-    syncLocationState();
+    syncLocationState(state);
     render();
     return;
   }
@@ -1477,7 +1240,7 @@ elements.runList.addEventListener("click", (event) => {
 
   state.selectedRunId = button.getAttribute("data-run-id");
   updateCurrentRun();
-  syncLocationState("push");
+  syncLocationState(state, "push");
   render();
   if (window.innerWidth <= 768) {
     state.sidebarOpen = false;
@@ -1512,7 +1275,7 @@ elements.agentList.addEventListener("click", (event) => {
   }
 
   state.selectedAgentId = button.getAttribute("data-agent-id");
-  syncLocationState("push");
+  syncLocationState(state, "push");
   renderAgentList(state.run);
   renderCompareTableV2(state.run);
   renderAgentTrendTableV2(state.run);
@@ -1549,7 +1312,7 @@ elements.compareTable.addEventListener("click", (event) => {
 
   state.selectedAgentId = clickedId;
   state.expandedCompareAgentId = null;
-  syncLocationState("push");
+  syncLocationState(state, "push");
   renderAgentList(state.run);
   renderCompareTableV2(state.run);
   renderAgentTrendTableV2(state.run);
@@ -1568,7 +1331,7 @@ elements.comparisonBars.addEventListener("click", (event) => {
 
   state.selectedAgentId = barRow.getAttribute("data-bar-agent-id");
   state.expandedCompareAgentId = null;
-  syncLocationState("push");
+  syncLocationState(state, "push");
   renderAgentList(state.run);
   renderCompareTableV2(state.run);
   renderComparisonBars(state.run);
@@ -1604,7 +1367,7 @@ elements.runCompareTable.addEventListener("click", (event) => {
 
   state.selectedRunId = row.getAttribute("data-compare-run-id");
   updateCurrentRun();
-  syncLocationState("push");
+  syncLocationState(state, "push");
   render();
 });
 
@@ -1615,7 +1378,7 @@ elements.runDiffTable.addEventListener("click", (event) => {
   }
 
   state.selectedAgentId = row.getAttribute("data-run-diff-agent-id");
-  syncLocationState("push");
+  syncLocationState(state, "push");
   renderAgentList(state.run);
   renderCompareTableV2(state.run);
   renderRunDiffTableV2();
@@ -1635,7 +1398,7 @@ elements.agentTrendTable.addEventListener("click", (event) => {
 
   state.selectedRunId = row.getAttribute("data-agent-trend-run-id");
   updateCurrentRun();
-  syncLocationState("push");
+  syncLocationState(state, "push");
   render();
 });
 
@@ -1867,7 +1630,7 @@ elements.errorBack?.addEventListener("click", () => {
   state.selectedAgentId = null;
   state.notice = null;
   persistCachedRuns();
-  syncLocationState();
+  syncLocationState(state);
   render();
 });
 
@@ -2150,6 +1913,6 @@ function showIndexedDBWarning() {
 
 // Run initialization
 detectService();
-syncLocationState();
+syncLocationState(state);
 render();
 initNewModules();

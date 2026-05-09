@@ -1,11 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { validateTaskPackId } from "@agentarena/core";
 import {
   buildCiWorkflow,
-  createAdhocLintCommand,
-  createAdhocTestCommand,
-  createPackageScriptCommand,
   TASKPACK_TEMPLATES,
 } from "../templates.js";
 import { type ParsedTaskPackMetadataFile, WORKSPACE_ROOT } from "./shared.js";
@@ -201,8 +197,7 @@ export async function runInit(parsed: {
   await fs.writeFile(taskPackPath, yamlContent, "utf8");
   console.log(`\n✓ Generated demo task pack: ${taskPackPath}`);
 
-  const { listAvailableAdapters, preflightAdapters } = await import("@agentarena/adapters");
-  const { createAgentSelection } = await import("@agentarena/core");
+  const { listAvailableAdapters } = await import("@agentarena/adapters");
 
   const allAdapters = listAvailableAdapters().filter((a) => a.kind !== "demo");
   const detectedAgents: string[] = [];

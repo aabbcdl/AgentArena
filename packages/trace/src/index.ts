@@ -5,48 +5,7 @@ import { createInterface } from "node:readline";
 import { pipeline } from "node:stream/promises";
 import { createGunzip, createGzip } from "node:zlib";
 import { ensureDirectory, type TraceEvent } from "@agentarena/core";
-
-
-export interface TraceFilter {
-  agentId?: string;
-  runId?: string;
-  type?: string | string[];
-  startTime?: string;
-  endTime?: string;
-  messageContains?: string;
-}
-
-export interface TraceQueryOptions {
-  limit?: number;
-  offset?: number;
-  filter?: TraceFilter;
-  reverse?: boolean;
-}
-
-function matchesFilter(event: TraceEvent, filter: TraceFilter): boolean {
-  if (filter.agentId && event.agentId !== filter.agentId) {
-    return false;
-  }
-  if (filter.runId && event.runId !== filter.runId) {
-    return false;
-  }
-  if (filter.type) {
-    const types = Array.isArray(filter.type) ? filter.type : [filter.type];
-    if (!types.includes(event.type)) {
-      return false;
-    }
-  }
-  if (filter.startTime && event.timestamp < filter.startTime) {
-    return false;
-  }
-  if (filter.endTime && event.timestamp > filter.endTime) {
-    return false;
-  }
-  if (filter.messageContains && !event.message.toLowerCase().includes(filter.messageContains.toLowerCase())) {
-    return false;
-  }
-  return true;
-}
+import { matchesFilter, type TraceFilter, type TraceQueryOptions } from "./types.js";
 
 /**
  * Read trace events from a JSONL file using streaming to handle large files.
@@ -78,6 +37,10 @@ export class JsonlTraceRecorder {
   private writeFailed = false;
 
   constructor(private readonly filePath: string) {}
+
+  async close(): Promise<void> {
+    await this.writeQueue;
+  }
 
   async record(event: TraceEvent): Promise<void> {
     // If a previous write failed, don't queue more - fail fast
@@ -315,3 +278,4 @@ export {
   type TraceStep,
   type TraceTimeline
 } from "./replay.js";
+export { matchesFilter, type TraceFilter, type TraceQueryOptions } from "./types.js";

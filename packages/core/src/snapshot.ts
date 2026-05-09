@@ -4,7 +4,7 @@ import { cpus } from "node:os";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
 import { normalizePath } from "./paths.js";
-import type { DiffSummary, FileSnapshotEntry } from "./types.js";
+import type { DiffSummary, FileSnapshotEntry } from "./types/index.js";
 
 const INTERNAL_IGNORED_NAMES = new Set([".agentarena", ".git", "node_modules"]);
 
@@ -108,7 +108,7 @@ export async function snapshotDirectory(rootPath: string): Promise<Map<string, F
         if (stat.size > maxFileSize) {
           // Create a synthetic hash based on metadata for huge files
           const hash = createHash("sha256")
-            .update(`huge-file:${relativePath}:${stat.size}:${stat.mtimeMs}`)
+            .update(`huge-file:${relativePath}:${stat.size}:${stat.mtimeMs}:${stat.ino}`)
             .digest("hex");
           snapshots.set(relativePath, { relativePath, hash });
           continue;

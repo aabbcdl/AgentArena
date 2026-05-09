@@ -19,7 +19,7 @@ export function throwIfAborted(signal: AbortSignal | undefined, message = "Bench
   }
 }
 
-export function createCancellation(signal?: AbortSignal): import("./types.js").BenchmarkCancellation {
+export function createCancellation(signal?: AbortSignal): import("./types/index.js").BenchmarkCancellation {
   const effectiveSignal = signal ?? new AbortController().signal;
   return {
     signal: effectiveSignal,

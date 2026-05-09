@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const CLI_ENTRY = path.join(REPO_ROOT, "packages", "cli", "dist", "index.js");
 
-function request(port, method, pathname, body) {
+function request(port, method, pathname, body, token) {
   return new Promise((resolve, reject) => {
     const options = {
       hostname: "127.0.0.1",
@@ -17,6 +17,9 @@ function request(port, method, pathname, body) {
       method,
       headers: { "Content-Type": "application/json" }
     };
+    if (token) {
+      options.headers.Authorization = `Bearer ${token}`;
+    }
 
     const req = http.request(options, (res) => {
       let data = "";
@@ -65,11 +68,19 @@ async function startServer(port) {
     env: { ...process.env }
   });
 
+  let stdout = "";
   let stderr = "";
+  child.stdout.on("data", (chunk) => { stdout += chunk; });
   child.stderr.on("data", (chunk) => { stderr += chunk; });
 
   await waitForServer(port);
-  return { child, stderr: () => stderr };
+
+  await new Promise(r => setTimeout(r, 200));
+
+  const tokenMatch = stdout.match(/auth_token=(\S+)/);
+  const authToken = tokenMatch ? tokenMatch[1] : undefined;
+
+  return { child, stderr: () => stderr, authToken };
 }
 
 // Use a unique port for each test run to avoid conflicts
@@ -108,9 +119,9 @@ test("GET /api/adapters returns adapter list", async () => {
 
 test("POST /api/run with empty body returns 400", async () => {
   const port = BASE_PORT + 2;
-  const { child } = await startServer(port);
+  const { child, authToken } = await startServer(port);
   try {
-    const res = await request(port, "POST", "/api/run", {});
+    const res = await request(port, "POST", "/api/run", {}, authToken);
     assert.equal(res.statusCode, 400);
     assert.ok(res.body.error.includes("repoPath") || res.body.error.includes("required"));
   } finally {
@@ -120,12 +131,12 @@ test("POST /api/run with empty body returns 400", async () => {
 
 test("POST /api/run missing agents returns 400", async () => {
   const port = BASE_PORT + 3;
-  const { child } = await startServer(port);
+  const { child, authToken } = await startServer(port);
   try {
     const res = await request(port, "POST", "/api/run", {
       repoPath: "/tmp/test",
       taskPath: "/tmp/test.yaml"
-    });
+    }, authToken);
     assert.equal(res.statusCode, 400);
     assert.ok(res.body.error.includes("agent") || res.body.error.includes("required"));
   } finally {
@@ -135,9 +146,9 @@ test("POST /api/run missing agents returns 400", async () => {
 
 test("POST /api/preflight missing baseAgentId returns 400", async () => {
   const port = BASE_PORT + 4;
-  const { child } = await startServer(port);
+  const { child, authToken } = await startServer(port);
   try {
-    const res = await request(port, "POST", "/api/preflight", {});
+    const res = await request(port, "POST", "/api/preflight", {}, authToken);
     assert.equal(res.statusCode, 400);
     assert.ok(res.body.error.includes("baseAgentId"));
   } finally {
@@ -147,9 +158,9 @@ test("POST /api/preflight missing baseAgentId returns 400", async () => {
 
 test("POST /api/create-adhoc-taskpack missing prompt returns 400", async () => {
   const port = BASE_PORT + 5;
-  const { child } = await startServer(port);
+  const { child, authToken } = await startServer(port);
   try {
-    const res = await request(port, "POST", "/api/create-adhoc-taskpack", {});
+    const res = await request(port, "POST", "/api/create-adhoc-taskpack", {}, authToken);
     assert.equal(res.statusCode, 400);
     assert.ok(res.body.error.includes("prompt"));
   } finally {
@@ -159,9 +170,9 @@ test("POST /api/create-adhoc-taskpack missing prompt returns 400", async () => {
 
 test("POST /api/provider-profiles missing required fields returns 400", async () => {
   const port = BASE_PORT + 6;
-  const { child } = await startServer(port);
+  const { child, authToken } = await startServer(port);
   try {
-    const res = await request(port, "POST", "/api/provider-profiles", { name: "test" });
+    const res = await request(port, "POST", "/api/provider-profiles", { name: "test" }, authToken);
     assert.equal(res.statusCode, 400);
     assert.ok(res.body.error.includes("kind") || res.body.error.includes("apiFormat"));
   } finally {
@@ -189,26 +200,21 @@ test("GET static file path traversal is blocked", async () => {
 
 test("POST /api/run concurrent requests return 409", async () => {
   const port = BASE_PORT + 8;
-  const { child } = await startServer(port);
+  const { child, authToken } = await startServer(port);
   try {
-    // Start a run (will likely fail but that's OK - we just need activeRun to be set)
     const runBody = {
       repoPath: REPO_ROOT,
       taskPath: path.join(REPO_ROOT, "examples", "taskpacks", "demo-repo-health.json"),
       agents: [{ baseAgentId: "demo-fast" }]
     };
 
-    // Fire first request (don't await yet)
-    const firstReq = request(port, "POST", "/api/run", runBody);
-    // Small delay to let the first request acquire the mutex
+    const firstReq = request(port, "POST", "/api/run", runBody, authToken);
     await new Promise((r) => setTimeout(r, 50));
 
-    // Second request should get 409
-    const secondRes = await request(port, "POST", "/api/run", runBody);
+    const secondRes = await request(port, "POST", "/api/run", runBody, authToken);
     assert.equal(secondRes.statusCode, 409);
     assert.ok(secondRes.body.error.includes("already in progress"));
 
-    // Clean up: await the first request
     await firstReq.catch(() => {});
   } finally {
     child.kill("SIGTERM");
@@ -217,17 +223,16 @@ test("POST /api/run concurrent requests return 409", async () => {
 
 test("POST /api/run valid request returns 202", async () => {
   const port = BASE_PORT + 9;
-  const { child } = await startServer(port);
+  const { child, authToken } = await startServer(port);
   try {
     const res = await request(port, "POST", "/api/run", {
       repoPath: REPO_ROOT,
       taskPath: path.join(REPO_ROOT, "examples", "taskpacks", "demo-repo-health.json"),
       agents: [{ baseAgentId: "demo-fast" }]
-    });
+    }, authToken);
     assert.equal(res.statusCode, 202);
     assert.equal(res.body.accepted, true);
 
-    // Wait for run to finish so the server is clean for shutdown
     await new Promise((r) => setTimeout(r, 3000));
   } finally {
     child.kill("SIGTERM");
@@ -247,6 +252,73 @@ test("Rate limit returns 429 after many requests", async () => {
     const rateLimited = results.filter((r) => r.statusCode === 429);
     assert.ok(rateLimited.length > 0, "should have at least one 429 response");
     assert.ok(rateLimited[0].body.error.includes("Rate limit"));
+  } finally {
+    child.kill("SIGTERM");
+  }
+});
+
+test("localhost GET /api/ui-info works without token", async () => {
+  const port = BASE_PORT + 20;
+  const { child } = await startServer(port);
+  try {
+    const res = await request(port, "GET", "/api/ui-info");
+    assert.equal(res.statusCode, 200, "localhost GET should work without token");
+  } finally {
+    child.kill("SIGTERM");
+  }
+});
+
+test("localhost POST /api/run requires token", async () => {
+  const port = BASE_PORT + 21;
+  const { child } = await startServer(port);
+  try {
+    const res = await request(port, "POST", "/api/run", {});
+    assert.equal(res.statusCode, 401, "localhost POST should require token");
+  } finally {
+    child.kill("SIGTERM");
+  }
+});
+
+test("localhost POST /api/run with valid token returns non-401", async () => {
+  const port = BASE_PORT + 22;
+  const { child, authToken } = await startServer(port);
+  try {
+    const res = await request(port, "POST", "/api/run", {}, authToken);
+    assert.notEqual(res.statusCode, 401, "POST with valid token should not return 401");
+  } finally {
+    child.kill("SIGTERM");
+  }
+});
+
+test("POST /api/preflight requires auth token", async () => {
+  const port = BASE_PORT + 31;
+  const { child } = await startServer(port);
+  try {
+    const res = await request(port, "POST", "/api/preflight", { baseAgentId: "demo-fast" });
+    assert.equal(res.statusCode, 401);
+  } finally {
+    child.kill("SIGTERM");
+  }
+});
+
+test("POST /api/create-adhoc-taskpack requires auth token", async () => {
+  const port = BASE_PORT + 32;
+  const { child } = await startServer(port);
+  try {
+    const res = await request(port, "POST", "/api/create-adhoc-taskpack", { prompt: "test", title: "Test" });
+    assert.equal(res.statusCode, 401);
+  } finally {
+    child.kill("SIGTERM");
+  }
+});
+
+test("GET /api/run-status returns idle when no run active", async () => {
+  const port = BASE_PORT + 33;
+  const { child } = await startServer(port);
+  try {
+    const res = await request(port, "GET", "/api/run-status");
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.body.state, "idle");
   } finally {
     child.kill("SIGTERM");
   }

@@ -1,6 +1,20 @@
 /**
  * @module view-model/scoring
+ *
  * Score weights, presets, composite scoring, and metric formatting.
+ *
+ * IMPORTANT: The backend (packages/report/scoring.ts) is the single source of
+ * truth for scoring. Runs loaded from summary.json already have `compositeScore`
+ * and `scoreReasons` pre-computed by `enrichRunWithScores()`.
+ *
+ * This module provides:
+ * 1. Weight preset data + helpers (used by the UI slider controls)
+ * 2. Dynamic re-computation when users adjust weights in the UI
+ * 3. Metric formatting helpers (findJudgeByType, formatTestMetric, etc.)
+ *
+ * The scoring logic (component computation, band rules, normalization) is
+ * intentionally kept in sync with the backend. When the backend changes,
+ * this module must be updated accordingly.
  */
 
 /**
@@ -12,19 +26,11 @@
  * @property {number} total - Weighted composite score (0–100 scale)
  * @property {ScoreWeights} weights - Normalized weights used
  * @property {Object} components - Individual component scores (0–1 scale)
- * @property {number} components.status
- * @property {number} components.tests
- * @property {number} components.criticalJudges
- * @property {number} components.nonCriticalJudges
- * @property {number} components.lint
- * @property {number} components.precision
- * @property {number} components.duration
- * @property {number} components.cost
- * @property {number} components.resolutionRate
- * @property {number} components.tokenEfficiency
- * @property {number} components.acceptanceRate
- * @property {number} components.categoryScore
  */
+
+// ---------------------------------------------------------------------------
+// Weight presets — mirrors packages/core/src/scoring-weights.ts
+// ---------------------------------------------------------------------------
 
 /** @type {ScoreWeights} */
 export const DEFAULT_SCORE_WEIGHTS = Object.freeze({
@@ -53,7 +59,8 @@ export const SCORE_WEIGHT_PRESETS = Object.freeze({
   balanced: Object.freeze({
     status: 0.30,
     tests: 0.25,
-    judges: 0.15,
+    criticalJudges: 0.10,
+    nonCriticalJudges: 0.05,
     lint: 0.10,
     precision: 0.10,
     duration: 0.06,
@@ -101,9 +108,9 @@ export const SCORE_WEIGHT_PRESETS = Object.freeze({
 /** @type {Record<string, ScoreWeights>} */
 export const DEPRECATED_SCORE_PRESETS = Object.freeze({
   "correctness-first": Object.freeze({ status: 0.20, tests: 0.30, criticalJudges: 0.25, nonCriticalJudges: 0.10, duration: 0.10, cost: 0.05 }),
-  "speed-first": Object.freeze({ status: 0.12, tests: 0.08, judges: 0.08, lint: 0.02, precision: 0.02, duration: 0.48, cost: 0.2 }),
-  "cost-first": Object.freeze({ status: 0.12, tests: 0.1, judges: 0.08, lint: 0.05, precision: 0.05, duration: 0.1, cost: 0.5 }),
-  "scope-discipline": Object.freeze({ status: 0.14, tests: 0.1, judges: 0.08, lint: 0.06, precision: 0.56, duration: 0.03, cost: 0.03 })
+  "speed-first": Object.freeze({ status: 0.12, tests: 0.08, criticalJudges: 0.05, nonCriticalJudges: 0.03, lint: 0.02, precision: 0.02, duration: 0.48, cost: 0.2 }),
+  "cost-first": Object.freeze({ status: 0.12, tests: 0.1, criticalJudges: 0.05, nonCriticalJudges: 0.03, lint: 0.05, precision: 0.05, duration: 0.1, cost: 0.5 }),
+  "scope-discipline": Object.freeze({ status: 0.14, tests: 0.1, criticalJudges: 0.05, nonCriticalJudges: 0.03, lint: 0.06, precision: 0.56, duration: 0.03, cost: 0.03 })
 });
 
 /**
@@ -165,7 +172,7 @@ export function getAllScorePresets() {
 }
 
 // ---------------------------------------------------------------------------
-// Individual metric helpers
+// Individual metric helpers (formatting + lookup)
 // ---------------------------------------------------------------------------
 
 /**
@@ -242,184 +249,269 @@ export function formatDiffPrecisionMetric(result) {
 }
 
 // ---------------------------------------------------------------------------
-// Private scoring helpers
+// Score component computation — mirrors backend report/scoring.ts exactly
 // ---------------------------------------------------------------------------
 
 /**
- * Duration efficiency: fastest / this result's duration (0–1, higher is better).
+ * Score band constants — must match backend FAILED_SCORE_BAND / CRITICAL_FAIL_SCORE_BAND.
+ */
+const FAILED_SCORE_BAND = { min: 10, max: 40 };
+const CRITICAL_FAIL_SCORE_BAND = { min: 50, max: 70 };
+
+/**
+ * Compute all individual score components for a result within a run.
+ * Mirrors `computeScoreComponents()` from packages/report/src/scoring.ts.
  * @param {Object} result
  * @param {Object} run
- * @returns {number}
+ * @returns {Object}
  */
-function durationEfficiencyScore(result, run) {
-  const durations = run.results.map((entry) => entry.durationMs).filter((value) => value > 0);
-  if (durations.length === 0) {
-    return 0;
+function computeScoreComponents(result, run) {
+  const testJudge = findJudgeByType(result, "test-result");
+  const lintJudge = findJudgeByType(result, "lint-check");
+  const patchJudges = (result.judgeResults ?? []).filter(j => j.type === "patch-validation");
+
+  // testPassRatio
+  let testsScore = 0;
+  if (testJudge && typeof testJudge.totalCount === "number") {
+    testsScore = testJudge.totalCount > 0 ? (testJudge.passedCount ?? 0) / testJudge.totalCount : testJudge.success ? 1 : 0;
+  } else if (testJudge?.success) {
+    testsScore = 1;
   }
-  const fastest = Math.min(...durations);
-  if (fastest <= 0) return 0;
-  return fastest / Math.max(result.durationMs, fastest);
+
+  // criticalJudgePassRatio
+  const criticalJudges = result.judgeResults.filter(j => j.critical === true);
+  const criticalJudgesScore = criticalJudges.length === 0 ? 1 : criticalJudges.filter(j => j.success).length / criticalJudges.length;
+
+  // nonCriticalJudgePassRatio
+  const nonCriticalJudges = result.judgeResults.filter(j => j.critical !== true);
+  const nonCriticalJudgesScore = nonCriticalJudges.length === 0 ? 1 : nonCriticalJudges.filter(j => j.success).length / nonCriticalJudges.length;
+
+  // hasCriticalJudgeFailure
+  const hasCriticalFailure = result.judgeResults.some(j => j.critical === true && !j.success);
+
+  // lintQualityScore
+  let lintScore = 0;
+  if (lintJudge) {
+    const errors = lintJudge.errorCount ?? 0;
+    const warnings = lintJudge.warningCount ?? 0;
+    lintScore = 1 / (1 + errors * 10 + warnings);
+  }
+
+  // precisionScore
+  const hasExpectedPaths = run.task?.expectedChangedPaths && run.task.expectedChangedPaths.length > 0;
+  const precisionScoreVal = hasExpectedPaths ? Math.max(result.diffPrecision?.score ?? 0, 0) : 0;
+
+  // durationEfficiencyScore
+  const durations = run.results.map(entry => entry.durationMs).filter(v => v > 0);
+  let durationScore = 0;
+  if (durations.length > 0) {
+    const fastest = Math.min(...durations);
+    durationScore = fastest / Math.max(result.durationMs, fastest);
+  }
+
+  // costEfficiencyScore
+  const costs = run.results.filter(entry => entry.costKnown && entry.estimatedCostUsd > 0).map(entry => entry.estimatedCostUsd);
+  let costScore = 0;
+  if (result.costKnown && result.estimatedCostUsd > 0 && costs.length > 0) {
+    const cheapest = Math.min(...costs);
+    costScore = cheapest / Math.max(result.estimatedCostUsd, cheapest);
+  }
+
+  // failToPassScore
+  const failToPassScoreVal = patchJudges.length === 0 ? 0 : patchJudges.filter(j => j.success).length / patchJudges.length;
+
+  // passToPassScore
+  let passToPassScoreVal = 0;
+  if (testJudge && typeof testJudge.totalCount === "number" && testJudge.totalCount > 0) {
+    passToPassScoreVal = (testJudge.passedCount ?? 0) / testJudge.totalCount;
+  }
+
+  return {
+    status: result.status === "success" ? 1 : 0,
+    tests: testsScore,
+    criticalJudges: criticalJudgesScore,
+    nonCriticalJudges: nonCriticalJudgesScore,
+    lint: lintScore,
+    precision: precisionScoreVal,
+    duration: durationScore,
+    cost: costScore,
+    resolutionRate: result.sweBench?.resolutionRate ?? (result.status === "success" ? 1 : 0),
+    tokenEfficiency: result.tokenEfficiencyScore ?? 0,
+    acceptanceRate: result.cursorBench?.acceptanceRate ?? 0,
+    categoryScore: result.status === "success" ? 1 : 0,
+    failToPassTests: failToPassScoreVal,
+    passToPassTests: passToPassScoreVal,
+    _hasCriticalFailure: hasCriticalFailure
+  };
 }
 
 /**
- * Cost efficiency: cheapest / this result's cost (0–1, higher is better).
+ * Normalize weights to only applicable keys, then normalize to sum=1.
+ * Mirrors `normalizeApplicableWeights()` from packages/report/src/scoring.ts.
+ * @param {ScoreWeights} weights
  * @param {Object} result
  * @param {Object} run
- * @returns {number}
+ * @returns {ScoreWeights}
  */
-function costEfficiencyScore(result, run) {
-  const costs = run.results.filter((entry) => entry.costKnown && entry.estimatedCostUsd > 0).map((entry) => entry.estimatedCostUsd);
-  if (!result.costKnown || result.estimatedCostUsd <= 0 || costs.length === 0) {
-    return 0;
+function normalizeApplicableWeights(weights, result, run) {
+  // Compatibility: migrate legacy "judges" key → criticalJudges + nonCriticalJudges
+  /** @type {Record<string, number>} */
+  const migratedWeights = {};
+  for (const [key, weight] of Object.entries(weights)) {
+    if (key === "judges") {
+      // Split legacy "judges" weight 2:1 into critical:nonCritical
+      if (!weights.criticalJudges) migratedWeights.criticalJudges = weight * (2 / 3);
+      if (!weights.nonCriticalJudges) migratedWeights.nonCriticalJudges = weight * (1 / 3);
+    } else {
+      migratedWeights[key] = weight;
+    }
   }
-  const cheapest = Math.min(...costs);
-  if (cheapest <= 0) return 0;
-  return cheapest / Math.max(result.estimatedCostUsd, cheapest);
-}
 
-/**
- * Test pass ratio from judge results (-1 if no test judge).
- * @param {Object} result
- * @returns {number}
- */
-function testPassRatio(result) {
-  const judge = findJudgeByType(result, "test-result");
-  if (!judge || typeof judge.totalCount !== "number") {
-    return -1;
-  }
-  return judge.totalCount > 0 ? (judge.passedCount ?? 0) / judge.totalCount : judge.success ? 1 : 0;
-}
+  /** @type {Record<string, number>} */
+  const applicableWeights = {};
+  const isPrecisionApplicable = run.task?.expectedChangedPaths && run.task.expectedChangedPaths.length > 0;
+  const hasTokenEfficiency = result.tokenEfficiencyScore !== undefined;
+  const hasResolutionRate = result.sweBench?.resolutionRate !== undefined;
+  const hasAcceptanceRate = result.cursorBench?.acceptanceRate !== undefined;
 
-/**
- * Lint quality score: 1 / (1 + errors*10 + warnings).
- * @param {Object} result
- * @returns {number}
- */
-function lintQualityScore(result) {
-  const judge = findJudgeByType(result, "lint-check");
-  if (!judge) {
-    return -1;
+  for (const [key, weight] of Object.entries(migratedWeights)) {
+    if (key === "precision" && !isPrecisionApplicable) continue;
+    if (key === "tokenEfficiency" && !hasTokenEfficiency) continue;
+    if (key === "resolutionRate" && !hasResolutionRate) continue;
+    if (key === "acceptanceRate" && !hasAcceptanceRate) continue;
+    if (key === "failToPassTests" && !hasResolutionRate) continue;
+    if (key === "passToPassTests" && !hasResolutionRate) continue;
+    applicableWeights[key] = weight;
   }
-  const errors = judge.errorCount ?? 0;
-  const warnings = judge.warningCount ?? 0;
-  return 1 / (1 + errors * 10 + warnings);
+
+  const total = Object.values(applicableWeights).reduce((sum, v) => sum + v, 0);
+  if (total <= 0) {
+    return applicableWeights;
+  }
+  return Object.fromEntries(Object.entries(applicableWeights).map(([k, v]) => [k, v / total]));
 }
 
 // ---------------------------------------------------------------------------
-// Composite scoring
+// Composite scoring — mirrors backend computeCompositeScore exactly
 // ---------------------------------------------------------------------------
 
 /**
  * Compute detailed composite score breakdown for a result within a run.
+ *
+ * When the user hasn't changed weights, prefer using `result.compositeScore`
+ * (pre-computed by the backend). This function is used for dynamic re-scoring
+ * when the user adjusts weight sliders.
+ *
  * @param {Object} result
  * @param {Object} run
  * @param {ScoreWeights} [weights]
  * @returns {CompositeScoreResult}
  */
 export function getCompositeScoreDetails(result, run, weights = DEFAULT_SCORE_WEIGHTS) {
-  const normalizedWeights = normalizeScoreWeights(weights);
-  const statusScore = result.status === "success" ? 1 : 0;
-  const testsScore = Math.max(testPassRatio(result), 0);
-  const criticalJudgePassRatio = result.criticalJudgePassRatio ?? judgePassRatio(result);
-  const nonCriticalJudgePassRatio = result.nonCriticalJudgePassRatio ?? judgePassRatio(result);
-  const criticalJudgesScore = Math.max(criticalJudgePassRatio, 0);
-  const nonCriticalJudgesScore = Math.max(nonCriticalJudgePassRatio, 0);
-  const lintScore = Math.max(lintQualityScore(result), 0);
-  const precisionScore = Math.max(diffPrecisionScore(result), 0);
-  const durationScore = durationEfficiencyScore(result, run);
-  const costScore = costEfficiencyScore(result, run);
-  const resolutionRateScore = result.resolutionRate ?? 0;
-  const tokenEfficiencyScore = result.tokenEfficiencyScore ?? 0;
-  const acceptanceRateScore = result.acceptanceRate ?? 0;
-  const categoryScoreScore = result.categoryScore ?? 0;
+  const components = computeScoreComponents(result, run);
+
+  // Rule 1: Failed run → failed band
+  if (result.status !== "success") {
+    const baseScore = FAILED_SCORE_BAND.min;
+    const efficiencyBonus = components.duration * 0.3 + components.cost * 0.2;
+    return {
+      total: Math.round(Math.min(FAILED_SCORE_BAND.max, baseScore + efficiencyBonus * 10) * 10) / 10,
+      weights: normalizeScoreWeights(weights),
+      components
+    };
+  }
+
+  // Rule 2: Critical judge failure → partial band
+  if (components._hasCriticalFailure) {
+    const baseScore = CRITICAL_FAIL_SCORE_BAND.min + (
+      components.tests * 10 +
+      components.nonCriticalJudges * 5 +
+      components.lint * 3 +
+      components.duration * 2
+    );
+    return {
+      total: Math.round(Math.min(CRITICAL_FAIL_SCORE_BAND.max, baseScore) * 10) / 10,
+      weights: normalizeScoreWeights(weights),
+      components
+    };
+  }
+
+  // Rule 3: Completed — weighted sum
+  const n = normalizeApplicableWeights(weights, result, run);
 
   const weightedScore =
-    statusScore * (normalizedWeights.status ?? 0) +
-    testsScore * (normalizedWeights.tests ?? 0) +
-    criticalJudgesScore * (normalizedWeights.criticalJudges ?? 0) +
-    nonCriticalJudgesScore * (normalizedWeights.nonCriticalJudges ?? 0) +
-    lintScore * (normalizedWeights.lint ?? 0) +
-    precisionScore * (normalizedWeights.precision ?? 0) +
-    durationScore * (normalizedWeights.duration ?? 0) +
-    costScore * (normalizedWeights.cost ?? 0) +
-    resolutionRateScore * (normalizedWeights.resolutionRate ?? 0) +
-    tokenEfficiencyScore * (normalizedWeights.tokenEfficiency ?? 0) +
-    acceptanceRateScore * (normalizedWeights.acceptanceRate ?? 0) +
-    categoryScoreScore * (normalizedWeights.categoryScore ?? 0);
+    components.status * (n.status ?? 0) +
+    components.tests * (n.tests ?? 0) +
+    components.criticalJudges * (n.criticalJudges ?? 0) +
+    components.nonCriticalJudges * (n.nonCriticalJudges ?? 0) +
+    components.lint * (n.lint ?? 0) +
+    components.precision * (n.precision ?? 0) +
+    components.duration * (n.duration ?? 0) +
+    components.cost * (n.cost ?? 0) +
+    components.resolutionRate * (n.resolutionRate ?? 0) +
+    components.tokenEfficiency * (n.tokenEfficiency ?? 0) +
+    components.acceptanceRate * (n.acceptanceRate ?? 0) +
+    components.categoryScore * (n.categoryScore ?? 0) +
+    components.failToPassTests * (n.failToPassTests ?? 0) +
+    components.passToPassTests * (n.passToPassTests ?? 0);
 
   return {
     total: Math.round(weightedScore * 1000) / 10,
-    weights: normalizedWeights,
-    components: {
-      status: statusScore,
-      tests: testsScore,
-      criticalJudges: criticalJudgesScore,
-      nonCriticalJudges: nonCriticalJudgesScore,
-      lint: lintScore,
-      precision: precisionScore,
-      duration: durationScore,
-      cost: costScore,
-      resolutionRate: resolutionRateScore,
-      tokenEfficiency: tokenEfficiencyScore,
-      acceptanceRate: acceptanceRateScore,
-      categoryScore: categoryScoreScore
-    }
+    weights: normalizeScoreWeights(weights),
+    components
   };
 }
 
 /**
  * Format composite score as a single decimal string.
+ * Prefers pre-computed `result.compositeScore` when available.
  * @param {Object} result
  * @param {Object} run
  * @param {ScoreWeights} [weights]
  * @returns {string}
  */
 export function formatCompositeScore(result, run, weights = DEFAULT_SCORE_WEIGHTS) {
+  // Use pre-computed score if available and weights match the run's stored weights
+  if (typeof result.compositeScore === "number" && weights === DEFAULT_SCORE_WEIGHTS) {
+    return result.compositeScore.toFixed(1);
+  }
   return `${getCompositeScoreDetails(result, run, weights).total.toFixed(1)}`;
 }
 
 /**
  * Get human-readable reasons why a result scored well.
+ * Prefers pre-computed `result.scoreReasons` when available.
  * @param {Object} result
  * @param {Object} run
  * @param {ScoreWeights} [weights]
  * @returns {string[]}
  */
 export function getCompositeScoreReasons(result, run, weights = DEFAULT_SCORE_WEIGHTS) {
-  const details = getCompositeScoreDetails(result, run, weights);
-  const reasons = [];
-  const normalizedWeights = normalizeScoreWeights(weights);
+  // Use pre-computed reasons if available and weights match
+  if (Array.isArray(result.scoreReasons) && weights === DEFAULT_SCORE_WEIGHTS) {
+    return result.scoreReasons;
+  }
 
-  if (details.components.tests >= 0.999) {
-    reasons.push("tests");
+  const components = computeScoreComponents(result, run);
+  const reasons = [];
+
+  if (result.status !== "success") {
+    reasons.push("failed");
+    return reasons;
   }
-  if (details.components.criticalJudges >= 0.999) {
-    reasons.push("criticalJudges");
+  if (components._hasCriticalFailure) {
+    reasons.push("critical-judge-failed");
   }
-  if (details.components.nonCriticalJudges >= 0.999) {
-    reasons.push("nonCriticalJudges");
-  }
-  if (details.components.lint >= 0.999) {
-    reasons.push("lint");
-  }
-  if (details.components.precision >= 0.999) {
-    reasons.push("precision");
-  }
-  if (details.components.duration >= 0.999) {
-    reasons.push("duration");
-  }
-  if (details.components.cost >= 0.999) {
-    reasons.push("cost");
-  }
-  if (details.components.resolutionRate > 0.95 * normalizedWeights.resolutionRate && normalizedWeights.resolutionRate > 0) {
-    reasons.push("resolution-rate-high");
-  }
-  if (details.components.tokenEfficiency > 0.95 * normalizedWeights.tokenEfficiency && normalizedWeights.tokenEfficiency > 0) {
-    reasons.push("token-efficiency-good");
-  }
-  if (details.components.acceptanceRate > 0.95 * normalizedWeights.acceptanceRate && normalizedWeights.acceptanceRate > 0) {
-    reasons.push("acceptance-rate-high");
-  }
+  if (components.tests >= 0.999) reasons.push("tests");
+  if (components.criticalJudges >= 0.999) reasons.push("criticalJudges");
+  if (components.nonCriticalJudges >= 0.999) reasons.push("nonCriticalJudges");
+  if (components.lint >= 0.999) reasons.push("lint");
+  if (components.precision >= 0.999) reasons.push("precision");
+  if (components.duration >= 0.999) reasons.push("duration");
+  if (components.cost >= 0.999) reasons.push("cost");
+  if (components.resolutionRate > 0.95) reasons.push("resolution-rate-high");
+  if (components.tokenEfficiency > 0.95) reasons.push("token-efficiency-good");
+  if (components.acceptanceRate > 0.95) reasons.push("acceptance-rate-high");
 
   return reasons;
 }

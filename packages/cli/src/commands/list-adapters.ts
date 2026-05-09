@@ -1,7 +1,6 @@
 import { listAvailableAdapters } from "@agentarena/adapters";
 import {
   getAvailabilityEmoji,
-  getTierEmoji,
   groupByTier,
 } from "./shared.js";
 

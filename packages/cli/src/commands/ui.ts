@@ -13,8 +13,6 @@ import {
   setClaudeProviderProfileSecret,
 } from "@agentarena/adapters";
 import {
-  type AgentSelection,
-  type BenchmarkRun,
   type ClaudeProviderProfile,
   createAgentSelection,
   createCancellation,
@@ -23,15 +21,16 @@ import {
   validateTaskPackId,
 } from "@agentarena/core";
 import {
-  type Locale as ReportLocale,
   writeReport,
 } from "@agentarena/report";
 import { type BenchmarkProgressEvent, runBenchmark } from "@agentarena/runner";
-import { loadTaskPack } from "@agentarena/taskpacks";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import type { ParsedArgs } from "../args.js";
 import {
+  checkAuthHeader,
+  checkCorsOrigin,
   checkRateLimit,
+  detectContentType,
   generateAuthToken,
   HttpError,
   jsonResponse,
@@ -51,13 +50,11 @@ import {
   resolveReportLocale,
   type UiRunLogEntry,
   type UiRunPayload,
-  type UiRunPhase,
   type UiRunStatus,
   WORKSPACE_ROOT,
 } from "./shared.js";
 
 const DEFAULT_UI_PORT = 4320;
-const _MAX_REQUEST_BODY_BYTES = 1_048_576;
 const MAX_UI_LOG_ENTRIES = 30;
 
 const WEB_REPORT_DIST_ROOT = path.join(WORKSPACE_ROOT, "apps", "web-report", "dist");
@@ -83,18 +80,7 @@ interface UiProviderProfilePayload {
   writeCommonConfig?: boolean;
   notes?: string;
   secret?: string;
-}
-
-function detectContentType(filePath: string): string {
-  const extension = path.extname(filePath).toLowerCase();
-  switch (extension) {
-    case ".html": return "text/html; charset=utf-8";
-    case ".js": return "text/javascript; charset=utf-8";
-    case ".css": return "text/css; charset=utf-8";
-    case ".json": return "application/json; charset=utf-8";
-    case ".svg": return "image/svg+xml";
-    default: return "application/octet-stream";
-  }
+  _confirmBaseUrlRisk?: boolean;
 }
 
 async function maybeOpenBrowser(url: string): Promise<void> {
@@ -190,36 +176,19 @@ export async function runUi(parsed: ParsedArgs): Promise<void> {
 
       // CORS protection: reject cross-origin requests
       const origin = request.headers.origin;
-      if (origin) {
-        const allowedOrigins = new Set([
-          `http://${host}:${port}`,
-          `http://localhost:${port}`,
-          `http://127.0.0.1:${port}`
-        ]);
-        // When host is 0.0.0.0, accept localhost and 127.0.0.1 origins
-        if (host === "0.0.0.0") {
-          allowedOrigins.add(`http://localhost:${port}`);
-          allowedOrigins.add(`http://127.0.0.1:${port}`);
-        }
-        if (!allowedOrigins.has(origin)) {
-          const forbidden = jsonResponse({ error: "Cross-origin requests are not allowed." }, 403);
-          response.writeHead(forbidden.statusCode, forbidden.headers);
-          response.end(forbidden.body);
-          return;
-        }
+      if (!checkCorsOrigin(origin, host, port)) {
+        const forbidden = jsonResponse({ error: "Cross-origin requests are not allowed." }, 403);
+        response.writeHead(forbidden.statusCode, forbidden.headers);
+        response.end(forbidden.body);
+        return;
       }
 
       // Token authentication: required for non-localhost connections
-      if (!isLocalhost && requestUrl.pathname.startsWith("/api/")) {
-        const authHeader = request.headers.authorization ?? "";
-        const tokenFromQuery = requestUrl.searchParams.get("token");
-        const providedToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : tokenFromQuery;
-        if (providedToken !== authToken) {
-          const unauthorized = jsonResponse({ error: "Authentication required. Pass token via Authorization: Bearer <token> header or ?token= query parameter." }, 401);
-          response.writeHead(unauthorized.statusCode, unauthorized.headers);
-          response.end(unauthorized.body);
-          return;
-        }
+      if (!checkAuthHeader(requestUrl, request.method, isLocalhost, authToken, request.headers.authorization)) {
+        const unauthorized = jsonResponse({ error: "Authentication required. Pass token via Authorization: Bearer <token> header." }, 401);
+        response.writeHead(unauthorized.statusCode, unauthorized.headers);
+        response.end(unauthorized.body);
+        return;
       }
 
       if (request.method === "GET" && requestUrl.pathname === "/api/ui-info") {
@@ -246,8 +215,7 @@ export async function runUi(parsed: ParsedArgs): Promise<void> {
                 "Provider-switched Claude Code variants use compatibility settings and may behave differently from official Claude Code.",
               host,
               port,
-              authRequired: !isLocalhost,
-              authToken: isLocalhost ? undefined : authToken
+              authRequired: !isLocalhost
             },
             null,
             2
@@ -298,17 +266,21 @@ export async function runUi(parsed: ParsedArgs): Promise<void> {
           response.writeHead(payload.statusCode, payload.headers);
           response.end(payload.body);
         } catch (err: unknown) {
-          const message = err instanceof Error ? err.message : String(err);
-          const errorPayload = jsonResponse({ error: message }, 500);
-          response.writeHead(errorPayload.statusCode, errorPayload.headers);
-          response.end(errorPayload.body);
+          console.error(`[agentarena] Preflight failed: ${err instanceof Error ? err.message : String(err)}`);
+          const payload = jsonResponse({ error: "Internal server error" }, 500);
+          response.writeHead(payload.statusCode, payload.headers);
+          response.end(payload.body);
         }
         return;
       }
 
       if (request.method === "GET" && requestUrl.pathname === "/api/provider-profiles") {
         const profiles = await listClaudeProviderProfiles();
-        const payload = jsonResponse(profiles);
+        const filtered = profiles.map(({ extraEnv, ...rest }: ClaudeProviderProfile) => ({
+          ...rest,
+          extraEnv: extraEnv ? Object.fromEntries(Object.keys(extraEnv as Record<string, unknown>).map(k => [k, "***"])) : undefined
+        }));
+        const payload = jsonResponse(filtered);
         response.writeHead(payload.statusCode, payload.headers);
         response.end(payload.body);
         return;
@@ -403,6 +375,12 @@ export async function runUi(parsed: ParsedArgs): Promise<void> {
             response.end(invalid.body);
             return;
           }
+          if (payload.secret && payload.secret.length > 10000) {
+            const invalid = jsonResponse({ error: "secret must be less than 10,000 characters." }, 400);
+            response.writeHead(invalid.statusCode, invalid.headers);
+            response.end(invalid.body);
+            return;
+          }
           await setClaudeProviderProfileSecret(profileId, payload.secret ?? "");
           const profiles = await listClaudeProviderProfiles();
           const responsePayload = jsonResponse({
@@ -428,6 +406,12 @@ export async function runUi(parsed: ParsedArgs): Promise<void> {
         }
         if (!body.prompt?.trim()) {
           const invalid = jsonResponse({ error: "prompt is required." }, 400);
+          response.writeHead(invalid.statusCode, invalid.headers);
+          response.end(invalid.body);
+          return;
+        }
+        if (body.prompt.length > 100_000) {
+          const invalid = jsonResponse({ error: "prompt must be less than 100,000 characters." }, 400);
           response.writeHead(invalid.statusCode, invalid.headers);
           response.end(invalid.body);
           return;
@@ -532,7 +516,8 @@ export async function runUi(parsed: ParsedArgs): Promise<void> {
           const payload = jsonResponse(items);
           response.writeHead(payload.statusCode, payload.headers);
           response.end(payload.body);
-        } catch {
+        } catch (listError) {
+          console.warn(`[agentarena] Failed to list adhoc taskpacks: ${listError instanceof Error ? listError.message : String(listError)}`);
           const payload = jsonResponse([]);
           response.writeHead(payload.statusCode, payload.headers);
           response.end(payload.body);
@@ -562,8 +547,11 @@ export async function runUi(parsed: ParsedArgs): Promise<void> {
           const payload = jsonResponse({ deleted: true, id: adhocId });
           response.writeHead(payload.statusCode, payload.headers);
           response.end(payload.body);
-        } catch {
-          const payload = jsonResponse({ error: "Adhoc taskpack not found." }, 404);
+        } catch (unlinkError) {
+          const code = (unlinkError as NodeJS.ErrnoException).code;
+          const status = code === "EACCES" || code === "EPERM" ? 403 : 404;
+          const message = code === "EACCES" || code === "EPERM" ? "Permission denied." : "Adhoc taskpack not found.";
+          const payload = jsonResponse({ error: message }, status);
           response.writeHead(payload.statusCode, payload.headers);
           response.end(payload.body);
         }
@@ -617,15 +605,66 @@ export async function runUi(parsed: ParsedArgs): Promise<void> {
           response.end(invalid.body);
           return;
         }
-        const selections = normalizeUiSelections(runPayload);
-        if (!runPayload.repoPath || !runPayload.taskPath || selections.length === 0) {
+        if (!runPayload.repoPath || typeof runPayload.repoPath !== "string") {
           runStarting = false;
-          const invalid = jsonResponse(
-            { error: "repoPath, taskPath, and at least one agent selection are required." },
-            400
-          );
+          const invalid = jsonResponse({ error: "repoPath is required and must be a string." }, 400);
           response.writeHead(invalid.statusCode, invalid.headers);
           response.end(invalid.body);
+          return;
+        }
+        if (!runPayload.taskPath || typeof runPayload.taskPath !== "string") {
+          runStarting = false;
+          const invalid = jsonResponse({ error: "taskPath is required and must be a string." }, 400);
+          response.writeHead(invalid.statusCode, invalid.headers);
+          response.end(invalid.body);
+          return;
+        }
+        const selections = normalizeUiSelections(runPayload);
+        if (selections.length === 0) {
+          runStarting = false;
+          const invalid = jsonResponse({ error: "At least one agent selection is required." }, 400);
+          response.writeHead(invalid.statusCode, invalid.headers);
+          response.end(invalid.body);
+          return;
+        }
+        if (runPayload.maxConcurrency !== undefined) {
+          const parsed = Number(runPayload.maxConcurrency);
+          if (!Number.isFinite(parsed) || parsed < 1) {
+            runStarting = false;
+            const invalid = jsonResponse({ error: "maxConcurrency must be a positive integer." }, 400);
+            response.writeHead(invalid.statusCode, invalid.headers);
+            response.end(invalid.body);
+            return;
+          }
+        }
+        if (runPayload.tokenBudget !== undefined) {
+          const parsed = Number(runPayload.tokenBudget);
+          if (!Number.isFinite(parsed) || parsed <= 0) {
+            runStarting = false;
+            const invalid = jsonResponse({ error: "tokenBudget must be a positive number." }, 400);
+            response.writeHead(invalid.statusCode, invalid.headers);
+            response.end(invalid.body);
+            return;
+          }
+        }
+
+        const resolvedRepoPath = path.resolve(runPayload.repoPath);
+        const resolvedTaskPath = path.resolve(runPayload.taskPath);
+        const cwd = process.cwd();
+
+        if (!resolvedRepoPath.startsWith(cwd + path.sep) && resolvedRepoPath !== cwd) {
+          runStarting = false;
+          const forbidden = jsonResponse({ error: "repoPath must be within the current working directory." }, 400);
+          response.writeHead(forbidden.statusCode, forbidden.headers);
+          response.end(forbidden.body);
+          return;
+        }
+
+        if (!resolvedTaskPath.startsWith(cwd + path.sep) && resolvedTaskPath !== cwd) {
+          runStarting = false;
+          const forbidden = jsonResponse({ error: "taskPath must be within the current working directory." }, 400);
+          response.writeHead(forbidden.statusCode, forbidden.headers);
+          response.end(forbidden.body);
           return;
         }
 
@@ -675,7 +714,7 @@ export async function runUi(parsed: ParsedArgs): Promise<void> {
               cleanupWorkspaces: runPayload.cleanupWorkspaces,
               maxConcurrency: runPayload.maxConcurrency,
               scoreMode: runPayload.scoreMode,
-              tokenBudget: runPayload.tokenBudget ? Number(runPayload.tokenBudget) : undefined,
+              tokenBudget: runPayload.tokenBudget ? (Number(runPayload.tokenBudget) || undefined) : undefined,
               cancellation,
               onProgress: (event: BenchmarkProgressEvent) => {
                 const phase =
@@ -774,6 +813,9 @@ export async function runUi(parsed: ParsedArgs): Promise<void> {
                   }
             );
           } finally {
+            if (activeRunStatus.state !== "cancelling" && activeRunStatus.state !== "cancelled") {
+              activeRunStatus = { ...activeRunStatus, state: "done" };
+            }
             activeRun = null;
           }
         })()
@@ -793,6 +835,8 @@ export async function runUi(parsed: ParsedArgs): Promise<void> {
           return;
         }
         activeRun.cancel();
+        activeRunStatus = { ...activeRunStatus, state: "cancelling" };
+        activeRun = null;
         appendRunLog({ phase: activeRunStatus.phase, message: "Cancellation requested by user." });
         const payload = jsonResponse({ cancelled: true });
         response.writeHead(payload.statusCode, payload.headers);
@@ -814,7 +858,10 @@ export async function runUi(parsed: ParsedArgs): Promise<void> {
           const body = await fs.readFile(filePath);
           response.writeHead(200, {
             "Content-Type": detectContentType(filePath),
-            "Cache-Control": "no-store"
+            "Cache-Control": "no-store",
+            "X-Frame-Options": "DENY",
+            "X-Content-Type-Options": "nosniff",
+            "Referrer-Policy": "strict-origin-when-cross-origin"
           });
           response.end(body);
           return;
@@ -831,10 +878,8 @@ export async function runUi(parsed: ParsedArgs): Promise<void> {
       response.end(methodNotAllowed.body);
     } catch (error) {
       const statusCode = error instanceof HttpError ? error.statusCode : 500;
-      const payload = jsonResponse(
-        { error: error instanceof Error ? error.message : String(error) },
-        statusCode
-      );
+      const message = statusCode >= 500 ? "Internal server error" : (error instanceof Error ? error.message : String(error));
+      const payload = jsonResponse({ error: message }, statusCode);
       response.writeHead(payload.statusCode, payload.headers);
       response.end(payload.body);
     }
@@ -849,11 +894,17 @@ export async function runUi(parsed: ParsedArgs): Promise<void> {
   console.log(`\nAgentArena UI server running`);
   console.log(`url=${url}`);
   console.log(`repo=${process.cwd()}`);
+  const authTokenFilePath = path.join(process.cwd(), ".agentarena", "last-auth-token");
+  await fs.mkdir(path.dirname(authTokenFilePath), { recursive: true });
+  await fs.writeFile(authTokenFilePath, authToken, "utf8");
+  console.log(`auth_token=${authToken}`);
+  console.log(`auth_token_file=${authTokenFilePath}`);
   if (!isLocalhost) {
-    console.log(`auth_token=${authToken}`);
     console.log(`\n  Non-localhost access requires authentication.`);
-    console.log(`  Pass the token via header: Authorization: Bearer ${authToken}`);
-    console.log(`  Or query parameter: ${url}/api/ui-info?token=${authToken}\n`);
+    console.log(`  Open in browser: http://${host}:${port}#token=${authToken}`);
+    console.log(`  Token saved to: ${authTokenFilePath}\n`);
+  } else {
+    console.log(`  WARNING: This token grants full API access. Do not share it.`);
   }
 
   if (!parsed.noOpen) {

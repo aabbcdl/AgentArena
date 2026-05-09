@@ -11,6 +11,7 @@ import {
   type GlobJudge,
   type JsonSchemaJudge,
   type JsonValueJudge,
+  judgeTypeRegistry,
   type LintCheckJudge,
   type PatchValidationJudge,
   type RegexMatchJudge,
@@ -21,7 +22,7 @@ import {
   type TaskPackMetadata,
   type TestResultJudge,
   type TokenEfficiencyJudge,
-  validateTaskPackId
+  validateTaskPackId,
 } from "@agentarena/core";
 import { parse as parseYaml } from "yaml";
 
@@ -233,7 +234,17 @@ function normalizeMetadata(value: unknown): TaskPackMetadata | undefined {
     passToPassTests: assertStringArray(metadata.passToPassTests, "metadata.passToPassTests"),
 
     // === CursorBench Extensions ===
-    tokenBudget: assertOptionalNumber(metadata.tokenBudget, "metadata.tokenBudget"),
+    tokenBudget: (() => {
+      const val = assertOptionalNumber(metadata.tokenBudget, "metadata.tokenBudget");
+      if (val !== undefined && val <= 0) {
+        throw new Error(
+          `Task pack field "metadata.tokenBudget" must be a positive number. ` +
+          `Received: ${val}. ` +
+          `Example: "metadata": { "tokenBudget": 1000 }`
+        );
+      }
+      return val;
+    })(),
     efficiencyTarget: assertOptionalNumber(metadata.efficiencyTarget, "metadata.efficiencyTarget"),
     interactionModel: interactionModel as "single-turn" | "multi-turn" | undefined,
     requirementClarity: requirementClarity as "precise" | "fuzzy" | "ambiguous" | undefined,
@@ -275,64 +286,6 @@ function normalizeDifficultyEvolution(value: unknown): NonNullable<TaskPackMetad
   };
 }
 
-/**
- * 判断 judge 是否默认为 critical
- * 规则：
- * - test-result: critical (测试结果直接决定任务是否完成)
- * - json-schema: critical (schema 验证失败意味着输出格式错误)
- * - 其他类型默认 non-critical
- */
-function isJudgeCriticalByDefault(type: string): boolean {
-  // Critical by default: failures indicate clear correctness violations
-  return type === "test-result" || type === "json-schema" || type === "compilation";
-}
-
-const COMMON_JUDGE_FIELDS = new Set(["id", "label", "type", "critical", "weight"]);
-const COMMAND_JUDGE_FIELDS = new Set([...COMMON_JUDGE_FIELDS, "command", "cwd", "timeoutMs", "envAllowList", "env"]);
-const TEST_RESULT_FIELDS = new Set([...COMMAND_JUDGE_FIELDS, "format", "reportFile", "passOnNoTests"]);
-const LINT_CHECK_FIELDS = new Set([...COMMAND_JUDGE_FIELDS, "format", "reportFile", "maxWarnings"]);
-const FILE_EXISTS_FIELDS = new Set([...COMMON_JUDGE_FIELDS, "path"]);
-const FILE_CONTAINS_FIELDS = new Set([...COMMON_JUDGE_FIELDS, "path", "pattern", "regex", "flags"]);
-const JSON_VALUE_FIELDS = new Set([...COMMON_JUDGE_FIELDS, "path", "pointer", "expected"]);
-const GLOB_FIELDS = new Set([...COMMON_JUDGE_FIELDS, "pattern", "minMatches", "maxMatches"]);
-const FILE_COUNT_FIELDS = new Set([...COMMON_JUDGE_FIELDS, "pattern", "equals", "min", "max"]);
-const SNAPSHOT_FIELDS = new Set([...COMMON_JUDGE_FIELDS, "path", "snapshotPath"]);
-const JSON_SCHEMA_FIELDS = new Set([...COMMON_JUDGE_FIELDS, "path", "schema", "schemaPath"]);
-const PATCH_VALIDATION_FIELDS = new Set([...COMMAND_JUDGE_FIELDS, "testSuite", "failToPassTests", "passToPassTests"]);
-const TOKEN_EFFICIENCY_FIELDS = new Set([...COMMON_JUDGE_FIELDS, "tokenBudget"]);
-const DIRECTORY_EXISTS_FIELDS = new Set([...COMMON_JUDGE_FIELDS, "path"]);
-const REGEX_MATCH_FIELDS = new Set([...COMMON_JUDGE_FIELDS, "path", "pattern", "flags", "shouldNotMatch", "minMatches", "maxMatches"]);
-const COMPILATION_FIELDS = new Set([...COMMAND_JUDGE_FIELDS, "tool", "buildArgs"]);
-
-const JUDGE_TYPE_FIELDS: Record<string, Set<string>> = {
-  command: COMMAND_JUDGE_FIELDS,
-  "test-result": TEST_RESULT_FIELDS,
-  "lint-check": LINT_CHECK_FIELDS,
-  "file-exists": FILE_EXISTS_FIELDS,
-  "file-contains": FILE_CONTAINS_FIELDS,
-  "json-value": JSON_VALUE_FIELDS,
-  glob: GLOB_FIELDS,
-  "file-count": FILE_COUNT_FIELDS,
-  snapshot: SNAPSHOT_FIELDS,
-  "json-schema": JSON_SCHEMA_FIELDS,
-  "patch-validation": PATCH_VALIDATION_FIELDS,
-  "token-efficiency": TOKEN_EFFICIENCY_FIELDS,
-  "directory-exists": DIRECTORY_EXISTS_FIELDS,
-  "regex-match": REGEX_MATCH_FIELDS,
-  compilation: COMPILATION_FIELDS
-};
-
-function assertNoUnknownFields(value: Record<string, unknown>, allowedFields: Set<string>, context: string): void {
-  const unknownFields = Object.keys(value).filter((key) => !allowedFields.has(key));
-  if (unknownFields.length > 0) {
-    throw new Error(
-      `${context} contains ${unknownFields.length} unrecognized field(s): ` +
-      `"${unknownFields.join('", "')}". ` +
-      `Allowed fields: ${Array.from(allowedFields).sort().join(", ")}.`
-    );
-  }
-}
-
 function normalizeJudge(
   value: Record<string, unknown>,
   index: number,
@@ -341,10 +294,16 @@ function normalizeJudge(
   const rawType = value.type;
   const type = rawType === undefined || rawType === null ? "command" : String(rawType);
 
-  // Validate no unknown fields for this judge type
-  const allowedFields = JUDGE_TYPE_FIELDS[type];
-  if (allowedFields) {
-    assertNoUnknownFields(value, allowedFields, `Judge "${type}" at index ${index}`);
+  const descriptor = judgeTypeRegistry.get(type);
+  if (descriptor) {
+    const unknownFields = Object.keys(value).filter((key) => !descriptor.allowedFields.has(key));
+    if (unknownFields.length > 0) {
+      throw new Error(
+        `Judge "${type}" at index ${index} contains ${unknownFields.length} unrecognized field(s): ` +
+        `"${unknownFields.join('", "')}". ` +
+        `Allowed fields: ${Array.from(descriptor.allowedFields).sort().join(", ")}.`
+      );
+    }
   }
 
   const id =
@@ -352,7 +311,7 @@ function normalizeJudge(
     `${defaultIdPrefix}-${index + 1}`;
   const label = assertString(value.label, `judges[${index}].label`);
   const critical = value.critical === undefined
-    ? isJudgeCriticalByDefault(type)
+    ? (descriptor?.isCriticalByDefault ?? false)
     : (assertOptionalBoolean(value.critical, `judges[${index}].critical`) ?? false);
 
   if (type === "command") {
@@ -626,23 +585,7 @@ function normalizeJudge(
     return judge;
   }
 
-  const supportedTypes = [
-    "command",
-    "test-result",
-    "lint-check",
-    "file-exists",
-    "file-contains",
-    "json-value",
-    "glob",
-    "file-count",
-    "snapshot",
-    "json-schema",
-    "patch-validation",
-    "token-efficiency",
-    "directory-exists",
-    "regex-match",
-    "compilation"
-  ];
+  const supportedTypes = judgeTypeRegistry.getAllTypes();
   throw new Error(
     `Task pack judge at index ${index} has unsupported type "${String(type)}". ` +
     `Supported types: ${supportedTypes.join(", ")}. ` +

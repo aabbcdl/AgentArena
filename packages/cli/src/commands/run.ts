@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { listAvailableAdapters } from "@agentarena/adapters";
-import type { BenchmarkRun } from "@agentarena/core";
+import { type BenchmarkRun, createCancellation, formatDuration } from "@agentarena/core";
 import {
   computeVarianceAnalysis,
   enrichRunWithScores,
@@ -14,10 +14,6 @@ import { type BenchmarkProgressEvent, runBenchmark } from "@agentarena/runner";
 import type { ParsedArgs } from "../args.js";
 import { buildBenchmarkOutputSummary } from "../output.js";
 import {
-  createCancellation,
-  createRunId,
-  formatDuration,
-  isAbortError,
   normalizeCliSelections,
   resolveReportLocale,
 } from "./shared.js";

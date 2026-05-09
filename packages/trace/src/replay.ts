@@ -1,5 +1,6 @@
 import type { TraceEvent } from "@agentarena/core";
-import { JsonlTraceRecorder, type TraceFilter } from "./index.js";
+import { JsonlTraceRecorder } from "./index.js";
+import type { TraceFilter } from "./types.js";
 
 /**
  * A single step in a trace replay timeline.

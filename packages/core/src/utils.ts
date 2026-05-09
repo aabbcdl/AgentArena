@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
-import type { AgentRequestedConfig, AgentSelection, RepoSourceResolution } from "./types.js";
+import type { AgentRequestedConfig, AgentSelection, RepoSourceResolution } from "./types/index.js";
 
 export function createRunId(date = new Date()): string {
   const stamp = date.toISOString().replace(/[:.]/g, "-");
@@ -71,15 +71,61 @@ export function resolveRepoSource(
     return { kind: "builtin", repoPath: path.join(builtinReposRoot, name) };
   }
 
+  if (repoSource.startsWith("http://") || repoSource.startsWith("https://")) {
+    const repoUrl = new URL(repoSource);
+    const repoName = path.basename(repoUrl.pathname, path.extname(repoUrl.pathname)) || "repo";
+    const safeName = repoName.replace(/[^a-zA-Z0-9._-]+/g, "_");
+    return { kind: "url", repoPath: path.join(builtinReposRoot, safeName) };
+  }
+
   throw new Error(
     `Unsupported repoSource: "${repoSource}". ` +
-    `Supported values: "user", "builtin://repo-name".`
+    `Supported values: "user", "builtin://repo-name", or an HTTP(S) URL.`
   );
 }
 
 export function validateTaskPackId(id: string): boolean {
-  // Task pack IDs should be alphanumeric with hyphens, 3-64 characters
   return /^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$/.test(id) || /^[a-z0-9]{1,64}$/.test(id);
+}
+
+function isPrivateIp(ip: string): boolean {
+  if (ip === "127.0.0.1" || ip === "0.0.0.0") return true;
+  if (ip.startsWith("10.")) return true;
+  if (ip.startsWith("192.168.")) return true;
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(ip)) return true;
+  if (ip.startsWith("169.254.")) return true;
+  return false;
+}
+
+export function isInternalUrl(urlString: string): boolean {
+  try {
+    const parsed = new URL(urlString);
+    let hostname = parsed.hostname.toLowerCase();
+    if (hostname === "localhost" || hostname === "::1" || hostname === "[::]" || hostname === "0.0.0.0") return true;
+    if (hostname.startsWith("[") && hostname.endsWith("]")) {
+      hostname = hostname.slice(1, -1);
+    }
+    if (hostname === "::1" || hostname === "::" || hostname === "[::]") return true;
+    const ipv4Mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i;
+    const match = hostname.match(ipv4Mapped);
+    if (match) {
+      if (isPrivateIp(match[1])) return true;
+    }
+    const ipv4MappedHex = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i;
+    const hexMatch = hostname.match(ipv4MappedHex);
+    if (hexMatch) {
+      const group1 = parseInt(hexMatch[1], 16);
+      const group2 = parseInt(hexMatch[2], 16);
+      const octets = [(group1 >>> 8) & 0xff, group1 & 0xff, (group2 >>> 8) & 0xff, group2 & 0xff];
+      const ipv4 = octets.join(".");
+      if (isPrivateIp(ipv4)) return true;
+    }
+    if (isPrivateIp(hostname)) return true;
+    if (hostname.endsWith(".internal") || hostname.endsWith(".local") || hostname.endsWith(".localhost")) return true;
+    return false;
+  } catch {
+    return true;
+  }
 }
 
 function slugifyVariantPart(value: string): string {

@@ -39,6 +39,13 @@ const adapterEntries: Array<[string, AgentAdapter]> = [
 
 const adapters = new Map<string, AgentAdapter>(adapterEntries);
 
+const duplicateIds = adapterEntries
+  .map(([id]) => id)
+  .filter((id, index, arr) => arr.indexOf(id) !== index);
+if (duplicateIds.length > 0) {
+  throw new Error(`Duplicate adapter IDs detected: ${duplicateIds.join(", ")}. Each adapter must have a unique ID.`);
+}
+
 export function listAvailableAdapters(): AgentAdapter[] {
   return Array.from(adapters.values());
 }
@@ -62,6 +69,8 @@ export function tryGetAdapter(agentId: string): AgentAdapter | undefined {
   return adapters.get(agentId);
 }
 
+const PREFLIGHT_TIMEOUT_MS = 30_000;
+
 export async function preflightAdapters(
   selections: AdapterPreflightOptions["selection"][],
   options?: AdapterPreflightOptions
@@ -73,10 +82,16 @@ export async function preflightAdapters(
       }
 
       const adapter = getAdapter(selection.baseAgentId);
-      return await adapter.preflight({
-        ...options,
-        selection
-      });
+      const result = await Promise.race([
+        adapter.preflight({
+          ...options,
+          selection
+        }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error(`Preflight for "${selection.baseAgentId}" timed out after ${PREFLIGHT_TIMEOUT_MS}ms.`)), PREFLIGHT_TIMEOUT_MS)
+        )
+      ]);
+      return result;
     })
   );
 }

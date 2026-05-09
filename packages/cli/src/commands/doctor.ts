@@ -6,7 +6,6 @@ import { createAgentSelection } from "@agentarena/core";
 import type { ParsedArgs } from "../args.js";
 import {
   getAvailabilityEmoji,
-  getTierEmoji,
   groupByTier,
   normalizeCliSelections,
 } from "./shared.js";

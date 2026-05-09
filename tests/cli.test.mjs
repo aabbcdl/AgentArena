@@ -84,7 +84,7 @@ async function startUiServer(cwd, extraArgs = [], envOverrides = {}) {
   const _started = await new Promise((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error(`UI server did not start.\nstdout:\n${stdout}\nstderr:\n${stderr}`)), 10000);
     const onData = () => {
-      if (stdout.includes("AgentArena UI server running")) {
+      if (stdout.includes("auth_token=")) {
         clearTimeout(timeout);
         resolve(true);
       }
@@ -94,11 +94,15 @@ async function startUiServer(cwd, extraArgs = [], envOverrides = {}) {
     child.on("exit", (code) => reject(new Error(`UI server exited early with code ${code}.\nstdout:\n${stdout}\nstderr:\n${stderr}`)));
   });
 
+  const tokenMatch = stdout.match(/auth_token=(\S+)/);
+  const authToken = tokenMatch ? tokenMatch[1] : undefined;
+
   return {
     port,
     child,
     stdout,
     stderr,
+    authToken,
     async stop() {
       child.kill("SIGTERM");
       await new Promise((resolve) => child.once("exit", resolve));
@@ -313,7 +317,8 @@ test("agentarena ui creates Node-oriented adhoc taskpacks without fallback echo 
     const response = await fetch(`http://127.0.0.1:${server.port}/api/create-adhoc-taskpack`, {
       method: "POST",
       headers: {
-        "content-type": "application/json"
+        "content-type": "application/json",
+        ...(server.authToken ? { "Authorization": `Bearer ${server.authToken}` } : {})
       },
       body: JSON.stringify({ prompt: "Make one useful change." })
     });
@@ -351,7 +356,7 @@ test("agentarena ui rejects adhoc taskpack path traversal deletes", async () => 
   try {
     const response = await fetch(
       `http://127.0.0.1:${server.port}/api/adhoc-taskpacks/${encodeURIComponent("../outside")}`,
-      { method: "DELETE" }
+      { method: "DELETE", headers: { ...(server.authToken ? { "Authorization": `Bearer ${server.authToken}` } : {}) } }
     );
 
     assert.equal(response.status, 400);
@@ -621,14 +626,16 @@ test("agentarena ui exposes Claude provider profile APIs", async () => {
     const createResponse = await fetch(`http://127.0.0.1:${server.port}/api/provider-profiles`, {
       method: "POST",
       headers: {
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        ...(server.authToken ? { "Authorization": `Bearer ${server.authToken}` } : {})
       },
       body: JSON.stringify({
         name: "NewAPI",
         kind: "anthropic-compatible",
         baseUrl: "https://api.example.com",
         apiFormat: "anthropic-messages",
-        primaryModel: "gpt-5.4"
+        primaryModel: "gpt-5.4",
+        _confirmBaseUrlRisk: true
       })
     });
     assert.equal(createResponse.status, 200);
@@ -647,14 +654,16 @@ test("agentarena ui exposes Claude provider profile APIs", async () => {
       {
         method: "PUT",
         headers: {
-          "Content-Type": "application/json"
+          "Content-Type": "application/json",
+          ...(server.authToken ? { "Authorization": `Bearer ${server.authToken}` } : {})
         },
         body: JSON.stringify({
           name: "NewAPI Updated",
           kind: "openai-proxy",
           baseUrl: "https://proxy.example.com/v1",
           apiFormat: "openai-chat-via-proxy",
-          primaryModel: "gpt-5.4"
+          primaryModel: "gpt-5.4",
+          _confirmBaseUrlRisk: true
         })
       }
     );
@@ -665,7 +674,7 @@ test("agentarena ui exposes Claude provider profile APIs", async () => {
 
     const deleteResponse = await fetch(
       `http://127.0.0.1:${server.port}/api/provider-profiles/${encodeURIComponent(createdPayload.profile.id)}`,
-      { method: "DELETE" }
+      { method: "DELETE", headers: { ...(server.authToken ? { "Authorization": `Bearer ${server.authToken}` } : {}) } }
     );
     assert.equal(deleteResponse.status, 200);
     const deletedPayload = await deleteResponse.json();
@@ -689,7 +698,8 @@ test("agentarena ui rejects oversized request bodies with 413", async () => {
     const response = await fetch(`http://127.0.0.1:${server.port}/api/provider-profiles`, {
       method: "POST",
       headers: {
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        ...(server.authToken ? { "Authorization": `Bearer ${server.authToken}` } : {})
       },
       body: oversizedBody
     });
@@ -733,13 +743,14 @@ test("agentarena ui cancels an active benchmark via API", async () => {
     ]
   });
 
-  const server = await startUiServer(path.resolve("."));
+  const server = await startUiServer(tempDir);
 
   try {
     const response = await fetch(`http://127.0.0.1:${server.port}/api/run`, {
       method: "POST",
       headers: {
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        ...(server.authToken ? { "Authorization": `Bearer ${server.authToken}` } : {})
       },
       body: JSON.stringify({
         repoPath,
@@ -772,7 +783,10 @@ test("agentarena ui cancels an active benchmark via API", async () => {
     assert.equal(runningStatus.state, "running");
 
     const cancelResponse = await fetch(`http://127.0.0.1:${server.port}/api/run/cancel`, {
-      method: "POST"
+      method: "POST",
+      headers: {
+        ...(server.authToken ? { "Authorization": `Bearer ${server.authToken}` } : {})
+      }
     });
     assert.equal(cancelResponse.status, 200);
     const cancelPayload = await cancelResponse.json();
@@ -803,7 +817,6 @@ test("agentarena ui exposes run progress while a benchmark is active", async () 
   const repoPath = path.join(tempDir, "repo");
   const outputPath = path.join(tempDir, "output");
   const taskPath = path.join(tempDir, "task-progress.json");
-
   await mkdir(repoPath, { recursive: true });
   await writeFile(path.join(repoPath, "README.md"), "# UI Repo\n", "utf8");
 
@@ -822,13 +835,14 @@ test("agentarena ui exposes run progress while a benchmark is active", async () 
     ]
   });
 
-  const server = await startUiServer(path.resolve("."));
+  const server = await startUiServer(tempDir);
 
   try {
     const runPromise = fetch(`http://127.0.0.1:${server.port}/api/run`, {
       method: "POST",
       headers: {
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        ...(server.authToken ? { "Authorization": `Bearer ${server.authToken}` } : {})
       },
       body: JSON.stringify({
         repoPath,
@@ -901,13 +915,14 @@ test("agentarena ui can execute a benchmark via API", async () => {
     ]
   });
 
-  const server = await startUiServer(path.resolve("."));
+  const server = await startUiServer(tempDir);
 
   try {
     const response = await fetch(`http://127.0.0.1:${server.port}/api/run`, {
       method: "POST",
       headers: {
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        ...(server.authToken ? { "Authorization": `Bearer ${server.authToken}` } : {})
       },
       body: JSON.stringify({
         repoPath,

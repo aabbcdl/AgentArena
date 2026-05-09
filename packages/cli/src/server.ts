@@ -6,18 +6,8 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { promises as fs } from "node:fs";
-import http from "node:http";
+import type http from "node:http";
 import path from "node:path";
-
-export interface ServerOptions {
-  host: string;
-  port: number;
-  webReportDistRoot: string;
-  /** Custom auth token. If not provided, a random one is generated. */
-  authToken?: string;
-  requestHandler: (request: http.IncomingMessage, requestUrl: URL) => Promise<{ statusCode: number; body: string; headers: Record<string, string> }>;
-}
 
 // Rate limiting
 const RATE_LIMIT_WINDOW_MS = 60_000;
@@ -81,8 +71,12 @@ export function startRateLimitCleanup(): NodeJS.Timeout {
   }, RATE_LIMIT_WINDOW_MS);
 }
 
-// CORS
-function checkCors(origin: string | undefined, host: string, port: number): boolean {
+// Auth
+export function generateAuthToken(): string {
+  return randomUUID();
+}
+
+export function checkCorsOrigin(origin: string | undefined, host: string, port: number): boolean {
   if (!origin) return true;
   const allowedOrigins = new Set([
     `http://${host}:${port}`,
@@ -96,23 +90,19 @@ function checkCors(origin: string | undefined, host: string, port: number): bool
   return allowedOrigins.has(origin);
 }
 
-// Auth
-export function generateAuthToken(): string {
-  return randomUUID();
-}
-
-function checkAuth(
+export function checkAuthHeader(
   requestUrl: URL,
-  request: http.IncomingMessage,
+  method: string | undefined,
   isLocalhost: boolean,
-  authToken: string
+  authToken: string,
+  authHeader: string | undefined
 ): boolean {
-  if (isLocalhost) return true;
-  if (!requestUrl.pathname.startsWith("/api/")) return true;
-  const authHeader = request.headers.authorization ?? "";
-  const tokenFromQuery = requestUrl.searchParams.get("token");
-  const providedToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : tokenFromQuery;
-  return providedToken === authToken;
+  const isDestructiveApi = method !== "GET" && requestUrl.pathname.startsWith("/api/");
+  if (isDestructiveApi || (!isLocalhost && requestUrl.pathname.startsWith("/api/"))) {
+    const providedToken = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : "";
+    return providedToken === authToken;
+  }
+  return true;
 }
 
 // Response helpers
@@ -120,7 +110,14 @@ export function jsonResponse(data: unknown, statusCode = 200): { statusCode: num
   return {
     statusCode,
     body: JSON.stringify(data, null, 2),
-    headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" }
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "no-store",
+      "X-Frame-Options": "DENY",
+      "X-Content-Type-Options": "nosniff",
+      "Referrer-Policy": "strict-origin-when-cross-origin",
+      "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'"
+    }
   };
 }
 
@@ -161,111 +158,15 @@ export function detectContentType(filePath: string): string {
     case ".css": return "text/css; charset=utf-8";
     case ".json": return "application/json; charset=utf-8";
     case ".svg": return "image/svg+xml";
+    case ".wasm": return "application/wasm";
+    case ".webmanifest": return "application/manifest+json";
+    case ".png": return "image/png";
+    case ".jpg": case ".jpeg": return "image/jpeg";
+    case ".gif": return "image/gif";
+    case ".ico": return "image/x-icon";
+    case ".woff": return "font/woff";
+    case ".woff2": return "font/woff2";
+    case ".ttf": return "font/ttf";
     default: return "application/octet-stream";
   }
 }
-
-// Static file serving
-export async function serveStaticFile(
-  requestUrl: URL,
-  webReportDistRoot: string
-): Promise<{ statusCode: number; body: Buffer | string; headers: Record<string, string> } | null> {
-  let filePath = requestUrl.pathname === "/"
-    ? path.join(webReportDistRoot, "index.html")
-    : path.join(webReportDistRoot, requestUrl.pathname.replace(/^\/+/, ""));
-  filePath = path.normalize(filePath);
-
-  if (!filePath.startsWith(webReportDistRoot)) {
-    return { statusCode: 403, body: "Forbidden", headers: { "Content-Type": "text/plain", "Cache-Control": "no-store" } };
-  }
-
-  try {
-    const body = await fs.readFile(filePath);
-    return { statusCode: 200, body, headers: { "Content-Type": detectContentType(filePath), "Cache-Control": "no-store" } };
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Create and start the HTTP server.
- */
-export function createHttpServer(options: ServerOptions): http.Server {
-  const { host, port, webReportDistRoot, requestHandler } = options;
-  const isLocalhost = host === "127.0.0.1" || host === "localhost" || host === "::1" || host === "::ffff:127.0.0.1";
-  const authToken = options.authToken || generateAuthToken();
-
-  const server = http.createServer(async (request, response) => {
-    try {
-      const requestUrl = new URL(request.url ?? "/", `http://${host}:${port}`);
-
-      // Rate limiting
-      if (requestUrl.pathname.startsWith("/api/")) {
-        const clientIp = request.socket.remoteAddress ?? "unknown";
-        const rateLimitResult = checkRateLimit(clientIp, requestUrl.pathname);
-        if (!rateLimitResult.allowed) {
-          const retryAfterSeconds = Math.ceil((rateLimitResult.retryAfterMs ?? 1000) / 1000);
-          response.writeHead(429, {
-            "Content-Type": "application/json; charset=utf-8",
-            "Retry-After": String(retryAfterSeconds),
-            "Cache-Control": "no-store"
-          });
-          response.end(JSON.stringify({ error: "Rate limit exceeded. Please wait before retrying.", retryAfterSeconds }));
-          return;
-        }
-      }
-
-      // CORS
-      const origin = request.headers.origin;
-      if (!checkCors(origin, host, port)) {
-        const forbidden = jsonResponse({ error: "Cross-origin requests are not allowed." }, 403);
-        response.writeHead(forbidden.statusCode, forbidden.headers);
-        response.end(forbidden.body);
-        return;
-      }
-
-      // Auth
-      if (!checkAuth(requestUrl, request, isLocalhost, authToken)) {
-        const unauthorized = jsonResponse({ error: "Authentication required. Pass token via Authorization: Bearer <token> header or ?token= query parameter." }, 401);
-        response.writeHead(unauthorized.statusCode, unauthorized.headers);
-        response.end(unauthorized.body);
-        return;
-      }
-
-      // API routes — delegate to handler
-      if (requestUrl.pathname.startsWith("/api/")) {
-        const result = await requestHandler(request, requestUrl);
-        response.writeHead(result.statusCode, result.headers);
-        response.end(result.body);
-        return;
-      }
-
-      // Static files
-      if (request.method === "GET") {
-        const result = await serveStaticFile(requestUrl, webReportDistRoot);
-        if (result) {
-          response.writeHead(result.statusCode, result.headers);
-          response.end(result.body);
-          return;
-        }
-        const notFound = textResponse("Not Found", 404);
-        response.writeHead(notFound.statusCode, notFound.headers);
-        response.end(notFound.body);
-        return;
-      }
-
-      const methodNotAllowed = textResponse("Method Not Allowed", 405);
-      response.writeHead(methodNotAllowed.statusCode, methodNotAllowed.headers);
-      response.end(methodNotAllowed.body);
-    } catch (error) {
-      const statusCode = error instanceof HttpError ? error.statusCode : 500;
-      const payload = jsonResponse({ error: error instanceof Error ? error.message : String(error) }, statusCode);
-      response.writeHead(payload.statusCode, payload.headers);
-      response.end(payload.body);
-    }
-  });
-
-  return server;
-}
-
-export { checkCors };

@@ -1,6 +1,11 @@
 /**
  * Scoring system for AgentArena benchmark results.
  *
+ * Single source of truth for composite scoring.
+ * The frontend (view-model/scoring.js) defers to pre-computed scores from
+ * `enrichRunWithScores()` and only recomputes when the user dynamically
+ * adjusts weights in the UI.
+ *
  * Design inspiration:
  * - Issue Resolution mode → Inspired by SWE-Bench (MIT License)
  * - Efficiency First mode → Inspired by industry best practices
@@ -10,23 +15,29 @@
  */
 
 import type { BenchmarkRun } from "@agentarena/core";
+import { getDefaultWeights } from "@agentarena/core";
 import { findJudgeByType, hasScoreMetadata, type ScoredRun } from "./report-helpers.js";
 
+// ---------------------------------------------------------------------------
+// Individual metric helpers (shared by both score computation & score reasons)
+// ---------------------------------------------------------------------------
+
 /**
- * 计算测试通过率
+ * Test pass ratio from judge results.
+ * Returns 0 if no test judge is present or judge has no totalCount.
+ * Returns 1 if judge.success is true but totalCount is 0 (edge: no tests, but judge passed).
  */
 function testPassRatio(result: BenchmarkRun["results"][number]): number {
   const judge = findJudgeByType(result, "test-result");
   if (!judge || typeof judge.totalCount !== "number") {
     return judge?.success ? 1 : 0;
   }
-
   return judge.totalCount > 0 ? (judge.passedCount ?? 0) / judge.totalCount : judge.success ? 1 : 0;
 }
 
 /**
- * 计算关键 judge 通过率
- * 关键 judge 失败会直接影响任务完成度
+ * Critical judge pass ratio.
+ * Returns 1 when there are no critical judges (vacuously true: all 0 of 0 passed).
  */
 function criticalJudgePassRatio(result: BenchmarkRun["results"][number]): number {
   const criticalJudges = result.judgeResults.filter((j) => j.critical === true);
@@ -37,8 +48,8 @@ function criticalJudgePassRatio(result: BenchmarkRun["results"][number]): number
 }
 
 /**
- * 计算非关键 judge 通过率
- * 非关键 judge 失败只扣分，不直接判死
+ * Non-critical judge pass ratio.
+ * Returns 1 when there are no non-critical judges (vacuously true).
  */
 function nonCriticalJudgePassRatio(result: BenchmarkRun["results"][number]): number {
   const nonCriticalJudges = result.judgeResults.filter((j) => j.critical !== true);
@@ -48,220 +59,215 @@ function nonCriticalJudgePassRatio(result: BenchmarkRun["results"][number]): num
   return nonCriticalJudges.filter((j) => j.success).length / nonCriticalJudges.length;
 }
 
-/**
- * 检查是否有任意关键 judge 失败
- */
+/** Whether any critical judge failed. */
 function hasCriticalJudgeFailure(result: BenchmarkRun["results"][number]): boolean {
   return result.judgeResults.some((j) => j.critical === true && !j.success);
 }
 
 /**
- * fail-to-pass 测试分数（Issue Resolution 模式）
- * 使用 patch-validation judge 的成功率作为代理
+ * fail-to-pass score (Issue Resolution mode).
+ * Uses patch-validation judge success rate as proxy.
+ * Returns 0 when no patch-validation judges exist.
  */
 function failToPassScore(result: BenchmarkRun["results"][number]): number {
-  const judges = result.judgeResults ?? [];
-  const patchValidationJudges = judges.filter(j => j.type === "patch-validation");
-  if (patchValidationJudges.length === 0) return 0; // 无 judge 时默认 0
-  // 如果存在 patch-validation judge，使用其成功率
-  const successCount = patchValidationJudges.filter(j => j.success).length;
-  return successCount / patchValidationJudges.length;
+  const patchValidationJudges = (result.judgeResults ?? []).filter(j => j.type === "patch-validation");
+  if (patchValidationJudges.length === 0) return 0;
+  return patchValidationJudges.filter(j => j.success).length / patchValidationJudges.length;
 }
 
 /**
- * pass-to-pass 测试分数（Issue Resolution 模式）
- * 当前使用 patch-validation 成功率作为代理
+ * pass-to-pass score (Issue Resolution mode).
+ * Returns 0 when no test judge data exists.
  */
 function passToPassScore(result: BenchmarkRun["results"][number]): number {
-  // pass-to-pass: check if previously-passing tests still pass
   const judge = findJudgeByType(result, "test-result");
   if (!judge || typeof judge.totalCount !== "number" || judge.totalCount === 0) {
-    return 0; // 无数据时默认 0
+    return 0;
   }
   return (judge.passedCount ?? 0) / judge.totalCount;
 }
 
 /**
- * Lint 质量分数
+ * Lint quality score: 1 / (1 + errors*10 + warnings).
+ * Returns 0 when no lint judge is present.
  */
 function lintQualityScore(result: BenchmarkRun["results"][number]): number {
   const judge = findJudgeByType(result, "lint-check");
   if (!judge) {
     return 0;
   }
-
   const errors = judge.errorCount ?? 0;
   const warnings = judge.warningCount ?? 0;
   return 1 / (1 + errors * 10 + warnings);
 }
 
-/**
- * 时长效率分数（与最快者对比）
- */
+/** Duration efficiency: fastest / this result's duration (0–1, higher is better). */
 function durationEfficiencyScore(result: BenchmarkRun["results"][number], run: BenchmarkRun): number {
   const durations = run.results.map((entry) => entry.durationMs).filter((value) => value > 0);
   if (durations.length === 0) {
     return 0;
   }
-
   const fastest = Math.min(...durations);
   return fastest / Math.max(result.durationMs, fastest);
 }
 
-/**
- * 成本效率分数（与最便宜者对比）
- */
+/** Cost efficiency: cheapest / this result's cost (0–1, higher is better). */
 function costEfficiencyScore(result: BenchmarkRun["results"][number], run: BenchmarkRun): number {
   const costs = run.results.filter((entry) => entry.costKnown && entry.estimatedCostUsd > 0).map((entry) => entry.estimatedCostUsd);
   if (!result.costKnown || result.estimatedCostUsd <= 0 || costs.length === 0) {
     return 0;
   }
-
   const cheapest = Math.min(...costs);
   return cheapest / Math.max(result.estimatedCostUsd, cheapest);
 }
 
 /**
- * Precision 分数：仅当 task 定义了 expectedChangedPaths 时才计分
+ * Precision score: only applicable when task defines expectedChangedPaths.
+ * Returns 0 when not applicable.
  */
 function precisionScore(result: BenchmarkRun["results"][number], run: BenchmarkRun): number {
-  // 只有当任务定义了预期改动范围时，precision 才参与计分
   const hasExpectedPaths = run.task.expectedChangedPaths && run.task.expectedChangedPaths.length > 0;
   if (!hasExpectedPaths) {
     return 0;
   }
-  
   return Math.max(result.diffPrecision?.score ?? 0, 0);
 }
 
-/**
- * Practical 风格评分模式
- * 权重：
- * - status: 0.24
- * - tests: 0.26
- * - criticalJudges: 0.20
- * - nonCriticalJudges: 0.08
- * - precision: 0.05
- * - lint: 0.03
- * - duration: 0.08
- * - cost: 0.06
- */
-const PRACTICAL_WEIGHTS = {
-  status: 0.24,
-  tests: 0.26,
-  criticalJudges: 0.20,
-  nonCriticalJudges: 0.08,
-  precision: 0.05,
-  lint: 0.03,
-  duration: 0.08,
-  cost: 0.06
-};
-
-/**
- * Balanced 风格评分模式（旧版兼容）
- */
-const BALANCED_WEIGHTS = {
-  status: 0.3,
-  tests: 0.25,
-  criticalJudges: 0.10,
-  nonCriticalJudges: 0.05,
-  lint: 0.1,
-  precision: 0.1,
-  duration: 0.06,
-  cost: 0.04
-};
-
-// === SWE-Bench Inspired: Issue Resolution Mode ===
-// Focus on whether the reported issue is actually resolved.
-// Heavily weights resolution rate and test pass-through.
-const ISSUE_RESOLUTION_WEIGHTS = {
-  status: 0.15,
-  resolutionRate: 0.45,
-  failToPassTests: 0.20,
-  passToPassTests: 0.15,
-  duration: 0.05
-};
-
-// === CursorBench Inspired: Efficiency First Mode ===
-// Emphasizes token efficiency and acceptance rate alongside quality.
-// Rewards agents that produce correct results with minimal overhead.
-const EFFICIENCY_FIRST_WEIGHTS = {
-  status: 0.20,
-  tests: 0.15,
-  criticalJudges: 0.15,
-  tokenEfficiency: 0.25,
-  acceptanceRate: 0.10,
-  duration: 0.10,
-  cost: 0.05
-};
-
-// === LiveBench Inspired: Rotating Tasks Mode ===
-// Balanced across category scores, critical judges, and tests.
-// Designed for diverse task types with equal importance.
-const ROTATING_TASKS_WEIGHTS = {
-  status: 0.20,
-  tests: 0.20,
-  criticalJudges: 0.20,
-  categoryScore: 0.20,
-  duration: 0.10,
-  cost: 0.10
-};
-
-// === Unified Mode: Combines all three benchmarks ===
-// Comprehensive scoring that incorporates signals from all three inspirations.
-// Suitable for general-purpose agent evaluation.
-const COMPREHENSIVE_WEIGHTS = {
-  status: 0.12,
-  tests: 0.15,
-  criticalJudges: 0.10,
-  nonCriticalJudges: 0.05,
-  resolutionRate: 0.12,
-  tokenEfficiency: 0.08,
-  categoryScore: 0.08,
-  duration: 0.15,
-  cost: 0.15,
-  precision: 0.05,
-  lint: 0.05
-};
-
-/**
- * 解析率分数（Issue Resolution 模式）
- * 直接使用 result 上定义的 resolutionRate，回退到 status 布尔值
- */
+/** Resolution rate score (Issue Resolution mode). Falls back to status boolean. */
 function resolutionRateScore(result: BenchmarkRun["results"][number]): number {
-  return result.resolutionRate ?? (result.status === "success" ? 1 : 0);
+  return result.sweBench?.resolutionRate ?? (result.status === "success" ? 1 : 0);
 }
 
-/**
- * Token 效率分数组件（Efficiency First / Comprehensive 模式）
- * 直接使用 result 上预计算的 tokenEfficiencyScore
- */
+/** Token efficiency score component (Efficiency First / Comprehensive modes). */
 function tokenEfficiencyScoreComponent(result: BenchmarkRun["results"][number]): number {
   return result.tokenEfficiencyScore ?? 0;
 }
 
-/**
- * 接受率分数（Efficiency First 模式）
- * 衡量 agent 生成内容被直接接受的比例
- */
+/** Acceptance rate score (Efficiency First mode). */
 function acceptanceRateScore(result: BenchmarkRun["results"][number]): number {
-  return result.acceptanceRate ?? 0;
+  return result.cursorBench?.acceptanceRate ?? 0;
 }
 
-/**
- * 类别分数（Rotating Tasks 模式）
- * 成功完成任务即得满分，按类别平等计分
- */
+/** Category score (Rotating Tasks mode). Full mark on success. */
 function categoryScore(result: BenchmarkRun["results"][number]): number {
   return result.status === "success" ? 1 : 0;
 }
 
+// ---------------------------------------------------------------------------
+// Score component computation (shared by computeCompositeScore & frontend)
+// ---------------------------------------------------------------------------
+
 /**
- * 计算综合分数
- * 核心规则：
- * 1. 失败 run 直接压入失败区间（< 50 分）
- * 2. 关键 judge 失败进入"未完成"区间（50-70 分）
- * 3. 只有任务完成后，速度和成本才拉开差距
+ * Compute all individual score components for a result within a run.
+ * This is the single source of truth for component values.
+ * Both backend scoring and frontend dynamic re-scoring use this.
+ */
+export function computeScoreComponents(
+  result: BenchmarkRun["results"][number],
+  run: BenchmarkRun
+): {
+  status: number;
+  tests: number;
+  criticalJudges: number;
+  nonCriticalJudges: number;
+  lint: number;
+  precision: number;
+  duration: number;
+  cost: number;
+  resolutionRate: number;
+  tokenEfficiency: number;
+  acceptanceRate: number;
+  categoryScore: number;
+  failToPassTests: number;
+  passToPassTests: number;
+} {
+  return {
+    status: result.status === "success" ? 1 : 0,
+    tests: testPassRatio(result),
+    criticalJudges: criticalJudgePassRatio(result),
+    nonCriticalJudges: nonCriticalJudgePassRatio(result),
+    lint: lintQualityScore(result),
+    precision: precisionScore(result, run),
+    duration: durationEfficiencyScore(result, run),
+    cost: costEfficiencyScore(result, run),
+    resolutionRate: resolutionRateScore(result),
+    tokenEfficiency: tokenEfficiencyScoreComponent(result),
+    acceptanceRate: acceptanceRateScore(result),
+    categoryScore: categoryScore(result),
+    failToPassTests: failToPassScore(result),
+    passToPassTests: passToPassScore(result)
+  };
+}
+
+/**
+ * Filter weights to only include applicable keys, then normalize to sum=1.
+ * Applicability rules:
+ * - "precision" only if task defines expectedChangedPaths
+ * - "tokenEfficiency" only if result has tokenEfficiencyScore
+ * - "resolutionRate" / "failToPassTests" / "passToPassTests" only if result has sweBench.resolutionRate
+ * - "acceptanceRate" only if result has cursorBench.acceptanceRate
+ */
+export function normalizeApplicableWeights(
+  weights: Record<string, number>,
+  result: BenchmarkRun["results"][number],
+  run: BenchmarkRun
+): Record<string, number> {
+  // Compatibility: migrate legacy "judges" key → criticalJudges + nonCriticalJudges
+  const migratedWeights: Record<string, number> = {};
+  for (const [key, weight] of Object.entries(weights)) {
+    if (key === "judges") {
+      // Split legacy "judges" weight 2:1 into critical:nonCritical
+      if (!weights.criticalJudges) migratedWeights.criticalJudges = weight * (2 / 3);
+      if (!weights.nonCriticalJudges) migratedWeights.nonCriticalJudges = weight * (1 / 3);
+    } else {
+      migratedWeights[key] = weight;
+    }
+  }
+
+  const applicableWeights: Record<string, number> = {};
+  const isPrecisionApplicable = run.task.expectedChangedPaths && run.task.expectedChangedPaths.length > 0;
+  const hasTokenEfficiency = result.tokenEfficiencyScore !== undefined;
+  const hasResolutionRate = result.sweBench?.resolutionRate !== undefined;
+  const hasAcceptanceRate = result.cursorBench?.acceptanceRate !== undefined;
+
+  for (const [key, weight] of Object.entries(migratedWeights)) {
+    if (key === "precision" && !isPrecisionApplicable) continue;
+    if (key === "tokenEfficiency" && !hasTokenEfficiency) continue;
+    if (key === "resolutionRate" && !hasResolutionRate) continue;
+    if (key === "acceptanceRate" && !hasAcceptanceRate) continue;
+    if (key === "failToPassTests" && !hasResolutionRate) continue;
+    if (key === "passToPassTests" && !hasResolutionRate) continue;
+    applicableWeights[key] = weight;
+  }
+
+  // Normalize so weights sum to 1
+  const total = Object.values(applicableWeights).reduce((sum, v) => sum + v, 0);
+  if (total <= 0) {
+    return applicableWeights;
+  }
+  return Object.fromEntries(Object.entries(applicableWeights).map(([k, v]) => [k, v / total]));
+}
+
+// ---------------------------------------------------------------------------
+// Score band constants (used by both backend and frontend)
+// ---------------------------------------------------------------------------
+
+/** Score band for failed runs: 10–40 */
+export const FAILED_SCORE_BAND = { min: 10, max: 40 } as const;
+/** Score band for runs with critical judge failures: 50–70 */
+export const CRITICAL_FAIL_SCORE_BAND = { min: 50, max: 70 } as const;
+
+// ---------------------------------------------------------------------------
+// Composite scoring
+// ---------------------------------------------------------------------------
+
+/**
+ * Compute composite score for a result within a run.
+ *
+ * Core rules:
+ * 1. Failed run → pressed into FAILED_SCORE_BAND (10–40)
+ * 2. Critical judge failure → pressed into CRITICAL_FAIL_SCORE_BAND (50–70)
+ * 3. Completed run → weighted linear combination, mapped to 0–100
  */
 export function computeCompositeScore(
   result: BenchmarkRun["results"][number],
@@ -269,153 +275,89 @@ export function computeCompositeScore(
   scoreWeights?: Record<string, number>,
   scoreMode?: string
 ): number {
-  // 根据评分模式选择权重
-  let weights = scoreWeights;
-  if (!weights) {
-    switch (scoreMode) {
-      case "balanced":
-        weights = BALANCED_WEIGHTS;
-        break;
-      case "issue-resolution":
-        weights = ISSUE_RESOLUTION_WEIGHTS;
-        break;
-      case "efficiency-first":
-        weights = EFFICIENCY_FIRST_WEIGHTS;
-        break;
-      case "rotating-tasks":
-        weights = ROTATING_TASKS_WEIGHTS;
-        break;
-      case "comprehensive":
-        weights = COMPREHENSIVE_WEIGHTS;
-        break;
-      default:
-        weights = PRACTICAL_WEIGHTS;
-        break;
-    }
-  }
-  
-  // 归一化权重
-  const total = Object.values(weights).reduce((sum, v) => sum + v, 0);
-  const n = total > 0
-    ? Object.fromEntries(Object.entries(weights).map(([k, v]) => [k, v / total]))
-    : weights;
+  const weights = scoreWeights ?? getDefaultWeights(scoreMode ?? "practical");
 
-  // 规则 1: 如果 run 失败，直接压入失败区间 (10-40 分)
+  // Rule 1: Failed run → failed band
   if (result.status !== "success") {
-    // 即使速度快/成本低，也不能超过 40 分
-    // 设置最低基础分为 10 分
-    const baseScore = 10;
+    const baseScore = FAILED_SCORE_BAND.min;
     const efficiencyBonus = (
       durationEfficiencyScore(result, run) * 0.3 +
       costEfficiencyScore(result, run) * 0.2
     );
-    return Math.round(Math.min(40, baseScore + efficiencyBonus * 10) * 10) / 10;
+    return Math.round(Math.min(FAILED_SCORE_BAND.max, baseScore + efficiencyBonus * 10) * 10) / 10;
   }
 
-  // 规则 2: 检查关键 judge 是否失败
-  const criticalJudgeFailed = hasCriticalJudgeFailure(result);
-  
-  // 计算各部分得分
-  const statusScore = result.status === "success" ? 1 : 0;
-  const testScore = testPassRatio(result);
-  const criticalScore = criticalJudgePassRatio(result);
-  const nonCriticalScore = nonCriticalJudgePassRatio(result);
-  const lintScore = lintQualityScore(result);
-  const precisionVal = precisionScore(result, run);
-  const durationScore = durationEfficiencyScore(result, run);
-  const costScore = costEfficiencyScore(result, run);
-  // 新增评分组件（用于 Issue Resolution / Efficiency First / Rotating Tasks / Comprehensive 模式）
-  const resolutionRateVal = resolutionRateScore(result);
-  const tokenEfficiencyVal = tokenEfficiencyScoreComponent(result);
-  const acceptanceRateVal = acceptanceRateScore(result);
-  const categoryScoreVal = categoryScore(result);
-  // Issue Resolution 模式专用分数
-  const failToPassVal = failToPassScore(result);
-  const passToPassVal = passToPassScore(result);
+  const components = computeScoreComponents(result, run);
 
-  // 规则 3: 如果关键 judge 失败，进入"未完成"区间 (50-70 分)
-  if (criticalJudgeFailed) {
-    const baseScore = 50 + (
-      testScore * 10 +
-      nonCriticalScore * 5 +
-      lintScore * 3 +
-      durationScore * 2
+  // Rule 2: Critical judge failure → partial band
+  if (hasCriticalJudgeFailure(result)) {
+    const baseScore = CRITICAL_FAIL_SCORE_BAND.min + (
+      components.tests * 10 +
+      components.nonCriticalJudges * 5 +
+      components.lint * 3 +
+      components.duration * 2
     );
-    return Math.round(Math.min(70, baseScore) * 10) / 10;
+    return Math.round(Math.min(CRITICAL_FAIL_SCORE_BAND.max, baseScore) * 10) / 10;
   }
 
-  // 规则 4: 任务完成，按权重计算综合分
-  const weightedScore =
-    statusScore * (n.status ?? 0) +
-    testScore * (n.tests ?? 0) +
-    criticalScore * (n.criticalJudges ?? 0) +
-    nonCriticalScore * (n.nonCriticalJudges ?? 0) +
-    lintScore * (n.lint ?? 0) +
-    precisionVal * (n.precision ?? 0) +
-    durationScore * (n.duration ?? 0) +
-    costScore * (n.cost ?? 0) +
-    // 新增评分组件加权
-    resolutionRateVal * (n.resolutionRate ?? 0) +
-    tokenEfficiencyVal * (n.tokenEfficiency ?? 0) +
-    acceptanceRateVal * (n.acceptanceRate ?? 0) +
-    categoryScoreVal * (n.categoryScore ?? 0) +
-    // Issue Resolution 模式分数
-    failToPassVal * (n.failToPassTests ?? 0) +
-    passToPassVal * (n.passToPassTests ?? 0);
+  // Rule 3: Completed — weighted sum
+  const n = normalizeApplicableWeights(weights, result, run);
 
-  // 转换为 0-100 分数
+  const weightedScore =
+    components.status * (n.status ?? 0) +
+    components.tests * (n.tests ?? 0) +
+    components.criticalJudges * (n.criticalJudges ?? 0) +
+    components.nonCriticalJudges * (n.nonCriticalJudges ?? 0) +
+    components.lint * (n.lint ?? 0) +
+    components.precision * (n.precision ?? 0) +
+    components.duration * (n.duration ?? 0) +
+    components.cost * (n.cost ?? 0) +
+    components.resolutionRate * (n.resolutionRate ?? 0) +
+    components.tokenEfficiency * (n.tokenEfficiency ?? 0) +
+    components.acceptanceRate * (n.acceptanceRate ?? 0) +
+    components.categoryScore * (n.categoryScore ?? 0) +
+    components.failToPassTests * (n.failToPassTests ?? 0) +
+    components.passToPassTests * (n.passToPassTests ?? 0);
+
+  // Map to 0–100 scale
   const finalScore = weightedScore * 100;
   return Math.round(finalScore * 10) / 10;
 }
 
 /**
- * 计算分数原因
+ * Compute score reasons — why a result scored well (or not).
  */
 export function computeScoreReasons(result: BenchmarkRun["results"][number], run: BenchmarkRun): string[] {
   const reasons: string[] = [];
-  
+
   if (result.status !== "success") {
     reasons.push("failed");
     return reasons;
   }
-  
+
   if (hasCriticalJudgeFailure(result)) {
     reasons.push("critical-judge-failed");
   }
-  
-  if (testPassRatio(result) >= 0.999) reasons.push("tests");
-  if (criticalJudgePassRatio(result) >= 0.999) reasons.push("critical-judges");
-  if (nonCriticalJudgePassRatio(result) >= 0.999) reasons.push("non-critical-judges");
-  if (lintQualityScore(result) >= 0.999) reasons.push("lint");
-  if (precisionScore(result, run) >= 0.999) reasons.push("precision");
-  if (durationEfficiencyScore(result, run) >= 0.999) reasons.push("duration");
-  if (costEfficiencyScore(result, run) >= 0.999) reasons.push("cost");
-  
+
+  const components = computeScoreComponents(result, run);
+
+  if (components.tests >= 0.999) reasons.push("tests");
+  if (components.criticalJudges >= 0.999) reasons.push("critical-judges");
+  if (components.nonCriticalJudges >= 0.999) reasons.push("non-critical-judges");
+  if (components.lint >= 0.999) reasons.push("lint");
+  if (components.precision >= 0.999) reasons.push("precision");
+  if (components.duration >= 0.999) reasons.push("duration");
+  if (components.cost >= 0.999) reasons.push("cost");
+  if (components.resolutionRate > 0.95) reasons.push("resolution-rate-high");
+  if (components.tokenEfficiency > 0.95) reasons.push("token-efficiency-good");
+  if (components.acceptanceRate > 0.95) reasons.push("acceptance-rate-high");
+
   return reasons;
 }
 
 /**
- * 根据评分模式获取默认权重
- */
-export function getDefaultWeights(scoreMode: string): Record<string, number> {
-  switch (scoreMode) {
-    case "balanced":
-      return BALANCED_WEIGHTS;
-    case "issue-resolution":
-      return ISSUE_RESOLUTION_WEIGHTS;
-    case "efficiency-first":
-      return EFFICIENCY_FIRST_WEIGHTS;
-    case "rotating-tasks":
-      return ROTATING_TASKS_WEIGHTS;
-    case "comprehensive":
-      return COMPREHENSIVE_WEIGHTS;
-    default:
-      return PRACTICAL_WEIGHTS;
-  }
-}
-
-/**
- * 为 run 添加评分元数据
+ * Enrich a run with computed scores.
+ * This is the main entry point called by the report pipeline.
  */
 export function enrichRunWithScores(run: BenchmarkRun): ScoredRun {
   const scoreMode = hasScoreMetadata(run) ? (run.scoreMode ?? "practical") : "practical";

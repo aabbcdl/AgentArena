@@ -7,6 +7,7 @@ import { renderMarkdown, renderPrComment } from "./markdown-template.js";
 import { buildBadgePayload, type Locale, sanitizeRun } from "./report-helpers.js";
 import { enrichRunWithScores } from "./scoring.js";
 
+export { getDefaultWeights } from "@agentarena/core";
 export { generateCsv } from "./csv-export.js";
 export {
   type DecisionRecommendation,
@@ -27,7 +28,15 @@ export type { AggregatedAgentStats, MultiRunComparison } from "./multi-run.js";
 export { aggregateMultiRuns, formatMultiRunReport } from "./multi-run.js";
 export type { Locale, ReportCopy, ScoredResult, ScoredRun } from "./report-helpers.js";
 export { sanitizeRun } from "./report-helpers.js";
-export { computeCompositeScore, computeScoreReasons, enrichRunWithScores, getDefaultWeights } from "./scoring.js";
+export {
+  CRITICAL_FAIL_SCORE_BAND,
+  computeCompositeScore,
+  computeScoreComponents,
+  computeScoreReasons,
+  enrichRunWithScores,
+  FAILED_SCORE_BAND,
+  normalizeApplicableWeights
+} from "./scoring.js";
 export {
   type AgentVarianceStats,
   computeVarianceAnalysis,

@@ -539,7 +539,7 @@ test("dashboard shows verdict hero and comparison bars after loading demo", {
 
     const agentCount = page.locator("#agent-count");
     const countText = await agentCount.textContent();
-    assert.ok(parseInt(countText) > 0, "agent count should be greater than 0");
+    assert.ok(parseInt(countText, 10) > 0, "agent count should be greater than 0");
   } finally {
     await browser.close();
     await uiServer.stop();

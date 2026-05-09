@@ -1,17 +1,10 @@
-import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { listAvailableAdapters, preflightAdapters } from "@agentarena/adapters";
-import { createAgentSelection, createCancellation, createRunId, formatDuration, isAbortError } from "@agentarena/core";
-import { type Locale as ReportLocale, writeReport } from "@agentarena/report";
+import { listAvailableAdapters } from "@agentarena/adapters";
+import { createAgentSelection } from "@agentarena/core";
+import type { Locale as ReportLocale, writeReport } from "@agentarena/report";
 import type { BenchmarkProgressEvent } from "@agentarena/runner";
-import { loadTaskPack } from "@agentarena/taskpacks";
-import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import type { ParsedArgs } from "../args.js";
-import { buildCiWorkflow, TASKPACK_TEMPLATES } from "../templates.js";
-
-// Re-export for use by command modules
-export { buildCiWorkflow, createAgentSelection, createCancellation, createRunId, formatDuration, isAbortError, listAvailableAdapters, loadTaskPack, parseYaml, preflightAdapters, stringifyYaml, TASKPACK_TEMPLATES, writeReport };
 
 export const CLI_PACKAGE_ROOT = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -153,7 +146,7 @@ export interface UiRunLogEntry {
 }
 
 export interface UiRunStatus {
-  state: "idle" | "running" | "done" | "error" | "cancelled";
+  state: "idle" | "running" | "done" | "error" | "cancelled" | "cancelling";
   phase: UiRunPhase | "starting" | "preflight" | "report";
   logs: UiRunLogEntry[];
   updatedAt: string;
@@ -262,22 +255,4 @@ export function showWelcomeMessage(): void {
   console.log("  agentarena ui        - 启动 Web 界面");
   console.log("  agentarena run       - 开始基准测试");
   console.log("");
-}
-
-export function detectContentType(filePath: string): string {
-  const extension = path.extname(filePath).toLowerCase();
-  switch (extension) {
-    case ".html":
-      return "text/html; charset=utf-8";
-    case ".js":
-      return "text/javascript; charset=utf-8";
-    case ".css":
-      return "text/css; charset=utf-8";
-    case ".json":
-      return "application/json; charset=utf-8";
-    case ".svg":
-      return "image/svg+xml";
-    default:
-      return "application/octet-stream";
-  }
 }
