@@ -14,6 +14,7 @@ import {
   buildAgentPrompt,
   CLAUDE_CODE_CAPABILITY,
   createPreflightResult,
+  formatAdapterError,
   type InvocationSpec,
   probeClaudeLikeAuth,
   probeClaudeProfileAuth,
@@ -180,14 +181,15 @@ abstract class ClaudeLikeAdapter implements AgentAdapter {
       );
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
+      const actionableMessage = formatAdapterError(errorMessage, this.title, invocation.displayCommand);
       await context.trace({
         type: "adapter.error",
         message: `Failed to execute ${this.title}`,
-        metadata: { error: errorMessage }
+        metadata: { error: actionableMessage }
       });
       return {
         status: "failed",
-        summary: `${this.title} execution failed: ${errorMessage}`,
+        summary: `${this.title} execution failed: ${actionableMessage}`,
         tokenUsage: 0,
         estimatedCostUsd: 0,
         costKnown: false,

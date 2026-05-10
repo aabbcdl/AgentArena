@@ -15,6 +15,7 @@ import {
   adapterWarn,
   buildAgentPrompt,
   createPreflightResult,
+  formatAdapterError,
   type InvocationSpec,
   probeHelp,
   probeInvocationVersion
@@ -353,14 +354,15 @@ export class QwenCodeAdapter implements AgentAdapter {
       );
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
+      const actionableMessage = formatAdapterError(errorMessage, "Qwen Code CLI", "qwen-coder");
       await context.trace({
         type: "adapter.error",
         message: "Failed to execute Qwen Code CLI",
-        metadata: { error: errorMessage }
+        metadata: { error: actionableMessage }
       });
       return {
         status: "failed",
-        summary: `Qwen Code CLI execution failed: ${errorMessage}`,
+        summary: `Qwen Code CLI execution failed: ${actionableMessage}`,
         tokenUsage: 0,
         estimatedCostUsd: 0,
         costKnown: false,

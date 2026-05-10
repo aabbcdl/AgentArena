@@ -12,6 +12,7 @@ import {
   adapterWarn,
   buildAgentPrompt,
   createPreflightResult,
+  formatAdapterError,
   type InvocationSpec,
   probeHelp,
   probeInvocationVersion
@@ -263,14 +264,15 @@ export class AugmentAdapter implements AgentAdapter {
       );
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
+      const actionableMessage = formatAdapterError(errorMessage, "Augment Code", "augment-code");
       await context.trace({
         type: "adapter.error",
         message: "Failed to execute Augment Code CLI",
-        metadata: { error: errorMessage }
+        metadata: { error: actionableMessage }
       });
       return {
         status: "failed",
-        summary: `Augment Code execution failed: ${errorMessage}`,
+        summary: `Augment Code execution failed: ${actionableMessage}`,
         tokenUsage: 0,
         estimatedCostUsd: 0,
         costKnown: false,

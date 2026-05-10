@@ -14,6 +14,7 @@ import {
   buildAgentPrompt,
   CODEX_CAPABILITY,
   createPreflightResult,
+  formatAdapterError,
   type InvocationSpec,
   probeHelp,
   probeInvocationVersion,
@@ -229,14 +230,15 @@ export class CodexCliAdapter implements AgentAdapter {
       );
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
+      const actionableMessage = formatAdapterError(errorMessage, "Codex CLI", "codex");
       await context.trace({
         type: "adapter.error",
         message: "Failed to execute Codex CLI",
-        metadata: { error: errorMessage }
+        metadata: { error: actionableMessage }
       });
       return {
         status: "failed",
-        summary: `Codex CLI execution failed: ${errorMessage}`,
+        summary: `Codex CLI execution failed: ${actionableMessage}`,
         tokenUsage: 0,
         estimatedCostUsd: 0,
         costKnown: false,

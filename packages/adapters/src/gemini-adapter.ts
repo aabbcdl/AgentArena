@@ -13,6 +13,7 @@ import {
   adapterWarn,
   buildAgentPrompt,
   createPreflightResult,
+  formatAdapterError,
   type InvocationSpec,
   probeHelp,
   probeInvocationVersion
@@ -156,14 +157,15 @@ export class GeminiCliAdapter implements AgentAdapter {
       );
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
+      const actionableMessage = formatAdapterError(errorMessage, "Gemini CLI", "gemini");
       await context.trace({
         type: "adapter.error",
         message: "Failed to execute Gemini CLI",
-        metadata: { error: errorMessage }
+        metadata: { error: actionableMessage }
       });
       return {
         status: "failed",
-        summary: `Gemini CLI execution failed: ${errorMessage}`,
+        summary: `Gemini CLI execution failed: ${actionableMessage}`,
         tokenUsage: 0,
         estimatedCostUsd: 0,
         costKnown: false,
