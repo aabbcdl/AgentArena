@@ -617,7 +617,11 @@ test("agentarena ui exposes Claude provider profile APIs", async () => {
   );
 
   try {
-    const profilesResponse = await fetch(`http://127.0.0.1:${server.port}/api/provider-profiles`);
+    const profilesResponse = await fetch(`http://127.0.0.1:${server.port}/api/provider-profiles`, {
+      headers: {
+        ...(server.authToken ? { "Authorization": `Bearer ${server.authToken}` } : {})
+      }
+    });
     assert.equal(profilesResponse.status, 200);
     const initialProfiles = await profilesResponse.json();
     assert.equal(Array.isArray(initialProfiles), true);
