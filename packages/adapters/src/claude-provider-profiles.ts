@@ -462,7 +462,7 @@ export async function saveClaudeProviderProfile(input: ClaudeProviderProfileInpu
     extraEnv: input.extraEnv ?? {},
     writeCommonConfig: input.writeCommonConfig ?? true,
     notes: input.notes,
-    riskFlags: defaultRiskFlags(input.kind),
+    riskFlags: [...new Set([...defaultRiskFlags(input.kind), ...(input.riskFlags ?? [])])],
     isBuiltIn: false,
     secretStored: false
   });

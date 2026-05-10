@@ -31,6 +31,73 @@ async function readTraceFileStreaming(filePath: string): Promise<{ events: Trace
   return { events, malformedCount };
 }
 
+/**
+ * Stream-trace query: reads JSONL line by line, applies filter and pagination
+ * without loading all events into memory. Stops as soon as the requested page
+ * is satisfied, making it safe for large trace files.
+ *
+ * For `reverse` queries (most-recent-first) we must read the entire file,
+ * but we still apply the filter during streaming to reduce memory pressure.
+ */
+async function queryTraceFileStream(
+  filePath: string,
+  options: TraceQueryOptions = {}
+): Promise<TraceEvent[]> {
+  const { limit, offset = 0, filter, reverse } = options;
+
+  const stream = createReadStream(filePath, { encoding: "utf8" });
+  const rl = createInterface({ input: stream, crlfDelay: Infinity });
+
+  // For reverse queries, we need all filtered events first
+  if (reverse) {
+    const filtered: TraceEvent[] = [];
+    for await (const line of rl) {
+      if (!line.trim()) continue;
+      try {
+        const event = JSON.parse(line) as TraceEvent;
+        if (!filter || matchesFilter(event, filter)) {
+          filtered.push(event);
+        }
+      } catch {
+        // skip malformed
+      }
+    }
+    filtered.reverse();
+    const end = limit !== undefined ? offset + limit : undefined;
+    return filtered.slice(offset, end);
+  }
+
+  // Forward query: streaming with early termination
+  let skipped = 0;
+  const results: TraceEvent[] = [];
+  const needed = limit !== undefined ? offset + limit : Infinity;
+
+  for await (const line of rl) {
+    if (!line.trim()) continue;
+    try {
+      const event = JSON.parse(line) as TraceEvent;
+      if (filter && !matchesFilter(event, filter)) continue;
+
+      if (skipped < offset) {
+        skipped++;
+        continue;
+      }
+
+      results.push(event);
+      if (results.length >= needed - offset) {
+        // We have enough — destroy the stream to stop reading
+        rl.close();
+        stream.destroy();
+        break;
+      }
+    } catch {
+      // skip malformed
+    }
+  }
+
+  return results;
+}
+
 export class JsonlTraceRecorder {
   private directoryEnsured = false;
   private writeQueue: Promise<void> = Promise.resolve();
@@ -96,35 +163,16 @@ export class JsonlTraceRecorder {
   }
 
   async query(options: TraceQueryOptions = {}): Promise<TraceEvent[]> {
-    const { limit, offset = 0, filter, reverse } = options;
-
     try {
-      // Use streaming to parse events (memory-efficient for large files)
-      const { events: allEvents } = await readTraceFileStreaming(this.filePath);
-
-      let result = allEvents;
-
-      if (reverse) {
-        result = result.reverse();
-      }
-
-      if (filter) {
-        result = result.filter((event) => this.matchesFilter(event, filter));
-      }
-
-      const start = offset;
-      const end = limit !== undefined ? start + limit : undefined;
-      return result.slice(start, end);
+      // Use streaming query: filters during read, stops early when page is full.
+      // This avoids loading the entire file into memory for large traces.
+      return await queryTraceFileStream(this.filePath, options);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
         throw error;
       }
       return [];
     }
-  }
-
-  private matchesFilter(event: TraceEvent, filter: TraceFilter): boolean {
-    return matchesFilter(event, filter);
   }
 
   async getEventCount(): Promise<number> {

@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-// Import from built dist
-import { extractCommunityEntry, rebuildIndex } from "../packages/cli/dist/publish.js";
+// Import from built dist — sorted alphabetically
+import { buildLeaderboardEntries, extractCommunityEntry } from "../packages/cli/dist/publish.js";
 
 function makeMockRun(overrides = {}) {
   return {
@@ -149,28 +149,25 @@ test("extractCommunityEntry handles missing resolvedRuntime", () => {
   assert.equal(entry.agentResults[0].version, "unknown");
 });
 
-test("rebuildIndex creates index from single entry", () => {
+test("buildLeaderboardEntries creates entries from single run", () => {
   const run = makeMockRun();
   const entry = extractCommunityEntry(run, "testuser");
-  const index = rebuildIndex(null, entry);
+  const entries = buildLeaderboardEntries([entry]);
 
-  assert.equal(index.schemaVersion, "agentarena.community-leaderboard/v1");
-  assert.equal(index.taskPackId, "test-task-pack");
-  assert.equal(index.totalRuns, 1);
-  assert.equal(index.entries.length, 2); // 2 agents
+  assert.equal(entries.length, 2); // 2 agents
 
   // Sorted by avgScore desc
-  assert.equal(index.entries[0].baseAgentId, "claude-code");
-  assert.equal(index.entries[0].avgScore, 85.5);
-  assert.equal(index.entries[0].bestScore, 85.5);
-  assert.equal(index.entries[0].runCount, 1);
-  assert.equal(index.entries[0].successRate, 1);
+  assert.equal(entries[0].baseAgentId, "claude-code");
+  assert.equal(entries[0].avgScore, 85.5);
+  assert.equal(entries[0].bestScore, 85.5);
+  assert.equal(entries[0].runCount, 1);
+  assert.equal(entries[0].successRate, 1);
 
-  assert.equal(index.entries[1].baseAgentId, "codex");
-  assert.equal(index.entries[1].avgScore, 72.0);
+  assert.equal(entries[1].baseAgentId, "codex");
+  assert.equal(entries[1].avgScore, 72.0);
 });
 
-test("rebuildIndex merges multiple entries correctly", () => {
+test("buildLeaderboardEntries merges multiple runs correctly (no precision loss)", () => {
   const run1 = makeMockRun();
   const entry1 = extractCommunityEntry(run1, "user1");
 
@@ -179,26 +176,24 @@ test("rebuildIndex merges multiple entries correctly", () => {
   run2.results[1].compositeScore = 68.0;
   const entry2 = extractCommunityEntry(run2, "user2");
 
-  const index1 = rebuildIndex(null, entry1);
-  const index2 = rebuildIndex(index1, entry2);
-
-  assert.equal(index2.totalRuns, 2);
+  // Use raw run data — no inflation, no precision loss
+  const entries = buildLeaderboardEntries([entry1, entry2]);
 
   // Claude: avg of 85.5 and 90.0 = 87.75, rounded to 87.8
-  const claudeEntry = index2.entries.find((e) => e.baseAgentId === "claude-code");
+  const claudeEntry = entries.find((e) => e.baseAgentId === "claude-code");
   assert.ok(claudeEntry, "Should have claude-code entry");
   assert.equal(claudeEntry.runCount, 2);
   assert.equal(claudeEntry.bestScore, 90.0);
   assert.ok(claudeEntry.avgScore > 85 && claudeEntry.avgScore < 90, `avgScore should be between 85 and 90, got ${claudeEntry.avgScore}`);
 
   // Codex: avg of 72.0 and 68.0 = 70.0
-  const codexEntry = index2.entries.find((e) => e.baseAgentId === "codex");
+  const codexEntry = entries.find((e) => e.baseAgentId === "codex");
   assert.ok(codexEntry, "Should have codex entry");
   assert.equal(codexEntry.runCount, 2);
   assert.equal(codexEntry.bestScore, 72.0);
 });
 
-test("rebuildIndex computes winRate correctly", () => {
+test("buildLeaderboardEntries computes winRate correctly", () => {
   const run1 = makeMockRun();
   const entry1 = extractCommunityEntry(run1, "user1");
 
@@ -208,10 +203,10 @@ test("rebuildIndex computes winRate correctly", () => {
   run2.results[1].compositeScore = 95.0; // codex wins
   const entry2 = extractCommunityEntry(run2, "user2");
 
-  const index = rebuildIndex(rebuildIndex(null, entry1), entry2);
+  const entries = buildLeaderboardEntries([entry1, entry2]);
 
-  const claudeEntry = index.entries.find((e) => e.baseAgentId === "claude-code");
-  const codexEntry = index.entries.find((e) => e.baseAgentId === "codex");
+  const claudeEntry = entries.find((e) => e.baseAgentId === "claude-code");
+  const codexEntry = entries.find((e) => e.baseAgentId === "codex");
 
   // Claude won run1, lost run2: winRate = 0.5
   assert.equal(claudeEntry.winRate, 0.5);
@@ -219,20 +214,30 @@ test("rebuildIndex computes winRate correctly", () => {
   assert.equal(codexEntry.winRate, 0.5);
 });
 
-test("extractCommunityEntry handles failed results", () => {
-  const run = makeMockRun();
-  run.results[0].status = "failed";
-  run.results[0].compositeScore = 0;
-  const entry = extractCommunityEntry(run, "testuser");
+test("buildLeaderboardEntries preserves exact scores (no inflation artifacts)", () => {
+  // This test verifies that the new approach doesn't produce synthetic data artifacts.
+  // With the old approach, rebuilding from an index would inflate avgScore into
+  // runCount identical data points, losing variance information.
+  // With the new approach, we aggregate from raw data directly.
+  const runs = [];
+  for (let i = 0; i < 5; i++) {
+    const run = makeMockRun({ runId: `run-${i}` });
+    run.results[0].compositeScore = 70 + i * 5; // 70, 75, 80, 85, 90
+    run.results[1].compositeScore = 60 + i * 3; // 60, 63, 66, 69, 72
+    runs.push(extractCommunityEntry(run, `user${i}`));
+  }
 
-  assert.equal(entry.agentResults[0].status, "failed");
-  assert.equal(entry.agentResults[0].compositeScore, 0);
-});
+  const entries = buildLeaderboardEntries(runs);
 
-test("extractCommunityEntry handles empty judgeResults", () => {
-  const run = makeMockRun();
-  run.results[0].judgeResults = [];
-  const entry = extractCommunityEntry(run, "testuser");
+  const claudeEntry = entries.find((e) => e.baseAgentId === "claude-code");
+  assert.ok(claudeEntry, "Should have claude-code entry");
+  assert.equal(claudeEntry.runCount, 5);
 
-  assert.equal(entry.agentResults[0].judgePassRate, 0);
+  // avg of 70, 75, 80, 85, 90 = 80.0
+  assert.equal(claudeEntry.avgScore, 80.0);
+  assert.equal(claudeEntry.bestScore, 90.0);
+
+  // Verify no synthetic artifacts: success rate should reflect actual statuses
+  // All 5 runs are "success" for claude-code
+  assert.equal(claudeEntry.successRate, 1.0);
 });

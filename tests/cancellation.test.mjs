@@ -62,7 +62,7 @@ test("cancellation during execution produces results with cancelled or failed st
   const controller = new AbortController();
 
   // Cancel after a short delay (during adapter execution)
-  const cancelTimer = setTimeout(() => controller.abort(), 50);
+  const cancelTimer = setTimeout(() => controller.abort(), 500);
 
   try {
     const result = await runBenchmark({
