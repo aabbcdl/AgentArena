@@ -15,6 +15,11 @@ import { parseClaudeEvents } from "./event-parsers.js";
 import type { ProcessResult } from "./process-utils.js";
 import { runProcess } from "./process-utils.js";
 
+export function adapterWarn(message: string, metadata?: Record<string, unknown>): void {
+  const detail = metadata ? ` ${JSON.stringify(metadata)}` : "";
+  console.warn(`[adapters] ${message}${detail}`);
+}
+
 interface DemoProfile {
   title: string;
   delayMs: number;
@@ -235,8 +240,8 @@ export async function probeInvocationVersion(
         source: "version-command"
       };
     }
-  } catch {
-    // Fall through to package lookup or unknown result.
+  } catch (e) {
+    adapterWarn("version probe failed", { command: invocation.displayCommand, error: e instanceof Error ? e.message : String(e) });
   }
 
   const invocationTarget =

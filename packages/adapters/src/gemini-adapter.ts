@@ -10,6 +10,7 @@ import type {
 import { parseGeminiEvents } from "./event-parsers.js";
 import { agentTimeoutMs, runProcess } from "./process-utils.js";
 import {
+  adapterWarn,
   buildAgentPrompt,
   createPreflightResult,
   type InvocationSpec,
@@ -213,8 +214,8 @@ export class GeminiCliAdapter implements AgentAdapter {
       if (gitDiff) {
         changedFilesHint.push(...gitDiff.split("\n").filter(Boolean));
       }
-    } catch {
-      // git not available or no changes
+    } catch (e) {
+      adapterWarn("git diff failed in workspace", { cwd: context.workspacePath, error: e instanceof Error ? e.message : String(e) });
     }
 
     return {

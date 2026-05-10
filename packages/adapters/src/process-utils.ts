@@ -2,6 +2,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { BenchmarkCancelledError, resolveTimeoutMs } from "@agentarena/core";
+import { adapterWarn } from "./shared.js";
 
 export interface ProcessResult {
   exitCode: number | null;
@@ -123,13 +124,15 @@ export async function runProcess(
             // Kill the entire process group on Unix
             try {
               process.kill(-pid, "SIGTERM");
-            } catch {
+            } catch (e) {
+              adapterWarn("process group SIGTERM failed, falling back to child.kill", { pid, error: e instanceof Error ? e.message : String(e) });
               if (child) child.kill("SIGTERM");
             }
             sigkillHandle = setTimeout(() => {
               try {
                 process.kill(-pid, "SIGKILL");
-              } catch {
+              } catch (e) {
+                adapterWarn("process group SIGKILL failed", { pid, error: e instanceof Error ? e.message : String(e) });
                 if (child && !child.killed) child.kill("SIGKILL");
               }
               sigkillHandle = undefined;
@@ -139,12 +142,13 @@ export async function runProcess(
             if (pid === undefined) return;
             try {
               execFileSync("taskkill", ["/F", "/T", "/PID", String(pid)], { stdio: "ignore" });
-            } catch {
+            } catch (e) {
+              adapterWarn("taskkill failed, falling back to child.kill", { pid, error: e instanceof Error ? e.message : String(e) });
               if (child) child.kill("SIGTERM");
             }
           }
-        } catch {
-          // Ignore kill errors
+        } catch (e) {
+          adapterWarn("all process kill attempts failed — possible orphan", { pid, error: e instanceof Error ? e.message : String(e) });
         }
       }
     };

@@ -9,6 +9,7 @@ import type {
 } from "@agentarena/core";
 import { agentTimeoutMs, runProcess } from "./process-utils.js";
 import {
+  adapterWarn,
   buildAgentPrompt,
   createPreflightResult,
   type InvocationSpec,
@@ -287,8 +288,8 @@ export class TraeAdapter implements AgentAdapter {
         if (gitDiff) {
           changedFilesHint.push(...gitDiff.split("\n").filter(Boolean));
         }
-      } catch {
-        // Ignore git diff failures.
+      } catch (e) {
+        adapterWarn("git diff failed in workspace", { cwd: context.workspacePath, error: e instanceof Error ? e.message : String(e) });
       }
     }
 

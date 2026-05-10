@@ -12,6 +12,7 @@ import {
 } from "@agentarena/core";
 import { agentTimeoutMs, runProcess } from "./process-utils.js";
 import {
+  adapterWarn,
   buildAgentPrompt,
   createPreflightResult,
   type InvocationSpec,
@@ -390,8 +391,8 @@ export class QwenCodeAdapter implements AgentAdapter {
       if (gitDiff) {
         changedFilesHint.push(...gitDiff.split("\n").filter(Boolean));
       }
-    } catch {
-      // git 不可用，忽略
+    } catch (e) {
+      adapterWarn("git diff failed in workspace", { cwd: context.workspacePath, error: e instanceof Error ? e.message : String(e) });
     }
 
     let summary: string;

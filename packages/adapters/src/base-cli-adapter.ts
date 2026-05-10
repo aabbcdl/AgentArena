@@ -9,6 +9,7 @@ import type {
 } from "@agentarena/core";
 import { agentTimeoutMs, pathExists, runProcess } from "./process-utils.js";
 import {
+  adapterWarn,
   buildAgentPrompt,
   createPreflightResult,
   type InvocationSpec,
@@ -154,7 +155,9 @@ class BaseCliAdapterImpl implements AgentAdapter {
       const { execFileSync } = await import("node:child_process");
       const gitDiff = execFileSync("git", ["diff", "--name-only"], { cwd: context.workspacePath, encoding: "utf8" }).trim();
       if (gitDiff) changedFilesHint.push(...gitDiff.split("\n").filter(Boolean));
-    } catch { /* git not available */ }
+    } catch (e) {
+      adapterWarn("git diff failed in workspace", { cwd: context.workspacePath, error: e instanceof Error ? e.message : String(e) });
+    }
 
     await context.trace({
       type: "adapter.finish",
