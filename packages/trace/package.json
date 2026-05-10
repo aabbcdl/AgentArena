@@ -12,7 +12,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@agentarena/core": "0.1.0"
+    "@agentarena/core": "workspace:*"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
