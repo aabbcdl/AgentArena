@@ -5,12 +5,13 @@ import {
   stringifyExpectation,
 } from "../shared.js";
 
-export async function runFileCountJudge(judge: FileCountJudge, workspacePath: string): Promise<JudgeResult> {
+export async function runFileCountJudge(judge: FileCountJudge, workspacePath: string, fileList?: string[]): Promise<JudgeResult> {
   const startedAt = Date.now();
   const matcher = createGlobMatcher(judge.pattern);
 
   try {
-    const matches = (await listWorkspaceFiles(workspacePath)).filter((filePath) => matcher(filePath));
+    const allFiles = fileList ?? await listWorkspaceFiles(workspacePath);
+    const matches = allFiles.filter((filePath) => matcher(filePath));
     const actual = matches.length;
     const success =
       (judge.equals === undefined || actual === judge.equals) &&

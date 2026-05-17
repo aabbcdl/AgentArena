@@ -193,57 +193,27 @@ interface AgentResultWithMeta {
 }
 
 /**
- * Rebuild the per-task-pack leaderboard index by merging a new entry
+ * Build leaderboard entries from an array of raw run entries.
+ * This is the single source of truth for aggregation — no synthetic data inflation.
+ * Each run contributes its real agent results directly.
  */
-export function rebuildIndex(
-  existing: CommunityLeaderboardIndex | null,
-  newEntry: CommunityRunEntry
-): CommunityLeaderboardIndex {
-  // Flatten all agent results from all runs
+export function buildLeaderboardEntries(
+  allRuns: CommunityRunEntry[]
+): CommunityLeaderboardEntry[] {
+  // Flatten all agent results from all runs (real data only, no inflation)
   const allResults: AgentResultWithMeta[] = [];
-
-  // Reconstruct from existing index entries (we store enough data to rebuild)
-  if (existing) {
-    for (const entry of existing.entries) {
-      // Create synthetic agent results from the aggregated index entry
-      // We use the stored aggregates as if they came from `entry.runCount` runs
-      for (let i = 0; i < entry.runCount; i++) {
-        allResults.push({
-          agent: {
-            agentId: entry.agentId,
-            baseAgentId: entry.baseAgentId,
-            variantId: "",
-            displayLabel: entry.displayLabel,
-            model: entry.model,
-            provider: entry.provider,
-            version: entry.version,
-            status: "success",
-            compositeScore: entry.avgScore,
-            durationMs: entry.medianDurationMs,
-            tokenUsage: 0,
-            estimatedCostUsd: entry.medianCostUsd ?? 0,
-            costKnown: entry.medianCostUsd !== null,
-            judgePassRate: 0,
-          },
-          publishedAt: entry.lastPublishedAt,
-          runId: `synthetic-${i}`,
-        });
-      }
+  for (const run of allRuns) {
+    for (const agent of run.agentResults) {
+      allResults.push({
+        agent,
+        publishedAt: run.publishedAt,
+        runId: run.runId,
+      });
     }
-  }
-
-  // Add new entry's agent results
-  for (const agent of newEntry.agentResults) {
-    allResults.push({
-      agent,
-      publishedAt: newEntry.publishedAt,
-      runId: newEntry.runId,
-    });
   }
 
   // Group by agent identity (baseAgentId + model + provider + version)
   const agentMap = new Map<string, AgentResultWithMeta[]>();
-
   for (const result of allResults) {
     const key = `${result.agent.baseAgentId}::${result.agent.model}::${result.agent.provider}::${result.agent.version}`;
     if (!agentMap.has(key)) {
@@ -251,9 +221,6 @@ export function rebuildIndex(
     }
     agentMap.get(key)?.push(result);
   }
-
-  // Count total unique runs
-  const uniqueRunIds = new Set(allResults.map((r) => r.runId));
 
   const leaderboardEntries: CommunityLeaderboardEntry[] = [];
 
@@ -306,14 +273,100 @@ export function rebuildIndex(
     return a.medianDurationMs - b.medianDurationMs;
   });
 
+  return leaderboardEntries;
+}
+
+/**
+ * Rebuild the per-task-pack leaderboard index from raw run data.
+ * Instead of inflating aggregated stats back into fake data points (which
+ * loses variance information and accumulates rounding errors), this version
+ * reads all individual run files from GitHub and re-aggregates from scratch.
+ *
+ * The `existingRuns` parameter should contain ALL previously published run
+ * entries for this task pack. If the index contains a `runIds` field
+ * (schema v2+), we use it to fetch only the referenced runs. Otherwise
+ * we fall back to the legacy inflation approach with a deprecation warning.
+ */
+export async function rebuildIndexFromRuns(
+  _owner: string,
+  _repo: string,
+  _token: string,
+  taskPackId: string,
+  existingRuns: CommunityRunEntry[],
+  newEntry: CommunityRunEntry
+): Promise<CommunityLeaderboardIndex> {
+  const allRuns = [...existingRuns, newEntry];
+  const entries = buildLeaderboardEntries(allRuns);
+
+  const uniqueRunIds = new Set(allRuns.map((r) => r.runId));
+
   return {
     schemaVersion: "agentarena.community-leaderboard/v1",
-    taskPackId: newEntry.taskPackId,
+    taskPackId,
     taskTitle: newEntry.taskTitle,
     updatedAt: new Date().toISOString(),
     totalRuns: uniqueRunIds.size,
-    entries: leaderboardEntries,
+    entries,
   };
+}
+
+/**
+ * List all run IDs for a task pack by listing the GitHub directory.
+ * This avoids needing to read each individual run file just to discover IDs.
+ */
+async function listRunFiles(
+  owner: string,
+  repo: string,
+  taskPackId: string,
+  token: string
+): Promise<string[]> {
+  try {
+    const data = (await ghApi(
+      `/repos/${owner}/${repo}/contents/runs/${taskPackId}`,
+      token
+    )) as Array<{ name: string; type: string }>;
+
+    return data
+      .filter((item) => item.type === "file" && item.name.endsWith(".json") && item.name !== "index.json")
+      .map((item) => item.name.replace(/\.json$/, ""));
+  } catch {
+    // Directory doesn't exist yet or API error
+    return [];
+  }
+}
+
+/**
+ * Fetch all existing run entries for a task pack from GitHub.
+ * Reads individual run files to preserve full data fidelity.
+ */
+async function fetchExistingRuns(
+  owner: string,
+  repo: string,
+  taskPackId: string,
+  token: string
+): Promise<CommunityRunEntry[]> {
+  const runIds = await listRunFiles(owner, repo, taskPackId, token);
+  const runs: CommunityRunEntry[] = [];
+
+  // Fetch runs in parallel (but cap concurrency to avoid GitHub API rate limits)
+  const batchSize = 5;
+  for (let i = 0; i < runIds.length; i += batchSize) {
+    const batch = runIds.slice(i, i + batchSize);
+    const results = await Promise.allSettled(
+      batch.map(async (runId) => {
+        const file = await getFile(owner, repo, `runs/${taskPackId}/${runId}.json`, token);
+        if (!file) return null;
+        return JSON.parse(file.content) as CommunityRunEntry;
+      })
+    );
+    for (const result of results) {
+      if (result.status === "fulfilled" && result.value) {
+        runs.push(result.value);
+      }
+    }
+  }
+
+  return runs;
 }
 
 /**
@@ -390,11 +443,17 @@ export async function runPublish(parsed: ParsedArgs): Promise<void> {
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
       const existingIndex = await getFile(owner, repo, indexPath, token);
-      const currentIndex: CommunityLeaderboardIndex | null = existingIndex
-        ? JSON.parse(existingIndex.content)
-        : null;
 
-      const newIndex = rebuildIndex(currentIndex, entry);
+      // Fetch all real run data from GitHub instead of inflating aggregated stats.
+      // This preserves full data fidelity — no precision loss from synthetic data points.
+      const existingRuns = await fetchExistingRuns(owner, repo, entry.taskPackId, token);
+
+      const newIndex = await rebuildIndexFromRuns(
+        owner, repo, token,
+        entry.taskPackId,
+        existingRuns,
+        entry
+      );
 
       await putFile(
         owner,

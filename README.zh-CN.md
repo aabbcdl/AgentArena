@@ -16,6 +16,8 @@ AgentArena 不是教你“怎么开始装 agent”的工具，而是帮已经在
 
 AgentArena 默认是本地优先。你提供自己的仓库、任务包和本地已经装好的 agent CLI，AgentArena 负责统一执行、judge、trace 和报告输出。
 
+本地 Web UI 的绑定地址、鉴权规则，以及 `doctor` / `preflight` 的结果怎么解读，见 **[docs/ui-and-adapters.md](./docs/ui-and-adapters.md)**。量化测试覆盖率可在仓库根目录执行：`pnpm test:coverage`（基于 Node `--experimental-test-coverage`）。
+
 ## 60 秒体验
 
 不需要安装任何 agent CLI，clone 下来就能跑：

@@ -5,6 +5,12 @@
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
   "files": [
     "dist"
   ],
@@ -12,8 +18,8 @@
     "access": "public"
   },
   "dependencies": {
-    "@agentarena/core": "0.1.0",
-    "yaml": "^2.8.2"
+    "@agentarena/core": "workspace:*",
+    "yaml": "2.8.2"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

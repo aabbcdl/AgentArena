@@ -1,5 +1,4 @@
 import { promises as fs } from "node:fs";
-import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { preflightAdapters } from "@agentarena/adapters";
@@ -8,30 +7,29 @@ import {
   type AgentSelection,
   type BenchmarkCancellation,
   type BenchmarkRun,
-  createRunId,
-  ensureDirectory,
   getDefaultWeights,
   isAbortError,
-  isInternalUrl,
-  resolveRepoSource,
   throwIfAborted,
 } from "@agentarena/core";
-import { loadTaskPack } from "@agentarena/taskpacks";
 import { normalizeSelections, runAgent } from "./agent-lifecycle.js";
 import { agentConcurrency, mapWithConcurrency } from "./concurrency.js";
+import { resolveAndValidateRepo } from "./repo-resolution.js";
 import {
-  createBaseResult,
   createCancellationSummary,
   createCancelledRunResult,
   createSkippedRunResult,
 } from "./result-builder.js";
+import { collectResults } from "./result-collection.js";
 import { cleanupWorkspace, formatErrorDetails, formatErrorMessage, type WorkspaceCleanupResult } from "./workspace.js";
+import { prepareWorkspace } from "./workspace-prep.js";
 
 export type { AgentRunContext, normalizeSelections, runAgent, wrapWithTimeout } from "./agent-lifecycle.js";
 export type { agentConcurrency, agentExecuteTimeoutMs, MapWithConcurrencyResult, mapWithConcurrency, resolvePositiveInt } from "./concurrency.js";
 export { DEFAULT_AGENT_CONCURRENCY } from "./concurrency.js";
+export type { RepoResolution, RepoResolutionOptions } from "./repo-resolution.js";
 export type { buildDiffPrecision, collectChangedFiles } from "./snapshot.js";
 export type { cleanupWorkspace, debugLog, formatErrorDetails, formatErrorMessage, WorkspaceCleanupResult } from "./workspace.js";
+export type { WorkspacePrep, WorkspacePrepOptions } from "./workspace-prep.js";
 
 export interface BenchmarkOptions {
   repoPath: string;
@@ -68,6 +66,22 @@ export interface BenchmarkProgressEvent {
   metadata?: Record<string, unknown>;
 }
 
+async function writeRunMarker(
+  outputPath: string,
+  state: "in-progress" | "complete" | "failed",
+  metadata: Record<string, unknown> = {}
+): Promise<void> {
+  try {
+    await fs.writeFile(
+      path.join(outputPath, "run-state.json"),
+      JSON.stringify({ state, updatedAt: new Date().toISOString(), ...metadata }, null, 2),
+      "utf8"
+    );
+  } catch (error) {
+    console.warn(`[agentarena] Failed to write run marker for ${outputPath}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 export async function runBenchmark(options: BenchmarkOptions): Promise<BenchmarkRun> {
   const cancellation = options.cancellation;
   const safeProgress = async (event: BenchmarkProgressEvent): Promise<void> => {
@@ -78,93 +92,18 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
     }
   };
 
-  const userRepoPath = path.resolve(options.repoPath);
-  const task = await loadTaskPack(options.taskPath);
-  const builtinReposRoot = options.builtinReposRoot ?? path.join(path.dirname(options.taskPath), "..", "repos");
-  const repoResolution = resolveRepoSource(task.repoSource, userRepoPath, builtinReposRoot);
-  const repoPath = path.resolve(repoResolution.repoPath);
+  // Step 1: Resolve and validate the repository
+  const { repoPath, task } = await resolveAndValidateRepo(options);
 
-  if (repoResolution.kind === "builtin") {
-    try {
-      const stat = await fs.stat(repoPath);
-      if (!stat.isDirectory()) {
-        throw new Error(`Builtin repo path is not a directory: "${repoPath}"`);
-      }
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        throw new Error(
-          `Builtin repo not found: "${repoPath}". ` +
-          `The task pack requires repoSource "${task.repoSource}" but the directory does not exist.`
-        );
-      }
-      throw error;
-    }
-  }
+  // Step 2: Prepare workspace directories and temp paths
+  const { runId, outputPath, workspaceRootPath } = await prepareWorkspace({
+    runId: options.runId,
+    outputPath: options.outputPath,
+    repoPath: options.repoPath
+  });
 
-  if (repoResolution.kind === "url") {
-    try {
-      const stat = await fs.stat(repoPath);
-      if (!stat.isDirectory()) {
-        throw new Error(`URL repo path is not a directory: "${repoPath}"`);
-      }
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        const repoUrl = task.repoSource;
-        if (typeof repoUrl !== "string" || !repoUrl.startsWith("http")) {
-          throw new Error(`Invalid URL repoSource: "${repoUrl}"`);
-        }
-        if (isInternalUrl(repoUrl)) {
-          throw new Error(`Cannot clone from internal/private URL: "${repoUrl}". Only public internet URLs are allowed.`);
-        }
-        const parentDir = path.dirname(repoPath);
-        await fs.mkdir(parentDir, { recursive: true });
-        const { execFile } = await import("node:child_process");
-        const { promisify } = await import("node:util");
-        const execFileAsync = promisify(execFile);
-        try {
-          await execFileAsync("git", ["clone", repoUrl, repoPath], {
-            timeout: 120_000,
-            maxBuffer: 10 * 1024 * 1024
-          });
-        } catch (cloneError) {
-          throw new Error(
-            `Failed to clone URL repoSource "${repoUrl}": ${cloneError instanceof Error ? cloneError.message : String(cloneError)}`
-          );
-        }
-      } else {
-        throw error;
-      }
-    }
-  }
+  await writeRunMarker(outputPath, "in-progress", { runId });
 
-  if (repoResolution.kind === "user") {
-    try {
-      const stat = await fs.stat(repoPath);
-      if (!stat.isDirectory()) {
-        throw new Error(`User repo path is not a directory: "${repoPath}"`);
-      }
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        throw new Error(`User repo not found: "${repoPath}". The specified repository path does not exist.`);
-      }
-      throw error;
-    }
-  }
-
-  const runId = options.runId ?? createRunId();
-  const outputRootPath = options.outputPath
-    ? path.resolve(options.outputPath)
-    : path.join(userRepoPath, ".agentarena", "runs");
-  const outputPath = path.join(outputRootPath, runId);
-  let workspaceRootPath: string;
-  try {
-    workspaceRootPath = await fs.mkdtemp(
-      path.join(tmpdir(), `agentarena-workspaces-${runId.replace(/[^a-zA-Z0-9_-]+/g, "-")}-`)
-    );
-  } catch (error) {
-    const errorDetails = formatErrorDetails(error);
-    throw new Error(`Failed to create workspace directory in "${tmpdir()}": ${errorDetails.message}. Check available disk space and permissions.`);
-  }
   const selections = normalizeSelections(options);
   const workspacePaths = new Set<string>();
 
@@ -172,23 +111,17 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
 
   let completedNormally = false;
   try {
-  await ensureDirectory(outputRootPath);
-  await ensureDirectory(outputPath);
   await safeProgress({
     phase: "starting",
     message: `Created run ${runId}.`,
-    metadata: {
-      runId,
-      outputPath
-    }
+    metadata: { runId, outputPath }
   });
 
+  // Step 3: Run preflight checks
   await safeProgress({
     phase: "preflight",
     message: `Running preflight for ${selections.length} agent selection(s).`,
-    metadata: {
-      count: selections.length
-    }
+    metadata: { count: selections.length }
   });
 
   let preflights: Awaited<ReturnType<typeof preflightAdapters>>;
@@ -212,6 +145,7 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
     }
   });
 
+  // Step 4: Execute agents concurrently
   const { results: rawResults, aborted } = await mapWithConcurrency(
     preflights,
     agentConcurrency(options),
@@ -226,9 +160,7 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
         variantId: preflight.variantId,
         displayLabel: preflight.displayLabel,
         message: `Running ${preflight.displayLabel}.`,
-        metadata: {
-          status: preflight.status
-        }
+        metadata: { status: preflight.status }
       });
 
       let result: AgentRunResult;
@@ -271,57 +203,19 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
     }
   );
 
-  const results: AgentRunResult[] = [];
-  const processedVariantIds = new Set<string>();
-  for (let i = 0; i < preflights.length; i++) {
-    const raw = i < rawResults.length ? rawResults[i] : undefined;
-    if (raw === undefined) {
-      const preflight = preflights[i];
-      const fallbackPath = path.join(outputPath, "agents", preflight.variantId, "trace.jsonl");
-      results.push(createBaseResult({
-        preflight,
-        tracePath: fallbackPath,
-        workspacePath: path.join(workspaceRootPath, preflight.variantId),
-        status: "cancelled",
-        summary: "Cancelled due to concurrent execution abort."
-      }));
-      processedVariantIds.add(preflight.variantId);
-    } else if (raw instanceof Error) {
-      const preflight = preflights[i];
-      const fallbackPath = path.join(outputPath, "agents", preflight.variantId, "trace.jsonl");
-      results.push(createBaseResult({
-        preflight,
-        tracePath: fallbackPath,
-        workspacePath: path.join(workspaceRootPath, preflight.variantId),
-        status: "failed",
-        summary: `Agent execution error: ${raw.message}`
-      }));
-      processedVariantIds.add(preflight.variantId);
-    } else {
-      results.push(raw);
-      processedVariantIds.add(raw.variantId);
-    }
-  }
-  for (const preflight of preflights) {
-    if (!processedVariantIds.has(preflight.variantId)) {
-      const fallbackPath = path.join(outputPath, "agents", preflight.variantId, "trace.jsonl");
-      results.push(createBaseResult({
-        preflight,
-        tracePath: fallbackPath,
-        workspacePath: path.join(workspaceRootPath, preflight.variantId),
-        status: "failed",
-        summary: "Agent was not executed due to a concurrent execution error."
-      }));
-    }
-  }
+  // Step 5: Collect results
+  const results = collectResults(rawResults, preflights, outputPath, workspaceRootPath);
 
+  // Step 6: Cleanup workspaces
   const cleanupResults: WorkspaceCleanupResult[] = [];
   if (options.cleanupWorkspaces) {
-    for (const workspacePath of workspacePaths) {
-      const cleanupResult = await cleanupWorkspace(workspacePath);
-      cleanupResults.push(cleanupResult);
-      if (!cleanupResult.success) {
-        console.warn(`Warning: Failed to cleanup workspace ${workspacePath}: ${cleanupResult.error}`);
+    const cleanupR = await Promise.all(
+      [...workspacePaths].map((wp) => cleanupWorkspace(wp))
+    );
+    for (const result of cleanupR) {
+      cleanupResults.push(result);
+      if (!result.success) {
+        console.warn(`Warning: Failed to cleanup workspace ${result.path}: ${result.error}`);
       }
     }
     const rootCleanupResult = await cleanupWorkspace(workspaceRootPath, 1);
@@ -345,6 +239,12 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
   });
 
   completedNormally = true;
+  await writeRunMarker(outputPath, completedWithCancellation ? "failed" : "complete", {
+    runId,
+    totalResults: results.length,
+    successResults: results.filter((value) => value.status === "success").length,
+    cancelledResults: results.filter((value) => value.status === "cancelled").length
+  });
   return {
     runId,
     createdAt: new Date().toISOString(),
@@ -357,7 +257,8 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
     results
   };
   } finally {
-    if (!completedNormally && options.cleanupWorkspaces) {
+    if (!completedNormally) {
+      await writeRunMarker(outputPath, "failed", { runId });
       for (const workspacePath of workspacePaths) {
         await cleanupWorkspace(workspacePath).catch(() => {});
       }
@@ -365,4 +266,3 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
     }
   }
 }
-

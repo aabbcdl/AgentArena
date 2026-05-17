@@ -1,9 +1,9 @@
 export type { AdapterEvent, AdapterEventType, ParsedAdapterOutput } from "./adapter-events.js";
 export { emitEvent, parseAdapterEvents } from "./adapter-events.js";
-export { getAdapter, getCodexDefaultResolvedRuntime, listAvailableAdapters, preflightAdapters } from "./adapter-registry.js";
+export { getAdapter, getCodexDefaultResolvedRuntime, listAvailableAdapters, loadAndRegisterPlugins, preflightAdapters } from "./adapter-registry.js";
 export type { ClaudeProviderProfileInput } from "./claude-provider-profiles.js";
 export {
-  __providerProfileTestUtils, 
+  __providerProfileTestUtils,
   buildClaudeProviderEnvironment,
   deleteClaudeProviderProfile,
   getClaudeProviderProfile,
@@ -14,10 +14,11 @@ export {
   supportsWindowsCredentialManager,
   writeClaudeWorkspaceSettings
 } from "./claude-provider-profiles.js";
+export { loadAdapterPlugins, registerExternalAdapters } from "./plugin-registry.js";
 
 import { parseClaudeEvents, parseCodexEvents, parseGeminiEvents } from "./event-parsers.js";
-import { agentTimeoutMs, formatTimeoutMessage, runProcess } from "./process-utils.js";
-import { readCodexConfigDefaults, resolveClaudeRuntime, resolveCodexRuntime } from "./shared.js";
+import { agentTimeoutMs, formatTimeoutMessage, runProcess, terminateProcessTree } from "./process-utils.js";
+import { readCodexConfigDefaults, resolveClaudeRuntime, resolveCodexRuntime } from "./runtime-resolution.js";
 
 export const __testUtils = {
   parseCodexEvents,
@@ -27,6 +28,7 @@ export const __testUtils = {
   readCodexConfigDefaults,
   resolveClaudeRuntime,
   runProcessForTest: runProcess,
+  terminateProcessTree,
   agentTimeoutMs,
   formatTimeoutMessage
 };

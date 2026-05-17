@@ -80,6 +80,11 @@ function failToPassScore(result: BenchmarkRun["results"][number]): number {
  * Returns 0 when no test judge data exists.
  */
 function passToPassScore(result: BenchmarkRun["results"][number]): number {
+  const patchValidation = result.sweBench?.patchValidationResult;
+  if (patchValidation?.passToPassResults && patchValidation.passToPassResults.length > 0) {
+    const passed = patchValidation.passToPassResults.filter(r => r.status === "pass").length;
+    return passed / patchValidation.passToPassResults.length;
+  }
   const judge = findJudgeByType(result, "test-result");
   if (!judge || typeof judge.totalCount !== "number" || judge.totalCount === 0) {
     return 0;
@@ -284,19 +289,23 @@ export function computeCompositeScore(
       durationEfficiencyScore(result, run) * 0.3 +
       costEfficiencyScore(result, run) * 0.2
     );
-    return Math.round(Math.min(FAILED_SCORE_BAND.max, baseScore + efficiencyBonus * 10) * 10) / 10;
+    return Math.round(Math.min(FAILED_SCORE_BAND.max, baseScore + efficiencyBonus * 100) * 10) / 10;
   }
 
   const components = computeScoreComponents(result, run);
 
-  // Rule 2: Critical judge failure → partial band
+  // Rule 2: Critical judge failure → partial band (use user weights)
   if (hasCriticalJudgeFailure(result)) {
-    const baseScore = CRITICAL_FAIL_SCORE_BAND.min + (
-      components.tests * 10 +
-      components.nonCriticalJudges * 5 +
-      components.lint * 3 +
-      components.duration * 2
-    );
+    const n = normalizeApplicableWeights(weights, result, run);
+    const weightedPartial =
+      components.tests * (n.tests ?? 0) +
+      components.nonCriticalJudges * (n.nonCriticalJudges ?? 0) +
+      components.lint * (n.lint ?? 0) +
+      components.precision * (n.precision ?? 0) +
+      components.duration * (n.duration ?? 0) +
+      components.cost * (n.cost ?? 0);
+    const bandRange = CRITICAL_FAIL_SCORE_BAND.max - CRITICAL_FAIL_SCORE_BAND.min;
+    const baseScore = CRITICAL_FAIL_SCORE_BAND.min + weightedPartial * bandRange;
     return Math.round(Math.min(CRITICAL_FAIL_SCORE_BAND.max, baseScore) * 10) / 10;
   }
 

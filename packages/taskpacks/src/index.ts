@@ -2,181 +2,28 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import {
   type CommandExecutionSpec,
-  type CommandJudge,
-  type CompilationJudge,
-  type DirectoryExistsJudge,
-  type FileContainsJudge,
-  type FileCountJudge,
-  type FileExistsJudge,
-  type GlobJudge,
-  type JsonSchemaJudge,
-  type JsonValueJudge,
   judgeTypeRegistry,
-  type LintCheckJudge,
-  type PatchValidationJudge,
-  type RegexMatchJudge,
-  type SnapshotJudge,
   TASK_PACK_SCHEMA_V1,
   type TaskJudge,
   type TaskPack,
   type TaskPackMetadata,
-  type TestResultJudge,
-  type TokenEfficiencyJudge,
   validateTaskPackId,
 } from "@agentarena/core";
 import { parse as parseYaml } from "yaml";
 
-function assertString(value: unknown, label: string): string {
-  if (typeof value !== "string") {
-    throw new Error(
-      `Task pack field "${label}" must be a string. ` +
-      `Received type: ${typeof value}. ` +
-      `Example: "${label}": "my-value"`
-    );
-  }
-  if (value.trim().length === 0) {
-    throw new Error(
-      `Task pack field "${label}" must be a non-empty string. ` +
-      `Received empty or whitespace-only string. ` +
-      `Example: "${label}": "my-value"`
-    );
-  }
-  return value;
-}
+import {
+  assertObject,
+  assertOptionalNonNegativeInteger,
+  assertOptionalNumber,
+  assertOptionalString,
+  assertString,
+  assertStringArray,
+  assertStringRecord,
+} from "./assert.js";
+import { JUDGE_NORMALIZERS } from "./normalizers.js";
 
-function assertOptionalString(value: unknown, label: string): string | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-  return assertString(value, label);
-}
-
-function assertOptionalPositiveInteger(value: unknown, label: string): number | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-  if (typeof value !== "number") {
-    throw new Error(
-      `Task pack field "${label}" must be a number. ` +
-      `Received type: ${typeof value}. ` +
-      `Example: "${label}": 1000`
-    );
-  }
-  if (!Number.isInteger(value)) {
-    throw new Error(
-      `Task pack field "${label}" must be an integer. ` +
-      `Received: ${value}. ` +
-      `Example: "${label}": 1000`
-    );
-  }
-  if (value <= 0) {
-    throw new Error(
-      `Task pack field "${label}" must be a positive integer. ` +
-      `Received: ${value}. ` +
-      `Example: "${label}": 1000`
-    );
-  }
-  return value;
-}
-
-function assertOptionalNumber(value: unknown, label: string): number | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-  if (typeof value !== "number") {
-    throw new Error(
-      `Task pack field "${label}" must be a number. ` +
-      `Received type: ${typeof value}. ` +
-      `Example: "${label}": 1.5`
-    );
-  }
-  return value;
-}
-
-function assertOptionalBoolean(value: unknown, label: string): boolean | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-  if (typeof value !== "boolean") {
-    throw new Error(
-      `Task pack field "${label}" must be a boolean. ` +
-      `Received type: ${typeof value}. ` +
-      `Example: "${label}": true`
-    );
-  }
-  return value;
-}
-
-function assertOptionalNonNegativeInteger(value: unknown, label: string): number | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-  if (typeof value !== "number") {
-    throw new Error(
-      `Task pack field "${label}" must be a number. ` +
-      `Received type: ${typeof value}. ` +
-      `Example: "${label}": 0`
-    );
-  }
-  if (!Number.isInteger(value)) {
-    throw new Error(
-      `Task pack field "${label}" must be an integer. ` +
-      `Received: ${value}. ` +
-      `Example: "${label}": 0`
-    );
-  }
-  if (value < 0) {
-    throw new Error(
-      `Task pack field "${label}" must be a non-negative integer. ` +
-      `Received: ${value}. ` +
-      `Example: "${label}": 0`
-    );
-  }
-  return value;
-}
-
-function assertStringArray(value: unknown, label: string): string[] {
-  if (value === undefined) {
-    return [];
-  }
-  if (!Array.isArray(value)) {
-    throw new Error(
-      `Task pack field "${label}" must be an array. ` +
-      `Received type: ${typeof value}. ` +
-      `Example: "${label}": ["value1", "value2"]`
-    );
-  }
-  return value.map((entry, index) => assertString(entry, `${label}[${index}]`));
-}
-
-function assertStringRecord(value: unknown, label: string): Record<string, string> | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(
-      `Task pack field "${label}" must be an object. ` +
-      `Received type: ${Array.isArray(value) ? "array" : typeof value}. ` +
-      `Example: "${label}": { "KEY": "value" }`
-    );
-  }
-  const entries = Object.entries(value as Record<string, unknown>).map(([key, entryValue]) => [
-    key,
-    assertString(entryValue, `${label}.${key}`)
-  ]);
-  return Object.fromEntries(entries);
-}
-
-function assertObject(value: unknown, label: string): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(
-      `Task pack field "${label}" must be an object. ` +
-      `Received type: ${Array.isArray(value) ? "array" : typeof value}. ` +
-      `Example: "${label}": { "key": "value" }`
-    );
-  }
-  return value as Record<string, unknown>;
-}
+// Re-export for external consumers
+export { JUDGE_NORMALIZERS } from "./normalizers.js";
 
 function normalizeMetadata(value: unknown): TaskPackMetadata | undefined {
   if (value === undefined) {
@@ -188,8 +35,7 @@ function normalizeMetadata(value: unknown): TaskPackMetadata | undefined {
   if (source !== "official" && source !== "community") {
     throw new Error(
       `Task pack field "metadata.source" must be "official" or "community". ` +
-      `Received: "${source}". ` +
-      `Example: "metadata": { "source": "official", "owner": "AgentArena" }`
+      `Received: "${source}".`
     );
   }
 
@@ -218,7 +64,7 @@ function normalizeMetadata(value: unknown): TaskPackMetadata | undefined {
   }
 
   return {
-    source,
+    source: source as "official" | "community",
     owner: assertString(metadata.owner, "metadata.owner"),
     difficulty: difficulty as "easy" | "medium" | "hard" | undefined,
     objective: assertOptionalString(metadata.objective, "metadata.objective"),
@@ -227,20 +73,15 @@ function normalizeMetadata(value: unknown): TaskPackMetadata | undefined {
     dependencies: assertStringArray(metadata.dependencies, "metadata.dependencies"),
     judgeRationale: assertOptionalString(metadata.judgeRationale, "metadata.judgeRationale"),
     differentiator: assertOptionalString(metadata.differentiator, "metadata.differentiator"),
-
-    // === SWE-Bench Extensions ===
     githubIssue: metadata.githubIssue === undefined ? undefined : normalizeGithubIssue(metadata.githubIssue),
     failToPassTests: assertStringArray(metadata.failToPassTests, "metadata.failToPassTests"),
     passToPassTests: assertStringArray(metadata.passToPassTests, "metadata.passToPassTests"),
-
-    // === CursorBench Extensions ===
     tokenBudget: (() => {
       const val = assertOptionalNumber(metadata.tokenBudget, "metadata.tokenBudget");
       if (val !== undefined && val <= 0) {
         throw new Error(
           `Task pack field "metadata.tokenBudget" must be a positive number. ` +
-          `Received: ${val}. ` +
-          `Example: "metadata": { "tokenBudget": 1000 }`
+          `Received: ${val}.`
         );
       }
       return val;
@@ -248,8 +89,6 @@ function normalizeMetadata(value: unknown): TaskPackMetadata | undefined {
     efficiencyTarget: assertOptionalNumber(metadata.efficiencyTarget, "metadata.efficiencyTarget"),
     interactionModel: interactionModel as "single-turn" | "multi-turn" | undefined,
     requirementClarity: requirementClarity as "precise" | "fuzzy" | "ambiguous" | undefined,
-
-    // === LiveBench Extensions ===
     taskCategories: assertStringArray(metadata.taskCategories, "metadata.taskCategories"),
     antiContamination: metadata.antiContamination === undefined ? undefined : normalizeAntiContamination(metadata.antiContamination),
     difficultyEvolution: metadata.difficultyEvolution === undefined ? undefined : normalizeDifficultyEvolution(metadata.difficultyEvolution)
@@ -261,7 +100,7 @@ function normalizeGithubIssue(value: unknown): NonNullable<TaskPackMetadata["git
   return {
     owner: assertOptionalString(obj.owner, "metadata.githubIssue.owner") ?? "",
     repo: assertOptionalString(obj.repo, "metadata.githubIssue.repo") ?? "",
-    issueNumber: assertOptionalPositiveInteger(obj.issueNumber, "metadata.githubIssue.issueNumber") ?? assertOptionalPositiveInteger(obj.number, "metadata.githubIssue.number") ?? 0,
+    issueNumber: assertOptionalNonNegativeInteger(obj.issueNumber, "metadata.githubIssue.issueNumber") ?? assertOptionalNonNegativeInteger(obj.number, "metadata.githubIssue.number") ?? 0,
     baseCommit: assertOptionalString(obj.baseCommit, "metadata.githubIssue.baseCommit") ?? "",
     testCommit: assertOptionalString(obj.testCommit, "metadata.githubIssue.testCommit") ?? "",
     patchPath: assertOptionalString(obj.patchPath, "metadata.githubIssue.patchPath")
@@ -284,6 +123,19 @@ function normalizeDifficultyEvolution(value: unknown): NonNullable<TaskPackMetad
     generation: assertOptionalNonNegativeInteger(obj.generation, "metadata.difficultyEvolution.generation") ?? 0,
     predecessorTaskId: assertOptionalString(obj.predecessorTaskId, "metadata.difficultyEvolution.predecessorTaskId")
   };
+}
+
+// Helper for normalizer to access assertOptionalBoolean
+function assertOptionalBooleanLocal(value: unknown, label: string): boolean | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "boolean") {
+    throw new Error(
+      `Task pack field "${label}" must be a boolean. Received type: ${typeof value}.`
+    );
+  }
+  return value;
 }
 
 function normalizeJudge(
@@ -312,284 +164,17 @@ function normalizeJudge(
   const label = assertString(value.label, `judges[${index}].label`);
   const critical = value.critical === undefined
     ? (descriptor?.isCriticalByDefault ?? false)
-    : (assertOptionalBoolean(value.critical, `judges[${index}].critical`) ?? false);
+    : (assertOptionalBooleanLocal(value.critical, `judges[${index}].critical`) ?? false);
 
-  if (type === "command") {
-    const judge: CommandJudge = {
-      id,
-      label,
-      type: "command",
-      critical,
-      command: assertString(value.command, `judges[${index}].command`),
-      cwd: assertOptionalString(value.cwd, `judges[${index}].cwd`),
-      timeoutMs: assertOptionalPositiveInteger(value.timeoutMs, `judges[${index}].timeoutMs`),
-      envAllowList: assertStringArray(value.envAllowList, `judges[${index}].envAllowList`),
-      env: assertStringRecord(value.env, `judges[${index}].env`)
-    };
-    return judge;
-  }
-
-  if (type === "test-result") {
-    const judge: TestResultJudge = {
-      id,
-      label,
-      type: "test-result",
-      critical,
-      command: assertString(value.command, `judges[${index}].command`),
-      cwd: assertOptionalString(value.cwd, `judges[${index}].cwd`),
-      timeoutMs: assertOptionalPositiveInteger(value.timeoutMs, `judges[${index}].timeoutMs`),
-      envAllowList: assertStringArray(value.envAllowList, `judges[${index}].envAllowList`),
-      env: assertStringRecord(value.env, `judges[${index}].env`),
-      format: (assertOptionalString(value.format, `judges[${index}].format`) as TestResultJudge["format"] | undefined) ?? "auto",
-      reportFile: assertOptionalString(value.reportFile, `judges[${index}].reportFile`),
-      passOnNoTests: assertOptionalBoolean(value.passOnNoTests, `judges[${index}].passOnNoTests`)
-    };
-    return judge;
-  }
-
-  if (type === "lint-check") {
-    const judge: LintCheckJudge = {
-      id,
-      label,
-      type: "lint-check",
-      critical,
-      command: assertString(value.command, `judges[${index}].command`),
-      cwd: assertOptionalString(value.cwd, `judges[${index}].cwd`),
-      timeoutMs: assertOptionalPositiveInteger(value.timeoutMs, `judges[${index}].timeoutMs`),
-      envAllowList: assertStringArray(value.envAllowList, `judges[${index}].envAllowList`),
-      env: assertStringRecord(value.env, `judges[${index}].env`),
-      format: (assertOptionalString(value.format, `judges[${index}].format`) as LintCheckJudge["format"] | undefined) ?? "auto",
-      reportFile: assertOptionalString(value.reportFile, `judges[${index}].reportFile`),
-      maxWarnings: assertOptionalNonNegativeInteger(value.maxWarnings, `judges[${index}].maxWarnings`)
-    };
-    return judge;
-  }
-
-  if (type === "file-exists") {
-    const judge: FileExistsJudge = {
-      id,
-      label,
-      type: "file-exists",
-      critical,
-      path: assertString(value.path, `judges[${index}].path`)
-    };
-    return judge;
-  }
-
-  if (type === "file-contains") {
-    const judge: FileContainsJudge = {
-      id,
-      label,
-      type: "file-contains",
-      critical,
-      path: assertString(value.path, `judges[${index}].path`),
-      pattern: assertString(value.pattern, `judges[${index}].pattern`),
-      regex: assertOptionalBoolean(value.regex, `judges[${index}].regex`),
-      flags: assertOptionalString(value.flags, `judges[${index}].flags`)
-    };
-    return judge;
-  }
-
-  if (type === "json-value") {
-    if (!Object.hasOwn(value, "expected")) {
-      throw new Error(
-        `Task pack field "judges[${index}].expected" is required for type "json-value". ` +
-        `Example: { "type": "json-value", "path": "data.json", "pointer": "/status", "expected": "ready" }`
-      );
-    }
-
-    const judge: JsonValueJudge = {
-      id,
-      label,
-      type: "json-value",
-      critical,
-      path: assertString(value.path, `judges[${index}].path`),
-      pointer: assertString(value.pointer, `judges[${index}].pointer`),
-      expected: value.expected
-    };
-    return judge;
-  }
-
-  if (type === "glob") {
-    const judge: GlobJudge = {
-      id,
-      label,
-      type: "glob",
-      critical,
-      pattern: assertString(value.pattern, `judges[${index}].pattern`),
-      minMatches: assertOptionalNonNegativeInteger(value.minMatches, `judges[${index}].minMatches`),
-      maxMatches: assertOptionalNonNegativeInteger(value.maxMatches, `judges[${index}].maxMatches`)
-    };
-    if (judge.minMatches !== undefined && judge.maxMatches !== undefined && judge.minMatches > judge.maxMatches) {
-      throw new Error(
-        `Task pack judge at index ${index}: minMatches (${judge.minMatches}) must be <= maxMatches (${judge.maxMatches}).`
-      );
-    }
-    return judge;
-  }
-
-  if (type === "file-count") {
-    const judge: FileCountJudge = {
-      id,
-      label,
-      type: "file-count",
-      critical,
-      pattern: assertString(value.pattern, `judges[${index}].pattern`),
-      equals: assertOptionalNonNegativeInteger(value.equals, `judges[${index}].equals`),
-      min: assertOptionalNonNegativeInteger(value.min, `judges[${index}].min`),
-      max: assertOptionalNonNegativeInteger(value.max, `judges[${index}].max`)
-    };
-
-    if (judge.equals === undefined && judge.min === undefined && judge.max === undefined) {
-      throw new Error(
-        `Task pack field "judges[${index}]" for type "file-count" must define equals, min, or max. ` +
-        `Example: { "type": "file-count", "pattern": "*.ts", "min": 1, "max": 10 }`
-      );
-    }
-    if (judge.min !== undefined && judge.max !== undefined && judge.min > judge.max) {
-      throw new Error(
-        `Task pack judge at index ${index}: min (${judge.min}) must be <= max (${judge.max}).`
-      );
-    }
-
-    return judge;
-  }
-
-  if (type === "snapshot") {
-    const judge: SnapshotJudge = {
-      id,
-      label,
-      type: "snapshot",
-      critical,
-      path: assertString(value.path, `judges[${index}].path`),
-      snapshotPath: assertString(value.snapshotPath, `judges[${index}].snapshotPath`)
-    };
-    return judge;
-  }
-
-  if (type === "json-schema") {
-    const schema = value.schema === undefined ? undefined : assertObject(value.schema, `judges[${index}].schema`);
-    const schemaPath = assertOptionalString(value.schemaPath, `judges[${index}].schemaPath`);
-    if (!schema && !schemaPath) {
-      throw new Error(
-        `Task pack field "judges[${index}]" for type "json-schema" must define schema or schemaPath. ` +
-        `Example with inline schema: { "type": "json-schema", "path": "data.json", "schema": { "type": "object" } } ` +
-        `Example with schema file: { "type": "json-schema", "path": "data.json", "schemaPath": "schema.json" }`
-      );
-    }
-
-    const judge: JsonSchemaJudge = {
-      id,
-      label,
-      type: "json-schema",
-      critical,
-      path: assertString(value.path, `judges[${index}].path`),
-      schema,
-      schemaPath
-    };
-    return judge;
-  }
-
-  if (type === "patch-validation") {
-    const judge: PatchValidationJudge = {
-      id,
-      label,
-      type: "patch-validation",
-      critical,
-      testSuite: assertString(value.testSuite, `judges[${index}].testSuite`),
-      failToPassTests: assertStringArray(value.failToPassTests, `judges[${index}].failToPassTests`),
-      passToPassTests: assertStringArray(value.passToPassTests, `judges[${index}].passToPassTests`),
-      command: assertOptionalString(value.command, `judges[${index}].command`) ?? "",
-      cwd: assertOptionalString(value.cwd, `judges[${index}].cwd`),
-      timeoutMs: assertOptionalPositiveInteger(value.timeoutMs, `judges[${index}].timeoutMs`),
-      envAllowList: assertStringArray(value.envAllowList, `judges[${index}].envAllowList`),
-      env: assertStringRecord(value.env, `judges[${index}].env`)
-    };
-    return judge;
-  }
-
-  if (type === "token-efficiency") {
-    const judge: TokenEfficiencyJudge = {
-      id,
-      label,
-      type: "token-efficiency",
-      critical,
-      tokenBudget: assertOptionalPositiveInteger(value.tokenBudget, `judges[${index}].tokenBudget`)
-    };
-    return judge;
-  }
-
-  if (type === "directory-exists") {
-    const judge: DirectoryExistsJudge = {
-      id,
-      label,
-      type: "directory-exists",
-      critical,
-      path: assertString(value.path, `judges[${index}].path`)
-    };
-    return judge;
-  }
-
-  if (type === "regex-match") {
-    const judge: RegexMatchJudge = {
-      id,
-      label,
-      type: "regex-match",
-      critical,
-      path: assertString(value.path, `judges[${index}].path`),
-      pattern: assertString(value.pattern, `judges[${index}].pattern`),
-      flags: assertOptionalString(value.flags, `judges[${index}].flags`),
-      shouldNotMatch: assertOptionalBoolean(value.shouldNotMatch, `judges[${index}].shouldNotMatch`),
-      minMatches: assertOptionalNonNegativeInteger(value.minMatches, `judges[${index}].minMatches`),
-      maxMatches: assertOptionalNonNegativeInteger(value.maxMatches, `judges[${index}].maxMatches`)
-    };
-
-    if (judge.minMatches !== undefined && judge.maxMatches !== undefined && judge.maxMatches > 0 && judge.minMatches > judge.maxMatches) {
-      throw new Error(
-        `Task pack judge at index ${index}: minMatches (${judge.minMatches}) must be <= maxMatches (${judge.maxMatches}).`
-      );
-    }
-    return judge;
-  }
-
-  if (type === "compilation") {
-    const validTools = ["auto", "npm", "pnpm", "yarn", "cargo", "go", "make", "gradle", "maven"];
-    const tool = assertOptionalString(value.tool, `judges[${index}].tool`) as CompilationJudge["tool"] | undefined;
-    if (tool && !validTools.includes(tool)) {
-      throw new Error(
-        `Task pack judge at index ${index}: invalid compilation tool "${tool}". ` +
-        `Valid options: ${validTools.join(", ")}.`
-      );
-    }
-
-    const command = assertOptionalString(value.command, `judges[${index}].command`);
-    const cwd = assertOptionalString(value.cwd, `judges[${index}].cwd`);
-    const timeoutMs = assertOptionalPositiveInteger(value.timeoutMs, `judges[${index}].timeoutMs`);
-    const envAllowList = assertStringArray(value.envAllowList, `judges[${index}].envAllowList`);
-    const env = assertStringRecord(value.env, `judges[${index}].env`);
-    const buildArgs = assertStringArray(value.buildArgs, `judges[${index}].buildArgs`);
-
-    const judge: CompilationJudge = {
-      id,
-      label,
-      type: "compilation",
-      critical,
-      ...(command ? { command } : {}),
-      ...(cwd ? { cwd } : {}),
-      ...(timeoutMs ? { timeoutMs } : {}),
-      ...(envAllowList.length > 0 ? { envAllowList } : {}),
-      ...(env ? { env } : {}),
-      ...(tool ? { tool } : {}),
-      ...(buildArgs.length > 0 ? { buildArgs } : {})
-    };
-    return judge;
+  const normalizer = JUDGE_NORMALIZERS[type];
+  if (normalizer) {
+    return normalizer(value, index, id, label, critical);
   }
 
   const supportedTypes = judgeTypeRegistry.getAllTypes();
   throw new Error(
     `Task pack judge at index ${index} has unsupported type "${String(type)}". ` +
-    `Supported types: ${supportedTypes.join(", ")}. ` +
-    `Example: { "type": "file-exists", "label": "README exists", "path": "README.md" }`
+    `Supported types: ${supportedTypes.join(", ")}.`
   );
 }
 
@@ -606,7 +191,7 @@ function normalizeCommandSpec(
     label: assertString(value.label, `${fieldName}[${index}].label`),
     command: assertString(value.command, `${fieldName}[${index}].command`),
     cwd: assertOptionalString(value.cwd, `${fieldName}[${index}].cwd`),
-    timeoutMs: assertOptionalPositiveInteger(value.timeoutMs, `${fieldName}[${index}].timeoutMs`),
+    timeoutMs: assertOptionalNonNegativeInteger(value.timeoutMs, `${fieldName}[${index}].timeoutMs`),
     envAllowList: assertStringArray(value.envAllowList, `${fieldName}[${index}].envAllowList`),
     env: assertStringRecord(value.env, `${fieldName}[${index}].env`)
   };
@@ -619,8 +204,7 @@ export async function loadTaskPack(taskPath: string): Promise<TaskPack> {
   if (![".json", ".yaml", ".yml"].includes(extension)) {
     throw new Error(
       `AgentArena task packs must use .json, .yaml, or .yml extensions. ` +
-      `Received file: "${path.basename(taskPath)}" with extension "${extension}". ` +
-      `Example: "my-task.yaml" or "my-task.json"`
+      `Received file: "${path.basename(taskPath)}" with extension "${extension}".`
     );
   }
 
@@ -630,16 +214,10 @@ export async function loadTaskPack(taskPath: string): Promise<TaskPack> {
   } catch (error) {
     const errorCode = (error as NodeJS.ErrnoException).code;
     if (errorCode === "ENOENT") {
-      throw new Error(
-        `Task pack file not found: "${resolvedPath}". ` +
-        `Please check the file path and ensure the file exists.`
-      );
+      throw new Error(`Task pack file not found: "${resolvedPath}".`);
     }
     if (errorCode === "EACCES") {
-      throw new Error(
-        `Permission denied reading task pack file: "${resolvedPath}". ` +
-        `Please check file permissions.`
-      );
+      throw new Error(`Permission denied reading task pack file: "${resolvedPath}".`);
     }
     throw new Error(
       `Failed to read task pack file: "${resolvedPath}". ` +
@@ -665,59 +243,40 @@ export async function loadTaskPack(taskPath: string): Promise<TaskPack> {
   if (!validateTaskPackId(taskId)) {
     throw new Error(
       `Task pack ID "${taskId}" is invalid. ` +
-      `IDs must be 1-64 lowercase alphanumeric characters with optional hyphens, ` +
-      `starting and ending with an alphanumeric character. ` +
-      `Example: "my-task-pack"`
+      `IDs must be 1-64 lowercase alphanumeric characters with optional hyphens, starting and ending with an alphanumeric character.`
     );
   }
-  const schemaVersion =
-    parsed.schemaVersion === undefined
-      ? TASK_PACK_SCHEMA_V1
-      : assertString(parsed.schemaVersion, "schemaVersion");
+
+  const schemaVersion = parsed.schemaVersion === undefined
+    ? TASK_PACK_SCHEMA_V1
+    : assertString(parsed.schemaVersion, "schemaVersion");
 
   if (schemaVersion !== TASK_PACK_SCHEMA_V1) {
     throw new Error(
-      `Unsupported task pack schema version "${schemaVersion}". ` +
-      `Expected: "${TASK_PACK_SCHEMA_V1}". ` +
-      `Please update your task pack to use the current schema version.`
+      `Unsupported task pack schema version "${schemaVersion}". Expected: "${TASK_PACK_SCHEMA_V1}".`
     );
   }
 
-  // Strict schema validation: reject unknown top-level fields
   const ALLOWED_TOP_LEVEL_FIELDS = new Set([
-    "schemaVersion",
-    "id",
-    "title",
-    "description",
-    "prompt",
-    "metadata",
-    "repoSource",
-    "expectedChangedPaths",
-    "envAllowList",
-    "setupCommands",
-    "judges",
-    "teardownCommands",
-    // Legacy field for backward compatibility
-    "successCommands"
+    "schemaVersion", "id", "title", "description", "prompt", "metadata",
+    "repoSource", "expectedChangedPaths", "envAllowList", "setupCommands",
+    "judges", "teardownCommands", "successCommands"
   ]);
 
   const unknownFields = Object.keys(parsed).filter((key) => !ALLOWED_TOP_LEVEL_FIELDS.has(key));
   if (unknownFields.length > 0) {
     console.warn(
       `Task pack contains ${unknownFields.length} unrecognized top-level field(s): ` +
-      `"${unknownFields.join('", "')}". ` +
-      `Allowed fields: ${Array.from(ALLOWED_TOP_LEVEL_FIELDS).sort().join(", ")}. ` +
-      `These fields will be ignored.`
+      `"${unknownFields.join('", "')}". These fields will be ignored.`
     );
   }
 
   if (parsed.judges !== undefined && parsed.judges !== null && !Array.isArray(parsed.judges)) {
     throw new Error(
-      `Task pack field "judges" must be an array. ` +
-      `Received type: ${typeof parsed.judges}. ` +
-      `Example: "judges": [{ "type": "file-exists", "label": "README", "path": "README.md" }]`
+      `Task pack field "judges" must be an array. Received type: ${typeof parsed.judges}.`
     );
   }
+
   const judgesInput = Array.isArray(parsed.judges)
     ? parsed.judges
     : Array.isArray(parsed.successCommands)
@@ -725,7 +284,6 @@ export async function loadTaskPack(taskPath: string): Promise<TaskPack> {
       : [];
   const setupCommandsInput = Array.isArray(parsed.setupCommands) ? parsed.setupCommands : [];
   const teardownCommandsInput = Array.isArray(parsed.teardownCommands) ? parsed.teardownCommands : [];
-
   const repoSource = assertOptionalString(parsed.repoSource, "repoSource");
 
   return {
@@ -742,27 +300,19 @@ export async function loadTaskPack(taskPath: string): Promise<TaskPack> {
       if (!value || typeof value !== "object") {
         throw new Error(`Task pack setup command at index ${index} must be an object.`);
       }
-
       return normalizeCommandSpec(value as Record<string, unknown>, index, "setupCommands", `${taskId}-setup`);
     }),
     judges: judgesInput.map((value, index) => {
       if (!value || typeof value !== "object") {
         throw new Error(`Task pack judge at index ${index} must be an object.`);
       }
-
       return normalizeJudge(value as Record<string, unknown>, index, taskId);
     }),
     teardownCommands: teardownCommandsInput.map((value, index) => {
       if (!value || typeof value !== "object") {
         throw new Error(`Task pack teardown command at index ${index} must be an object.`);
       }
-
-      return normalizeCommandSpec(
-        value as Record<string, unknown>,
-        index,
-        "teardownCommands",
-        `${taskId}-teardown`
-      );
+      return normalizeCommandSpec(value as Record<string, unknown>, index, "teardownCommands", `${taskId}-teardown`);
     })
   };
 }
@@ -771,39 +321,32 @@ export async function loadTaskPack(taskPath: string): Promise<TaskPack> {
  * Conflict detected between multiple task packs.
  */
 export interface TaskPackConflict {
-  /** IDs of the conflicting task packs. */
   taskPackIds: string[];
-  /** Type of conflict. */
   type: "duplicate-id" | "conflicting-setup" | "conflicting-teardown" | "env-allowlist-mismatch";
-  /** Human-readable description of the conflict. */
   message: string;
 }
 
 /**
  * Detect potential conflicts when combining multiple task packs.
- * Useful for validating task pack combinations before running benchmarks.
  */
 export function detectTaskPackConflicts(taskPacks: Array<{ id: string; setupCommands: Array<{ id: string; command: string }>; teardownCommands: Array<{ id: string; command: string }>; envAllowList: string[] }>): TaskPackConflict[] {
   const conflicts: TaskPackConflict[] = [];
-
-  // Check for duplicate IDs
   const idCounts = new Map<string, string[]>();
   for (const pack of taskPacks) {
     const existing = idCounts.get(pack.id) ?? [];
     existing.push(pack.id);
     idCounts.set(pack.id, existing);
   }
-  for (const [id, ids] of idCounts) {
+  for (const [, ids] of idCounts) {
     if (ids.length > 1) {
       conflicts.push({
         taskPackIds: ids,
         type: "duplicate-id",
-        message: `Multiple task packs share the same id "${id}". Each task pack must have a unique id.`
+        message: `Multiple task packs share the same id. Each task pack must have a unique id.`
       });
     }
   }
 
-  // Check for conflicting setup command IDs
   const setupIds = new Map<string, string[]>();
   for (const pack of taskPacks) {
     for (const cmd of pack.setupCommands) {
@@ -812,17 +355,16 @@ export function detectTaskPackConflicts(taskPacks: Array<{ id: string; setupComm
       setupIds.set(cmd.id, existing);
     }
   }
-  for (const [id, ids] of setupIds) {
+  for (const [, ids] of setupIds) {
     if (ids.length > 1) {
       conflicts.push({
         taskPackIds: [...new Set(ids)],
         type: "conflicting-setup",
-        message: `Setup command id "${id}" is used by multiple task packs: ${[...new Set(ids)].join(", ")}. This may cause unexpected behavior when combined.`
+        message: `Setup command id is used by multiple task packs. This may cause unexpected behavior when combined.`
       });
     }
   }
 
-  // Check for conflicting teardown command IDs
   const teardownIds = new Map<string, string[]>();
   for (const pack of taskPacks) {
     for (const cmd of pack.teardownCommands) {
@@ -831,12 +373,12 @@ export function detectTaskPackConflicts(taskPacks: Array<{ id: string; setupComm
       teardownIds.set(cmd.id, existing);
     }
   }
-  for (const [id, ids] of teardownIds) {
+  for (const [, ids] of teardownIds) {
     if (ids.length > 1) {
       conflicts.push({
         taskPackIds: [...new Set(ids)],
         type: "conflicting-teardown",
-        message: `Teardown command id "${id}" is used by multiple task packs: ${[...new Set(ids)].join(", ")}. This may cause unexpected behavior when combined.`
+        message: `Teardown command id is used by multiple task packs. This may cause unexpected behavior when combined.`
       });
     }
   }

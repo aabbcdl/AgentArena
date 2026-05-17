@@ -18,6 +18,8 @@ It helps answer questions like:
 
 AgentArena is local-first by default. You point it at your own repository, task pack, and locally installed agent CLIs. AgentArena handles shared setup, execution, judges, traces, and reports.
 
+See **[docs/ui-and-adapters.md](./docs/ui-and-adapters.md)** for local UI bind address & auth rules, doctor/preflight semantics, and related contract tests. Quantitative line coverage: `pnpm test:coverage` (Node `--experimental-test-coverage`).
+
 ## Try It in 60 Seconds
 
 No agent CLI needed. Just clone and run:

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import fs from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
 import test from "node:test";
@@ -47,7 +48,15 @@ function waitForServer(port, timeoutMs = 10000) {
     const check = () => {
       const req = http.get(`http://127.0.0.1:${port}/api/ui-info`, (res) => {
         res.resume();
-        resolve();
+        if (res.statusCode === 200) {
+          resolve();
+        } else {
+          if (Date.now() > deadline) {
+            reject(new Error(`Server returned ${res.statusCode} and did not become ready within timeout`));
+          } else {
+            setTimeout(check, 200);
+          }
+        }
       });
       req.on("error", () => {
         if (Date.now() > deadline) {
@@ -86,7 +95,7 @@ async function startServer(port) {
 // Use a unique port for each test run to avoid conflicts
 const BASE_PORT = 4320 + Math.floor(Math.random() * 1000);
 
-test("GET /api/ui-info returns correct structure", async () => {
+test("GET /api/ui-info returns correct structure", { timeout: 60_000 }, async () => {
   const port = BASE_PORT;
   const { child } = await startServer(port);
   try {
@@ -101,7 +110,7 @@ test("GET /api/ui-info returns correct structure", async () => {
   }
 });
 
-test("GET /api/adapters returns adapter list", async () => {
+test("GET /api/adapters returns adapter list", { timeout: 60_000 }, async () => {
   const port = BASE_PORT + 1;
   const { child } = await startServer(port);
   try {
@@ -117,7 +126,7 @@ test("GET /api/adapters returns adapter list", async () => {
   }
 });
 
-test("POST /api/run with empty body returns 400", async () => {
+test("POST /api/run with empty body returns 400", { timeout: 60_000 }, async () => {
   const port = BASE_PORT + 2;
   const { child, authToken } = await startServer(port);
   try {
@@ -129,7 +138,7 @@ test("POST /api/run with empty body returns 400", async () => {
   }
 });
 
-test("POST /api/run missing agents returns 400", async () => {
+test("POST /api/run missing agents returns 400", { timeout: 60_000 }, async () => {
   const port = BASE_PORT + 3;
   const { child, authToken } = await startServer(port);
   try {
@@ -144,7 +153,7 @@ test("POST /api/run missing agents returns 400", async () => {
   }
 });
 
-test("POST /api/preflight missing baseAgentId returns 400", async () => {
+test("POST /api/preflight missing baseAgentId returns 400", { timeout: 60_000 }, async () => {
   const port = BASE_PORT + 4;
   const { child, authToken } = await startServer(port);
   try {
@@ -156,7 +165,7 @@ test("POST /api/preflight missing baseAgentId returns 400", async () => {
   }
 });
 
-test("POST /api/create-adhoc-taskpack missing prompt returns 400", async () => {
+test("POST /api/create-adhoc-taskpack missing prompt returns 400", { timeout: 60_000 }, async () => {
   const port = BASE_PORT + 5;
   const { child, authToken } = await startServer(port);
   try {
@@ -168,7 +177,7 @@ test("POST /api/create-adhoc-taskpack missing prompt returns 400", async () => {
   }
 });
 
-test("POST /api/provider-profiles missing required fields returns 400", async () => {
+test("POST /api/provider-profiles missing required fields returns 400", { timeout: 60_000 }, async () => {
   const port = BASE_PORT + 6;
   const { child, authToken } = await startServer(port);
   try {
@@ -180,7 +189,7 @@ test("POST /api/provider-profiles missing required fields returns 400", async ()
   }
 });
 
-test("GET static file path traversal is blocked", async () => {
+test("GET static file path traversal is blocked", { timeout: 60_000 }, async () => {
   const port = BASE_PORT + 7;
   const { child } = await startServer(port);
   try {
@@ -198,7 +207,7 @@ test("GET static file path traversal is blocked", async () => {
   }
 });
 
-test("POST /api/run concurrent requests return 409", async () => {
+test("POST /api/run concurrent requests return 409", { timeout: 60_000 }, async () => {
   const port = BASE_PORT + 8;
   const { child, authToken } = await startServer(port);
   try {
@@ -221,7 +230,7 @@ test("POST /api/run concurrent requests return 409", async () => {
   }
 });
 
-test("POST /api/run valid request returns 202", async () => {
+test("POST /api/run valid request returns 202", { timeout: 60_000 }, async () => {
   const port = BASE_PORT + 9;
   const { child, authToken } = await startServer(port);
   try {
@@ -239,7 +248,7 @@ test("POST /api/run valid request returns 202", async () => {
   }
 });
 
-test("Rate limit returns 429 after many requests", async () => {
+test("Rate limit returns 429 after many requests", { timeout: 60_000 }, async () => {
   const port = BASE_PORT + 10;
   const { child } = await startServer(port);
   try {
@@ -257,7 +266,7 @@ test("Rate limit returns 429 after many requests", async () => {
   }
 });
 
-test("localhost GET /api/ui-info works without token", async () => {
+test("localhost GET /api/ui-info works without token", { timeout: 60_000 }, async () => {
   const port = BASE_PORT + 20;
   const { child } = await startServer(port);
   try {
@@ -268,7 +277,7 @@ test("localhost GET /api/ui-info works without token", async () => {
   }
 });
 
-test("localhost POST /api/run requires token", async () => {
+test("localhost POST /api/run requires token", { timeout: 60_000 }, async () => {
   const port = BASE_PORT + 21;
   const { child } = await startServer(port);
   try {
@@ -279,7 +288,7 @@ test("localhost POST /api/run requires token", async () => {
   }
 });
 
-test("localhost POST /api/run with valid token returns non-401", async () => {
+test("localhost POST /api/run with valid token returns non-401", { timeout: 60_000 }, async () => {
   const port = BASE_PORT + 22;
   const { child, authToken } = await startServer(port);
   try {
@@ -290,7 +299,7 @@ test("localhost POST /api/run with valid token returns non-401", async () => {
   }
 });
 
-test("POST /api/preflight requires auth token", async () => {
+test("POST /api/preflight requires auth token", { timeout: 60_000 }, async () => {
   const port = BASE_PORT + 31;
   const { child } = await startServer(port);
   try {
@@ -301,7 +310,7 @@ test("POST /api/preflight requires auth token", async () => {
   }
 });
 
-test("POST /api/create-adhoc-taskpack requires auth token", async () => {
+test("POST /api/create-adhoc-taskpack requires auth token", { timeout: 60_000 }, async () => {
   const port = BASE_PORT + 32;
   const { child } = await startServer(port);
   try {
@@ -312,8 +321,11 @@ test("POST /api/create-adhoc-taskpack requires auth token", async () => {
   }
 });
 
-test("GET /api/run-status returns idle when no run active", async () => {
+test("GET /api/run-status returns idle when no run active", { timeout: 60_000 }, async () => {
   const port = BASE_PORT + 33;
+  // Clean up any persisted run state from previous tests
+  const stateDir = path.join(process.cwd(), ".agentarena", "ui");
+  try { await fs.rm(stateDir, { recursive: true, force: true }); } catch {}
   const { child } = await startServer(port);
   try {
     const res = await request(port, "GET", "/api/run-status");

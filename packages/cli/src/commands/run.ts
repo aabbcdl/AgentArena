@@ -34,30 +34,20 @@ export async function runBenchmarkCommand(
   }
 
   if (!parsed.taskPath) {
-    console.error(
-      `❌ 缺少必需参数：--task / Missing required argument: --task`,
+    throw new Error(
+      "Missing required argument: --task\n" +
+        "A task pack file path is required\n" +
+        "Example: agentarena run --repo . --task taskpack.yaml --agents demo-fast",
     );
-    console.error(
-      `原因：需要指定任务包文件路径 / A task pack file path is required`,
-    );
-    console.error(
-      `解决方法：agentarena run --repo . --task taskpack.yaml --agents demo-fast`,
-    );
-    process.exit(1);
   }
 
   if (parsed.agentIds.length === 0) {
-    console.error(
-      `❌ 缺少必需参数：--agents / Missing required argument: --agents`,
+    throw new Error(
+      "Missing required argument: --agents\n" +
+        "At least one agent is required\n" +
+        "Example: agentarena run --repo . --task taskpack.yaml --agents demo-fast\n" +
+        'List available: agentarena list-adapters',
     );
-    console.error(
-      `原因：需要指定至少一个要测试的 AI 代理 / At least one agent is required`,
-    );
-    console.error(
-      `解决方法：agentarena run --repo . --task taskpack.yaml --agents demo-fast`,
-    );
-    console.error(`查看可用代理 / List available: agentarena list-adapters`);
-    process.exit(1);
   }
 
   // Validate repo path exists
@@ -68,16 +58,11 @@ export async function runBenchmarkCommand(
     }
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      console.error(
-        `❌ --repo 路径不存在：${parsed.repoPath} / --repo path not found: ${parsed.repoPath}`,
+      throw new Error(
+        `--repo path not found: ${parsed.repoPath}\n` +
+          "The specified repository path does not exist\n" +
+          "Check the path or create the directory",
       );
-      console.error(
-        `原因：指定的代码仓库路径不存在 / The specified repository path does not exist`,
-      );
-      console.error(
-        `解决方法：检查路径是否正确，或先创建该目录 / Check the path or create the directory`,
-      );
-      process.exit(1);
     }
     throw error;
   }
@@ -87,16 +72,11 @@ export async function runBenchmarkCommand(
     await fs.access(parsed.taskPath);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      console.error(
-        `❌ --task 文件不存在：${parsed.taskPath} / --task file not found: ${parsed.taskPath}`,
+      throw new Error(
+        `--task file not found: ${parsed.taskPath}\n` +
+          "The specified task pack file does not exist\n" +
+          "Check the file path or run agentarena init-taskpack to create one",
       );
-      console.error(
-        `原因：指定的任务包文件不存在 / The specified task pack file does not exist`,
-      );
-      console.error(
-        `解决方法：检查文件路径，或运行 agentarena init-taskpack 创建新任务包`,
-      );
-      process.exit(1);
     }
     throw error;
   }
@@ -107,15 +87,12 @@ export async function runBenchmarkCommand(
     (id) => !availableIds.includes(id),
   );
   if (invalidAgents.length > 0) {
-    console.error(
-      `❌ 未知的代理：${invalidAgents.join(", ")} / Unknown agents: ${invalidAgents.join(", ")}`,
+    throw new Error(
+      `Unknown agents: ${invalidAgents.join(", ")}\n` +
+        "These agents are not installed or do not exist\n" +
+        `Available: ${availableIds.join(", ")}\n` +
+        'Details: agentarena list-adapters',
     );
-    console.error(
-      `原因：这些代理未安装或不存在 / These agents are not installed or does not exist`,
-    );
-    console.error(`可用代理 / Available: ${availableIds.join(", ")}`);
-    console.error(`查看详情 / Details: agentarena list-adapters`);
-    process.exit(1);
   }
 
   const selections = normalizeCliSelections(parsed);
@@ -207,21 +184,28 @@ export async function runBenchmarkCommand(
   let varianceReportText: string | null = null;
   try {
     const allRunFiles = await fs.readdir(runsDir);
-    const previousRuns = await Promise.all(
-      allRunFiles
-        .filter((f) => f.endsWith(".json"))
-        .map(async (f) => {
-          try {
-            const content = await fs.readFile(
-              path.join(runsDir, f),
-              "utf8",
-            );
-            return JSON.parse(content) as BenchmarkRun;
-          } catch {
-            return null;
-          }
-        }),
-    );
+    const jsonFiles = allRunFiles.filter((f) => f.endsWith(".json")).slice(-50);
+    const previousRuns: (BenchmarkRun | null)[] = [];
+    let totalBytesRead = 0;
+    const MAX_VARIANCE_BYTES = 50 * 1024 * 1024; // 50MB limit for variance analysis
+
+    for (const f of jsonFiles) {
+      try {
+        const content = await fs.readFile(
+          path.join(runsDir, f),
+          "utf8",
+        );
+        totalBytesRead += content.length;
+        if (totalBytesRead > MAX_VARIANCE_BYTES) {
+          console.warn(`[agentarena] Variance analysis stopped: exceeded ${Math.round(MAX_VARIANCE_BYTES / (1024 * 1024))}MB memory limit`);
+          break;
+        }
+        previousRuns.push(JSON.parse(content) as BenchmarkRun);
+      } catch {
+        previousRuns.push(null);
+      }
+    }
+
     const comparableRuns = previousRuns.filter(
       (r): r is BenchmarkRun =>
         r !== null && r.task?.id === benchmark.task?.id,
@@ -230,8 +214,8 @@ export async function runBenchmarkCommand(
       const varianceReport = computeVarianceAnalysis(comparableRuns);
       varianceReportText = formatVarianceReport(varianceReport);
     }
-  } catch {
-    // Ignore variance analysis errors - not critical
+  } catch (varianceError) {
+    console.warn(`[agentarena] Variance analysis skipped: ${varianceError instanceof Error ? varianceError.message : String(varianceError)}`);
   }
 
   if (parsed.format === "json") {
@@ -344,5 +328,13 @@ export async function runBenchmarkCommand(
 
   if (benchmark.results.some((result) => result.status !== "success")) {
     process.exitCode = 1;
+  }
+
+  // Auto-cleanup old runs (keep most recent 50 by default)
+  try {
+    const { runCleanup } = await import("./cleanup.js");
+    await runCleanup({ ...parsed, maxRuns: parsed.maxRuns ?? 50 });
+  } catch (cleanupError) {
+    console.warn(`[agentarena] Auto-cleanup failed: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`);
   }
 }

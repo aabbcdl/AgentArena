@@ -6,20 +6,28 @@ import { pipeline } from "node:stream/promises";
 import { normalizePath } from "./paths.js";
 import type { DiffSummary, FileSnapshotEntry } from "./types/index.js";
 
-const INTERNAL_IGNORED_NAMES = new Set([".agentarena", ".git", "node_modules"]);
+export const INTERNAL_IGNORED_NAMES = new Set([".agentarena", ".git", "node_modules"]);
 
 // Allow overriding via environment variable (in bytes).
 // Falls back to 100 MB if not set or invalid.
 const DEFAULT_MAX_SNAPSHOT_FILE_SIZE = 100 * 1024 * 1024; // 100 MB
-function getMaxSnapshotFileSize(): number {
-  const envValue = process.env.AGENTARENA_MAX_SNAPSHOT_FILE_SIZE;
+const DEFAULT_MAX_SNAPSHOT_DEPTH = 64;
+const DEFAULT_MAX_SNAPSHOT_FILES = 100_000;
+const DEFAULT_MAX_SNAPSHOT_TOTAL_BYTES = 1024 * 1024 * 1024; // 1 GB
+
+function positiveNumberFromEnv(name: string, fallback: number): number {
+  const envValue = process.env[name];
   if (envValue) {
     const parsed = Number(envValue);
     if (Number.isFinite(parsed) && parsed > 0) {
       return parsed;
     }
   }
-  return DEFAULT_MAX_SNAPSHOT_FILE_SIZE;
+  return fallback;
+}
+
+function getMaxSnapshotFileSize(): number {
+  return positiveNumberFromEnv("AGENTARENA_MAX_SNAPSHOT_FILE_SIZE", DEFAULT_MAX_SNAPSHOT_FILE_SIZE);
 }
 
 export async function ensureDirectory(dirPath: string): Promise<void> {
@@ -30,6 +38,7 @@ export async function copyRepository(sourcePath: string, destinationPath: string
   await fs.cp(sourcePath, destinationPath, {
       force: true,
       recursive: true,
+      verbatimSymlinks: true,
       filter: (itemPath) => {
         const name = path.basename(itemPath);
         return !INTERNAL_IGNORED_NAMES.has(name);
@@ -76,9 +85,23 @@ export async function snapshotDirectory(rootPath: string): Promise<Map<string, F
   const snapshots = new Map<string, FileSnapshotEntry>();
   const filesToHash: FileToHash[] = [];
   const maxFileSize = getMaxSnapshotFileSize();
+  const maxDepth = positiveNumberFromEnv("AGENTARENA_MAX_SNAPSHOT_DEPTH", DEFAULT_MAX_SNAPSHOT_DEPTH);
+  const maxFiles = positiveNumberFromEnv("AGENTARENA_MAX_SNAPSHOT_FILES", DEFAULT_MAX_SNAPSHOT_FILES);
+  const maxTotalBytes = positiveNumberFromEnv("AGENTARENA_MAX_SNAPSHOT_TOTAL_BYTES", DEFAULT_MAX_SNAPSHOT_TOTAL_BYTES);
+  let seenFiles = 0;
+  let seenBytes = 0;
+  let truncated = false;
 
   // Phase 1: Walk directory and collect file metadata
-  async function walk(currentPath: string): Promise<void> {
+  async function walk(currentPath: string, depth = 0): Promise<void> {
+    if (truncated) {
+      return;
+    }
+    if (depth > maxDepth) {
+      truncated = true;
+      console.warn(`Snapshot: max depth ${maxDepth} reached at ${currentPath}; remaining files skipped.`);
+      return;
+    }
     let entries: import("node:fs").Dirent[];
     try {
       entries = await fs.readdir(currentPath, { withFileTypes: true });
@@ -86,6 +109,8 @@ export async function snapshotDirectory(rootPath: string): Promise<Map<string, F
       console.warn(`Snapshot: skipped directory due to error: ${currentPath}`, _error instanceof Error ? _error.message : String(_error));
       return;
     }
+
+    const subdirs: string[] = [];
 
     for (const entry of entries) {
       const absolutePath = path.join(currentPath, entry.name);
@@ -95,7 +120,7 @@ export async function snapshotDirectory(rootPath: string): Promise<Map<string, F
         if (INTERNAL_IGNORED_NAMES.has(entry.name)) {
           continue;
         }
-        await walk(absolutePath);
+        subdirs.push(absolutePath);
         continue;
       }
 
@@ -105,11 +130,18 @@ export async function snapshotDirectory(rootPath: string): Promise<Map<string, F
 
       try {
         const stat = await fs.stat(absolutePath);
+        seenFiles += 1;
+        seenBytes += stat.size;
+        if (seenFiles > maxFiles || seenBytes > maxTotalBytes) {
+          truncated = true;
+          console.warn(`Snapshot: scan budget exceeded (${seenFiles} files, ${seenBytes} bytes); remaining files skipped.`);
+          return;
+        }
         if (stat.size > maxFileSize) {
-          // Create a synthetic hash based on metadata for huge files
-          const hash = createHash("sha256")
-            .update(`huge-file:${relativePath}:${stat.size}:${stat.mtimeMs}:${stat.ino}`)
+          const hexDigest = createHash("sha256")
+            .update(`${relativePath}:${stat.size}:${stat.mtimeMs}:${stat.ino}`)
             .digest("hex");
+          const hash = `huge-file:${hexDigest}`;
           snapshots.set(relativePath, { relativePath, hash });
           continue;
         }
@@ -117,6 +149,10 @@ export async function snapshotDirectory(rootPath: string): Promise<Map<string, F
       } catch (_error) {
         console.warn(`Snapshot: skipped file due to error: ${relativePath}`, _error instanceof Error ? _error.message : String(_error));
       }
+    }
+
+    if (subdirs.length > 0 && !truncated) {
+      await mapWithConcurrency(subdirs, Math.max(1, cpus().length), (dir) => walk(dir, depth + 1));
     }
   }
 

@@ -376,7 +376,7 @@ test("Claude provider profiles persist metadata without leaking secrets", async 
     assert.equal(saved.name, "NewAPI");
     assert.equal(saved.kind, "anthropic-compatible");
     assert.equal(saved.primaryModel, "gpt-5.4");
-    assert.deepEqual(saved.riskFlags, ["third-party-provider", "compatibility-mode", "user-managed-secret"]);
+    assert.deepEqual(saved.riskFlags, ["third-party-provider", "compatibility-mode", "user-managed-secret", "baseUrl-redirects-traffic"]);
     if (supportsWindowsCredentialManager()) {
       assert.equal(saved.secretStored, true);
     }

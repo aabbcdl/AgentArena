@@ -111,6 +111,7 @@ const state = {
   communityData: null,
   communityLoading: false,
   communityError: null,
+  _communityRequestId: 0,
   sidebarOpen: false,
   scoreWeights: /** @type {Record<string, number>} */ ({ ...DEFAULT_SCORE_WEIGHTS }),
   runSearchQuery: "",

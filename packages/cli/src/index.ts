@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import { type ParsedArgs, parseArgs, printHelp } from "./args.js";
+import { validateCommandArgs } from "./args-validators.js";
+import { runCleanup } from "./commands/cleanup.js";
 import { runDoctor } from "./commands/doctor.js";
 import { runInit, runInitCi, runInitTaskpack } from "./commands/init.js";
 import { runListAdapters } from "./commands/list-adapters.js";
@@ -29,6 +31,13 @@ async function main(): Promise<void> {
       return;
     }
 
+    // Validate command-specific arguments
+    const validation = validateCommandArgs(parsed);
+    if (!validation.ok) {
+      console.error(`❌ ${validation.error}`);
+      process.exit(1);
+    }
+
     switch (parsed.command) {
       case "doctor":
         await runDoctor(parsed);
@@ -50,6 +59,9 @@ async function main(): Promise<void> {
         break;
       case "publish":
         await runPublish(parsed);
+        break;
+      case "clean":
+        await runCleanup(parsed);
         break;
       case "ui":
         await runUi(parsed);
@@ -120,4 +132,4 @@ async function main(): Promise<void> {
   }
 }
 
-void main();
+main().catch(() => { process.exitCode ??= 1; });

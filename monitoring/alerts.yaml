@@ -1,0 +1,123 @@
+groups:
+  - name: agentarena_business
+    rules:
+      - alert: AgentSuccessRateTooLow
+        expr: rate(agentarena_agent_status_total{status="success"}[30m]) / rate(agentarena_agent_status_total[30m]) < 0.3
+        for: 3 runs
+        labels:
+          severity: critical
+        annotations:
+          summary: "Agent 成功率低于 30%"
+          runbook: "检查 adapter preflight 状态和 agent 执行超时日志"
+
+      - alert: PreflightFailureRateHigh
+        expr: rate(agentarena_preflight_total{status=~"missing|blocked"}[15m]) / rate(agentarena_preflight_total[15m]) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Preflight 失败率超过 50%"
+          runbook: "运行 agentarena doctor 检查适配器就绪状态"
+
+      - alert: AgentTimeoutRateHigh
+        expr: rate(agentarena_agent_timeout_total[30m]) / rate(agentarena_agent_execute_total[30m]) > 0.15
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Agent 执行超时率超过 15%"
+          runbook: "检查 AGENTARENA_AGENT_TIMEOUT_MS 配置和目标仓库体积"
+
+      - alert: ApiErrorRateHigh
+        expr: rate(agentarena_http_requests_total{status=~"5.."}[5m]) / rate(agentarena_http_requests_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "API 5xx 错误率超过 5%"
+          runbook: "检查 UI Server 日志中的未捕获异常"
+
+      - alert: AuthFailureRateHigh
+        expr: rate(agentarena_auth_failure_total[5m]) / rate(agentarena_http_requests_total{path=~"/api/.*"}[5m]) > 0.3
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "鉴权失败率超过 30%"
+          runbook: "检查是否有未授权访问尝试，审查 auth token 是否泄露"
+
+      - alert: RateLimitTriggeredFrequently
+        expr: rate(agentarena_rate_limit_triggered_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Rate Limit 频繁触发"
+          runbook: "检查客户端 IP 分布，排查异常流量"
+
+      - alert: TraceWriteFailed
+        expr: increase(agentarena_trace_write_errors_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Trace 写入失败"
+          runbook: "检查磁盘空间和文件权限"
+
+  - name: agentarena_system
+    rules:
+      - alert: HighMemoryUsage
+        expr: process_resident_memory_bytes > 1073741824
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Node.js 进程内存超过 1GB"
+          runbook: "检查 trace 读取是否加载了过大文件；检查 rateLimitStore 是否泄漏"
+
+      - alert: DiskSpaceLow
+        expr: node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"} < 0.1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "磁盘剩余空间低于 10%"
+          runbook: "清理 .agentarena/ 下的旧 runs 和 workspaces"
+
+      - alert: TooManyOpenFiles
+        expr: process_open_fds > 800
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "打开的文件描述符超过 800"
+          runbook: "检查 trace 流式读取是否正确关闭；检查 agent 子进程是否泄漏"
+
+      - alert: WorkspaceAccumulation
+        expr: agentarena_active_workspaces > 50
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "活跃 workspace 数量超过 50"
+          runbook: "检查 cleanupWorkspaces 配置；手动清理残留 workspace"
+
+  - name: agentarena_publish
+    rules:
+      - alert: PublishFailureRate
+        expr: rate(agentarena_publish_total{status="failed"}[1h]) / rate(agentarena_publish_total[1h]) > 0.2
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "社区发布失败率超过 20%"
+          runbook: "检查 GitHub Token 有效性；检查 API 限流状态"
+
+      - alert: PublishDurationTooLong
+        expr: histogram_quantile(0.95, rate(agentarena_publish_duration_seconds_bucket[10m])) > 120
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Publish 操作 P95 延迟超过 120 秒"
+          runbook: "检查 GitHub API 响应时间；检查 run 文件数量是否过多"

@@ -16,6 +16,8 @@ import {
   diffSnapshots,
   ensureDirectory,
   isAbortError,
+  logger,
+  metrics,
   snapshotDirectory,
   type TraceEvent,
   throwIfAborted,
@@ -292,6 +294,13 @@ export async function executeAgent(
   debugLog(debug, `  [adapter] Executing ${adapter.title} (${adapter.kind})`);
   debugLog(debug, `  [adapter] Timeout: ${adapterTimeoutMs}ms`);
 
+  metrics.agentExecuteTotal.inc({ agentId: preflight.agentId, adapterKind: adapter.kind });
+  logger.info("adapter", "agent.execute", `Starting agent execution: ${adapter.title}`, {
+    agentId: preflight.agentId,
+    variantId: preflight.variantId,
+    metadata: { adapterKind: adapter.kind, timeoutMs: adapterTimeoutMs }
+  });
+
   if (cancellation?.signal) {
     if (cancellation.signal.aborted) {
       forwardCancellation();
@@ -346,6 +355,22 @@ export async function executeAgent(
       adapterTimedOut
         ? new Error(`${adapter.title} execution timed out after ${adapterTimeoutMs}ms.`)
         : error;
+    
+    if (adapterTimedOut) {
+      metrics.agentTimeoutTotal.inc({ agentId: preflight.agentId, adapterKind: adapter.kind });
+      logger.warn("adapter", "agent.timeout", `${adapter.title} execution timed out`, {
+        agentId: preflight.agentId,
+        variantId: preflight.variantId,
+        metadata: { timeoutMs: adapterTimeoutMs }
+      });
+    } else {
+      logger.error("adapter", "agent.error", `${adapter.title} execution failed`, {
+        agentId: preflight.agentId,
+        variantId: preflight.variantId,
+        error
+      });
+    }
+    
     const errorDetails = formatErrorDetails(error);
     await traceRecorder.record({
       agentId: preflight.agentId,
@@ -630,6 +655,39 @@ export function buildFinalResult(
     ? { taskCategory, contaminationChecked, difficultyGeneration }
     : undefined;
 
+  const finalStatus = success ? "success" : "failed";
+  const durationSeconds = durationMs / 1000;
+  
+  metrics.agentStatusTotal.inc({ status: finalStatus, agentId: preflight.agentId, adapterKind: adapter.kind });
+  metrics.agentDurationSeconds.observe({ agentId: preflight.agentId, status: finalStatus }, durationSeconds);
+  
+  if (adapterResult.tokenUsage) {
+    metrics.agentTokenUsage.observe({ agentId: preflight.agentId }, adapterResult.tokenUsage);
+  }
+  
+  if (adapterResult.estimatedCostUsd && adapterResult.costKnown) {
+    metrics.agentCostUsd.observe({ agentId: preflight.agentId }, adapterResult.estimatedCostUsd);
+  }
+  
+  const passedJudges = judgeResults.filter(j => j.success).length;
+  const totalJudges = judgeResults.length;
+  if (totalJudges > 0) {
+    metrics.judgePassRate.set({ agentId: preflight.agentId }, passedJudges / totalJudges);
+  }
+  
+  logger.info("adapter", "agent.complete", `Agent execution completed: ${adapter.title}`, {
+    agentId: preflight.agentId,
+    variantId: preflight.variantId,
+    metadata: {
+      status: finalStatus,
+      durationMs,
+      tokenUsage: adapterResult.tokenUsage,
+      costUsd: adapterResult.estimatedCostUsd,
+      judgesPassed: passedJudges,
+      judgesTotal: totalJudges
+    }
+  });
+
   return createBaseResult({
     preflight,
     tracePath,
@@ -820,6 +878,27 @@ export async function runAgent(
     context
   );
   } finally {
+    // Clean up intermediate files on cancellation
+    if (context.cancellation?.signal?.aborted) {
+      try {
+        const { promises: fs } = await import("node:fs");
+        const intermediateFiles = [
+          context.tracePath,
+          path.join(context.agentOutputPath, "before-snapshot.json"),
+          path.join(context.agentOutputPath, "after-snapshot.json"),
+        ];
+        for (const filePath of intermediateFiles) {
+          try {
+            await fs.unlink(filePath);
+          } catch (error) {
+            console.debug("[agentarena] Failed to delete intermediate file:", error instanceof Error ? error.message : String(error));
+          }
+        }
+      } catch (error) {
+        console.debug("[agentarena] Intermediate file cleanup failed:", error instanceof Error ? error.message : String(error));
+      }
+    }
+
     await context.traceRecorder.close().catch((closeError: unknown) => {
       console.warn(`[agentarena] Failed to close trace recorder: ${closeError instanceof Error ? closeError.message : String(closeError)}`);
     });

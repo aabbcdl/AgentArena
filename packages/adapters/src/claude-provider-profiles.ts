@@ -1,3 +1,29 @@
+/**
+ * Claude Code provider profile management.
+ *
+ * Handles CRUD operations on a local JSON registry, secret storage
+ * (Windows Credential Manager or AES-256-GCM encrypted file), and
+ * workspace settings generation for provider-switched Claude Code runs.
+ *
+ * Structure:
+ * - Types, constants, path resolution
+ * - Registry file I/O (read/write JSON at ~/.config/agentarena/)
+ * - Secret storage: Windows uses PasswordVault via PowerShell,
+ *   other platforms use AES-256-GCM with machine-bound key (hostname + username)
+ * - Profile CRUD: save, get, list, delete, buildEnvironment
+ * - Workspace settings writer (generates .claude/settings.json per run)
+ *
+ * Security model:
+ * - baseUrl validated against ALLOWED_API_HOSTS (4 known providers)
+ * - Private/loopback IPs blocked via isInternalUrl() (SSRF prevention)
+ * - Unknown hosts require _confirmBaseUrlRisk acknowledgment
+ * - Secrets are machine-bound: changing hostname or username silently
+ *   invalidates encrypted secrets (logged via console.warn)
+ *
+ * Why one file: crypto, PowerShell, and file I/O are tightly coupled to
+ * the profile lifecycle. Splitting creates circular deps between the
+ * secret layer and the profile layer.
+ */
 import { execFile } from "node:child_process";
 import { createCipheriv, createDecipheriv, randomBytes, randomUUID, scryptSync } from "node:crypto";
 import { promises as fs } from "node:fs";
@@ -336,6 +362,7 @@ async function getSecretFile(profileId: string): Promise<string | null> {
     if (raw.startsWith(SECRET_ENCRYPTION_MARKER)) {
       const decrypted = decryptSecret(raw);
       if (decrypted === null) {
+        // biome-ignore lint/suspicious/noConsole: security diagnostic for failed decryption
         console.warn(
           `[agentarena] Failed to decrypt secret for profile "${profileId}". ` +
           `The secret was encrypted on a different machine (hostname+username derived key). ` +
@@ -462,7 +489,7 @@ export async function saveClaudeProviderProfile(input: ClaudeProviderProfileInpu
     extraEnv: input.extraEnv ?? {},
     writeCommonConfig: input.writeCommonConfig ?? true,
     notes: input.notes,
-    riskFlags: defaultRiskFlags(input.kind),
+    riskFlags: [...new Set([...defaultRiskFlags(input.kind), ...(input.riskFlags ?? [])])],
     isBuiltIn: false,
     secretStored: false
   });

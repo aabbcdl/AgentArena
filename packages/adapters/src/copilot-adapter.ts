@@ -7,9 +7,9 @@ import {
   type AgentResolvedRuntime,
   ensureDirectory
 } from "@agentarena/core";
+import type { InvocationSpec } from "./adapter-capabilities.js";
 import { createCliAdapter } from "./base-cli-adapter.js";
-import type { InvocationSpec } from "./shared.js";
-import { probeInvocationVersion } from "./shared.js";
+import { probeInvocationVersion } from "./invocation-probes.js";
 
 export const COPILOT_CAPABILITY: AdapterCapability = {
   supportTier: "experimental",

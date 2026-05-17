@@ -183,28 +183,39 @@ export async function executeCommand(
       signal?.removeEventListener("abort", cancelExecution);
     };
 
-    const cancelExecution = () => {
-      cancelled = true;
-      if (!child.killed) {
-        child.kill();
-      }
-    };
-
     let killHandle: ReturnType<typeof setTimeout> | undefined;
-    const timeoutHandle = setTimeout(() => {
-      timedOut = true;
-      if (!child.killed) {
-        child.kill();
-      }
+
+    const scheduleForceKill = () => {
+      if (killHandle) return; // prevent duplicate timers
       killHandle = setTimeout(() => {
         if (!child.killed && child.pid) {
           try {
-            process.kill(child.pid, "SIGKILL");
+            if (process.platform !== "win32") {
+              process.kill(-child.pid, "SIGKILL");
+            } else {
+              child.kill("SIGKILL");
+            }
           } catch (killError) {
             console.warn(`[agentarena] Failed to SIGKILL process ${child.pid}: ${killError instanceof Error ? killError.message : String(killError)}`);
           }
         }
       }, 3_000);
+    };
+
+    const cancelExecution = () => {
+      cancelled = true;
+      if (!child.killed) {
+        child.kill();
+        scheduleForceKill();
+      }
+    };
+
+    const timeoutHandle = setTimeout(() => {
+      timedOut = true;
+      if (!child.killed) {
+        child.kill();
+        scheduleForceKill();
+      }
     }, timeoutMs);
 
     signal?.addEventListener("abort", cancelExecution, { once: true });

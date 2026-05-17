@@ -1,3 +1,5 @@
+import { escapeHtml } from "../app-helpers.js";
+
 const CACHE_PREFIX = "agentarena-community-";
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 
@@ -112,19 +114,21 @@ export function renderCommunityLeaderboard(container, indexData, t, locale) {
     const entry = entries[i];
     const rank = i + 1;
     const rankClass = rank <= 3 ? `rank-${rank}` : "";
-    const lastSeen = new Date(entry.lastPublishedAt);
-    const lastSeenStr = lastSeen.toLocaleDateString(isZhCn ? "zh-CN" : "en", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    });
+    const lastSeen = entry.lastPublishedAt ? new Date(entry.lastPublishedAt) : null;
+    const lastSeenStr = lastSeen && !isNaN(lastSeen.getTime())
+      ? lastSeen.toLocaleDateString(isZhCn ? "zh-CN" : "en", {
+          year: "numeric",
+          month: "short",
+          day: "numeric",
+        })
+      : "-";
 
     html += `<tr class="${rankClass}">`;
     html += `<td class="rank-cell"><span class="rank-badge">${rank}</span></td>`;
     html += `<td>${escapeHtml(entry.displayLabel)}</td>`;
     html += `<td>${escapeHtml(entry.model)}</td>`;
-    html += `<td class="score-cell">${entry.avgScore.toFixed(1)}</td>`;
-    html += `<td>${(entry.successRate * 100).toFixed(0)}%</td>`;
+    html += `<td class="score-cell">${typeof entry.avgScore === "number" ? entry.avgScore.toFixed(1) : "-"}</td>`;
+    html += `<td>${typeof entry.successRate === "number" ? (entry.successRate * 100).toFixed(0) + "%" : "-"}</td>`;
     html += `<td>${entry.runCount}</td>`;
     html += `<td>${lastSeenStr}</td>`;
     html += `</tr>`;
@@ -160,13 +164,4 @@ export function findCommunityRank(run, communityData) {
   }
 
   return null;
-}
-
-function escapeHtml(str) {
-  if (!str) return "";
-  return String(str)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
 }

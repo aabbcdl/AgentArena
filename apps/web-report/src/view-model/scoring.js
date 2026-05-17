@@ -139,7 +139,10 @@ export function getMatchingScorePresetId(weights = DEFAULT_SCORE_WEIGHTS) {
   return (
     Object.entries(SCORE_WEIGHT_PRESETS).find(([, preset]) => {
       const normalizedPreset = normalizeScoreWeights(/** @type {ScoreWeights} */ (preset));
-      return Object.keys(normalizedPreset).every((key) => Math.abs(normalizedPreset[key] - normalized[key]) < 0.001);
+      const presetKeys = Object.keys(normalizedPreset);
+      const normKeys = Object.keys(normalized);
+      if (presetKeys.length !== normKeys.length) return false;
+      return presetKeys.every((key) => Math.abs(normalizedPreset[key] - (normalized[key] ?? 0)) < 0.001);
     })?.[0] ?? null
   );
 }
@@ -473,7 +476,7 @@ export function getCompositeScoreDetails(result, run, weights = DEFAULT_SCORE_WE
  */
 export function formatCompositeScore(result, run, weights = DEFAULT_SCORE_WEIGHTS) {
   // Use pre-computed score if available and weights match the run's stored weights
-  if (typeof result.compositeScore === "number" && weights === DEFAULT_SCORE_WEIGHTS) {
+  if (typeof result.compositeScore === "number" && getMatchingScorePresetId(weights)) {
     return result.compositeScore.toFixed(1);
   }
   return `${getCompositeScoreDetails(result, run, weights).total.toFixed(1)}`;
@@ -489,7 +492,7 @@ export function formatCompositeScore(result, run, weights = DEFAULT_SCORE_WEIGHT
  */
 export function getCompositeScoreReasons(result, run, weights = DEFAULT_SCORE_WEIGHTS) {
   // Use pre-computed reasons if available and weights match
-  if (Array.isArray(result.scoreReasons) && weights === DEFAULT_SCORE_WEIGHTS) {
+  if (Array.isArray(result.scoreReasons) && getMatchingScorePresetId(weights)) {
     return result.scoreReasons;
   }
 
@@ -504,8 +507,8 @@ export function getCompositeScoreReasons(result, run, weights = DEFAULT_SCORE_WE
     reasons.push("critical-judge-failed");
   }
   if (components.tests >= 0.999) reasons.push("tests");
-  if (components.criticalJudges >= 0.999) reasons.push("criticalJudges");
-  if (components.nonCriticalJudges >= 0.999) reasons.push("nonCriticalJudges");
+  if (components.criticalJudges >= 0.999) reasons.push("critical-judges");
+  if (components.nonCriticalJudges >= 0.999) reasons.push("non-critical-judges");
   if (components.lint >= 0.999) reasons.push("lint");
   if (components.precision >= 0.999) reasons.push("precision");
   if (components.duration >= 0.999) reasons.push("duration");

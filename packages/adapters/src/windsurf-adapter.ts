@@ -6,7 +6,8 @@ import type {
   AdapterPreflightResult,
   AgentAdapter
 } from "@agentarena/core";
-import { createPreflightResult, getAdaptersPackageVersion } from "./shared.js";
+import { createPreflightResult } from "./adapter-helpers.js";
+import { getAdaptersPackageVersion } from "./invocation-probes.js";
 
 export const WINDSURF_CAPABILITY: AdapterCapability = {
   supportTier: "blocked",

@@ -1,7 +1,9 @@
 import { execFileSync, spawn } from "node:child_process";
-import { promises as fs } from "node:fs";
 import path from "node:path";
-import { BenchmarkCancelledError, resolveTimeoutMs } from "@agentarena/core";
+import { BenchmarkCancelledError, MAX_PROCESS_OUTPUT_BYTES, pathExists, resolveTimeoutMs } from "@agentarena/core";
+import { adapterWarn } from "./adapter-diagnostics.js";
+
+export { MAX_PROCESS_OUTPUT_BYTES, pathExists };
 
 export interface ProcessResult {
   exitCode: number | null;
@@ -19,9 +21,6 @@ interface ProcessError extends Error {
 }
 
 export const DEFAULT_AGENT_TIMEOUT_MS = 15 * 60 * 1_000;
-
-/** Maximum bytes to accumulate from stdout/stderr before truncating (50 MB). */
-export const MAX_PROCESS_OUTPUT_BYTES = 50 * 1024 * 1024;
 
 export function agentTimeoutMs(): number {
   return resolveTimeoutMs(process.env.AGENTARENA_AGENT_TIMEOUT_MS, DEFAULT_AGENT_TIMEOUT_MS);
@@ -58,15 +57,6 @@ export async function sleep(durationMs: number, signal?: AbortSignal): Promise<v
 
     signal.addEventListener("abort", onAbort, { once: true });
   });
-}
-
-export async function pathExists(targetPath: string): Promise<boolean> {
-  try {
-    await fs.access(targetPath);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 export async function findExecutableOnPath(names: string[]): Promise<string | undefined> {
@@ -119,17 +109,24 @@ export async function runProcess(
       if (child && !child.killed && child.pid) {
         const pid = child.pid;
         try {
+          // Clear any existing SIGKILL timer to prevent duplicates
+          if (sigkillHandle) {
+            clearTimeout(sigkillHandle);
+            sigkillHandle = undefined;
+          }
           if (process.platform !== "win32") {
             // Kill the entire process group on Unix
             try {
               process.kill(-pid, "SIGTERM");
-            } catch {
+            } catch (e) {
+              adapterWarn("process group SIGTERM failed, falling back to child.kill", { pid, error: e instanceof Error ? e.message : String(e) });
               if (child) child.kill("SIGTERM");
             }
             sigkillHandle = setTimeout(() => {
               try {
                 process.kill(-pid, "SIGKILL");
-              } catch {
+              } catch (e) {
+                adapterWarn("process group SIGKILL failed", { pid, error: e instanceof Error ? e.message : String(e) });
                 if (child && !child.killed) child.kill("SIGKILL");
               }
               sigkillHandle = undefined;
@@ -139,12 +136,13 @@ export async function runProcess(
             if (pid === undefined) return;
             try {
               execFileSync("taskkill", ["/F", "/T", "/PID", String(pid)], { stdio: "ignore" });
-            } catch {
+            } catch (e) {
+              adapterWarn("taskkill failed, falling back to child.kill", { pid, error: e instanceof Error ? e.message : String(e) });
               if (child) child.kill("SIGTERM");
             }
           }
-        } catch {
-          // Ignore kill errors
+        } catch (e) {
+          adapterWarn("all process kill attempts failed — possible orphan", { pid, error: e instanceof Error ? e.message : String(e) });
         }
       }
     };
@@ -202,21 +200,25 @@ export async function runProcess(
 
     child.stdout?.on("data", (chunk: Buffer) => {
       if (stdoutTruncated) return;
-      stdoutBytes += chunk.length;
+      const str = chunk.toString("utf8");
+      stdoutBytes += Buffer.byteLength(str, "utf8");
       if (stdoutBytes > MAX_PROCESS_OUTPUT_BYTES) {
-        stdout += chunk.toString("utf8").slice(0, MAX_PROCESS_OUTPUT_BYTES - (stdoutBytes - chunk.length));
+        const remaining = MAX_PROCESS_OUTPUT_BYTES - (stdoutBytes - Buffer.byteLength(str, "utf8"));
+        stdout += Buffer.from(str, "utf8").slice(0, remaining).toString("utf8");
         stdout += `\n[stdout truncated at ${MAX_PROCESS_OUTPUT_BYTES} bytes]`;
         stdoutTruncated = true;
       } else {
-        stdout += chunk.toString("utf8");
+        stdout += str;
       }
     });
 
     child.stderr?.on("data", (chunk: Buffer) => {
       if (stderrTruncated) return;
-      stderrBytes += chunk.length;
+      const str = chunk.toString("utf8");
+      stderrBytes += Buffer.byteLength(str, "utf8");
       if (stderrBytes > MAX_PROCESS_OUTPUT_BYTES) {
-        stderr += chunk.toString("utf8").slice(0, MAX_PROCESS_OUTPUT_BYTES - (stderrBytes - chunk.length));
+        const remaining = MAX_PROCESS_OUTPUT_BYTES - (stderrBytes - Buffer.byteLength(str, "utf8"));
+        stderr += Buffer.from(str, "utf8").slice(0, remaining).toString("utf8");
         stderr += `\n[stderr truncated at ${MAX_PROCESS_OUTPUT_BYTES} bytes]`;
         stderrTruncated = true;
       } else {
@@ -255,4 +257,49 @@ export async function runProcess(
       }
     });
   });
+}
+
+/**
+ * Forcefully terminate a process tree.
+ * On Windows: uses taskkill /F /T with retry.
+ * On Unix: kills process group, escalates to SIGKILL after 1s.
+ * This is used when cancelling a run to guarantee subprocess termination.
+ */
+export async function terminateProcessTree(pid: number): Promise<void> {
+  if (!pid || pid <= 0) return;
+
+  if (process.platform === "win32") {
+    // Windows: taskkill with retry (3 attempts)
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        execFileSync("taskkill", ["/F", "/T", "/PID", String(pid)], { stdio: "ignore" });
+        return; // Success
+      } catch {
+        if (attempt < 2) {
+          await new Promise((resolve) => setTimeout(resolve, 200));
+        }
+      }
+    }
+    // Final fallback: try child.kill
+    try {
+      process.kill(pid, "SIGTERM");
+    } catch (error) {
+      adapterWarn("process.kill SIGTERM fallback failed", { pid, error: error instanceof Error ? error.message : String(error) });
+    }
+  } else {
+    // Unix: kill entire process group
+    try {
+      process.kill(-pid, "SIGTERM");
+    } catch {
+      try { process.kill(pid, "SIGTERM"); } catch (error) { adapterWarn("process.kill SIGTERM fallback failed", { pid, error: error instanceof Error ? error.message : String(error) }); }
+    }
+
+    // Escalate to SIGKILL after 1 second
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    try {
+      process.kill(-pid, "SIGKILL");
+    } catch {
+      try { process.kill(pid, "SIGKILL"); } catch (error) { adapterWarn("process.kill SIGKILL fallback failed", { pid, error: error instanceof Error ? error.message : String(error) }); }
+    }
+  }
 }

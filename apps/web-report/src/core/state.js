@@ -98,7 +98,7 @@ class StateManager {
         try {
           callback(data);
         } catch (err) {
-          console.error(`StateManager: 事件 ${event} 回调出错`, err);
+          console.error(`StateManager: error in event "${event}" callback`, err);
         }
       }
     }

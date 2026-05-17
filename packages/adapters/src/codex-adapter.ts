@@ -8,17 +8,13 @@ import {
   type AgentAdapter,
   ensureDirectory
 } from "@agentarena/core";
+import { CODEX_CAPABILITY, type InvocationSpec } from "./adapter-capabilities.js";
+import { formatAdapterError } from "./adapter-diagnostics.js";
+import { buildAgentPrompt, createPreflightResult } from "./adapter-helpers.js";
 import { parseCodexEvents } from "./event-parsers.js";
+import { probeHelp, probeInvocationVersion } from "./invocation-probes.js";
 import { agentTimeoutMs, runProcess } from "./process-utils.js";
-import {
-  buildAgentPrompt,
-  CODEX_CAPABILITY,
-  createPreflightResult,
-  type InvocationSpec,
-  probeHelp,
-  probeInvocationVersion,
-  resolveCodexRuntime
-} from "./shared.js";
+import { resolveCodexRuntime } from "./runtime-resolution.js";
 
 async function resolveCodexInvocation(): Promise<InvocationSpec> {
   if (process.env.AGENTARENA_CODEX_BIN?.trim()) {
@@ -194,16 +190,13 @@ export class CodexCliAdapter implements AgentAdapter {
         ? versionProbe.source
         : resolvedRuntime.agentVersionSource
     };
+    let insertIndex = invocation.argsPrefix.length + 1;
     if (resolvedRuntime.effectiveReasoningEffort) {
-      args.splice(
-        invocation.argsPrefix.length + 1,
-        0,
-        "-c",
-        `model_reasoning_effort="${resolvedRuntime.effectiveReasoningEffort}"`
-      );
+      args.splice(insertIndex, 0, "-c", `model_reasoning_effort="${resolvedRuntime.effectiveReasoningEffort}"`);
+      insertIndex += 2;
     }
     if (resolvedRuntime.effectiveModel) {
-      args.splice(invocation.argsPrefix.length + 1, 0, "--model", resolvedRuntime.effectiveModel);
+      args.splice(insertIndex, 0, "--model", resolvedRuntime.effectiveModel);
     }
 
     await context.trace({
@@ -229,14 +222,15 @@ export class CodexCliAdapter implements AgentAdapter {
       );
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
+      const actionableMessage = formatAdapterError(errorMessage, "Codex CLI", "codex");
       await context.trace({
         type: "adapter.error",
         message: "Failed to execute Codex CLI",
-        metadata: { error: errorMessage }
+        metadata: { error: actionableMessage }
       });
       return {
         status: "failed",
-        summary: `Codex CLI execution failed: ${errorMessage}`,
+        summary: `Codex CLI execution failed: ${actionableMessage}`,
         tokenUsage: 0,
         estimatedCostUsd: 0,
         costKnown: false,

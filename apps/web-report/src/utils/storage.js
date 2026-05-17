@@ -26,7 +26,7 @@ class ResultStore {
       const request = indexedDB.open(DB_NAME, DB_VERSION);
       
       request.onerror = () => {
-        console.warn('IndexedDB 打开失败，将使用内存模式');
+        console.warn('IndexedDB open failed, falling back to in-memory mode');
         this.ready = false;
         resolve();
       };
@@ -367,20 +367,26 @@ class ResultStore {
       const stores = ['runs', 'traces', 'settings'];
       let completed = 0;
       let hasError = false;
-      
+      const total = stores.length;
+
       for (const storeName of stores) {
         const store = this._getStore(storeName, 'readwrite');
-        if (!store) { hasError = true; continue; }
-        
+        if (!store) {
+          hasError = true;
+          completed++;
+          if (completed === total) resolve(!hasError);
+          continue;
+        }
+
         const request = store.clear();
         request.onsuccess = () => {
           completed++;
-          if (completed === stores.length) resolve(!hasError);
+          if (completed === total) resolve(!hasError);
         };
         request.onerror = () => {
           hasError = true;
           completed++;
-          if (completed === stores.length) resolve(false);
+          if (completed === total) resolve(false);
         };
       }
     });

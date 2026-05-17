@@ -52,5 +52,6 @@ node packages/cli/dist/index.js run \
 ## Notes
 
 - This image is intended as a reproducible execution shell, not a published production service.
+- Docker improves host isolation, but the example compose setup is not a complete security sandbox. Harden mounts, network access, users, and secrets before running untrusted task packs or adapter plugins.
 - External agent CLIs such as Codex, Claude Code, or Cursor may still require additional authentication or host-specific setup.
 - For browser-level smoke tests in CI, use Playwright separately because browser dependencies are heavier than the default runner image.

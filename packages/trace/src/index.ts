@@ -4,7 +4,7 @@ import path from "node:path";
 import { createInterface } from "node:readline";
 import { pipeline } from "node:stream/promises";
 import { createGunzip, createGzip } from "node:zlib";
-import { ensureDirectory, type TraceEvent } from "@agentarena/core";
+import { ensureDirectory, logger, metrics, type TraceEvent } from "@agentarena/core";
 import { matchesFilter, type TraceFilter, type TraceQueryOptions } from "./types.js";
 
 /**
@@ -29,6 +29,73 @@ async function readTraceFileStreaming(filePath: string): Promise<{ events: Trace
   }
 
   return { events, malformedCount };
+}
+
+/**
+ * Stream-trace query: reads JSONL line by line, applies filter and pagination
+ * without loading all events into memory. Stops as soon as the requested page
+ * is satisfied, making it safe for large trace files.
+ *
+ * For `reverse` queries (most-recent-first) we must read the entire file,
+ * but we still apply the filter during streaming to reduce memory pressure.
+ */
+async function queryTraceFileStream(
+  filePath: string,
+  options: TraceQueryOptions = {}
+): Promise<{ events: TraceEvent[]; malformedCount: number }> {
+  const { limit, offset = 0, filter, reverse } = options;
+  let malformedCount = 0;
+
+  const stream = createReadStream(filePath, { encoding: "utf8" });
+  const rl = createInterface({ input: stream, crlfDelay: Infinity });
+
+  // For reverse queries, we need all filtered events first
+  if (reverse) {
+    const filtered: TraceEvent[] = [];
+    for await (const line of rl) {
+      if (!line.trim()) continue;
+      try {
+        const event = JSON.parse(line) as TraceEvent;
+        if (!filter || matchesFilter(event, filter)) {
+          filtered.push(event);
+        }
+      } catch {
+        malformedCount++;
+      }
+    }
+    filtered.reverse();
+    const end = limit !== undefined ? offset + limit : undefined;
+    return { events: filtered.slice(offset, end), malformedCount };
+  }
+
+  // Forward query: streaming with early termination
+  let skipped = 0;
+  const results: TraceEvent[] = [];
+  const needed = limit !== undefined ? offset + limit : Infinity;
+
+  for await (const line of rl) {
+    if (!line.trim()) continue;
+    try {
+      const event = JSON.parse(line) as TraceEvent;
+      if (filter && !matchesFilter(event, filter)) continue;
+
+      if (skipped < offset) {
+        skipped++;
+        continue;
+      }
+
+      results.push(event);
+      if (results.length >= needed - offset) {
+        rl.close();
+        stream.destroy();
+        break;
+      }
+    } catch {
+      malformedCount++;
+    }
+  }
+
+  return { events: results, malformedCount };
 }
 
 export class JsonlTraceRecorder {
@@ -57,6 +124,11 @@ export class JsonlTraceRecorder {
       await fs.appendFile(this.filePath, `${JSON.stringify(event)}\n`, "utf8");
     }).catch((error) => {
       this.writeFailed = true;
+      metrics.traceWriteErrorsTotal.inc({ filePath: this.filePath.slice(0, 50) });
+      logger.error("trace", "trace.write", "Trace write failed", {
+        metadata: { filePath: this.filePath },
+        error
+      });
       throw error;
     });
     await this.writeQueue;
@@ -78,6 +150,11 @@ export class JsonlTraceRecorder {
       await fs.appendFile(this.filePath, lines, "utf8");
     }).catch((error) => {
       this.writeFailed = true;
+      metrics.traceWriteErrorsTotal.inc({ filePath: this.filePath.slice(0, 50) });
+      logger.error("trace", "trace.write", "Trace batch write failed", {
+        metadata: { filePath: this.filePath, eventCount: events.length },
+        error
+      });
       throw error;
     });
     await this.writeQueue;
@@ -96,35 +173,15 @@ export class JsonlTraceRecorder {
   }
 
   async query(options: TraceQueryOptions = {}): Promise<TraceEvent[]> {
-    const { limit, offset = 0, filter, reverse } = options;
-
     try {
-      // Use streaming to parse events (memory-efficient for large files)
-      const { events: allEvents } = await readTraceFileStreaming(this.filePath);
-
-      let result = allEvents;
-
-      if (reverse) {
-        result = result.reverse();
-      }
-
-      if (filter) {
-        result = result.filter((event) => this.matchesFilter(event, filter));
-      }
-
-      const start = offset;
-      const end = limit !== undefined ? start + limit : undefined;
-      return result.slice(start, end);
+      const { events } = await queryTraceFileStream(this.filePath, options);
+      return events;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
         throw error;
       }
       return [];
     }
-  }
-
-  private matchesFilter(event: TraceEvent, filter: TraceFilter): boolean {
-    return matchesFilter(event, filter);
   }
 
   async getEventCount(): Promise<number> {
@@ -215,13 +272,29 @@ export class JsonlTraceRecorder {
 
 export class InMemoryTraceRecorder {
   private events: TraceEvent[] = [];
+  private readonly maxEvents: number;
+  private droppedCount = 0;
+
+  constructor(options?: { maxEvents?: number }) {
+    this.maxEvents = options?.maxEvents ?? 10000;
+  }
 
   async record(event: TraceEvent): Promise<void> {
     this.events.push({ ...event });
+    this.evictIfNeeded();
   }
 
   async recordBatch(events: TraceEvent[]): Promise<void> {
     this.events.push(...events.map((event) => ({ ...event })));
+    this.evictIfNeeded();
+  }
+
+  private evictIfNeeded(): void {
+    if (this.events.length <= this.maxEvents) return;
+    const dropCount = this.events.length - this.maxEvents;
+    this.events.splice(0, dropCount);
+    this.droppedCount += dropCount;
+    logger.warn("trace", "trace.evict", `Dropped ${dropCount} oldest trace events (maxEvents: ${this.maxEvents}, total dropped: ${this.droppedCount})`);
   }
 
   getEvents(): TraceEvent[] {

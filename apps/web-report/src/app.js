@@ -16,6 +16,8 @@ import { state } from "./app-state.js";
 import { RUN_LOADED } from "./core/events.js";
 import { judgeRegistry } from "./core/judge-registry.js";
 import { stateManager } from "./core/state.js";
+import { initCrossRunEvents } from "./cross-run-events.js";
+import { buildDemoRun } from "./demo-data.js";
 import { translate } from "./i18n.js";
 import { createLauncherModule } from "./launcher/module.js";
 import { createCrossRunRenders } from "./report/cross-run.js";
@@ -78,6 +80,11 @@ import {
   summarizeRun
 } from "./view-model.js";
 
+/**
+ * 维护地图（慎改契约）：HTTP `/api/*` JSON 见 `tests/contracts-http-api.test.mjs` · 服务端鉴权见 `tests/server-unit.test.mjs` ·
+ * Trace JSONL / TraceEvent 见 `tests/trace-event-contract.test.mjs` · 运维说明见仓库 `docs/ui-and-adapters.md`。
+ */
+
 // state is imported from ./app-state.js
 
 // elements is imported from ./app-elements.js
@@ -124,21 +131,7 @@ const scoreWeightElements = {
   cost: "scoreWeightCost"
 };
 
-// Weight name mapping for slider labels — now uses i18n keys
-const _WEIGHT_NAMES = {
-  status: 'scoreWeightStatus',
-  tests: 'scoreWeightTests',
-  criticalJudges: 'scoreWeightCriticalJudges',
-  nonCriticalJudges: 'scoreWeightNonCriticalJudges',
-  resolutionRate: 'scoreWeightResolutionRate',
-  tokenEfficiency: 'scoreWeightTokenEfficiency',
-  acceptanceRate: 'scoreWeightAcceptanceRate',
-  categoryScore: 'scoreWeightCategoryScore',
-  duration: 'scoreWeightDuration',
-  cost: 'scoreWeightCost',
-  precision: 'scoreWeightPrecision',
-  lint: 'scoreWeightLint'
-};
+
 
 function t(key, ...args) {
   return translate(state.language, key, ...args);
@@ -792,6 +785,9 @@ async function renderCommunityView() {
     return;
   }
 
+  // Guard against stale fetches overwriting newer data
+  const requestId = ++state._communityRequestId;
+
   // Try cache first
   const cached = getCachedCommunityData(taskPackId);
   if (cached) {
@@ -815,6 +811,10 @@ async function renderCommunityView() {
 
   try {
     const data = await fetchCommunityIndex(taskPackId);
+
+    // Discard stale results if a newer request was made
+    if (state._communityRequestId !== requestId) return;
+
     state.communityTaskPackId = taskPackId;
     state.communityData = data;
     state.communityLoading = false;
@@ -829,6 +829,9 @@ async function renderCommunityView() {
       elements.communityContent.innerHTML = `<p class="community-empty">${t("communityNoData")}</p><p class="community-hint">${t("communityPublishHint")}</p>`;
     }
   } catch (error) {
+    // Discard stale errors if a newer request was made
+    if (state._communityRequestId !== requestId) return;
+
     state.communityLoading = false;
     state.communityError = error?.message ?? "Unknown error";
     elements.communityStatus.textContent = t("communityError");
@@ -1528,76 +1531,16 @@ if (restoredCache) {
   });
 }
 
-// 跨运行对比功能
-elements.crossRunToggleSelect.addEventListener("click", () => {
-  state.crossRunSelectMode = !state.crossRunSelectMode;
-  if (!state.crossRunSelectMode) {
-    state.crossRunSelectedIds.clear();
-    state.crossRunCompareData = null;
-  }
-  renderCrossRunCompare();
+// 跨运行对比功能 — delegated to cross-run-events module
+initCrossRunEvents({
+  elements,
+  state,
+  getCrossRunCompareRows,
+  clearCachedCommunityData,
+  renderCommunityView,
+  renderCrossRunCompareImpl,
+  renderCrossRunSelectionListImpl
 });
-
-elements.crossRunSearch.addEventListener("input", () => {
-  renderCrossRunSelectionList();
-});
-
-elements.crossRunSelectionList.addEventListener("click", (event) => {
-  const checkbox = event.target.closest('input[type="checkbox"]');
-  if (!checkbox) return;
-  
-  const runId = checkbox.getAttribute("data-run-id");
-  if (!runId) return;
-  
-  if (checkbox.checked) {
-    state.crossRunSelectedIds.add(runId);
-  } else {
-    state.crossRunSelectedIds.delete(runId);
-  }
-  elements.crossRunCompareBtn.disabled = state.crossRunSelectedIds.size < 2;
-  renderCrossRunSelectionList();
-});
-
-elements.crossRunCompareBtn.addEventListener("click", () => {
-  const selectedRuns = state.runs.filter(run => state.crossRunSelectedIds.has(run.runId));
-  if (selectedRuns.length < 2) return;
-  
-  state.crossRunCompareData = getCrossRunCompareRows(selectedRuns, { scoreWeights: state.scoreWeights });
-  state.crossRunSelectMode = false;
-  state.crossRunSelectedIds = new Set(state.crossRunCompareData.comparableRuns.map((run) => run.runId));
-  renderCrossRunCompare();
-});
-
-elements.crossRunClearBtn.addEventListener("click", () => {
-  state.crossRunSelectedIds.clear();
-  state.crossRunCompareData = null;
-  elements.crossRunCompareBtn.disabled = true;
-  renderCrossRunSelectionList();
-  renderCrossRunCompare();
-});
-
-elements.crossRunCloseCompare.addEventListener("click", () => {
-  state.crossRunCompareData = null;
-  state.crossRunSelectedIds.clear();
-  renderCrossRunCompare();
-});
-
-elements.communityRefresh?.addEventListener("click", async () => {
-  if (state.communityTaskPackId) {
-    clearCachedCommunityData(state.communityTaskPackId);
-    state.communityData = null;
-    state.communityTaskPackId = null;
-  }
-  await renderCommunityView();
-});
-
-function renderCrossRunCompare() {
-  return renderCrossRunCompareImpl();
-}
-
-function renderCrossRunSelectionList() {
-  return renderCrossRunSelectionListImpl();
-}
 
 // Feature 5: Sidebar toggle for mobile
 elements.sidebarToggle.addEventListener("click", () => {
@@ -1647,7 +1590,6 @@ if (elements.tryDemoBtn) {
       btn.addEventListener("click", () => {
         loadDemoData();
       });
-      console.log('Demo button event listener added after DOM ready');
     }
   });
 }
@@ -1734,128 +1676,12 @@ function loadDemoData() {
     elements.tryDemoBtn.disabled = true;
   }
 
-  // Create demo run data
-  const demoRun = {
-    runId: `demo-${Date.now()}`,
-    createdAt: new Date().toISOString(),
-    task: {
-      id: "demo-task-fix-auth-bug",
-      title: "Fix Authentication Bug",
-      description: "Fix the authentication middleware to properly handle expired tokens and return appropriate error responses.",
-      schemaVersion: "agentarena.taskpack/v1",
-      metadata: {
-        objective: "Fix the authentication bug where expired tokens are not properly rejected",
-        judgeRationale: "The fix should properly validate token expiration and return 401 Unauthorized",
-        repoTypes: ["node", "express"],
-        difficulty: "medium"
-      },
-      judges: [
-        {
-          id: "test-auth",
-          type: "test-result",
-          label: "Auth Tests Pass",
-          expectation: "all tests pass"
-        },
-        {
-          id: "lint-check",
-          type: "lint-check",
-          label: "No Lint Errors",
-          expectation: "no errors"
-        },
-        {
-          id: "file-exists",
-          type: "file-exists",
-          label: "Auth Middleware Exists",
-          target: "src/middleware/auth.js"
-        }
-      ]
-    },
-    scoreWeights: { ...DEFAULT_SCORE_WEIGHTS },
-    scoreMode: "practical",
-    results: [
-      {
-        agentId: "demo-fast",
-        agentLabel: "Demo Fast",
-        status: "success",
-        durationMs: 45000,
-        estimatedCostUsd: 0.15,
-        costKnown: true,
-        tokensUsed: 2500,
-        filesChanged: 3,
-        diffPrecision: 0.85,
-        testPassRate: 0.95,
-        lintPassRate: 1.0,
-        judgeResults: [
-          { judgeId: "test-auth", status: "pass", message: "All auth tests pass" },
-          { judgeId: "lint-check", status: "pass", message: "No lint errors found" },
-          { judgeId: "file-exists", status: "pass", message: "Auth middleware exists" }
-        ],
-        compositeScore: 0.92,
-        baseAgent: "demo-fast",
-        variant: "default",
-        runtime: {
-          verification: "local",
-          source: "demo"
-        }
-      },
-      {
-        agentId: "demo-thorough",
-        agentLabel: "Demo Thorough",
-        status: "success",
-        durationMs: 78000,
-        estimatedCostUsd: 0.28,
-        costKnown: true,
-        tokensUsed: 4800,
-        filesChanged: 5,
-        diffPrecision: 0.92,
-        testPassRate: 0.98,
-        lintPassRate: 1.0,
-        judgeResults: [
-          { judgeId: "test-auth", status: "pass", message: "All auth tests pass" },
-          { judgeId: "lint-check", status: "pass", message: "No lint errors found" },
-          { judgeId: "file-exists", status: "pass", message: "Auth middleware exists" }
-        ],
-        compositeScore: 0.95,
-        baseAgent: "demo-thorough",
-        variant: "default",
-        runtime: {
-          verification: "local",
-          source: "demo"
-        }
-      },
-      {
-        agentId: "demo-budget",
-        agentLabel: "Demo Budget",
-        status: "failed",
-        durationMs: 32000,
-        estimatedCostUsd: 0.08,
-        costKnown: true,
-        tokensUsed: 1200,
-        filesChanged: 1,
-        diffPrecision: 0.45,
-        testPassRate: 0.65,
-        lintPassRate: 0.85,
-        judgeResults: [
-          { judgeId: "test-auth", status: "fail", message: "2 auth tests failing" },
-          { judgeId: "lint-check", status: "pass", message: "No lint errors found" },
-          { judgeId: "file-exists", status: "pass", message: "Auth middleware exists" }
-        ],
-        compositeScore: 0.58,
-        baseAgent: "demo-budget",
-        variant: "default",
-        runtime: {
-          verification: "local",
-          source: "demo"
-        }
-      }
-    ]
-  };
+  // Create demo run data from extracted module
+  const demoRun = buildDemoRun({ defaultScoreWeights: DEFAULT_SCORE_WEIGHTS });
 
   // Apply the demo data
   setTimeout(() => {
-    console.log('setTimeout callback, applying demo data');
     applyRuns([demoRun]);
-    console.log('applyRuns called');
     state.notice = localText(
       "演示数据已加载。这是一个模拟的 benchmark 结果，展示了 AgentArena 的主要功能。",
       "Demo data loaded. This is a simulated benchmark result showcasing AgentArena's main features."

@@ -15,6 +15,74 @@ class JudgeRegistry {
     this.builtinJudges = new Map();
     this.customJudges = new Map();
     this.loaded = false;
+    this._worker = null;
+    this._messageId = 0;
+    this._pendingMessages = new Map();
+  }
+
+  /**
+   * 获取或创建 Web Worker（懒加载，复用）
+   */
+  _getWorker() {
+    if (!this._worker) {
+      const workerUrl = new URL('../judge-worker.js', import.meta.url);
+      this._worker = new Worker(workerUrl);
+
+      this._worker.onmessage = (e) => {
+        const { id, type: msgType } = e.data;
+        const pending = this._pendingMessages.get(id);
+        if (pending) {
+          this._pendingMessages.delete(id);
+          clearTimeout(pending.timer);
+          if (msgType.endsWith('_error') || msgType === 'error') {
+            pending.reject(new Error(e.data.error));
+          } else {
+            pending.resolve(e.data);
+          }
+        }
+      };
+
+      this._worker.onerror = (err) => {
+        for (const [id, pending] of this._pendingMessages) {
+          this._pendingMessages.delete(id);
+          clearTimeout(pending.timer);
+          pending.reject(new Error(err.message || 'Worker error'));
+        }
+        this._worker = null;
+      };
+    }
+    return this._worker;
+  }
+
+  /**
+   * 向 Worker 发送消息并等待响应
+   */
+  _sendToWorker(type, payload, timeoutMs = 30000) {
+    const worker = this._getWorker();
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2)}-${++this._messageId}`;
+
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this._pendingMessages.delete(id);
+        reject(new Error(`Worker communication timeout (${timeoutMs}ms)`));
+      }, timeoutMs);
+
+      this._pendingMessages.set(id, { resolve, reject, timer });
+      worker.postMessage({ type, id, payload });
+    });
+  }
+
+  /**
+   * 通过 Worker 执行 Judge 评估
+   */
+  async _evaluateInWorker(judgeId, context) {
+    const result = await this._sendToWorker('evaluate', { judgeId, context });
+
+    if (result.type === 'evaluate_error') {
+      throw new Error(result.error);
+    }
+
+    return result.payload;
   }
 
   /**
@@ -22,22 +90,23 @@ class JudgeRegistry {
    */
   async init() {
     if (this.loaded) return;
-    
+
     try {
       const customJudgesData = await resultStore.getSetting('customJudges');
       if (customJudgesData && Array.isArray(customJudgesData)) {
         for (const judgeData of customJudgesData) {
           try {
-            this._registerInternal(judgeData, true);
+            const code = `registerJudge({id:${JSON.stringify(judgeData.id)},name:${JSON.stringify(judgeData.name)},description:${JSON.stringify(judgeData.description || '')},version:${JSON.stringify(judgeData.version || '1.0.0')},evaluate:${judgeData.evaluate}});`;
+            await this._loadFromCodeInternal(code, false);
           } catch (err) {
             console.warn(`加载自定义 Judge ${judgeData.id} 失败:`, err);
           }
         }
       }
     } catch (err) {
-      console.warn('从 IndexedDB 加载自定义 Judge 失败:', err);
+      console.warn('Failed to load custom Judges from IndexedDB:', err);
     }
-    
+
     this.loaded = true;
   }
 
@@ -65,12 +134,10 @@ class JudgeRegistry {
    * @param {boolean} isCustom - 是否为自定义
    */
   _registerInternal(judge, isCustom = false) {
-    // 验证必要字段
     if (!judge.id || !judge.name || !judge.evaluate) {
       throw new Error('Judge 必须包含 id、name 和 evaluate 字段');
     }
 
-    // 验证 evaluate 是函数
     if (typeof judge.evaluate !== 'function') {
       throw new Error('Judge.evaluate 必须是函数');
     }
@@ -81,6 +148,7 @@ class JudgeRegistry {
       description: judge.description || '',
       version: judge.version || '1.0.0',
       evaluate: judge.evaluate,
+      evaluateSource: judge.evaluateSource || judge.evaluate.toString(),
       isCustom
     };
 
@@ -92,42 +160,54 @@ class JudgeRegistry {
   }
 
   /**
-   * 从代码字符串注册 Judge
+   * 从代码字符串注册 Judge（通过 Web Worker 沙箱执行）
    * @param {string} code - Judge 代码字符串
    * @returns {Promise<Object|null>} 注册的 Judge
    */
   async loadFromCode(code) {
-    // 创建安全的执行环境
-    const sandbox = {
-      registerJudge: (judge) => {
-        this.register(judge);
-        return judge;
+    return this._loadFromCodeInternal(code, true);
+  }
+
+  /**
+   * 内部加载方法
+   * @param {string} code - Judge 代码字符串
+   * @param {boolean} publishEvent - 是否发布事件和持久化
+   * @returns {Promise<Object|null>}
+   */
+  async _loadFromCodeInternal(code, publishEvent) {
+    const result = await this._sendToWorker('load_code', { code });
+
+    if (result.type === 'load_code_error') {
+      throw new Error(result.error);
+    }
+
+    const { judges: judgeResults } = result.payload;
+    let lastJudge = null;
+
+    for (const judgeData of judgeResults) {
+      const judgeId = judgeData.id;
+      const judgeDef = {
+        id: judgeId,
+        name: judgeData.name,
+        description: judgeData.description,
+        version: judgeData.version,
+        evaluateSource: judgeData.evaluateSource,
+        evaluate: (context) => this._evaluateInWorker(judgeId, context),
+        isCustom: true
+      };
+
+      this.customJudges.set(judgeId, judgeDef);
+      lastJudge = judgeDef;
+    }
+
+    if (publishEvent) {
+      this._persistCustomJudges();
+      for (const judgeData of judgeResults) {
+        stateManager.publish(JUDGE_REGISTERED, { judge: this.customJudges.get(judgeData.id) });
       }
-    };
+    }
 
-    // 使用 new Function 创建函数（有独立作用域）
-    const fn = new Function('registerJudge', code);
-    
-    // 设置超时
-    const timeoutMs = 30000;
-    const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error(`Judge 注册超时（${timeoutMs}ms）`)), timeoutMs);
-    });
-
-    const execPromise = new Promise((resolve, reject) => {
-      try {
-        fn(sandbox.registerJudge);
-        resolve();
-      } catch (err) {
-        reject(err);
-      }
-    });
-
-    await Promise.race([execPromise, timeoutPromise]);
-    
-    // 返回最后注册的 Judge
-    const judges = this.listCustom();
-    return judges[judges.length - 1] || null;
+    return lastJudge;
   }
 
   /**
@@ -139,6 +219,10 @@ class JudgeRegistry {
       this.customJudges.delete(id);
       this._persistCustomJudges();
       stateManager.publish(JUDGE_UNREGISTERED, { id });
+
+      if (this._worker) {
+        this._sendToWorker('unload', { judgeId: id }).catch(() => {});
+      }
       return true;
     }
     return false;
@@ -192,14 +276,13 @@ class JudgeRegistry {
       throw new Error(`Judge ${id} 不存在`);
     }
 
-    // 设置超时
     const timeoutMs = 30000;
     const timeoutPromise = new Promise((_, reject) => {
       setTimeout(() => reject(new Error(`Judge ${id} 评估超时（${timeoutMs}ms）`)), timeoutMs);
     });
 
     const evalPromise = Promise.resolve(judge.evaluate(context));
-    
+
     return Promise.race([evalPromise, timeoutPromise]);
   }
 
@@ -213,9 +296,9 @@ class JudgeRegistry {
         name: j.name,
         description: j.description,
         version: j.version,
-        evaluate: j.evaluate.toString()
+        evaluate: j.evaluateSource
       }));
-      
+
       await resultStore.saveSetting('customJudges', judgesData);
     } catch (err) {
       console.warn('持久化自定义 Judge 失败:', err);

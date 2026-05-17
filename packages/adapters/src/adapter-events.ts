@@ -1,12 +1,20 @@
 /**
  * Unified adapter event protocol.
  *
- * All adapters should emit JSON-lines events conforming to this schema.
- * This enables a single parser to handle output from any adapter,
- * eliminating the need for adapter-specific parseCodexEvents/parseClaudeEvents/parseGeminiEvents.
+ * Defines the standard JSONL event schema that adapters can emit to produce
+ * structured, parseable trace output. The type definitions are actively used
+ * by DemoAdapter and serve as the contract for future adapter migration.
+ *
+ * Current status:
+ * - Type definitions: used by DemoAdapter for typed event objects
+ * - parseAdapterEvents: exported for future use — will replace the legacy
+ *   per-adapter parseCodexEvents/parseClaudeEvents/parseGeminiEvents parsers
+ *   once all adapters output this protocol
+ * - emitEvent: exported for future use — adapters will call this to emit
+ *   standardized JSONL events to stdout
  *
  * Migration path:
- * - New adapters MUST use this protocol
+ * - New adapters SHOULD use this protocol
  * - Existing adapters continue using their legacy parsers (deprecated)
  * - Legacy parsers will be removed when all adapters are migrated
  */
@@ -104,7 +112,11 @@ export interface ParsedAdapterOutput {
 
 /**
  * Parse a stream of JSON-line adapter events into a structured result.
- * This is the unified parser that replaces parseCodexEvents/parseClaudeEvents/parseGeminiEvents.
+ * This is the unified parser that will replace parseCodexEvents/parseClaudeEvents/parseGeminiEvents
+ * once all adapters are migrated to emit this protocol.
+ *
+ * NOTE: Currently only exported for future use — no adapter yet outputs this protocol natively.
+ * DemoAdapter emits typed events via context.trace() but does not use this parser.
  */
 export function parseAdapterEvents(stdout: string): ParsedAdapterOutput {
   const changedFiles = new Set<string>();
@@ -128,6 +140,7 @@ export function parseAdapterEvents(stdout: string): ParsedAdapterOutput {
     } catch {
       parseErrorCount++;
       if (parseErrorCount <= 3) {
+        // biome-ignore lint/suspicious/noConsole: parse error diagnostic
         console.warn(`parseAdapterEvents: Failed to parse JSON line: ${line.slice(0, 100)}...`);
       }
       continue;
@@ -181,6 +194,7 @@ export function parseAdapterEvents(stdout: string): ParsedAdapterOutput {
   }
 
   if (parseErrorCount > MAX_PARSE_ERRORS) {
+    // biome-ignore lint/suspicious/noConsole: parse error diagnostic
     console.warn(`parseAdapterEvents: Skipped ${parseErrorCount} unparseable lines in total.`);
   }
 
@@ -205,7 +219,10 @@ export function parseAdapterEvents(stdout: string): ParsedAdapterOutput {
 
 /**
  * Helper to emit a JSON-line event to stdout.
- * Adapters can use this to emit standardized events.
+ * Adapters can use this to emit standardized events once they are migrated
+ * to the unified protocol.
+ *
+ * NOTE: Currently only exported for future use.
  */
 export function emitEvent(event: AdapterEvent): void {
   process.stdout.write(JSON.stringify(event) + "\n");

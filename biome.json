@@ -43,5 +43,31 @@
       "tests/**",
       "!!**/apps/web-report/src/launcher/module.js"
     ]
-  }
+  },
+  "overrides": [
+    {
+      "includes": ["apps/web-report/src/**"],
+      "linter": {
+        "rules": {
+          "suspicious": { "noConsole": "off" }
+        }
+      }
+    },
+    {
+      "includes": ["packages/cli/src/**"],
+      "linter": {
+        "rules": {
+          "suspicious": { "noConsole": "off" }
+        }
+      }
+    },
+    {
+      "includes": ["packages/adapters/src/**"],
+      "linter": {
+        "rules": {
+          "suspicious": { "noConsole": "warn" }
+        }
+      }
+    }
+  ]
 }

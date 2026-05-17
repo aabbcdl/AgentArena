@@ -844,3 +844,72 @@ test("TraceReplayer matchesFilter filters by agentId, runId, type, messageContai
   assert.equal(replayer.matchesFilter(events[0], { messageContains: "hello" }), true);
   assert.equal(replayer.matchesFilter(events[0], { messageContains: "goodbye" }), false);
 });
+
+// ─── Edge case tests ───
+
+test("getRunVerdict handles empty results array", () => {
+  const run = createRun("run-empty", "Task Empty", { results: [] });
+  const verdict = getRunVerdict(run);
+  // Should not throw and return some default
+  assert.ok(verdict);
+});
+
+test("getRunVerdict handles all failed results", () => {
+  const run = createRun("run-all-failed", "Task All Failed", {
+    results: [
+      createResult("agent-a", { status: "failed", judgeResults: [{ success: false }] }),
+      createResult("agent-b", { status: "failed", judgeResults: [{ success: false }] })
+    ]
+  });
+  const verdict = getRunVerdict(run);
+  assert.ok(verdict);
+});
+
+test("getCompositeScoreDetails handles result with no judges", () => {
+  const run = createRun("run-no-judges", "Task No Judges", {
+    results: [createResult("agent-a", { judgeResults: [] })]
+  });
+  const details = getCompositeScoreDetails(run.results[0], run);
+  assert.ok(typeof details.total === "number");
+  assert.ok(Number.isFinite(details.total));
+});
+
+test("getCompositeScoreDetails handles result with zero weights", () => {
+  const run = createRun("run-zero-weights", "Task Zero Weights", {
+    scoreWeights: {
+      status: 0, tests: 0, criticalJudges: 0, nonCriticalJudges: 0,
+      lint: 0, precision: 0, duration: 0, cost: 0
+    },
+    results: [createResult("agent-a", { judgeResults: [{ success: true }] })]
+  });
+  const details = getCompositeScoreDetails(run.results[0], run);
+  assert.ok(typeof details.total === "number");
+  assert.ok(Number.isFinite(details.total));
+});
+
+test("getCrossRunCompareRows handles runs with no results", () => {
+  const runs = [
+    createRun("run-empty-a", "Task A", { results: [] }),
+    createRun("run-empty-b", "Task A", { results: [] })
+  ];
+  const data = getCrossRunCompareRows(runs);
+  assert.ok(Array.isArray(data.comparableRuns));
+});
+
+test("getRunToRunAgentDiff handles missing previous run", () => {
+  const currentRun = createRun("run-current", "Task A", {
+    results: [createResult("agent-a", { durationMs: 1000, tokenUsage: 100 })]
+  });
+  // Pass empty array as previous runs
+  const diff = getRunToRunAgentDiff([], currentRun);
+  assert.ok(diff);
+  assert.equal(diff.previousRun, null);
+  assert.equal(diff.rows.length, 0);
+});
+
+test("buildShareCard handles empty run", () => {
+  const run = createRun("run-empty", "Task Empty", { results: [] });
+  const card = buildShareCard(run);
+  assert.ok(typeof card === "string");
+  assert.ok(card.length > 0);
+});

@@ -5,9 +5,10 @@
  * Handles: rate limiting, CORS, token auth, API routing, static file serving.
  */
 
-import { randomUUID } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import type http from "node:http";
 import path from "node:path";
+import { auditLogger, logger, metrics } from "@agentarena/core";
 
 // Rate limiting
 const RATE_LIMIT_WINDOW_MS = 60_000;
@@ -28,6 +29,49 @@ interface RateLimitEntry {
 
 const rateLimitStore = new Map<string, RateLimitEntry>();
 
+// Proxy trust configuration
+let trustProxy = false;
+const trustedProxyIps = new Set<string>();
+
+export function setTrustProxy(enabled: boolean, trustedIps?: string[]): void {
+  trustProxy = enabled;
+  if (trustedIps) {
+    for (const ip of trustedIps) {
+      trustedProxyIps.add(ip);
+    }
+  }
+}
+
+/**
+ * Extract client IP from request, respecting X-Forwarded-For when proxy is trusted.
+ */
+export function getClientIp(request: http.IncomingMessage): string {
+  const socketIp = request.socket.remoteAddress ?? "unknown";
+
+  if (!trustProxy) {
+    return socketIp;
+  }
+
+  // If specific trusted IPs are configured, only trust those
+  if (trustedProxyIps.size > 0 && !trustedProxyIps.has(socketIp)) {
+    return socketIp;
+  }
+
+  // Read X-Forwarded-For header
+  // Use the LAST entry added by the trusted proxy, not the first (which is easily spoofable)
+  const forwardedFor = request.headers["x-forwarded-for"];
+  if (typeof forwardedFor === "string") {
+    const ips = forwardedFor.split(",").map(ip => ip.trim()).filter(Boolean);
+    // The rightmost IP before the proxy's own entry is the real client
+    const clientIp = ips.length >= 2 ? ips[ips.length - 2] : ips[0];
+    if (clientIp) {
+      return clientIp;
+    }
+  }
+
+  return socketIp;
+}
+
 export function checkRateLimit(ip: string, pathname: string): { allowed: boolean; retryAfterMs?: number } {
   const now = Date.now();
   let entry = rateLimitStore.get(ip);
@@ -44,11 +88,25 @@ export function checkRateLimit(ip: string, pathname: string): { allowed: boolean
 
   if (isExpensive && entry.expensiveTimestamps.length >= RATE_LIMIT_EXPENSIVE_MAX) {
     const oldest = entry.expensiveTimestamps[0];
+    metrics.rateLimitTriggeredTotal.inc({ clientIp: ip.slice(0, 3) + "***", path: pathname });
+    logger.warn("server", "rate.limit", "Rate limit exceeded", { metadata: { path: pathname } });
+    auditLogger.rateLimitTriggered("Rate limit exceeded", {
+      clientIp: ip,
+      resourceType: "api",
+      resourceId: pathname,
+    });
     return { allowed: false, retryAfterMs: oldest + RATE_LIMIT_WINDOW_MS - now };
   }
 
   if (entry.timestamps.length >= RATE_LIMIT_MAX_REQUESTS) {
     const oldest = entry.timestamps[0];
+    metrics.rateLimitTriggeredTotal.inc({ clientIp: ip.slice(0, 3) + "***", path: pathname });
+    logger.warn("server", "rate.limit", "Rate limit exceeded", { metadata: { path: pathname } });
+    auditLogger.rateLimitTriggered("Rate limit exceeded", {
+      clientIp: ip,
+      resourceType: "api",
+      resourceId: pathname,
+    });
     return { allowed: false, retryAfterMs: oldest + RATE_LIMIT_WINDOW_MS - now };
   }
 
@@ -73,11 +131,13 @@ export function startRateLimitCleanup(): NodeJS.Timeout {
 
 // Auth
 export function generateAuthToken(): string {
-  return randomUUID();
+  return randomBytes(32).toString("hex");
 }
 
 export function checkCorsOrigin(origin: string | undefined, host: string, port: number): boolean {
   if (!origin) return true;
+  // Reject null origin (from file:// protocol, privacy redirects, etc.)
+  if (origin === "null") return false;
   const allowedOrigins = new Set([
     `http://${host}:${port}`,
     `http://localhost:${port}`,
@@ -90,17 +150,73 @@ export function checkCorsOrigin(origin: string | undefined, host: string, port: 
   return allowedOrigins.has(origin);
 }
 
+/**
+ * Paths that expose sensitive data (secrets, credentials, profiles).
+ * These always require authentication, even on localhost.
+ */
+const SENSITIVE_API_PATHS = new Set([
+  "/api/provider-profiles",
+  "/api/run",
+  "/api/run/cancel",
+  "/api/preflight",
+  "/api/create-adhoc-taskpack",
+]);
+
+/**
+ * Check if a path pattern matches a sensitive path (including sub-paths like /api/provider-profiles/:id/secret).
+ */
+function isSensitivePath(pathname: string): boolean {
+  if (SENSITIVE_API_PATHS.has(pathname)) return true;
+  // Match sub-paths: /api/provider-profiles/:id, /api/provider-profiles/:id/secret
+  if (pathname.startsWith("/api/provider-profiles/")) return true;
+  return false;
+}
+
 export function checkAuthHeader(
   requestUrl: URL,
   method: string | undefined,
   isLocalhost: boolean,
   authToken: string,
-  authHeader: string | undefined
+  authHeader: string | undefined,
+  clientIp?: string
 ): boolean {
-  const isDestructiveApi = method !== "GET" && requestUrl.pathname.startsWith("/api/");
-  if (isDestructiveApi || (!isLocalhost && requestUrl.pathname.startsWith("/api/"))) {
+  const isApiPath = requestUrl.pathname.startsWith("/api/");
+  if (!isApiPath) return true;
+
+  // Sensitive API paths ALWAYS require auth, even on localhost
+  const isSensitive = isSensitivePath(requestUrl.pathname);
+  const isDestructiveApi = method !== "GET";
+
+  if (isSensitive || isDestructiveApi || !isLocalhost) {
     const providedToken = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : "";
-    return providedToken === authToken;
+    // Use timing-safe comparison to prevent timing attacks
+    // Constant-time comparison: always iterate over the expected token length
+    // to avoid leaking the token length via timing differences.
+    let mismatch = providedToken.length !== authToken.length ? 1 : 0;
+    for (let i = 0; i < authToken.length; i++) {
+      mismatch |= (i < providedToken.length ? providedToken.charCodeAt(i) : 0) ^ authToken.charCodeAt(i);
+    }
+    if (mismatch !== 0) {
+      const maskedIp = clientIp ? clientIp.slice(0, 3) + "***" : "unknown";
+      metrics.authFailureTotal.inc({ clientIp: maskedIp, path: requestUrl.pathname });
+      logger.warn("server", "auth.verify", "Authentication failed: token mismatch (length or content)", {
+        metadata: { path: requestUrl.pathname, method }
+      });
+      auditLogger.authFailure("Authentication failed: token mismatch", {
+        clientIp,
+        resourceType: "api",
+        resourceId: requestUrl.pathname,
+        metadata: { method },
+      });
+    } else {
+      auditLogger.authSuccess("Authentication successful", {
+        clientIp,
+        resourceType: "api",
+        resourceId: requestUrl.pathname,
+        metadata: { method },
+      });
+    }
+    return mismatch === 0;
   }
   return true;
 }
@@ -116,7 +232,9 @@ export function jsonResponse(data: unknown, statusCode = 200): { statusCode: num
       "X-Frame-Options": "DENY",
       "X-Content-Type-Options": "nosniff",
       "Referrer-Policy": "strict-origin-when-cross-origin",
-      "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'"
+      "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'",
+      // Prevent caching of API responses that may contain sensitive data
+      "Pragma": "no-cache"
     }
   };
 }
@@ -136,18 +254,33 @@ export class HttpError extends Error {
   }
 }
 
-export async function readRequestBody(request: http.IncomingMessage, maxBytes = 1_048_576): Promise<string> {
+export async function readRequestBody(request: http.IncomingMessage, maxBytes = 1_048_576, timeoutMs = 30_000): Promise<string> {
   const chunks: Buffer[] = [];
   let totalBytes = 0;
-  for await (const chunk of request) {
-    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    totalBytes += buffer.length;
-    if (totalBytes > maxBytes) {
-      throw new HttpError("Request body too large.", 413);
+
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    const timer = setTimeout(() => {
+      request.destroy();
+      reject(new HttpError("Request body read timed out.", 408));
+    }, timeoutMs);
+    request.on("end", () => clearTimeout(timer));
+    request.on("error", () => clearTimeout(timer));
+    request.on("close", () => clearTimeout(timer));
+  });
+
+  const readPromise = (async () => {
+    for await (const chunk of request) {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      totalBytes += buffer.length;
+      if (totalBytes > maxBytes) {
+        throw new HttpError("Request body too large.", 413);
+      }
+      chunks.push(buffer);
     }
-    chunks.push(buffer);
-  }
-  return Buffer.concat(chunks).toString("utf8");
+    return Buffer.concat(chunks).toString("utf8");
+  })();
+
+  return Promise.race([readPromise, timeoutPromise]);
 }
 
 export function detectContentType(filePath: string): string {

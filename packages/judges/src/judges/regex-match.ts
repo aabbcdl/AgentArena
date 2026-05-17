@@ -46,8 +46,13 @@ export async function runRegexMatchJudge(
       throw new Error(`Invalid regex pattern "${judge.pattern}": ${error instanceof Error ? error.message : String(error)}`);
     }
 
-    const matches = content.match(regex);
-    const matchCount = matches ? matches.length : 0;
+    let matchCount: number;
+    if (regex.global) {
+      const allMatches = [...content.matchAll(regex)];
+      matchCount = allMatches.length;
+    } else {
+      matchCount = regex.test(content) ? 1 : 0;
+    }
     const minMatches = judge.minMatches ?? 1;
     const shouldNotMatch = judge.shouldNotMatch ?? false;
 

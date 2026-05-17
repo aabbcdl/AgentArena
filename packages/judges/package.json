@@ -5,6 +5,12 @@
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
   "files": [
     "dist"
   ],
@@ -12,15 +18,15 @@
     "access": "public"
   },
   "dependencies": {
-    "@agentarena/core": "0.1.0",
-    "ajv": "^8.18.0",
-    "picomatch": "^4.0.3"
+    "@agentarena/core": "workspace:*",
+    "ajv": "8.18.0",
+    "picomatch": "4.0.3"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {
-    "@types/picomatch": "^4.0.2"
+    "@types/picomatch": "4.0.2"
   }
 }

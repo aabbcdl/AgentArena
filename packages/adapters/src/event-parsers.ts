@@ -114,10 +114,12 @@ export function parseCodexEvents(stdout: string, workspacePath: string): {
       parseErrorCount += 1;
       // Only log first few parse errors to avoid flooding
       if (parseErrorCount <= 3) {
+        // biome-ignore lint/suspicious/noConsole: parse error diagnostic
         console.warn(`parseCodexEvents: Failed to parse JSON line: ${line.slice(0, 100)}...`);
       }
       if (parseErrorCount > MAX_PARSE_ERRORS) {
-        // After too many errors, silently skip to avoid performance impact
+        // After too many errors, stop parsing to avoid performance impact
+        break;
       }
       continue;
     }
@@ -165,6 +167,7 @@ export function parseCodexEvents(stdout: string, workspacePath: string): {
   }
 
   if (parseErrorCount > MAX_PARSE_ERRORS) {
+    // biome-ignore lint/suspicious/noConsole: parse error diagnostic
     console.warn(`parseCodexEvents: Skipped ${parseErrorCount} unparseable lines in total.`);
   }
 
@@ -182,23 +185,6 @@ export function parseCodexEvents(stdout: string, workspacePath: string): {
             verification: "confirmed"
           }
         : undefined
-  };
-}
-
-export interface GeminiJsonEvent {
-  type?: string;
-  session_id?: string;
-  is_error?: boolean;
-  error?: string;
-  total_cost_usd?: number;
-  result?: string;
-  usage?: ClaudeUsageEvent;
-  message?: {
-    usage?: ClaudeUsageEvent;
-    content?: Array<{
-      type?: string;
-      text?: string;
-    }>;
   };
 }
 
@@ -243,6 +229,7 @@ export function parseStreamJsonEvents(
     } catch {
       parseErrorCount += 1;
       if (parseErrorCount <= 3) {
+        // biome-ignore lint/suspicious/noConsole: parse error diagnostic
         console.warn(`${callerName}: Failed to parse JSON line: ${line.slice(0, 100)}...`);
       }
       continue;
@@ -301,6 +288,7 @@ export function parseStreamJsonEvents(
   }
 
   if (parseErrorCount > MAX_PARSE_ERRORS) {
+    // biome-ignore lint/suspicious/noConsole: parse error diagnostic
     console.warn(`${callerName}: Skipped ${parseErrorCount} unparseable lines in total.`);
   }
 

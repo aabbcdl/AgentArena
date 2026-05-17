@@ -5,9 +5,9 @@ import type {
   AdapterPreflightOptions,
   AdapterPreflightResult
 } from "@agentarena/core";
+import { CURSOR_CAPABILITY, type InvocationSpec } from "./adapter-capabilities.js";
 import { ClaudeLikeAdapter } from "./claude-adapter.js";
 import { findExecutableOnPath, pathExists } from "./process-utils.js";
-import { CURSOR_CAPABILITY, type InvocationSpec } from "./shared.js";
 
 /**
  * Try to derive the cursor-agent CLI path from a Cursor binary path.

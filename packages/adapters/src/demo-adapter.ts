@@ -5,17 +5,12 @@ import type {
   AdapterPreflightResult,
   AgentAdapter
 } from "@agentarena/core";
+import { DEMO_CAPABILITY, type DemoProfile } from "./adapter-capabilities.js";
 import type { AdapterEvent } from "./adapter-events.js";
+import { createPreflightResult } from "./adapter-helpers.js";
+import { buildDemoSummary, computeTokenUsage, writeDemoArtifacts } from "./demo-helpers.js";
+import { getAdaptersPackageVersion } from "./invocation-probes.js";
 import { sleep } from "./process-utils.js";
-import {
-  buildDemoSummary,
-  computeTokenUsage,
-  createPreflightResult,
-  DEMO_CAPABILITY,
-  type DemoProfile,
-  getAdaptersPackageVersion,
-  writeDemoArtifacts
-} from "./shared.js";
 
 export class DemoAdapter implements AgentAdapter {
   readonly kind = "demo" as const;

@@ -7,14 +7,11 @@ import type {
   AgentAdapter,
   AgentResolvedRuntime
 } from "@agentarena/core";
+import type { InvocationSpec } from "./adapter-capabilities.js";
+import { formatAdapterError } from "./adapter-diagnostics.js";
+import { buildAgentPrompt, createPreflightResult, getChangedFilesFromGit } from "./adapter-helpers.js";
+import { probeHelp, probeInvocationVersion } from "./invocation-probes.js";
 import { agentTimeoutMs, runProcess } from "./process-utils.js";
-import {
-  buildAgentPrompt,
-  createPreflightResult,
-  type InvocationSpec,
-  probeHelp,
-  probeInvocationVersion
-} from "./shared.js";
 
 export const TRAE_CAPABILITY: AdapterCapability = {
   supportTier: "experimental",
@@ -258,14 +255,15 @@ export class TraeAdapter implements AgentAdapter {
       );
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
+      const actionableMessage = formatAdapterError(errorMessage, "Trae", "trae");
       await context.trace({
         type: "adapter.error",
         message: "Failed to execute Trae CLI",
-        metadata: { error: errorMessage }
+        metadata: { error: actionableMessage }
       });
       return {
         status: "failed",
-        summary: `Trae execution failed: ${errorMessage}`,
+        summary: `Trae execution failed: ${actionableMessage}`,
         tokenUsage: 0,
         estimatedCostUsd: 0,
         costKnown: false,
@@ -278,18 +276,7 @@ export class TraeAdapter implements AgentAdapter {
     const changedFilesHint: string[] = [...parsed.changedFiles];
 
     if (changedFilesHint.length === 0) {
-      try {
-        const { execFileSync } = await import("node:child_process");
-        const gitDiff = execFileSync("git", ["diff", "--name-only"], {
-          cwd: context.workspacePath,
-          encoding: "utf8"
-        }).trim();
-        if (gitDiff) {
-          changedFilesHint.push(...gitDiff.split("\n").filter(Boolean));
-        }
-      } catch {
-        // Ignore git diff failures.
-      }
+      changedFilesHint.push(...await getChangedFilesFromGit(context.workspacePath));
     }
 
     const summary =

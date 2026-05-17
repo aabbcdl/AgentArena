@@ -7,14 +7,11 @@ import type {
   AgentAdapter,
   AgentResolvedRuntime
 } from "@agentarena/core";
+import type { InvocationSpec } from "./adapter-capabilities.js";
+import { formatAdapterError } from "./adapter-diagnostics.js";
+import { buildAgentPrompt, createPreflightResult, getChangedFilesFromGit } from "./adapter-helpers.js";
+import { probeHelp, probeInvocationVersion } from "./invocation-probes.js";
 import { agentTimeoutMs, pathExists, runProcess } from "./process-utils.js";
-import {
-  buildAgentPrompt,
-  createPreflightResult,
-  type InvocationSpec,
-  probeHelp,
-  probeInvocationVersion
-} from "./shared.js";
 
 /**
  * Configuration for creating a CLI-based agent adapter.
@@ -90,8 +87,9 @@ class BaseCliAdapterImpl implements AgentAdapter {
           "blocked", "CLI help probe timed out.", resolvedRuntime, invocation.displayCommand, [result.stderr.trim()].filter(Boolean));
       }
       if (result.error) {
+        const hint = formatAdapterError(result.error, this.title, invocation.displayCommand);
         return createPreflightResult(options?.selection, this.id, this.title, this.kind, this.capability,
-          "missing", "CLI could not be launched.", resolvedRuntime, invocation.displayCommand, [result.error]);
+          "missing", hint, resolvedRuntime, invocation.displayCommand, [result.error]);
       }
       if (result.exitCode === 0) {
         return createPreflightResult(options?.selection, this.id, this.title, this.kind, this.capability,
@@ -139,8 +137,9 @@ class BaseCliAdapterImpl implements AgentAdapter {
       execution = await runProcess(invocation.command, args, context.workspacePath, agentTimeoutMs(), context.environment, context.signal);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      await context.trace({ type: "adapter.error", message: `Failed to execute ${this.title}`, metadata: { error: errorMessage } });
-      return { status: "failed", summary: `${this.title} execution failed: ${errorMessage}`, tokenUsage: 0, estimatedCostUsd: 0, costKnown: false, changedFilesHint: [], resolvedRuntime: runtime };
+      const actionableMessage = formatAdapterError(errorMessage, this.title, invocation.displayCommand);
+      await context.trace({ type: "adapter.error", message: `Failed to execute ${this.title}`, metadata: { error: actionableMessage } });
+      return { status: "failed", summary: `${this.title} execution failed: ${actionableMessage}`, tokenUsage: 0, estimatedCostUsd: 0, costKnown: false, changedFilesHint: [], resolvedRuntime: runtime };
     }
 
     const tokenUsage = this.config.parseTokenUsage?.(execution.stdout) ?? 0;
@@ -148,13 +147,7 @@ class BaseCliAdapterImpl implements AgentAdapter {
       ? this.config.parseSummary(execution.stdout, execution.stderr, execution.exitCode)
       : execution.stdout.trim() || `${this.title} completed the task.`;
 
-    // Detect changed files via git
-    const changedFilesHint: string[] = [];
-    try {
-      const { execFileSync } = await import("node:child_process");
-      const gitDiff = execFileSync("git", ["diff", "--name-only"], { cwd: context.workspacePath, encoding: "utf8" }).trim();
-      if (gitDiff) changedFilesHint.push(...gitDiff.split("\n").filter(Boolean));
-    } catch { /* git not available */ }
+    const changedFilesHint = await getChangedFilesFromGit(context.workspacePath);
 
     await context.trace({
       type: "adapter.finish",
@@ -176,18 +169,16 @@ class BaseCliAdapterImpl implements AgentAdapter {
   private async resolveInvocation(): Promise<InvocationSpec> {
     const { binEnvVar, command } = this.config;
     if (binEnvVar && process.env[binEnvVar]?.trim()) {
-      const cmd = process.env[binEnvVar]?.trim();
-      if (cmd) {
-        // Validate that the binary exists before returning
-        const exists = await pathExists(cmd);
-        if (!exists) {
-          throw new Error(
-            `Custom binary path "${cmd}" (from ${binEnvVar}) does not exist or is not accessible. ` +
-            `Please check your ${binEnvVar} environment variable.`
-          );
-        }
-        return { command: cmd, argsPrefix: [], displayCommand: cmd };
+      const cmd = process.env[binEnvVar].trim();
+      // Validate that the binary exists before returning
+      const exists = await pathExists(cmd);
+      if (!exists) {
+        throw new Error(
+          `Custom binary path "${cmd}" (from ${binEnvVar}) does not exist or is not accessible. ` +
+          `Please check your ${binEnvVar} environment variable.`
+        );
       }
+      return { command: cmd, argsPrefix: [], displayCommand: cmd };
     }
     if (process.platform === "win32") {
       return { command: `${command}.cmd`, argsPrefix: [], displayCommand: `${command}.cmd` };

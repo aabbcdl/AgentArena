@@ -40,10 +40,28 @@ export async function isPathInsideWorkspace(workspacePath: string, targetPath: s
     return !realRelativePath.startsWith("..") && !path.isAbsolute(realRelativePath);
   } catch (error: unknown) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      // Target doesn't exist yet — basic string check
-      return !relativePath.startsWith("..") && !path.isAbsolute(relativePath);
+      let current = resolvedTarget;
+      while (current !== resolvedWorkspace) {
+        const parent = path.dirname(current);
+        if (parent === current) return false;
+        try {
+          const realParent = await fs.realpath(parent);
+          const realWorkspace = await fs.realpath(resolvedWorkspace);
+          const realRelativePath = path.relative(realWorkspace, realParent);
+          if (realRelativePath.startsWith("..") || path.isAbsolute(realRelativePath)) {
+            return false;
+          }
+          const relativeFromParent = path.relative(parent, resolvedTarget);
+          return !relativeFromParent.startsWith("..") && !path.isAbsolute(relativeFromParent);
+        } catch (parentError: unknown) {
+          if ((parentError as NodeJS.ErrnoException).code !== "ENOENT") {
+            return false;
+          }
+          current = parent;
+        }
+      }
+      return true;
     }
-    // Other errors (EACCES, etc.) — fail closed
     return false;
   }
 }

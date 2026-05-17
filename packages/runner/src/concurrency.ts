@@ -7,7 +7,7 @@ const DEFAULT_AGENT_EXECUTE_TIMEOUT_MS = 30 * 60 * 1_000;
 export { DEFAULT_AGENT_CONCURRENCY };
 
 export interface MapWithConcurrencyResult<R> {
-  results: (R | Error)[];
+  results: (R | Error | undefined)[];
   aborted: boolean;
 }
 
@@ -53,7 +53,7 @@ export async function mapWithConcurrency<T, R>(
   await Promise.all(workers);
 
   return {
-    results: results.filter((value): value is R | Error => value !== undefined),
+    results: results as (R | Error | undefined)[],
     aborted
   };
 }

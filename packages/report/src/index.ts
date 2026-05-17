@@ -7,6 +7,12 @@ import { renderMarkdown, renderPrComment } from "./markdown-template.js";
 import { buildBadgePayload, type Locale, sanitizeRun } from "./report-helpers.js";
 import { enrichRunWithScores } from "./scoring.js";
 
+async function atomicWriteFile(filePath: string, content: string): Promise<void> {
+  const tmpPath = `${filePath}.tmp`;
+  await fs.writeFile(tmpPath, content, "utf8");
+  await fs.rename(tmpPath, filePath);
+}
+
 export { getDefaultWeights } from "@agentarena/core";
 export { generateCsv } from "./csv-export.js";
 export {
@@ -37,6 +43,13 @@ export {
   FAILED_SCORE_BAND,
   normalizeApplicableWeights
 } from "./scoring.js";
+export {
+  type CompositeScore,
+  getDefaultScoreComponents,
+  type ScoreComponents,
+  validateCompositeScore,
+  validateScoreComponents
+} from "./scoring-schema.js";
 export {
   type AgentVarianceStats,
   computeVarianceAnalysis,
@@ -89,11 +102,11 @@ export async function writeReport(
   };
   
   await Promise.all([
-    fs.writeFile(jsonPath, JSON.stringify(exportData, null, 2), "utf8"),
-    fs.writeFile(htmlPath, renderHtml(publicRun, locale, leaderboard), "utf8"),
-    fs.writeFile(markdownPath, renderMarkdown(publicRun, locale, leaderboard), "utf8"),
-    fs.writeFile(badgePath, JSON.stringify(buildBadgePayload(publicRun), null, 2), "utf8"),
-    fs.writeFile(prCommentPath, renderPrComment(publicRun, locale, leaderboard), "utf8")
+    atomicWriteFile(jsonPath, JSON.stringify(exportData, null, 2)),
+    atomicWriteFile(htmlPath, renderHtml(publicRun, locale, leaderboard)),
+    atomicWriteFile(markdownPath, renderMarkdown(publicRun, locale, leaderboard)),
+    atomicWriteFile(badgePath, JSON.stringify(buildBadgePayload(publicRun), null, 2)),
+    atomicWriteFile(prCommentPath, renderPrComment(publicRun, locale, leaderboard))
   ]);
 
   return { htmlPath, jsonPath, markdownPath, badgePath, prCommentPath };

@@ -1,11 +1,14 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import {
-  BenchmarkCancelledError,
   buildExecutionEnvironment,
   type CommandExecutionSpec,
+  INTERNAL_IGNORED_NAMES,
   isPathInsideWorkspace,
+  MAX_PROCESS_OUTPUT_BYTES,
+  pathExists,
   resolveTimeoutMs,
+  throwIfAborted,
   uniqueSorted,
 } from "@agentarena/core";
 import Ajv from "ajv";
@@ -15,7 +18,6 @@ export const COMMON_JUDGE_FIELDS = new Set(["id", "label", "type", "critical", "
 export const COMMAND_JUDGE_FIELDS = new Set([...COMMON_JUDGE_FIELDS, "command", "cwd", "timeoutMs", "envAllowList", "env"]);
 
 export const DEFAULT_JUDGE_TIMEOUT_MS = 5 * 60 * 1_000;
-export const MAX_PROCESS_OUTPUT_BYTES = 50 * 1024 * 1024;
 
 export function hasReDoSRisk(pattern: string): boolean {
   if (/\([^)]*[+*][^)]*\)[+*?]/.test(pattern)) return true;
@@ -82,11 +84,7 @@ export interface CommandExecutionCapture {
   cwd: string;
 }
 
-export function throwIfCancelled(signal?: AbortSignal): void {
-  if (signal?.aborted) {
-    throw new BenchmarkCancelledError();
-  }
-}
+export const throwIfCancelled = throwIfAborted;
 
 export function stringifyExpectation(value: unknown): string {
   return typeof value === "string" ? value : JSON.stringify(value);
@@ -96,7 +94,6 @@ export function createGlobMatcher(pattern: string): (value: string) => boolean {
   return picomatch(pattern, { dot: true });
 }
 
-const IGNORED_DIRS = new Set(["node_modules", ".git", ".agentarena"]);
 const MAX_WALK_DEPTH = 64;
 
 export async function listWorkspaceFiles(rootPath: string): Promise<string[]> {
@@ -113,7 +110,7 @@ export async function listWorkspaceFiles(rootPath: string): Promise<string[]> {
     for (const entry of entries) {
       const absolutePath = path.join(currentPath, entry.name);
       if (entry.isDirectory()) {
-        if (IGNORED_DIRS.has(entry.name)) continue;
+        if (INTERNAL_IGNORED_NAMES.has(entry.name)) continue;
         await walk(absolutePath, depth + 1);
         continue;
       }
@@ -376,15 +373,12 @@ export function checkRequiredTests(
   const results: Array<{ name: string; status: string; matched: boolean }> = [];
 
   for (const pattern of requiredPatterns) {
-    const matcher = pattern.includes("*") ? picomatch(pattern, { dot: true }) : null;
+    const matcher = picomatch(pattern, { dot: true });
     const matched = tests.filter(test => {
       if (test.name === pattern || test.fullName === pattern) {
         return true;
       }
-      if (matcher) {
-        return matcher(test.fullName) || matcher(test.name);
-      }
-      return false;
+      return matcher(test.fullName) || matcher(test.name);
     });
 
     if (matched.length > 0) {
@@ -479,11 +473,62 @@ export function parseLintSummary(payload: unknown, format: string | undefined): 
   throw new Error("Lint result JSON did not match ESLint or Biome reporter output.");
 }
 
-export async function pathExists(targetPath: string): Promise<boolean> {
-  try {
-    await fs.access(targetPath);
-    return true;
-  } catch {
+/**
+ * Validate that a value is a valid JudgeResult structure.
+ * Returns true if valid, false otherwise.
+ *
+ * This prevents garbage-in → garbage-out in scoring by ensuring
+ * judge results have the required fields with correct types.
+ */
+export function validateJudgeResult(result: unknown): result is {
+  judgeId: string;
+  label: string;
+  type: string;
+  success: boolean;
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  durationMs: number;
+} {
+  if (!result || typeof result !== "object") {
     return false;
   }
+
+  const obj = result as Record<string, unknown>;
+
+  // Required string fields
+  if (typeof obj.judgeId !== "string" || obj.judgeId.length === 0) {
+    return false;
+  }
+  if (typeof obj.label !== "string") {
+    return false;
+  }
+  if (typeof obj.type !== "string" || obj.type.length === 0) {
+    return false;
+  }
+
+  // Required boolean field
+  if (typeof obj.success !== "boolean") {
+    return false;
+  }
+
+  // Required number fields
+  if (obj.exitCode !== null && typeof obj.exitCode !== "number") {
+    return false;
+  }
+  if (typeof obj.durationMs !== "number" || obj.durationMs < 0) {
+    return false;
+  }
+
+  // Required string fields for output
+  if (typeof obj.stdout !== "string") {
+    return false;
+  }
+  if (typeof obj.stderr !== "string") {
+    return false;
+  }
+
+  return true;
 }
+
+export { MAX_PROCESS_OUTPUT_BYTES, pathExists };

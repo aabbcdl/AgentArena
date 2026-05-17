@@ -86,7 +86,7 @@ class Router {
         try {
           route.viewFn(this.params);
         } catch (err) {
-          console.error(`Router: 视图渲染出错 (${routePath})`, err);
+          console.error(`Router: view render error (${routePath})`, err);
         }
         
         matched = true;

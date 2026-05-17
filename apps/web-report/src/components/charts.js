@@ -3,6 +3,8 @@
  * 提供 SVG 条形图、Canvas 雷达图和权重滑块，用于评分可视化
  */
 
+import { escapeHtml } from "../app-helpers.js";
+
 // 色盲友好配色方案（6 个维度）
 // 使用亮度递增 + 饱和度差异，确保色弱用户可区分
 const CHART_COLORS = [
@@ -371,7 +373,10 @@ export function renderComparisonBarChart(container, agents, dimensions, options 
 
   container.appendChild(svg);
 
-  // 响应 resize
+  // 响应 resize (disconnect previous observer to avoid leaks)
+  if (container._chartResizeObserver) {
+    container._chartResizeObserver.disconnect();
+  }
   const ro = new ResizeObserver(() => {
     const w = container.clientWidth;
     if (w > 0 && w !== width) {
@@ -702,7 +707,7 @@ export function renderWeightSliders(container, currentWeights, onChange, options
       label.style.fontSize = '13px';
       const displayName = labelMap[key] || key;
       const pct = (value * 100).toFixed(0);
-      label.innerHTML = `<span>${displayName}</span> <span class="weight-value" style="font-weight:600;min-width:36px;text-align:right;display:inline-block">${pct}%</span>`;
+      label.innerHTML = `<span>${escapeHtml(displayName)}</span> <span class="weight-value" style="font-weight:600;min-width:36px;text-align:right;display:inline-block">${pct}%</span>`;
 
       const input = document.createElement('input');
       input.type = 'range';

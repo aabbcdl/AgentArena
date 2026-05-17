@@ -48,7 +48,7 @@ export class TaskPackMarket {
       this.packs = await response.json();
       this.filteredPacks = [...this.packs];
     } catch (err) {
-      console.warn('加载任务包注册表失败:', err);
+      console.warn('Failed to load task pack registry:', err);
       this.packs = [];
       this.filteredPacks = [];
     }

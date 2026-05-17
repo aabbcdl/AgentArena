@@ -110,8 +110,9 @@ async function startUiServer(cwd, extraArgs = [], envOverrides = {}) {
   };
 }
 
-test("agentarena run exits with code 0 on successful benchmark", async () => {
+test("agentarena run exits with code 0 on successful benchmark", { timeout: 60_000 }, async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-cli-"));
+  try {
   const repoPath = path.join(tempDir, "repo");
   const outputPath = path.join(tempDir, "output-success");
   const taskPath = path.join(tempDir, "task-success.json");
@@ -146,12 +147,14 @@ test("agentarena run exits with code 0 on successful benchmark", async () => {
   assert.equal(runDirs.length, 1);
   assert.equal(runDirs[0].isDirectory(), true);
   assert.ok(await readFile(path.join(outputPath, runDirs[0].name, "summary.json"), "utf8"));
-
-  await rm(tempDir, { recursive: true, force: true });
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
 });
 
-test("agentarena run exits with code 1 on failed benchmark", async () => {
+test("agentarena run exits with code 1 on failed benchmark", { timeout: 60_000 }, async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-cli-"));
+  try {
   const repoPath = path.join(tempDir, "repo");
   const outputPath = path.join(tempDir, "output-fail");
   const taskPath = path.join(tempDir, "task-fail.json");
@@ -181,11 +184,12 @@ test("agentarena run exits with code 1 on failed benchmark", async () => {
 
   assert.equal(result.code, 1);
   assert.match(result.stdout, /status=failed/);
-
-  await rm(tempDir, { recursive: true, force: true });
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
 });
 
-test("agentarena doctor exits with code 0 in strict mode when all adapters are ready", async () => {
+test("agentarena doctor exits with code 0 in strict mode when all adapters are ready", { timeout: 60_000 }, async () => {
   const result = await runCli(
     ["doctor", "--agents", "demo-fast,demo-budget", "--strict"],
     path.resolve(".")
@@ -195,7 +199,7 @@ test("agentarena doctor exits with code 0 in strict mode when all adapters are r
   assert.match(result.stdout, /✓ ready/);
 });
 
-test("agentarena doctor exits with code 1 in strict mode when any adapter is not ready", async () => {
+test("agentarena doctor exits with code 1 in strict mode when any adapter is not ready", { timeout: 60_000 }, async () => {
   const result = await runCli(
     ["doctor", "--agents", "demo-fast,cursor", "--strict"],
     path.resolve("."),
@@ -209,8 +213,9 @@ test("agentarena doctor exits with code 1 in strict mode when any adapter is not
   assert.match(result.stdout, /✗ missing|✗ blocked|≈ unverified/);
 });
 
-test("agentarena run can update snapshots from the CLI", async () => {
+test("agentarena run can update snapshots from the CLI", { timeout: 60_000 }, async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-cli-"));
+  try {
   const repoPath = path.join(tempDir, "repo");
   const outputPath = path.join(tempDir, "output-update");
   const taskPath = path.join(tempDir, "task-update.json");
@@ -259,12 +264,14 @@ test("agentarena run can update snapshots from the CLI", async () => {
 
   assert.equal(result.code, 0);
   assert.match(result.stdout, /status=success/);
-
-  await rm(tempDir, { recursive: true, force: true });
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
 });
 
-test("agentarena run supports --cleanup-workspaces flag", async () => {
+test("agentarena run supports --cleanup-workspaces flag", { timeout: 60_000 }, async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-cli-"));
+  try {
   const repoPath = path.join(tempDir, "repo");
   const outputPath = path.join(tempDir, "output-cleanup");
   const taskPath = path.join(tempDir, "task-cleanup.json");
@@ -305,12 +312,16 @@ test("agentarena run supports --cleanup-workspaces flag", async () => {
 
   assert.equal(result.code, 0);
   assert.match(result.stdout, /AgentArena run complete/);
-
-  await rm(tempDir, { recursive: true, force: true });
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
 });
 
-test("agentarena ui creates Node-oriented adhoc taskpacks without fallback echo judges", async () => {
+test("agentarena ui creates Node-oriented adhoc taskpacks without fallback echo judges", { timeout: 60_000 }, async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-cli-"));
+  // Create a package.json so language detection identifies this as a Node.js project
+  await writeFile(path.join(tempDir, "package.json"), JSON.stringify({ name: "test", scripts: { build: "echo ok", test: "echo ok" } }), "utf8");
+  await writeFile(path.join(tempDir, "README.md"), "# Test\n", "utf8");
   const server = await startUiServer(tempDir);
 
   try {
@@ -331,11 +342,11 @@ test("agentarena ui creates Node-oriented adhoc taskpacks without fallback echo 
     assert.match(yaml, /type: lint-check/);
     assert.match(yaml, /source: community/);
     assert.match(yaml, /repoTypes:\s*\n\s*- node-js/);
-    assert.match(yaml, /tags:\s*\n\s*- adhoc\n\s*- custom\n\s*- node-assumptions/);
-    assert.match(yaml, /judgeRationale: These default checks assume a Node-style repository with package\.json, README, build, test, and lint commands\./);
+    assert.match(yaml, /tags:\s*\n\s*- adhoc\n\s*- custom\n\s*- node-js/);
+    assert.match(yaml, /judgeRationale: These default checks assume a node-js repository with appropriate build, test, and lint commands\./);
     assert.match(yaml, /label: Node package manifest still exists/);
     assert.match(yaml, /label: Node project still builds/);
-    assert.match(yaml, /label: Node tests still pass with structured results/);
+    assert.match(yaml, /label: Node tests still pass/);
     assert.match(yaml, /label: Node lint stays clean/);
     assert.doesNotMatch(yaml, /No build script/);
     assert.doesNotMatch(yaml, /No test script/);
@@ -345,7 +356,7 @@ test("agentarena ui creates Node-oriented adhoc taskpacks without fallback echo 
   }
 });
 
-test("agentarena ui rejects adhoc taskpack path traversal deletes", async () => {
+test("agentarena ui rejects adhoc taskpack path traversal deletes", { timeout: 60_000 }, async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-cli-"));
   const server = await startUiServer(tempDir);
   const escapeTarget = path.join(tempDir, ".agentarena", "outside.yaml");
@@ -367,7 +378,7 @@ test("agentarena ui rejects adhoc taskpack path traversal deletes", async () => 
   }
 });
 
-test("agentarena doctor supports JSON output", async () => {
+test("agentarena doctor supports JSON output", { timeout: 60_000 }, async () => {
   const result = await runCli(["doctor", "--agents", "demo-fast", "--json"], path.resolve("."));
 
   assert.equal(result.code, 0);
@@ -378,7 +389,7 @@ test("agentarena doctor supports JSON output", async () => {
   assert.equal(payload[0].capability.supportTier, "supported");
 });
 
-test("agentarena doctor reports codex runtime overrides", async () => {
+test("agentarena doctor reports codex runtime overrides", { timeout: 60_000 }, async () => {
   const result = await runCli(
     [
       "doctor",
@@ -414,6 +425,7 @@ test("agentarena list-adapters supports JSON output", async () => {
 
 test("agentarena init-taskpack writes a starter YAML file", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-cli-"));
+  try {
   const outputPath = path.join(tempDir, "agentarena.taskpack.yaml");
 
   const result = await runCli(
@@ -427,12 +439,14 @@ test("agentarena init-taskpack writes a starter YAML file", async () => {
   assert.match(content, /schemaVersion: agentarena\.taskpack\/v1/);
   assert.match(content, /type: snapshot/);
   assert.match(content, /expectedChangedPaths:/);
-
-  await rm(tempDir, { recursive: true, force: true });
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
 });
 
 test("agentarena init-taskpack repo-health template includes structured quality judges", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-cli-"));
+  try {
   const outputPath = path.join(tempDir, "agentarena.taskpack.yaml");
 
   const result = await runCli(
@@ -446,12 +460,14 @@ test("agentarena init-taskpack repo-health template includes structured quality 
   assert.match(content, /type: lint-check/);
   assert.match(content, /passOnNoTests: true/);
   assert.match(content, /expectedChangedPaths:/);
-
-  await rm(tempDir, { recursive: true, force: true });
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
 });
 
-test("agentarena run supports JSON output", async () => {
+test("agentarena run supports JSON output", { timeout: 60_000 }, async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-cli-"));
+  try {
   const repoPath = path.join(tempDir, "repo");
   const outputPath = path.join(tempDir, "output-json");
   const taskPath = path.join(tempDir, "task-json.json");
@@ -507,12 +523,14 @@ test("agentarena run supports JSON output", async () => {
   assert.equal(summary.scoreWeights.status, 0.24);
   assert.equal(typeof summary.results[0].compositeScore, "number");
   assert.equal(Array.isArray(summary.results[0].scoreReasons), true);
-
-  await rm(tempDir, { recursive: true, force: true });
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
 });
 
 test("agentarena init-ci writes a benchmark workflow", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-cli-"));
+  try {
   const workflowPath = path.join(tempDir, ".github", "workflows", "agentarena-benchmark.yml");
 
   const result = await runCli(
@@ -533,12 +551,14 @@ test("agentarena init-ci writes a benchmark workflow", async () => {
   assert.match(content, /name: AgentArena Benchmark/);
   assert.match(content, /run --repo \. --task agentarena\.taskpack\.yaml --agents demo-fast,codex/);
   assert.match(content, /pr-comment\.md/);
-
-  await rm(tempDir, { recursive: true, force: true });
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
 });
 
 test("agentarena init-ci supports nightly templates and custom output directories", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-cli-"));
+  try {
   const workflowPath = path.join(tempDir, ".github", "workflows", "agentarena-nightly.yml");
 
   const result = await runCli(
@@ -565,11 +585,12 @@ test("agentarena init-ci supports nightly templates and custom output directorie
   assert.match(content, /doctor --agents demo-fast --probe-auth --strict --json > \.agentarena\/nightly\/doctor\.json/);
   assert.doesNotMatch(content, /Comment benchmark summary on PR/);
   assert.match(content, /cat \.agentarena\/nightly\/summary\.md >> "\$GITHUB_STEP_SUMMARY"/);
-
-  await rm(tempDir, { recursive: true, force: true });
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
 });
 
-test("agentarena ui exposes metadata and adapter APIs", async () => {
+test("agentarena ui exposes metadata and adapter APIs", { timeout: 60_000 }, async () => {
   const server = await startUiServer(path.resolve("."));
 
   try {
@@ -603,7 +624,7 @@ test("agentarena ui exposes metadata and adapter APIs", async () => {
   }
 });
 
-test("agentarena ui exposes Claude provider profile APIs", async () => {
+test("agentarena ui exposes Claude provider profile APIs", { timeout: 60_000 }, async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-ui-profiles-"));
   const registryPath = path.join(tempDir, "claude-provider-profiles.json");
   const server = await startUiServer(
@@ -617,7 +638,11 @@ test("agentarena ui exposes Claude provider profile APIs", async () => {
   );
 
   try {
-    const profilesResponse = await fetch(`http://127.0.0.1:${server.port}/api/provider-profiles`);
+    const profilesResponse = await fetch(`http://127.0.0.1:${server.port}/api/provider-profiles`, {
+      headers: {
+        ...(server.authToken ? { "Authorization": `Bearer ${server.authToken}` } : {})
+      }
+    });
     assert.equal(profilesResponse.status, 200);
     const initialProfiles = await profilesResponse.json();
     assert.equal(Array.isArray(initialProfiles), true);
@@ -685,7 +710,7 @@ test("agentarena ui exposes Claude provider profile APIs", async () => {
   }
 });
 
-test("agentarena ui rejects oversized request bodies with 413", async () => {
+test("agentarena ui rejects oversized request bodies with 413", { timeout: 60_000 }, async () => {
   const server = await startUiServer(path.resolve("."));
 
   try {
@@ -712,7 +737,7 @@ test("agentarena ui rejects oversized request bodies with 413", async () => {
   }
 });
 
-test("agentarena ui cancels an active benchmark via API", async () => {
+test("agentarena ui cancels an active benchmark via API", { timeout: 60_000 }, async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-ui-cancel-"));
   const repoPath = path.join(tempDir, "repo");
   const outputPath = path.join(tempDir, "output");
@@ -812,7 +837,7 @@ test("agentarena ui cancels an active benchmark via API", async () => {
   }
 });
 
-test("agentarena ui exposes run progress while a benchmark is active", async () => {
+test("agentarena ui exposes run progress while a benchmark is active", { timeout: 60_000 }, async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-ui-"));
   const repoPath = path.join(tempDir, "repo");
   const outputPath = path.join(tempDir, "output");
@@ -891,7 +916,7 @@ test("agentarena ui exposes run progress while a benchmark is active", async () 
   }
 });
 
-test("agentarena ui can execute a benchmark via API", async () => {
+test("agentarena ui can execute a benchmark via API", { timeout: 60_000 }, async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-ui-"));
   const repoPath = path.join(tempDir, "repo");
   const outputPath = path.join(tempDir, "output");

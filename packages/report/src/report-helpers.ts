@@ -1,9 +1,10 @@
-import path from "node:path";
 import {
   type AdapterPreflightResult,
   type AgentRequestedConfig,
   type AgentResolvedRuntime,
   type BenchmarkRun,
+  escapeHtml,
+  normalizePath,
   portableBasename,
   portableRelativePath
 } from "@agentarena/core";
@@ -149,14 +150,7 @@ export function getRunScoreMode(run: BenchmarkRun): string {
   return hasScoreMetadata(run) ? (run.scoreMode ?? "balanced") : "balanced";
 }
 
-export function escapeHtml(value: unknown): string {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
+export { escapeHtml };
 
 export function escapeMdCell(value: string): string {
   return value.replaceAll("|", "\\|").replaceAll("\n", " ");
@@ -173,10 +167,6 @@ export function statusTone(status: AdapterPreflightResult["status"]): string {
     case "missing":
       return "tone-missing";
   }
-}
-
-function normalizePath(value: string): string {
-  return value.split(path.sep).join("/");
 }
 
 function sanitizePath(value: string, basePath: string, prefix: string): string {
