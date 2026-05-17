@@ -1,15 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
-import path from "node:path";
-
-const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-
-// Import scoring functions
-import { getCompositeScoreDetails, formatCompositeScore, DEFAULT_SCORE_WEIGHTS, getScoreWeightPreset } from "../apps/web-report/src/view-model/scoring.js";
-
-// Import comparison and trust functions
-import { getRunCompareRows, getRunVerdict, getRunTrustSummary, getSelectionTrustSummary } from "../apps/web-report/src/view-model/comparison.js";
+import { getRunTrustSummary, getRunVerdict, getSelectionTrustSummary } from "../apps/web-report/src/view-model/comparison.js";
+import { formatCompositeScore, getCompositeScoreDetails, getScoreWeightPreset } from "../apps/web-report/src/view-model/scoring.js";
 
 function makeMockResult(overrides = {}) {
   return {
@@ -46,7 +38,7 @@ test("getCompositeScoreDetails handles result with no judge results", () => {
 
   const details = getCompositeScoreDetails(result, run, weights);
   assert.ok(typeof details.total === "number");
-  assert.ok(!isNaN(details.total));
+  assert.ok(!Number.isNaN(details.total));
   assert.ok(details.total >= 0 && details.total <= 100);
 });
 
@@ -57,7 +49,7 @@ test("getCompositeScoreDetails handles result with undefined tokenUsage", () => 
 
   const details = getCompositeScoreDetails(result, run, weights);
   assert.ok(typeof details.total === "number");
-  assert.ok(!isNaN(details.total));
+  assert.ok(!Number.isNaN(details.total));
 });
 
 test("getCompositeScoreDetails handles result with NaN durationMs", () => {
@@ -67,7 +59,7 @@ test("getCompositeScoreDetails handles result with NaN durationMs", () => {
 
   const details = getCompositeScoreDetails(result, run, weights);
   assert.ok(typeof details.total === "number");
-  assert.ok(!isNaN(details.total));
+  assert.ok(!Number.isNaN(details.total));
 });
 
 test("getCompositeScoreDetails handles result with negative durationMs", () => {
@@ -96,7 +88,7 @@ test("formatCompositeScore handles null compositeScore", () => {
 
   const formatted = formatCompositeScore(result, run);
   assert.ok(typeof formatted === "string");
-  assert.ok(!isNaN(parseFloat(formatted)));
+  assert.ok(!Number.isNaN(parseFloat(formatted)));
 });
 
 test("getRunVerdict handles run with all failed results", () => {

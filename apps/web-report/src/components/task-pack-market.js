@@ -3,8 +3,8 @@
  * Provides task pack browsing, search, and import functionality
  */
 
-import { h } from '../utils/dom.js';
 import { translate } from '../i18n.js';
+import { h } from '../utils/dom.js';
 
 // Task pack registry URL (GitHub raw)
 const TASK_PACK_REGISTRY_URL = 'https://raw.githubusercontent.com/agentarena/agentarena/main/task-packs.json';
