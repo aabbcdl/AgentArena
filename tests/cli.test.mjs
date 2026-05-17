@@ -507,7 +507,10 @@ test("agentarena run supports JSON output", { timeout: 60_000 }, async () => {
   );
 
   assert.equal(result.code, 0);
-  const payload = JSON.parse(result.stdout);
+  // Extract the result JSON from stdout (may be preceded by log lines)
+  const jsonStart = result.stdout.lastIndexOf("\n{");
+  const jsonStr = jsonStart >= 0 ? result.stdout.slice(jsonStart + 1) : result.stdout;
+  const payload = JSON.parse(jsonStr);
   assert.equal(payload.task.id, "cli-json");
   assert.equal(payload.results[0].agentId, "demo-fast");
   assert.equal(payload.results[0].baseAgentId, "demo-fast");

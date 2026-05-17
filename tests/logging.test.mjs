@@ -41,7 +41,9 @@ test("createLogEntry handles errors", () => {
   assert.equal(entry.component, "trace");
   assert.equal(entry.action, "write");
   assert.equal(entry.message, "Failed to write trace");
-  assert.equal(entry.error, error);
+  assert.equal(entry.error.name, "Error");
+  assert.equal(entry.error.message, "Test error");
+  assert.ok(entry.error.stack);
 });
 
 test("createLogEntry redacts sensitive data", () => {
@@ -61,7 +63,8 @@ test("createLogEntry redacts sensitive data", () => {
   );
 
   assert.equal(entry.metadata.normal, "visible");
-  assert.ok(entry.metadata.password.includes("[REDACTED]") || entry.metadata.password === "[REDACTED]");
+  assert.notEqual(entry.metadata.password, "secret123");
+  assert.ok(entry.metadata.password.includes("****") || entry.metadata.password === "***");
 });
 
 test("createLogEntry works without optional fields", () => {

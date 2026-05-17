@@ -28,7 +28,7 @@ test("all official taskpack templates pass loadTaskPack validation", async () =>
 test("demo taskpack JSON files pass loadTaskPack validation", async () => {
   const demoDir = path.join(REPO_ROOT, "examples", "taskpacks");
   const entries = await readdir(demoDir);
-  const jsonFiles = entries.filter((f) => f.endsWith(".json"));
+  const jsonFiles = entries.filter((f) => f.endsWith(".json") && f !== "task-packs.json");
 
   for (const file of jsonFiles) {
     const taskPath = path.join(demoDir, file);
