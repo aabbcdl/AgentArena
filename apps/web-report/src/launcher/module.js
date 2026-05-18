@@ -981,11 +981,11 @@ export function createLauncherModule(deps) {
   async function detectService() {
     try {
       const [infoResponse, adaptersResponse, taskPacksResponse, runStatusResponse, providerProfilesResponse] = await Promise.all([
-        fetchWithTimeout("/api/ui-info"),
-        fetchWithTimeout("/api/adapters"),
-        fetchWithTimeout("/api/taskpacks"),
-        fetchWithTimeout("/api/run-status", { cache: "no-store" }),
-        fetchWithTimeout("/api/provider-profiles")
+        apiFetch("/api/ui-info"),
+        apiFetch("/api/adapters"),
+        apiFetch("/api/taskpacks"),
+        apiFetch("/api/run-status", { cache: "no-store" }),
+        apiFetch("/api/provider-profiles")
       ]);
       if (!infoResponse.ok || !adaptersResponse.ok || !taskPacksResponse.ok || !runStatusResponse.ok || !providerProfilesResponse.ok) {
         return;
