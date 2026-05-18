@@ -134,14 +134,12 @@ export async function runUi(parsed: ParsedArgs): Promise<void> {
    * there are `await` points (e.g., readRequestBody) where another request can sneak in.
    * This flag is set synchronously BEFORE any await, preventing the TOCTOU race.
    *
-   * Reset points (7 total — missing any one causes deadlock):
-   *   1. Line ~316: validation failure (missing repoPath)
-   *   2. Line ~324: validation failure (missing taskPath)
-   *   3. Line ~332: validation failure (missing agents)
-   *   4. Line ~340: validation failure (invalid scoreMode)
-   *   5. Line ~348: validation failure (invalid tokenBudget)
-   *   6. Line ~356: validation failure (invalid maxConcurrency)
-   *   7. Line ~408: successful run start (transferred to activeRun)
+   * Reset points (5 total — missing any one causes deadlock):
+   *   1. readRequestBody failure (line ~388)
+   *   2. JSON parse failure (line ~395)
+   *   3. validateRunPayload failure (line ~402)
+   *   4. Empty selections (line ~409)
+   *   5. Successful run start — transferred to activeRun (line ~444)
    */
   let runStarting = false;
   const codexDefaults = await getCodexDefaultResolvedRuntime();

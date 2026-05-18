@@ -78,6 +78,16 @@ export function normalizeWeights(weights: Record<string, number>): Record<string
 /**
  * Full pipeline: migrate → filter → normalize.
  * This is the main entry point used by computeCompositeScore.
+ *
+ * IMPORTANT: Weight redistribution means different results within the same run
+ * may be scored with different weight distributions. For example, if result A
+ * has tokenEfficiencyScore but result B does not, the "tokenEfficiency" weight
+ * is removed from B's scoring and redistributed to other components.
+ *
+ * This is intentional: it ensures each result is scored on the dimensions where
+ * it has data, rather than penalizing results for missing optional metrics.
+ * The trade-off is that cross-result score comparisons are not strictly apples-to-apples
+ * when results have different data availability.
  */
 export function normalizeApplicableWeights(
   weights: Record<string, number>,

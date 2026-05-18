@@ -1,9 +1,28 @@
 import { renderBarChart, renderComparisonBarChart, renderRadarChart } from "../components/charts.js";
+import { escapeHtml, setHidden } from "../app-helpers.js";
+import {
+  summarizeRun, runtimeIdentity, resultLabel, baseAgentLabel,
+  getRunVerdict, getRunCompareRows, getCompareResults,
+  findPreviousComparableRun, getRunToRunAgentDiff, getAgentTrendRows,
+  getRunTrustSummary, getSelectionTrustSummary
+} from "../view-model/comparison.js";
+import { formatCompositeScore, getCompositeScoreReasons } from "../view-model/scoring.js";
+import {
+  taskIntentSummary, baselineTaskWarning, taskMeaningBadges,
+  formatJudgeType, translateStatus, statusClass
+} from "../task-utils.js";
 import { createVirtualList } from "../utils/virtual-list.js";
 
 const VIRTUAL_LIST_THRESHOLD = 50;
 let runListVirtual = null;
 
+/**
+ * Create the dashboard module.
+ *
+ * Note: Pure utility functions (escapeHtml, formatDuration, statusClass, etc.)
+ * are imported directly to reduce the DI surface. Only state, elements,
+ * and render callbacks need to be injected.
+ */
 export function createDashboardModule(deps) {
   const {
     state,
@@ -13,39 +32,17 @@ export function createDashboardModule(deps) {
     runCompareFilters,
     t,
     localText,
-    escapeHtml,
-    setHidden,
     formatDuration,
     formatCost,
-    translateStatus,
-    statusClass,
-    formatJudgeType,
-    resultLabel,
-    baseAgentLabel,
     recordKey,
     runtimeVerificationLabel,
-    taskIntentSummary,
     getArchivedScoreModeLabel,
     getScoreModeLabel,
-    baselineTaskWarning,
-    taskMeaningBadges,
     runFocusLine,
-    summarizeRun,
-    getRunCompareRows,
-    getRunToRunAgentDiff,
-    getRunTrustSummary,
-    getAgentTrendRows,
-    getSelectionTrustSummary,
-    getRunVerdict,
-    getCompareResults,
-    findPreviousComparableRun,
-    runtimeIdentity,
-    formatCompositeScore,
     formatDiffPrecisionMetric,
     formatTestMetric,
     formatLintMetric,
     findJudgeByType,
-    getCompositeScoreReasons,
     diffPrecisionScore,
     renderStepCards,
     renderJudgeCards,

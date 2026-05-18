@@ -43,9 +43,27 @@ export { hasCriticalJudgeFailure } from "./score-metrics.js";
 // Score band constants (used by both backend and frontend)
 // ---------------------------------------------------------------------------
 
-/** Score band for failed runs: 10–40 */
+/**
+ * Score band for failed runs: 10–40.
+ *
+ * Rationale: Failed runs should score below passing runs (50+) but not zero,
+ * because some partial work may still have value (e.g., correct approach but
+ * wrong implementation). The 10–40 range leaves room for efficiency bonuses
+ * to differentiate between "barely tried" and "almost succeeded" failures.
+ *
+ * SCORING_VERSION history: v1-v4 used different bands and weight formulas.
+ * v5 is the current version (frozen at 0.1.0 per STABILITY.md).
+ */
 export const FAILED_SCORE_BAND = { min: 10, max: 40 } as const;
-/** Score band for runs with critical judge failures: 50–70 */
+
+/**
+ * Score band for runs with critical judge failures: 50–70.
+ *
+ * Rationale: These runs technically succeeded (exit code 0) but failed critical
+ * validation (e.g., tests broken, security issues). They should score below
+ * fully passing runs (70+) but above failures (40). The 50–70 range reflects
+ * "partially successful" — the agent did something right but missed critical checks.
+ */
 export const CRITICAL_FAIL_SCORE_BAND = { min: 50, max: 70 } as const;
 
 // ---------------------------------------------------------------------------

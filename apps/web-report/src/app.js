@@ -403,40 +403,18 @@ const {
   runCompareFilters,
   t,
   localText,
-  escapeHtml,
-  setHidden,
   formatDuration,
   formatCost,
-  translateStatus,
-  statusClass,
-  formatJudgeType,
-  resultLabel,
-  baseAgentLabel,
   recordKey,
   runtimeVerificationLabel,
-  taskIntentSummary,
   getArchivedScoreModeLabel,
   getScoreModeLabel,
-  baselineTaskWarning,
-  taskMeaningBadges,
   runFocusLine,
-  summarizeRun,
-  getRunCompareRows,
-  getRunToRunAgentDiff,
-  getRunTrustSummary,
-  getAgentTrendRows,
-  getRunVerdict,
-  getCompareResults,
-  findPreviousComparableRun,
-  runtimeIdentity,
-  formatCompositeScore,
   formatDiffPrecisionMetric,
   formatTestMetric,
   formatLintMetric,
   findJudgeByType,
-  getCompositeScoreReasons,
   diffPrecisionScore,
-  getSelectionTrustSummary,
   renderStepCards,
   renderJudgeCards,
   renderDiff,
@@ -790,6 +768,19 @@ async function renderCommunityView() {
   }
 }
 
+/**
+ * Master render function. Call order matters:
+ *
+ * 1. renderStaticText() — sets all i18n text nodes (no DOM dependency)
+ * 2. renderLauncher()   — updates launcher panel (independent)
+ * 3. renderRunList()    — builds run list DOM (creates elements used by dashboard)
+ * 4. renderDashboard()  — reads run list DOM, renders comparison/verdict/agent detail
+ * 5. renderCommunityView() — async fetch, renders community leaderboard
+ *
+ * DO NOT reorder without verifying that downstream functions don't depend on
+ * DOM elements created by upstream functions. Specifically, renderDashboard()
+ * reads elements that renderRunList() creates.
+ */
 function render() {
   renderStaticText();
   if (elements.resultLoaderMessage) {

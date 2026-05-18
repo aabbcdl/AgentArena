@@ -20,11 +20,29 @@ interface ProcessError extends Error {
   exitCode?: number | null;
 }
 
+/**
+ * Default agent execution timeout: 15 minutes.
+ *
+ * Rationale: Most agent tasks complete in 1-5 minutes. 15 minutes provides
+ * generous headroom for complex tasks (large codebases, multi-file changes)
+ * while preventing indefinite hangs. Overridable via AGENTARENA_AGENT_TIMEOUT_MS env var.
+ */
 export const DEFAULT_AGENT_TIMEOUT_MS = 15 * 60 * 1_000;
 
-/** Grace period before sending SIGKILL after SIGTERM (Unix) */
+/**
+ * Grace period before sending SIGKILL after SIGTERM (Unix only).
+ * 2 seconds gives the process time to flush buffers, close file handles,
+ * and run cleanup handlers. Shorter than TERMINATE_ESCALATE_MS because
+ * runProcess has a timeout deadline and needs faster escalation.
+ */
 const SIGKILL_GRACE_MS = 2000;
-/** Wait time before escalating to SIGKILL in terminateProcessTree (Unix) */
+
+/**
+ * Wait time before escalating to SIGKILL in terminateProcessTree (Unix only).
+ * 1 second is sufficient for graceful shutdown of child process trees.
+ * Shorter than SIGKILL_GRACE_MS because terminateProcessTree is called
+ * during workspace cleanup where speed matters more than graceful shutdown.
+ */
 const TERMINATE_ESCALATE_MS = 1000;
 
 export function agentTimeoutMs(): number {

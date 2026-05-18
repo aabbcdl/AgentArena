@@ -166,6 +166,9 @@ export async function runBenchmarkCommand(
 
   // Generate decision report
   // TODO: expose as CLI flags (--team-size, --daily-runs)
+  // These defaults represent a typical small team scenario for cost projection.
+  // teamSize=10: average dev team size for ROI calculations
+  // dailyRuns=5: conservative estimate of benchmark runs per day
   const DEFAULT_TEAM_SIZE = 10;
   const DEFAULT_DAILY_RUNS = 5;
   const decisionReport = generateDecisionReport(benchmark, {

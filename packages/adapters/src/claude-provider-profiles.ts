@@ -153,6 +153,11 @@ async function ensureRegistryDir(): Promise<void> {
   await fs.mkdir(path.dirname(registryPath()), { recursive: true });
 }
 
+// ---------------------------------------------------------------------------
+// Section 1: Registry file I/O
+// Reads/writes ~/.config/agentarena/claude-provider-profiles.json
+// ---------------------------------------------------------------------------
+
 async function readRegistry(): Promise<ProfileRegistryFile> {
   let rawRegistry: string;
   try {
@@ -241,6 +246,10 @@ async function runPowerShellJson(script: string): Promise<unknown> {
     );
   });
 }
+
+// ---------------------------------------------------------------------------
+// Section 2: Secret storage (Windows Credential Manager / AES-256-GCM)
+// ---------------------------------------------------------------------------
 
 async function setSecretWindows(profileId: string, secret: string): Promise<void> {
   const target = secretTarget(profileId);
@@ -433,6 +442,10 @@ export async function getClaudeProviderProfile(profileId?: string): Promise<Clau
 
   return profile;
 }
+
+// ---------------------------------------------------------------------------
+// Section 3: Profile CRUD (save, get, list, delete, buildEnvironment)
+// ---------------------------------------------------------------------------
 
 export async function saveClaudeProviderProfile(input: ClaudeProviderProfileInput): Promise<ClaudeProviderProfile> {
   if (input.kind === "official") {
