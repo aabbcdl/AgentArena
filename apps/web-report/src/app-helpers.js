@@ -19,11 +19,13 @@ const _RUN_CACHE_MAX_BYTES = 1_500_000;
 // ---------------------------------------------------------------------------
 
 /**
- * Get auth token from URL hash or localStorage.
+ * Get auth token from URL hash, meta tag, or localStorage.
+ * Priority: URL hash > meta tag (localhost auto-inject) > localStorage.
  * If found in hash, persists to localStorage and clears the hash.
  * @returns {string}
  */
 function getAuthToken() {
+  // Check URL hash first (backwards compatibility)
   const hash = window.location.hash;
   if (hash) {
     const match = hash.match(/[#&]token=([^&]+)/);
@@ -33,6 +35,14 @@ function getAuthToken() {
       return match[1];
     }
   }
+
+  // Check meta tag (localhost auto-inject for seamless UX)
+  const metaToken = document.querySelector('meta[name="agentarena-auth-token"]')?.content;
+  if (metaToken) {
+    localStorage.setItem('agentarena_token', metaToken);
+    return metaToken;
+  }
+
   return localStorage.getItem('agentarena_token') || '';
 }
 
@@ -59,8 +69,22 @@ function renderAuthRequiredOverlay() {
   const card = document.createElement('div');
   Object.assign(card.style, {
     background: '#fff', color: '#111', padding: '24px 28px', borderRadius: '12px',
-    maxWidth: '440px', boxShadow: '0 12px 32px rgba(0,0,0,0.25)'
+    maxWidth: '440px', boxShadow: '0 12px 32px rgba(0,0,0,0.25)', position: 'relative'
   });
+
+  const closeButton = document.createElement('button');
+  closeButton.type = 'button';
+  closeButton.setAttribute('aria-label', '关闭 / Close');
+  closeButton.innerHTML = '&times;';
+  Object.assign(closeButton.style, {
+    position: 'absolute', top: '12px', right: '12px',
+    background: 'transparent', border: 'none', fontSize: '24px', lineHeight: '1',
+    cursor: 'pointer', color: '#666', padding: '4px 8px'
+  });
+  closeButton.addEventListener('click', () => {
+    overlay.remove();
+  });
+  card.appendChild(closeButton);
 
   const title = document.createElement('h2');
   title.id = 'auth-required-title';
@@ -117,6 +141,18 @@ function renderAuthRequiredOverlay() {
 
   overlay.appendChild(card);
   document.body.appendChild(overlay);
+
+  const closeOverlay = () => overlay.remove();
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) closeOverlay();
+  });
+  document.addEventListener('keydown', function handler(e) {
+    if (e.key === 'Escape' && document.getElementById('auth-required-overlay')) {
+      closeOverlay();
+      document.removeEventListener('keydown', handler);
+    }
+  });
+
   setTimeout(() => input.focus(), 0);
 }
 
