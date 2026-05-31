@@ -161,30 +161,26 @@ function renderErrorState({ title, message, retryText, retryAction }) {
 }
 
 function renderRunInfo(run) {
-  const intent = taskIntentSummary(run.task);
   const archivedScoreMode = getArchivedScoreModeLabel(run);
   const activeScoreMode = getScoreModeLabel();
   elements.runInfo.innerHTML = `
     <div class="panel-header">
       <h2>${escapeHtml(t("runInfoTitle"))}</h2>
-      <span class="muted">#${escapeHtml(run.runId.slice(-4))}</span>
+      <span class="muted">#${escapeHtml(run.runId.slice(-8))}</span>
     </div>
-    <p class="muted">${escapeHtml(t("createdAt"))} ${escapeHtml(formatRelativeTime(run.createdAt, localText))}</p>
-    <p class="muted">${escapeHtml(t("taskSchema"))} ${escapeHtml(run.task.schemaVersion)}</p>
-    <p class="muted"><strong>${escapeHtml(localText("归档评分模式", "Archived Score Mode"))}:</strong> ${escapeHtml(archivedScoreMode)}</p>
-    <p class="muted"><strong>${escapeHtml(localText("当前评分模式", "Active Score Mode"))}:</strong> ${escapeHtml(activeScoreMode)}</p>
-    ${run.scoreScope ? `<p class="muted"><strong>${escapeHtml(localText("评分范围", "Score Scope"))}:</strong> ${escapeHtml(run.scoreScope)}</p>` : ""}
-    ${run.scoreValidityNote ? `<p class="warning-text">${escapeHtml(run.scoreValidityNote)}</p>` : ""}
-    ${archivedScoreMode !== activeScoreMode ? `<p class="warning-text">${escapeHtml(localText("当前评分口径与归档结果不同；如需按原始口径复现排序，请恢复归档评分。", "Active scoring differs from the archived run; restore archived scoring to reproduce the original ranking lens."))}</p>` : ""}
-    <div class="run-info-actions">
+    <div style="display:flex;flex-wrap:wrap;gap:16px;font-size:0.82rem;">
+      <span class="muted">${escapeHtml(t("createdAt"))} ${escapeHtml(formatRelativeTime(run.createdAt, localText))}</span>
+      <span class="muted">${escapeHtml(t("taskSchema"))} ${escapeHtml(run.task.schemaVersion)}</span>
+      <span class="muted">${escapeHtml(localText("评分", "Scoring"))}: ${escapeHtml(activeScoreMode)}</span>
+    </div>
+    ${archivedScoreMode !== activeScoreMode ? `
+    <div class="run-info-actions" style="margin-top:8px;">
       <button type="button" class="archive-score-restore-btn" data-role="restore-archived-score" data-run-id="${escapeHtml(run.runId)}">
         <svg class="icon"><use href="#icon-archive"/></svg>
-        ${escapeHtml(localText("恢复归档评分口径", "Restore Archived Scoring"))}
+        ${escapeHtml(localText("恢复归档评分", "Restore Archived Scoring"))}
       </button>
-    </div>
-    <p class="muted"><strong>${escapeHtml(localText("目标", "Objective"))}:</strong> ${escapeHtml(intent.objective || "n/a")}</p>
-    <p class="muted"><strong>${escapeHtml(localText("Judge 依据", "Judge Rationale"))}:</strong> ${escapeHtml(intent.rationale || "n/a")}</p>
-    <p class="warning-text">${escapeHtml(baselineTaskWarning(run.task, t))}</p>
+    </div>` : ""}
+    ${run.scoreValidityNote ? `<p class="warning-text" style="font-size:0.78rem;margin-top:6px;">${escapeHtml(run.scoreValidityNote)}</p>` : ""}
   `;
   setHidden(elements.runInfo, false);
 }
@@ -192,42 +188,27 @@ function renderRunInfo(run) {
 
 function renderTaskBrief(run) {
   const intent = taskIntentSummary(run.task);
-  const repoTypes = intent.repoTypes && intent.repoTypes !== "generic" ? intent.repoTypes : "generic";
   const resultCount = run.results.length;
-  const variantLabels = run.results.map((result) => resultLabel(result)).join(", ");
   const badges = taskMeaningBadges(run.task, t);
 
   elements.taskBrief.innerHTML = `
-    <div class="panel-header">
-      <h3>${escapeHtml(localText("这次 benchmark 在测什么", "What this run actually measures"))}</h3>
-      <span class="muted">${escapeHtml(resultCount)} ${escapeHtml(localText("个 variants", "variants"))}</span>
-    </div>
-    <div class="badge-row">
-      ${badges.map((badge) => `<span class="meaning-badge">${escapeHtml(badge)}</span>`).join("")}
-    </div>
-    <article class="brief-card brief-focus-card">
-      <p class="metric-label">${escapeHtml(localText("如何解读这次结果", "How to read this result"))}</p>
-      <p>${escapeHtml(runFocusLine(run))}</p>
-    </article>
-    <div class="brief-grid">
-      <article class="brief-card">
-        <p class="metric-label">${escapeHtml(localText("目标", "Objective"))}</p>
-        <p>${escapeHtml(intent.objective || run.task.description || "n/a")}</p>
-      </article>
-      <article class="brief-card">
-        <p class="metric-label">${escapeHtml(localText("Judge 依据", "Judge Rationale"))}</p>
-        <p>${escapeHtml(intent.rationale || "n/a")}</p>
-      </article>
-      <article class="brief-card">
-        <p class="metric-label">${escapeHtml(localText("适用仓库", "Repo Types"))}</p>
-        <p>${escapeHtml(repoTypes)}</p>
-      </article>
-      <article class="brief-card">
-        <p class="metric-label">${escapeHtml(localText("参与对比的 Variants", "Compared Variants"))}</p>
-        <p>${escapeHtml(variantLabels || "n/a")}</p>
-      </article>
-    </div>
-    <p class="warning-text">${escapeHtml(baselineTaskWarning(run.task, t))}</p>
+    <details class="agent-detail-section">
+      <summary>
+        <span>\ud83d\udccb</span>
+        ${escapeHtml(localText("任务说明", "Task Info"))}
+        <span class="muted" style="font-weight:400;font-size:0.78rem;margin-left:8px;">${escapeHtml(run.task.title || run.task.id)} \u00b7 ${escapeHtml(resultCount)} ${escapeHtml(localText("个 variants", "variants"))}</span>
+      </summary>
+      <div>
+        <div class="badge-row" style="margin-bottom:8px;">
+          ${badges.map((badge) => `<span class="meaning-badge">${escapeHtml(badge)}</span>`).join("")}
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:0.82rem;">
+          <div><span class="muted">${escapeHtml(localText("目标", "Objective"))}:</span> ${escapeHtml(intent.objective || run.task.description || "n/a")}</div>
+          <div><span class="muted">${escapeHtml(localText("Judge 依据", "Judge Rationale"))}:</span> ${escapeHtml(intent.rationale || "n/a")}</div>
+        </div>
+        <p class="warning-text" style="margin-top:8px;font-size:0.78rem;">${escapeHtml(baselineTaskWarning(run.task, t))}</p>
+      </div>
+    </details>
   `;
 }
 
@@ -1095,70 +1076,32 @@ function renderSelectedAgentV2() {
     Array.from(new Set(result.judgeResults.map((judge) => formatJudgeType(judge.type, t)))).join(", ") ||
     localText("无", "None");
 
+  const statusIcon = result.status === "success" ? "\u2705" : "\u274c";
+  const passedJudges = result.judgeResults.filter(j => j.success).length;
+  const totalJudges = result.judgeResults.length;
+  const scoreVal = formatCompositeScore(result, state.run, state.scoreWeights);
+  const gradeInfo = typeof result.compositeScore === "number" ? scoreGrade(result.compositeScore, result.status) : null;
+  const gradeLabel = gradeInfo ? localText(gradeInfo.labelZh, gradeInfo.label) : "";
+
   elements.resultSummary.innerHTML = `
-    <h3>${escapeHtml(resultLabel(result))}</h3>
-    <div class="summary-grid">
-      <div class="summary-row"><span>${escapeHtml(localText("基础 Agent", "Base Agent"))}</span><strong>${escapeHtml(baseAgentLabel(result))}</strong></div>
-      <div class="summary-row"><span>${escapeHtml(localText("Provider", "Provider"))}</span><strong>${escapeHtml(runtime.provider)}</strong></div>
-      <div class="summary-row"><span>${escapeHtml(localText("类型", "Kind"))}</span><strong>${escapeHtml(runtime.providerKind)}</strong></div>
-      <div class="summary-row"><span>${escapeHtml(localText("模型", "Model"))}</span><strong>${escapeHtml(runtime.model)}</strong></div>
-      <div class="summary-row"><span>${escapeHtml(localText("推理", "Reasoning"))}</span><strong>${escapeHtml(runtime.reasoning)}</strong></div>
-      <div class="summary-row"><span>${escapeHtml(localText("版本", "Version"))}</span><strong>${escapeHtml(runtime.version)}</strong></div>
-      <div class="summary-row"><span>${escapeHtml(localText("可信度", "Verification"))}</span><strong>${escapeHtml(runtimeVerificationLabel(result))}</strong></div>
+    <h3>${statusIcon} ${escapeHtml(resultLabel(result))}</h3>
+    <div class="summary-grid" style="grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px;">
       <div class="summary-row"><span>${escapeHtml(localText("状态", "Status"))}</span><strong>${escapeHtml(translateStatus(result.status, t))}</strong></div>
-      <div class="summary-row"><span>${escapeHtml(localText("综合分", "Composite Score"))}</span><strong>${escapeHtml(formatCompositeScore(result, state.run, state.scoreWeights))}</strong></div>
+      <div class="summary-row"><span>${escapeHtml(localText("综合分", "Score"))}</span><strong>${escapeHtml(scoreVal)}${gradeInfo ? ` <small class="${gradeInfo.cssClass}">${escapeHtml(gradeLabel)}</small>` : ""}</strong></div>
+      <div class="summary-row"><span>${escapeHtml(localText("通过率", "Pass Rate"))}</span><strong>${passedJudges}/${totalJudges}</strong></div>
       <div class="summary-row"><span>${escapeHtml(localText("耗时", "Duration"))}</span><strong>${escapeHtml(formatDuration(result.durationMs))}</strong></div>
-      <div class="summary-row"><span>${escapeHtml(t("metrics.tokens"))}</span><strong>${escapeHtml(String(result.tokenUsage ?? "N/A"))}</strong></div>
-      <div class="summary-row"><span>${escapeHtml(localText("成本", "Cost"))}</span><strong>${escapeHtml(formatCost(result))}</strong></div>
-      <div class="summary-row"><span>${escapeHtml(localText("测试结果", "Test Result"))}</span><strong>${escapeHtml(formatTestMetric(result))}</strong></div>
-      <div class="summary-row"><span>${escapeHtml(localText("Lint 结果", "Lint Result"))}</span><strong>${escapeHtml(formatLintMetric(result))}</strong></div>
-      <div class="summary-row"><span>${escapeHtml(localText("Diff 精准度", "Diff Precision"))}</span><strong>${escapeHtml(formatDiffPrecisionMetric(result))}</strong></div>
-      <div class="summary-row"><span>${escapeHtml(localText("改动文件", "Changed Files"))}</span><strong>${escapeHtml(String(result.changedFiles.length))}</strong></div>
-      <div class="summary-row"><span>${escapeHtml(localText("Judge 类型", "Judge Types"))}</span><strong>${escapeHtml(judgeKinds)}</strong></div>
-      ${testJudge ? `<div class="summary-row"><span>${escapeHtml(localText("测试解析器", "Test Parser"))}</span><strong>${escapeHtml(testJudge.parser ?? "auto")}</strong></div>` : ""}
-      ${lintJudge ? `<div class="summary-row"><span>${escapeHtml(localText("Lint 解析器", "Lint Parser"))}</span><strong>${escapeHtml(lintJudge.parser ?? "auto")}</strong></div>` : ""}
-      <div class="summary-row"><span>${escapeHtml(localText("Trace 路径", "Trace"))}</span><code>${escapeHtml(result.tracePath)}</code></div>
-      <div class="summary-row"><span>${escapeHtml(localText("工作区", "Workspace"))}</span><code>${escapeHtml(result.workspacePath)}</code></div>
+      <div class="summary-row"><span>${escapeHtml(localText("改动文件", "Changed"))}</span><strong>${escapeHtml(String(result.changedFiles.length))}</strong></div>
+      <div class="summary-row"><span>${escapeHtml(localText("模型", "Model"))}</span><strong>${escapeHtml(runtime.model || "default")}</strong></div>
     </div>
-    <p class="muted">${escapeHtml(result.summary)}</p>
   `;
 
   elements.resultDetails.innerHTML = [
-    `
-      <section class="detail-card">
-        <h3>${escapeHtml(localText("模型信息", "Model Identity"))}</h3>
-        <div class="summary-grid">
-          <div class="summary-row"><span>${escapeHtml(localText("请求配置", "Requested"))}</span><strong>${escapeHtml(result.requestedConfig?.model ?? "default")} / ${escapeHtml(result.requestedConfig?.reasoningEffort ?? "default")}</strong></div>
-          <div class="summary-row"><span>${escapeHtml(localText("实际使用", "Effective"))}</span><strong>${escapeHtml(runtime.model)} / ${escapeHtml(runtime.reasoning)}</strong></div>
-          <div class="summary-row"><span>${escapeHtml(localText("版本", "Version"))}</span><strong>${escapeHtml(runtime.version)}</strong></div>
-          <div class="summary-row"><span>${escapeHtml(localText("版本来源", "Version Source"))}</span><strong>${escapeHtml(runtime.versionSource)}</strong></div>
-          <div class="summary-row"><span>${escapeHtml(localText("来源", "Source"))}</span><strong>${escapeHtml(runtime.source)}</strong></div>
-          <div class="summary-row"><span>${escapeHtml(localText("可信度", "Verification"))}</span><strong>${escapeHtml(runtime.verification)}</strong></div>
-        </div>
-      </section>
-    `,
-    `
-      <section class="detail-card">
-        <h3>${escapeHtml(localText("Provider 信息", "Provider Identity"))}</h3>
-        <div class="summary-grid">
-          <div class="summary-row"><span>${escapeHtml(localText("请求 Profile", "Requested Profile"))}</span><strong>${escapeHtml(result.requestedConfig?.providerProfileId ?? "official")}</strong></div>
-          <div class="summary-row"><span>${escapeHtml(localText("实际 Provider", "Effective Provider"))}</span><strong>${escapeHtml(runtime.provider)}</strong></div>
-          <div class="summary-row"><span>${escapeHtml(localText("Provider 类型", "Provider Kind"))}</span><strong>${escapeHtml(runtime.providerKind)}</strong></div>
-          <div class="summary-row"><span>${escapeHtml(localText("Provider 来源", "Provider Source"))}</span><strong>${escapeHtml(runtime.providerSource)}</strong></div>
-        </div>
-        ${
-          runtime.providerKind !== "official" && runtime.provider !== "official"
-            ? `<p class="warning-text">${escapeHtml(localText("此结果通过非官方 Provider 的 Claude Code 配置生成。", "This result was produced through a provider-switched Claude Code configuration."))}</p>`
-            : ""
-        }
-      </section>
-    `,
-    renderStepCards(localText("准备步骤", "Setup"), result.setupResults),
+    // Judge results — always visible (key info)
     renderJudgeCards(result),
-    renderStepCards(localText("收尾步骤", "Teardown"), result.teardownResults),
+    // Changed files — always visible
     `
       <section class="detail-card">
-        <h3>${escapeHtml(localText("改动文件", "Changed Files"))}</h3>
+        <h3>${escapeHtml(localText("改动文件", "Changed Files"))} (${result.changedFiles.length})</h3>
         ${
           result.changedFiles.length === 0
             ? `<p class="empty-state">${escapeHtml(localText("没有检测到 diff。", "No diff detected."))}</p>`
@@ -1166,7 +1109,28 @@ function renderSelectedAgentV2() {
         }
       </section>
     `,
-    renderDiff(result)
+    // Diff view — always visible
+    renderDiff(result),
+    // Technical details — collapsed by default
+    `<details class="agent-detail-section">
+      <summary><span>\ud83d\udd27</span> ${escapeHtml(localText("技术详情", "Technical Details"))}</summary>
+      <div>
+        <h4 style="margin:8px 0 4px;font-size:0.85rem;">${escapeHtml(localText("模型信息", "Model Identity"))}</h4>
+        <div class="summary-grid" style="font-size:0.82rem;">
+          <div class="summary-row"><span>${escapeHtml(localText("模型", "Model"))}</span><strong>${escapeHtml(runtime.model)} / ${escapeHtml(runtime.reasoning)}</strong></div>
+          <div class="summary-row"><span>${escapeHtml(localText("版本", "Version"))}</span><strong>${escapeHtml(runtime.version)}</strong></div>
+          <div class="summary-row"><span>${escapeHtml(localText("来源", "Source"))}</span><strong>${escapeHtml(runtime.source)}</strong></div>
+          <div class="summary-row"><span>${escapeHtml(localText("Provider", "Provider"))}</span><strong>${escapeHtml(runtime.provider)} (${escapeHtml(runtime.providerKind)})</strong></div>
+        </div>
+        ${runtime.providerKind !== "official" && runtime.provider !== "official" ? `<p class="warning-text" style="font-size:0.78rem;">${escapeHtml(localText("此结果通过非官方 Provider 生成。", "This result was produced through a provider-switched configuration."))}</p>` : ""}
+        ${renderStepCards(localText("准备步骤", "Setup"), result.setupResults)}
+        ${renderStepCards(localText("收尾步骤", "Teardown"), result.teardownResults)}
+        <div class="summary-grid" style="font-size:0.78rem;margin-top:8px;">
+          <div class="summary-row"><span>Trace</span><code>${escapeHtml(result.tracePath)}</code></div>
+          <div class="summary-row"><span>Workspace</span><code>${escapeHtml(result.workspacePath)}</code></div>
+        </div>
+      </div>
+    </details>`
   ].join("");
 }
 
@@ -1295,6 +1259,22 @@ function renderTaskTrace(run) {
   const agentBlocks = results.map(result => {
     const summary = result.summary || "";
     const hasRealResponse = summary && summary.trim().length > 0 && !summary.includes("did not return a result");
+    const changedFilesCount = (result.changedFiles || []).length;
+    const allJudgesPassed = result.judgeResults && result.judgeResults.length > 0 && result.judgeResults.every(j => j.success);
+    const isShortResponse = hasRealResponse && summary.trim().length < 200;
+
+    // Detect if agent did no real work but judges passed
+    let interpretationNote = "";
+    if (isShortResponse && changedFilesCount === 0 && allJudgesPassed && result.status === "success") {
+      interpretationNote = `
+        <div class="trace-interpretation trace-interpretation-warn">
+          <span>\u26a0\ufe0f</span>
+          <span>${escapeHtml(localText(
+            "Agent 未执行实质性改动，但 Judge 检查项均通过。"通过"仅代表文件未被破坏，不代表完成了任务。",
+            "Agent made no substantive changes, but all judge checks passed. \"Pass\" only means files were not broken — it does not mean the task was completed."
+          ))}</span>
+        </div>`;
+    }
 
     // Extract CLI command from trace
     let cliCommand = "";
@@ -1315,11 +1295,13 @@ function renderTaskTrace(run) {
           <span>${statusIcon} ${escapeHtml(label)}</span>
           <span style="font-size:0.75rem;font-weight:400;text-transform:none;letter-spacing:0;">
             ${escapeHtml(localText("状态", "Status"))}: ${escapeHtml(translateStatus(result.status, t))}
+            ${changedFilesCount > 0 ? ` \u00b7 ${changedFilesCount} ${escapeHtml(localText("个文件已改动", "files changed"))}` : ` \u00b7 ${escapeHtml(localText("无改动", "no changes"))}`}
           </span>
         </div>
         ${cliCommand ? `
-        <div class="task-trace-command">${escapeHtml(cliCommand.length > 200 ? cliCommand.slice(0, 200) + "..." : cliCommand)}</div>
+        <div class="task-trace-command">${escapeHtml(cliCommand.length > 300 ? cliCommand.slice(0, 300) + "..." : cliCommand)}</div>
         ` : ""}
+        ${interpretationNote}
         <div style="padding:12px 14px;">
           <div style="font-weight:600;font-size:0.82rem;color:var(--text-muted);margin-bottom:6px;">${escapeHtml(t("taskTraceResponse"))}</div>
           ${hasRealResponse

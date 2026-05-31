@@ -487,14 +487,14 @@
               <div class="panel-header">
                 <h3 id="agent-compare-title">Agent Compare</h3>
               </div>
-              <section class="detail-card compare-settings-card">
-                <div class="panel-header">
+              <details class="compare-settings-card">
+                <summary class="panel-header">
                   <h4 id="score-weights-title">Score Weights</h4>
                   <button id="score-weights-reset" type="button">
                     <svg class="icon"><use href="#icon-refresh"/></svg>
                     Reset
                   </button>
-                </div>
+                </summary>
                 <div class="filter-bar" id="score-weight-presets">
                   <span class="preset-label" data-i18n="scorePresetLabel">Score preset:</span>
                   <button type="button" data-score-preset="practical" class="preset-btn active" data-i18n="scorePresetPracticalBtn">🎯 Practical</button>
@@ -511,7 +511,7 @@
                     <div class="weight-sliders" id="weight-sliders"></div>
                   </details>
                 </div>
-              </section>
+              </details>
               <div class="filter-bar">
                 <select id="compare-status-filter" aria-label="Filter by status">
                   <option value="all">All Statuses</option>
