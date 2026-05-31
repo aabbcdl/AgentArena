@@ -3281,7 +3281,7 @@ details.launcher-section > *:not(summary) {
 #launcher-repo-path:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-  background: var(--surface-tertiary, #f5f5f5);
+  background: var(--bg-tertiary, #f5f5f5);
 }
 
 #launcher-use-builtin {
@@ -5002,7 +5002,7 @@ textarea:focus-visible {
    =================================================================== */
 
 .summary-card {
-  background: var(--surface-primary, #fff);
+  background: var(--bg-primary, #fff);
   border: 1px solid var(--border, #e0e0e0);
   border-radius: 12px;
   padding: 24px;
@@ -5184,7 +5184,7 @@ textarea:focus-visible {
 /* Pass rate bar */
 .summary-pass-ring {
   height: 6px;
-  background: var(--surface-tertiary, #eee);
+  background: var(--bg-tertiary, #eee);
   border-radius: 3px;
   overflow: hidden;
   margin: 2px 0;
@@ -5222,7 +5222,7 @@ textarea:focus-visible {
 }
 
 .compare-table-compact .compare-row:hover {
-  background: var(--surface-hover, #f5f5f5);
+  background: var(--surface-hover);
 }
 
 .compare-table-compact .compare-row.active {
@@ -5333,7 +5333,7 @@ textarea:focus-visible {
 /* Detail row in compact table */
 .compare-detail-row td {
   padding: 0;
-  background: var(--surface-secondary, #fafafa);
+  background: var(--bg-secondary, #fafafa);
 }
 
 /* Responsive: stack on narrow screens */
@@ -5372,7 +5372,7 @@ textarea:focus-visible {
   padding: 6px 14px;
   border: 1px solid var(--border, #ddd);
   border-radius: 8px;
-  background: var(--surface-primary, #fff);
+  background: var(--bg-primary, #fff);
   color: var(--text-primary, #333);
   cursor: pointer;
   font-size: 0.85rem;
@@ -5384,7 +5384,7 @@ textarea:focus-visible {
 }
 
 .btn-back-launcher:hover {
-  background: var(--surface-hover, #f5f5f5);
+  background: var(--surface-hover);
   border-color: var(--accent, #1976d2);
   color: var(--accent, #1976d2);
 }
@@ -5409,7 +5409,7 @@ textarea:focus-visible {
   padding: 12px 16px;
   font-weight: 700;
   font-size: 0.95rem;
-  background: var(--surface-secondary, #fafafa);
+  background: var(--bg-secondary, #fafafa);
   list-style: none;
   display: flex;
   align-items: center;
@@ -5448,7 +5448,7 @@ textarea:focus-visible {
   font-size: 0.82rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  background: var(--surface-tertiary, #f0f0f0);
+  background: var(--bg-tertiary, #f0f0f0);
   color: var(--text-muted, #666);
   display: flex;
   justify-content: space-between;
@@ -5475,7 +5475,7 @@ textarea:focus-visible {
   word-break: break-word;
   max-height: 300px;
   overflow-y: auto;
-  background: var(--surface-primary, #fff);
+  background: var(--bg-primary, #fff);
   color: var(--text-primary, #333);
 }
 
@@ -5489,7 +5489,7 @@ textarea:focus-visible {
 .task-trace-command {
   font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
   font-size: 0.78rem;
-  background: var(--surface-tertiary, #f0f0f0);
+  background: var(--bg-tertiary, #f0f0f0);
   padding: 10px 14px;
   border-radius: 6px;
   overflow-x: auto;
@@ -5502,143 +5502,8 @@ textarea:focus-visible {
    Dark mode for Summary Card & Score Grades
    =================================================================== */
 
-@media (prefers-color-scheme: dark) {
-  .summary-card {
-    background: var(--surface-primary, #1e1e1e);
-    border-color: var(--border, #333);
-    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-  }
+/* Dark mode: handled by :root CSS variables */
 
-  .summary-verdict-title {
-    color: var(--text-primary, #e0e0e0);
-  }
-
-  .summary-verdict-text {
-    color: var(--text-secondary, #aaa);
-  }
-
-  .summary-winner-name {
-    color: var(--text-primary, #e0e0e0);
-  }
-
-  .summary-metric-label {
-    color: var(--text-muted, #777);
-  }
-
-  .summary-metric-value {
-    color: var(--text-primary, #e0e0e0);
-  }
-
-  .summary-pass-ring {
-    background: var(--surface-tertiary, #333);
-  }
-
-  .summary-badge-pass {
-    background: rgba(46, 125, 50, 0.2);
-    color: #66bb6a;
-  }
-
-  .summary-badge-fail {
-    background: rgba(229, 57, 53, 0.2);
-    color: #ef5350;
-  }
-
-  .summary-badge-fast {
-    background: rgba(25, 118, 210, 0.2);
-    color: #42a5f5;
-  }
-
-  .summary-badge-cheap {
-    background: rgba(123, 31, 162, 0.2);
-    color: #ab47bc;
-  }
-
-  /* Score grade colors for dark mode */
-  .score-excellent {
-    color: #66bb6a;
-    background: rgba(102, 187, 106, 0.15);
-  }
-
-  .score-good {
-    color: #81c784;
-    background: rgba(129, 199, 132, 0.15);
-  }
-
-  .score-fair {
-    color: #ffb74d;
-    background: rgba(255, 183, 77, 0.15);
-  }
-
-  .score-poor, .score-failed {
-    color: #ef5350;
-    background: rgba(239, 83, 80, 0.15);
-  }
-
-  .score-cell.score-excellent, .score-cell.score-excellent .score-grade-label { color: #66bb6a; }
-  .score-cell.score-good, .score-cell.score-good .score-grade-label { color: #81c784; }
-  .score-cell.score-fair, .score-cell.score-fair .score-grade-label { color: #ffb74d; }
-  .score-cell.score-poor, .score-cell.score-failed,
-  .score-cell.score-poor .score-grade-label, .score-cell.score-failed .score-grade-label { color: #ef5350; }
-
-  .compare-table-compact th {
-    color: var(--text-muted, #777);
-    border-bottom-color: var(--border, #333);
-  }
-
-  .compare-table-compact .compare-row:hover {
-    background: var(--surface-hover, #2a2a2a);
-  }
-
-  .compare-table-compact .compare-row.active {
-    background: rgba(25, 118, 210, 0.12);
-  }
-
-  .compare-failed-section {
-    border-color: rgba(239, 83, 80, 0.3);
-  }
-
-  .compare-failed-summary {
-    color: #ef5350;
-    background: rgba(239, 83, 80, 0.08);
-  }
-
-  /* Task trace dark mode */
-  .task-trace-section summary {
-    background: var(--surface-secondary, #252525);
-  }
-
-  .task-trace-block {
-    border-color: var(--border, #333);
-  }
-
-  .task-trace-block-header {
-    background: var(--surface-tertiary, #2a2a2a);
-    color: var(--text-muted, #888);
-  }
-
-  .task-trace-block pre {
-    background: var(--surface-primary, #1e1e1e);
-    color: var(--text-primary, #d0d0d0);
-  }
-
-  .task-trace-command {
-    background: var(--surface-tertiary, #2a2a2a);
-    color: var(--text-secondary, #aaa);
-  }
-
-  /* Back to launcher button */
-  .btn-back-launcher {
-    background: var(--surface-primary, #1e1e1e);
-    border-color: var(--border, #444);
-    color: var(--text-primary, #e0e0e0);
-  }
-
-  .btn-back-launcher:hover {
-    background: var(--surface-hover, #2a2a2a);
-    border-color: var(--accent, #42a5f5);
-    color: var(--accent, #42a5f5);
-  }
-}
 
 /* ===================================================================
    Score weights panel — compact + feedback
@@ -5681,7 +5546,7 @@ textarea:focus-visible {
   font-size: 0.8rem;
   border-radius: 16px;
   border: 1px solid var(--border, #ddd);
-  background: var(--surface-primary, #fff);
+  background: var(--bg-primary, #fff);
   cursor: pointer;
   transition: all 0.15s;
   white-space: nowrap;
@@ -5766,14 +5631,5 @@ textarea:focus-visible {
   border-color: var(--accent, #1976d2) !important;
 }
 
-@media (prefers-color-scheme: dark) {
-  @keyframes launcher-pulse {
-    0% { box-shadow: 0 0 0 0 rgba(66, 165, 245, 0.5); }
-    50% { box-shadow: 0 0 0 8px rgba(66, 165, 245, 0); }
-    100% { box-shadow: 0 0 0 0 rgba(66, 165, 245, 0); }
-  }
+/* Dark mode: handled by :root CSS variables */
 
-  .launcher-highlight {
-    border-color: var(--accent, #42a5f5) !important;
-  }
-}
