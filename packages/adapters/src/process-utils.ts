@@ -118,6 +118,21 @@ export async function findExecutableOnPath(names: string[]): Promise<string | un
   return undefined;
 }
 
+/**
+ * Spawn a child process and collect its output.
+ *
+ * ERROR HANDLING CONTRACT:
+ * This function NEVER throws. All failure modes (spawn errors, timeouts,
+ * cancellations, process crashes) are captured and returned as fields on
+ * the `ProcessResult` object:
+ *   - `exitCode: null` + `error: "<message>"` → spawn failed
+ *   - `timedOut: true` → process exceeded timeoutMs
+ *   - `signal: "SIGTERM"` + `error: "cancelled"` → AbortSignal fired
+ *
+ * Callers should check `result.exitCode === 0 && !result.error` to
+ * determine success. A try/catch around the `await runProcess(...)` call
+ * is unnecessary but harmless — it will never trigger.
+ */
 export async function runProcess(
   command: string,
   args: string[],

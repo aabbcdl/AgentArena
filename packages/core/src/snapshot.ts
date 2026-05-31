@@ -61,6 +61,11 @@ interface FileToHash {
   mtimeMs: number;
 }
 
+/**
+ * Bounded-concurrency map. See packages/runner/src/concurrency.ts for
+ * the full concurrency-safety rationale (shared counter is safe under
+ * Node.js single-threaded event loop when read-increment is synchronous).
+ */
 async function mapWithConcurrency<T, R>(
   items: T[],
   limit: number,
@@ -71,6 +76,7 @@ async function mapWithConcurrency<T, R>(
 
   async function worker(): Promise<void> {
     while (nextIndex < items.length) {
+      // Synchronous claim — no await between read and increment.
       const currentIndex = nextIndex;
       nextIndex += 1;
       results[currentIndex] = await mapper(items[currentIndex]);

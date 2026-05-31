@@ -11,6 +11,24 @@ export interface MapWithConcurrencyResult<R> {
   aborted: boolean;
 }
 
+/**
+ * Run a mapper function over an array with bounded concurrency.
+ *
+ * CONCURRENCY SAFETY:
+ * This implementation uses a shared mutable `nextIndex` counter that is
+ * incremented inside an `async function`. This is safe in Node.js because:
+ *   1. JavaScript is single-threaded — only one worker function runs at a time.
+ *   2. The `nextIndex` read-increment is purely synchronous (no `await` between
+ *      `const currentIndex = nextIndex` and `nextIndex += 1`), so no other
+ *      worker can observe a torn read.
+ *   3. Workers only yield control at `await mapper(...)` and `await` inside
+ *      the while-loop body, both of which happen AFTER the index has been
+ *      claimed.
+ *
+ * If this code were ever ported to a true multi-threaded runtime (e.g.
+ * `worker_threads` with shared memory), the counter would need to be
+ * replaced with `Atomics.add()` on a `SharedArrayBuffer`.
+ */
 export async function mapWithConcurrency<T, R>(
   items: T[],
   limit: number,
@@ -33,6 +51,7 @@ export async function mapWithConcurrency<T, R>(
         return;
       }
 
+      // Synchronous claim — no await between read and increment.
       const currentIndex = nextIndex;
       nextIndex += 1;
 

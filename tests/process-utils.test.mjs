@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
@@ -92,27 +94,40 @@ test("runProcess reports non-zero exit code", async () => {
 });
 
 test("runProcess times out for long-running process", async () => {
-  const result = await runProcess(
-    process.execPath,
-    ["-e", "setTimeout(() => {}, 60000)"],
-    process.cwd(),
-    200
-  );
-  assert.equal(result.timedOut, true);
+  // Use a temp script file, not `node -e "setTimeout(() => {}, 60000)"`:
+  // runProcess spawns with `shell: true` on Windows, where cmd.exe splits the
+  // `-e` argument on the spaces, node sees only `setTimeout(()` and dies with a
+  // SyntaxError in ~150ms — so the timeout never fires and this test flakes.
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-timeout-"));
+  try {
+    const scriptPath = path.join(tempDir, "sleep.js");
+    await writeFile(scriptPath, "setTimeout(() => {}, 60000);\n", "utf8");
+    const result = await runProcess(process.execPath, [scriptPath], process.cwd(), 200);
+    assert.equal(result.timedOut, true);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
 });
 
 test("runProcess respects abort signal", async () => {
-  const controller = new AbortController();
-  setTimeout(() => controller.abort(), 100);
-  const result = await runProcess(
-    process.execPath,
-    ["-e", "setTimeout(() => {}, 60000)"],
-    process.cwd(),
-    30000,
-    undefined,
-    controller.signal
-  );
-  assert.ok(result.exitCode !== 0 || result.timedOut || result.error);
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-abort-"));
+  try {
+    const scriptPath = path.join(tempDir, "sleep.js");
+    await writeFile(scriptPath, "setTimeout(() => {}, 60000);\n", "utf8");
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 100);
+    const result = await runProcess(
+      process.execPath,
+      [scriptPath],
+      process.cwd(),
+      30000,
+      undefined,
+      controller.signal
+    );
+    assert.ok(result.exitCode !== 0 || result.timedOut || result.error);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
 });
 
 test("runProcess handles command not found", async () => {
@@ -139,44 +154,50 @@ test("runProcess truncates stdout that exceeds MAX_PROCESS_OUTPUT_BYTES", async 
   // Write ~52 MB to stdout in 1-MB chunks. The runProcess pipeline must cap
   // the captured output and append a truncation marker so benchmark agents
   // producing huge logs can't OOM the parent.
-  const script = `
-    const chunk = "a".repeat(1024 * 1024);
-    for (let i = 0; i < 52; i++) {
-      process.stdout.write(chunk);
-    }
-  `;
-  const result = await runProcess(
-    process.execPath,
-    ["-e", script],
-    process.cwd(),
-    60_000
-  );
-  assert.equal(result.timedOut, false);
-  assert.ok(
-    result.stdout.length <= MAX_ALLOWED_OUTPUT,
-    `Expected stdout <= ${MAX_ALLOWED_OUTPUT} bytes, got ${result.stdout.length}`
-  );
-  assert.match(result.stdout, /truncated/i, `Expected truncation marker in stdout`);
+  //
+  // The generator is written to a temp .js file and run as `node <file>`
+  // rather than `node -e "<script>"`. runProcess spawns with `shell: true` on
+  // Windows, where cmd.exe splits a multi-line `-e` argument on whitespace and
+  // node then sees `-e` with no argument (exit code 9, empty output). A single
+  // file-path argument survives the shell unchanged on every platform.
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-trunc-"));
+  try {
+    const scriptPath = path.join(tempDir, "gen-stdout.js");
+    await writeFile(
+      scriptPath,
+      'const chunk = "a".repeat(1024 * 1024);\nfor (let i = 0; i < 52; i++) { process.stdout.write(chunk); }\n',
+      "utf8"
+    );
+    const result = await runProcess(process.execPath, [scriptPath], process.cwd(), 60_000);
+    assert.equal(result.timedOut, false);
+    assert.ok(
+      result.stdout.length <= MAX_ALLOWED_OUTPUT,
+      `Expected stdout <= ${MAX_ALLOWED_OUTPUT} bytes, got ${result.stdout.length}`
+    );
+    assert.match(result.stdout, /truncated/i, `Expected truncation marker in stdout`);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
 });
 
 test("runProcess truncates stderr that exceeds MAX_PROCESS_OUTPUT_BYTES", async () => {
-  const script = `
-    const chunk = "e".repeat(1024 * 1024);
-    for (let i = 0; i < 52; i++) {
-      process.stderr.write(chunk);
-    }
-  `;
-  const result = await runProcess(
-    process.execPath,
-    ["-e", script],
-    process.cwd(),
-    60_000
-  );
-  assert.ok(
-    result.stderr.length <= MAX_ALLOWED_OUTPUT,
-    `Expected stderr <= ${MAX_ALLOWED_OUTPUT} bytes, got ${result.stderr.length}`
-  );
-  assert.match(result.stderr, /truncated/i);
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-trunc-"));
+  try {
+    const scriptPath = path.join(tempDir, "gen-stderr.js");
+    await writeFile(
+      scriptPath,
+      'const chunk = "e".repeat(1024 * 1024);\nfor (let i = 0; i < 52; i++) { process.stderr.write(chunk); }\n',
+      "utf8"
+    );
+    const result = await runProcess(process.execPath, [scriptPath], process.cwd(), 60_000);
+    assert.ok(
+      result.stderr.length <= MAX_ALLOWED_OUTPUT,
+      `Expected stderr <= ${MAX_ALLOWED_OUTPUT} bytes, got ${result.stderr.length}`
+    );
+    assert.match(result.stderr, /truncated/i);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
 });
 
 // --- terminateProcessTree (previously had NO coverage) ---

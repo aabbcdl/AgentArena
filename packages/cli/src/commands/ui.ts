@@ -622,14 +622,18 @@ export async function runUi(parsed: ParsedArgs): Promise<void> {
           let body = await fs.readFile(filePath);
 
           // Auto-inject auth token into index.html for localhost (seamless first-time UX).
-          // Injects a meta tag that the frontend reads on startup — no redirect needed.
+          // Injects a meta tag + self-removing script so the token doesn't persist in
+          // saved pages, screenshots, or printouts. The script reads the token into
+          // sessionStorage and removes the meta element from the DOM immediately.
           if (isLocalhost && filePath.endsWith("index.html") && authToken) {
             let html = body.toString("utf8");
             const metaTag = `<meta name="agentarena-auth-token" content="${authToken}">`;
+            const cleanupScript = `<script>(function(){var m=document.querySelector('meta[name="agentarena-auth-token"]');if(m){try{sessionStorage.setItem('agentarena-auth-token',m.getAttribute('content'))}catch(e){}m.remove()}})();</script>`;
+            const injection = `  ${metaTag}\n  ${cleanupScript}\n`;
             if (html.includes("</head>")) {
-              html = html.replace("</head>", `  ${metaTag}\n</head>`);
+              html = html.replace("</head>", `${injection}</head>`);
             } else {
-              html = metaTag + "\n" + html;
+              html = injection + html;
             }
             body = Buffer.from(html, "utf8");
           }
@@ -687,8 +691,29 @@ export async function runUi(parsed: ParsedArgs): Promise<void> {
   const authTokenFilePath = path.join(process.cwd(), ".agentarena", "last-auth-token");
   await fs.mkdir(path.dirname(authTokenFilePath), { recursive: true });
   await fs.writeFile(authTokenFilePath, authToken, { encoding: "utf8", mode: 0o600 });
-  // Attempt to restrict file permissions (best-effort; Windows ACLs differ).
-  await fs.chmod(authTokenFilePath, 0o600).catch(() => {});
+  // Restrict file permissions to owner-only.
+  // On Unix: fs.chmod(0o600) is sufficient.
+  // On Windows: fs.chmod is a no-op; use icacls to restrict to the current user.
+  if (process.platform === "win32") {
+    try {
+      const { execFileSync } = await import("node:child_process");
+      const username = process.env.USERNAME || process.env.USER;
+      if (username) {
+        // Remove inherited permissions, grant full control only to current user.
+        // (F) — not (R) — so the owner retains write+delete: overwriting the token on a
+        // later launch and cleaning up the file both require those rights on Windows.
+        execFileSync("icacls", [authTokenFilePath, "/inheritance:r", "/grant:r", `${username}:(F)`], {
+          stdio: "ignore",
+          timeout: 5000,
+          windowsHide: true,
+        });
+      }
+    } catch {
+      logger.warn("server", "auth.token_acl", "Failed to set Windows ACL on auth token file. The token may be readable by other users on this machine.");
+    }
+  } else {
+    await fs.chmod(authTokenFilePath, 0o600).catch(() => {});
+  }
   // Never print the token (or any prefix of it) to stdout — CI logs and terminal
   // scrollback capture stdout, and even a partial prefix narrows brute force.
   // Don't include the token in the URL fragment either: browser history persists it.

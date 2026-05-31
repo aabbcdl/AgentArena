@@ -150,6 +150,50 @@ export function isInternalUrl(urlString: string): boolean {
   }
 }
 
+/**
+ * Resolve a hostname to its IP addresses and check if any resolve to a
+ * private/internal address. This guards against DNS rebinding attacks where
+ * a domain initially resolves to a public IP (passing `isInternalUrl`)
+ * but later resolves to a private IP at request time.
+ *
+ * Returns true if any resolved IP is internal/private.
+ */
+export async function hasInternalDnsResolution(urlString: string): Promise<boolean> {
+  try {
+    const { promises: dnsPromises } = await import("node:dns");
+    const parsed = new URL(urlString);
+    const hostname = parsed.hostname.toLowerCase();
+
+    // Skip check for IP literals and known-safe hostnames
+    if (/^\d+\.\d+\.\d+\.\d+$/.test(hostname)) {
+      return isPrivateIp(hostname);
+    }
+
+    try {
+      const addresses = await dnsPromises.resolve4(hostname);
+      for (const addr of addresses) {
+        if (isPrivateIp(addr)) return true;
+      }
+    } catch {
+      // No A records — try AAAA
+    }
+
+    try {
+      const addresses6 = await dnsPromises.resolve6(hostname);
+      for (const addr of addresses6) {
+        if (isPrivateIpv6(addr)) return true;
+      }
+    } catch {
+      // No AAAA records either — treat as non-internal
+    }
+
+    return false;
+  } catch {
+    // DNS resolution failure = treat as potentially internal (fail-safe)
+    return true;
+  }
+}
+
 function slugifyVariantPart(value: string): string {
   return value
     .trim()

@@ -277,11 +277,21 @@ export async function loadTaskPack(taskPath: string): Promise<TaskPack> {
     );
   }
 
-  const judgesInput = Array.isArray(parsed.judges)
-    ? parsed.judges
-    : Array.isArray(parsed.successCommands)
-      ? parsed.successCommands
-      : [];
+  // `successCommands` is a deprecated alias for `judges` (kept for backward
+  // compatibility with early task pack files). Emit a deprecation warning so
+  // users know to migrate before the alias is removed in a future release.
+  let judgesInput: unknown[];
+  if (Array.isArray(parsed.judges)) {
+    judgesInput = parsed.judges;
+  } else if (Array.isArray(parsed.successCommands)) {
+    console.warn(
+      `[agentarena] DEPRECATION: Task pack "${taskId}" uses "successCommands" which is deprecated. ` +
+      `Please rename the field to "judges". "successCommands" will be removed in a future version.`
+    );
+    judgesInput = parsed.successCommands;
+  } else {
+    judgesInput = [];
+  }
   const setupCommandsInput = Array.isArray(parsed.setupCommands) ? parsed.setupCommands : [];
   const teardownCommandsInput = Array.isArray(parsed.teardownCommands) ? parsed.teardownCommands : [];
   const repoSource = assertOptionalString(parsed.repoSource, "repoSource");

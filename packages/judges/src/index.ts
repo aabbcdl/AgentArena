@@ -186,6 +186,14 @@ function getJudgeConcurrency(): number {
   return Math.min(Math.floor(parsed), 16);
 }
 
+/**
+ * Run command-based judges with bounded concurrency.
+ *
+ * See `mapWithConcurrency` in packages/runner/src/concurrency.ts for the
+ * full concurrency safety rationale. The shared `cursor` counter is safe
+ * under Node.js's single-threaded event loop because the read-increment
+ * is synchronous (no `await` between `const at = cursor` and `cursor += 1`).
+ */
 async function mapJudgesWithConcurrency(
   indices: number[],
   judges: TaskJudge[],
@@ -199,6 +207,7 @@ async function mapJudgesWithConcurrency(
   let cursor = 0;
   const next = async (): Promise<void> => {
     while (cursor < indices.length) {
+      // Synchronous claim — no await between read and increment.
       const at = cursor;
       cursor += 1;
       const idx = indices[at];

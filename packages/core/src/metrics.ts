@@ -33,6 +33,20 @@ export function clearMetricsBuffer(): void {
   metricsBuffer.length = 0;
 }
 
+/**
+ * Trim the metrics buffer when it exceeds the maximum size.
+ *
+ * Uses batch trimming (splice off the oldest 20%) instead of per-item
+ * `Array.shift()`. `shift()` on a 10,000-element array is O(n) per call,
+ * causing quadratic cost under sustained metric recording. Batch trimming
+ * amortizes the cost across thousands of inserts.
+ */
+function trimMetricsBuffer(): void {
+  if (metricsBuffer.length <= MAX_BUFFER_SIZE) return;
+  const trimCount = Math.floor(MAX_BUFFER_SIZE * 0.2); // Remove oldest 20%
+  metricsBuffer.splice(0, trimCount);
+}
+
 export function invalidateAllMetricsCaches(): void {
   cachedAllMetrics = null;
   lastAllMetricsUpdate = 0;
@@ -43,12 +57,8 @@ function recordMetric(metric: MetricValue): void {
     metricHandler(metric);
   }
   
-  if (metricsBuffer.length < MAX_BUFFER_SIZE) {
-    metricsBuffer.push(metric);
-  } else {
-    metricsBuffer.shift();
-    metricsBuffer.push(metric);
-  }
+  metricsBuffer.push(metric);
+  trimMetricsBuffer();
 }
 
 export class Counter {

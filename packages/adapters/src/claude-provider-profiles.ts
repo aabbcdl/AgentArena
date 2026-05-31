@@ -30,7 +30,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { ClaudeProviderProfile, ClaudeProviderRiskFlag } from "@agentarena/core";
-import { isInternalUrl } from "@agentarena/core";
+import { hasInternalDnsResolution, isInternalUrl } from "@agentarena/core";
 
 interface ProfileRegistryFile {
   schemaVersion: 1;
@@ -459,6 +459,30 @@ export async function saveClaudeProviderProfile(input: ClaudeProviderProfileInpu
 
   if (input.baseUrl && isInternalUrl(input.baseUrl)) {
     throw new Error("baseUrl cannot point to an internal/private address. This restriction prevents Server-Side Request Forgery (SSRF) attacks.");
+  }
+
+  // DNS rebinding guard: resolve the hostname and verify no resolved IP is
+  // internal/private. Without this, an attacker could register a domain that
+  // initially resolves to a public IP (passing isInternalUrl) but later resolves
+  // to 127.0.0.1 at request time, bypassing the SSRF protection.
+  if (input.baseUrl) {
+    try {
+      const isDnsInternal = await hasInternalDnsResolution(input.baseUrl);
+      if (isDnsInternal) {
+        throw new Error(
+          `baseUrl "${input.baseUrl}" resolves to an internal/private IP address. ` +
+          `This restriction prevents DNS rebinding SSRF attacks.`
+        );
+      }
+    } catch (dnsError) {
+      if (dnsError instanceof Error && dnsError.message.includes("resolves to an internal")) {
+        throw dnsError;
+      }
+      // DNS resolution failure is treated as potentially internal (fail-safe)
+      throw new Error(
+        `baseUrl "${input.baseUrl}" failed DNS resolution. Cannot verify it does not point to an internal address.`
+      );
+    }
   }
 
   if (input.baseUrl) {

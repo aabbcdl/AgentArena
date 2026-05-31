@@ -37,32 +37,54 @@ describe("workspace", () => {
 
   describe("debugLog", () => {
     it("logs when enabled", () => {
-      const originalError = console.error;
+      // debugLog delegates to the structured logger, which writes DEBUG entries
+      // as JSON via console.log — and only when AGENTARENA_DEBUG is set. The old
+      // test mocked console.error and looked for a "[debug]" prefix, neither of
+      // which the current logger produces, so it always failed.
+      const originalLog = console.log;
+      const originalDebugEnv = process.env.AGENTARENA_DEBUG;
+      process.env.AGENTARENA_DEBUG = "1";
       let logged = false;
-      console.error = (...args) => {
-        if (args[0] === "[debug]") {
+      console.log = (...args) => {
+        if (typeof args[0] === "string" && args[0].includes("test-debug-message")) {
           logged = true;
         }
       };
 
       try {
-        debugLog(true, "test");
+        debugLog(true, "test-debug-message");
         assert.ok(logged);
       } finally {
-        console.error = originalError;
+        console.log = originalLog;
+        if (originalDebugEnv === undefined) {
+          delete process.env.AGENTARENA_DEBUG;
+        } else {
+          process.env.AGENTARENA_DEBUG = originalDebugEnv;
+        }
       }
     });
 
     it("silent when disabled", () => {
-      const originalError = console.error;
+      // When the `enabled` flag is false, debugLog must not emit anything,
+      // regardless of the AGENTARENA_DEBUG env var.
+      const originalLog = console.log;
+      const originalDebugEnv = process.env.AGENTARENA_DEBUG;
+      process.env.AGENTARENA_DEBUG = "1";
       let logged = false;
-      console.error = () => { logged = true; };
+      console.log = () => {
+        logged = true;
+      };
 
       try {
         debugLog(false, "test");
         assert.ok(!logged);
       } finally {
-        console.error = originalError;
+        console.log = originalLog;
+        if (originalDebugEnv === undefined) {
+          delete process.env.AGENTARENA_DEBUG;
+        } else {
+          process.env.AGENTARENA_DEBUG = originalDebugEnv;
+        }
       }
     });
   });
