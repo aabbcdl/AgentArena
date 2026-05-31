@@ -871,8 +871,8 @@ function updateStickyBarVisibility() {
   const selectedCount = document.querySelectorAll('#launcher-agents input[type="checkbox"]:checked').length;
   if (elements.stickyBarSummary) {
     elements.stickyBarSummary.innerHTML = selectedCount > 0
-      ? `<strong>${selectedCount}</strong> agent${selectedCount === 1 ? '' : 's'} configured`
-      : 'Configure agents and a task to start benchmarking';
+      ? t('stickyBarAgentsConfigured', selectedCount)
+      : t('stickyBarHint');
   }
 
   // Show sticky bar only when launcher is not visible

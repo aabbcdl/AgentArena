@@ -45,6 +45,8 @@ const en = {
   heroFeatureHistoryTitle: "History Tracking",
   heroFeatureHistoryDesc: "Track agent performance across multiple runs",
   configureAgentsBtn: "Configure Agents",
+  stickyBarHint: "Select agents and a task to start benchmarking",
+  stickyBarAgentsConfigured: (count) => `<strong>${count}</strong> agent${count === 1 ? '' : 's'} configured`,
   heroHowTitle: "Recommended workflow",
   heroHowSteps: [
     "Choose the repository and task that resemble your real work.",
@@ -517,6 +519,8 @@ const zhCN = {
   heroFeatureHistoryTitle: "历史追踪",
   heroFeatureHistoryDesc: "跨多次运行追踪 agent 表现",
   configureAgentsBtn: "配置 Agents",
+  stickyBarHint: "选择 agents 和任务后开始跑分",
+  stickyBarAgentsConfigured: (count) => `已配置 <strong>${count}</strong> 个 agent`,
   heroHowTitle: "推荐用法",
   heroHowSteps: [
     "先选一个真正代表你工作场景的仓库和任务。",
