@@ -84,7 +84,9 @@ const elements = {
   taskTitle: document.querySelector("#task-title"),
   taskMeta: document.querySelector("#task-meta"),
   summaryCard: document.querySelector("#summary-card"),
+  taskTrace: document.querySelector("#task-trace"),
   verdictHero: document.querySelector("#verdict-hero"),
+  backToLauncher: document.querySelector("#back-to-launcher"),
 
   // Leaderboard
   leaderboardSection: document.querySelector("#leaderboard-section"),

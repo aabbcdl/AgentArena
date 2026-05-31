@@ -92,6 +92,10 @@
       <symbol id="icon-filter" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>
       </symbol>
+      <symbol id="icon-arrow-left" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <line x1="19" y1="12" x2="5" y2="12"/>
+        <polyline points="12 19 5 12 12 5"/>
+      </symbol>
       <symbol id="icon-menu" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <line x1="3" y1="12" x2="21" y2="12"/>
         <line x1="3" y1="6" x2="21" y2="6"/>
@@ -405,10 +409,16 @@
 
         <section id="dashboard" class="hidden">
           <div class="topbar">
-            <div>
-              <p id="topbar-eyebrow" class="eyebrow">AgentArena · Run Overview</p>
-              <h2 id="task-title">Task</h2>
-              <p id="task-meta" class="muted"></p>
+            <div class="topbar-left">
+              <button id="back-to-launcher" type="button" class="btn btn-back-launcher" title="Back to launcher">
+                <svg class="icon" style="width:16px;height:16px;"><use href="#icon-arrow-left"/></svg>
+                <span data-i18n="backToLauncher">← 继续跑分</span>
+              </button>
+              <div>
+                <p id="topbar-eyebrow" class="eyebrow">AgentArena · Run Overview</p>
+                <h2 id="task-title">Task</h2>
+                <p id="task-meta" class="muted"></p>
+              </div>
             </div>
           </div>
           <div class="share-actions" id="share-actions" role="toolbar" aria-label="Share and export">
@@ -461,6 +471,7 @@
           <section class="report-zone report-zone-summary">
             <section id="summary-card"></section>
             <section id="verdict-hero"></section>
+            <section id="task-trace"></section>
           </section>
 
           <section class="report-zone report-zone-compare">

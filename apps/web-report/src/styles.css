@@ -5354,3 +5354,146 @@ textarea:focus-visible {
     display: none;
   }
 }
+
+/* ===================================================================
+   Back to Launcher button + topbar layout
+   =================================================================== */
+
+.topbar-left {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.btn-back-launcher {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border: 1px solid var(--border, #ddd);
+  border-radius: 8px;
+  background: var(--surface-primary, #fff);
+  color: var(--text-primary, #333);
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: all 0.15s;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.btn-back-launcher:hover {
+  background: var(--surface-hover, #f5f5f5);
+  border-color: var(--accent, #1976d2);
+  color: var(--accent, #1976d2);
+}
+
+.btn-back-launcher svg {
+  flex-shrink: 0;
+}
+
+/* ===================================================================
+   Task Trace section — shows what was sent vs what came back
+   =================================================================== */
+
+.task-trace-section {
+  margin-top: 20px;
+  border: 1px solid var(--border, #e0e0e0);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.task-trace-section summary {
+  cursor: pointer;
+  padding: 12px 16px;
+  font-weight: 700;
+  font-size: 0.95rem;
+  background: var(--surface-secondary, #fafafa);
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.task-trace-section summary::-webkit-details-marker {
+  display: none;
+}
+
+.task-trace-section summary::before {
+  content: "\25B6";
+  font-size: 0.7em;
+  transition: transform 0.2s;
+}
+
+.task-trace-section[open] summary::before {
+  transform: rotate(90deg);
+}
+
+.task-trace-body {
+  padding: 16px;
+  display: grid;
+  gap: 16px;
+}
+
+.task-trace-block {
+  border: 1px solid var(--border, #e0e0e0);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.task-trace-block-header {
+  padding: 8px 14px;
+  font-weight: 600;
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: var(--surface-tertiary, #f0f0f0);
+  color: var(--text-muted, #666);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.task-trace-block-header .btn-copy-trace {
+  padding: 2px 8px;
+  font-size: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  cursor: pointer;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.task-trace-block pre {
+  margin: 0;
+  padding: 12px 14px;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 300px;
+  overflow-y: auto;
+  background: var(--surface-primary, #fff);
+  color: var(--text-primary, #333);
+}
+
+.task-trace-response-empty {
+  padding: 16px;
+  color: var(--danger, #e53935);
+  font-style: italic;
+  font-size: 0.85rem;
+}
+
+.task-trace-command {
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 0.78rem;
+  background: var(--surface-tertiary, #f0f0f0);
+  padding: 10px 14px;
+  border-radius: 6px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--text-secondary, #555);
+}

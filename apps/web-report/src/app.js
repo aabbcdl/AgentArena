@@ -1408,6 +1408,23 @@ elements.launcherToggle.addEventListener("click", () => {
   state.launcherExpanded = !state.launcherExpanded;
   renderLauncher();
 });
+
+// Back to launcher button — scroll to launcher, expand it, and clear run state
+if (elements.backToLauncher) {
+  elements.backToLauncher.addEventListener("click", () => {
+    // Expand launcher if collapsed
+    state.launcherExpanded = true;
+    renderLauncher();
+    // Scroll to top of page to show launcher
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    // Focus the launcher panel after scroll completes
+    setTimeout(() => {
+      if (elements.launcherPanel) {
+        elements.launcherPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    }, 100);
+  });
+}
 elements.languageSelect.addEventListener("change", (event) => {
   state.language = String(event.target.value ?? "en");
   document.documentElement.lang = state.language === "zh-CN" ? "zh-CN" : "en";

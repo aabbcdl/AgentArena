@@ -1457,6 +1457,92 @@ function renderLeaderboard(run) {
 
 
 /**
+ * Render the Task Trace section: what was asked vs what came back.
+ *
+ * This answers the user's question: "Did the agent actually receive the task?
+ * What did it return?"
+ */
+function renderTaskTrace(run) {
+  if (!elements.taskTrace) return;
+
+  const taskPrompt = run.task?.prompt || "";
+  const results = run.results || [];
+
+  // Build per-agent trace blocks
+  const agentBlocks = results.map(result => {
+    const summary = result.summary || "";
+    const hasRealResponse = summary && summary.trim().length > 0 && !summary.includes("did not return a result");
+
+    // Extract CLI command from trace
+    let cliCommand = "";
+    if (result.traceEvents) {
+      const startEvent = result.traceEvents.find(e => e.type === "adapter.start");
+      if (startEvent?.metadata?.command) {
+        const args = startEvent.metadata.args || [];
+        cliCommand = startEvent.metadata.command + " " + args.join(" ");
+      }
+    }
+
+    const statusIcon = result.status === "success" ? "\u2705" : "\u274c";
+    const label = resultLabel(result);
+
+    return `
+      <div class="task-trace-block" style="margin-bottom:12px;">
+        <div class="task-trace-block-header">
+          <span>${statusIcon} ${escapeHtml(label)}</span>
+          <span style="font-size:0.75rem;font-weight:400;text-transform:none;letter-spacing:0;">
+            ${escapeHtml(localText("状态", "Status"))}: ${escapeHtml(translateStatus(result.status, t))}
+          </span>
+        </div>
+        ${cliCommand ? `
+        <div class="task-trace-command">${escapeHtml(cliCommand.length > 200 ? cliCommand.slice(0, 200) + "..." : cliCommand)}</div>
+        ` : ""}
+        <div style="padding:12px 14px;">
+          <div style="font-weight:600;font-size:0.82rem;color:var(--text-muted);margin-bottom:6px;">${escapeHtml(t("taskTraceResponse"))}</div>
+          ${hasRealResponse
+            ? `<pre style="margin:0;font-size:0.82rem;white-space:pre-wrap;word-break:break-word;max-height:200px;overflow-y:auto;">${escapeHtml(summary)}</pre>`
+            : `<p class="task-trace-response-empty">${escapeHtml(t("taskTraceNoResponse"))}</p>`
+          }
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  elements.taskTrace.innerHTML = `
+    <details class="task-trace-section">
+      <summary>
+        <span>\ud83d\udd0d</span>
+        ${escapeHtml(t("taskTraceTitle"))}
+      </summary>
+      <div class="task-trace-body">
+        <div class="task-trace-block">
+          <div class="task-trace-block-header">
+            <span>${escapeHtml(t("taskTracePrompt"))}</span>
+            <button class="btn-copy-trace" data-copy-target="task-prompt">\ud83d\udccb ${escapeHtml(localText("复制", "Copy"))}</button>
+          </div>
+          <pre id="task-prompt-text">${escapeHtml(taskPrompt)}</pre>
+        </div>
+        ${agentBlocks}
+      </div>
+    </details>
+  `;
+
+  // Wire up copy button
+  const copyBtn = elements.taskTrace.querySelector('[data-copy-target="task-prompt"]');
+  if (copyBtn) {
+    copyBtn.addEventListener("click", () => {
+      const textEl = document.getElementById("task-prompt-text");
+      if (textEl) {
+        navigator.clipboard?.writeText(textEl.textContent).then(() => {
+          copyBtn.textContent = "\u2713 " + localText("已复制", "Copied");
+          setTimeout(() => { copyBtn.textContent = "\ud83d\udccb " + localText("复制", "Copy"); }, 2000);
+        });
+      }
+    });
+  }
+}
+
+/**
  * Render the top-level Results Summary Card.
  *
  * This is the FIRST thing users see on the dashboard. It answers three
@@ -1639,6 +1725,9 @@ function renderDashboard(run) {
     }
   }
 
+  // 任务轨迹（任务要求 vs Agent 返回）
+  renderTaskTrace(run);
+
   // 免责声明
   let disclaimer = document.querySelector(".agentarena-disclaimer");
   if (!disclaimer) {
@@ -1675,6 +1764,7 @@ function renderDashboard(run) {
     renderLeaderboard,
     renderSummaryCard,
     scoreGrade,
+    renderTaskTrace,
     renderDashboard
   };
 }

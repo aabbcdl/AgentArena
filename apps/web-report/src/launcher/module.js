@@ -850,12 +850,26 @@ export function createLauncherModule(deps) {
       elements.launcherTaskSelect.innerHTML = optionHtml.join("");
     }
 
-    if (!elements.launcherTaskPath.value && info.defaultTaskPath) {
+    // Restore the task select value — try exact match first, then by ID
+    const currentTaskPath = elements.launcherTaskPath.value;
+    if (!currentTaskPath && info.defaultTaskPath) {
       elements.launcherTaskPath.value = info.defaultTaskPath;
       elements.launcherTaskSelect.value = info.defaultTaskPath;
-    } else if (elements.launcherTaskPath.value) {
-      const matching = state.availableTaskPacks.find((taskPack) => taskPack.path === elements.launcherTaskPath.value);
-      elements.launcherTaskSelect.value = matching ? matching.path : "";
+    } else if (currentTaskPath) {
+      const matching = state.availableTaskPacks.find((taskPack) => taskPack.path === currentTaskPath);
+      if (matching) {
+        elements.launcherTaskSelect.value = matching.path;
+      } else {
+        // Path doesn't match any known task pack — keep custom path mode
+        elements.launcherTaskSelect.value = "";
+      }
+    } else {
+      // No task path set — default to first available task pack
+      const firstPack = state.availableTaskPacks?.[0];
+      if (firstPack) {
+        elements.launcherTaskPath.value = firstPack.path;
+        elements.launcherTaskSelect.value = firstPack.path;
+      }
     }
 
     const selectedTaskPackPath = elements.launcherTaskSelect.value || elements.launcherTaskPath.value;
