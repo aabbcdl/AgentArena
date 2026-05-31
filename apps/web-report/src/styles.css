@@ -5497,3 +5497,256 @@ textarea:focus-visible {
   word-break: break-all;
   color: var(--text-secondary, #555);
 }
+
+/* ===================================================================
+   Dark mode for Summary Card & Score Grades
+   =================================================================== */
+
+@media (prefers-color-scheme: dark) {
+  .summary-card {
+    background: var(--surface-primary, #1e1e1e);
+    border-color: var(--border, #333);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  }
+
+  .summary-verdict-title {
+    color: var(--text-primary, #e0e0e0);
+  }
+
+  .summary-verdict-text {
+    color: var(--text-secondary, #aaa);
+  }
+
+  .summary-winner-name {
+    color: var(--text-primary, #e0e0e0);
+  }
+
+  .summary-metric-label {
+    color: var(--text-muted, #777);
+  }
+
+  .summary-metric-value {
+    color: var(--text-primary, #e0e0e0);
+  }
+
+  .summary-pass-ring {
+    background: var(--surface-tertiary, #333);
+  }
+
+  .summary-badge-pass {
+    background: rgba(46, 125, 50, 0.2);
+    color: #66bb6a;
+  }
+
+  .summary-badge-fail {
+    background: rgba(229, 57, 53, 0.2);
+    color: #ef5350;
+  }
+
+  .summary-badge-fast {
+    background: rgba(25, 118, 210, 0.2);
+    color: #42a5f5;
+  }
+
+  .summary-badge-cheap {
+    background: rgba(123, 31, 162, 0.2);
+    color: #ab47bc;
+  }
+
+  /* Score grade colors for dark mode */
+  .score-excellent {
+    color: #66bb6a;
+    background: rgba(102, 187, 106, 0.15);
+  }
+
+  .score-good {
+    color: #81c784;
+    background: rgba(129, 199, 132, 0.15);
+  }
+
+  .score-fair {
+    color: #ffb74d;
+    background: rgba(255, 183, 77, 0.15);
+  }
+
+  .score-poor, .score-failed {
+    color: #ef5350;
+    background: rgba(239, 83, 80, 0.15);
+  }
+
+  .score-cell.score-excellent, .score-cell.score-excellent .score-grade-label { color: #66bb6a; }
+  .score-cell.score-good, .score-cell.score-good .score-grade-label { color: #81c784; }
+  .score-cell.score-fair, .score-cell.score-fair .score-grade-label { color: #ffb74d; }
+  .score-cell.score-poor, .score-cell.score-failed,
+  .score-cell.score-poor .score-grade-label, .score-cell.score-failed .score-grade-label { color: #ef5350; }
+
+  .compare-table-compact th {
+    color: var(--text-muted, #777);
+    border-bottom-color: var(--border, #333);
+  }
+
+  .compare-table-compact .compare-row:hover {
+    background: var(--surface-hover, #2a2a2a);
+  }
+
+  .compare-table-compact .compare-row.active {
+    background: rgba(25, 118, 210, 0.12);
+  }
+
+  .compare-failed-section {
+    border-color: rgba(239, 83, 80, 0.3);
+  }
+
+  .compare-failed-summary {
+    color: #ef5350;
+    background: rgba(239, 83, 80, 0.08);
+  }
+
+  /* Task trace dark mode */
+  .task-trace-section summary {
+    background: var(--surface-secondary, #252525);
+  }
+
+  .task-trace-block {
+    border-color: var(--border, #333);
+  }
+
+  .task-trace-block-header {
+    background: var(--surface-tertiary, #2a2a2a);
+    color: var(--text-muted, #888);
+  }
+
+  .task-trace-block pre {
+    background: var(--surface-primary, #1e1e1e);
+    color: var(--text-primary, #d0d0d0);
+  }
+
+  .task-trace-command {
+    background: var(--surface-tertiary, #2a2a2a);
+    color: var(--text-secondary, #aaa);
+  }
+
+  /* Back to launcher button */
+  .btn-back-launcher {
+    background: var(--surface-primary, #1e1e1e);
+    border-color: var(--border, #444);
+    color: var(--text-primary, #e0e0e0);
+  }
+
+  .btn-back-launcher:hover {
+    background: var(--surface-hover, #2a2a2a);
+    border-color: var(--accent, #42a5f5);
+    color: var(--accent, #42a5f5);
+  }
+}
+
+/* ===================================================================
+   Score weights panel — compact + feedback
+   =================================================================== */
+
+.weight-slider-section details {
+  border: 1px solid var(--border, #e0e0e0);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.weight-sliders {
+  padding: 12px 0;
+}
+
+/* Make weight change visually obvious — highlight recently changed */
+.weight-slider-section .weight-row {
+  transition: background 0.3s;
+  padding: 6px 8px;
+  border-radius: 6px;
+}
+
+.weight-slider-section .weight-row:hover {
+  background: var(--surface-hover, rgba(0,0,0,0.03));
+}
+
+.weight-slider-section .weight-row input[type="range"] {
+  accent-color: var(--accent, #1976d2);
+  cursor: pointer;
+}
+
+/* Preset buttons — more compact */
+#score-weight-presets {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+#score-weight-presets .preset-btn {
+  padding: 4px 10px;
+  font-size: 0.8rem;
+  border-radius: 16px;
+  border: 1px solid var(--border, #ddd);
+  background: var(--surface-primary, #fff);
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+#score-weight-presets .preset-btn:hover {
+  border-color: var(--accent, #1976d2);
+  color: var(--accent, #1976d2);
+}
+
+#score-weight-presets .preset-btn.active {
+  background: var(--accent, #1976d2);
+  color: #fff;
+  border-color: var(--accent, #1976d2);
+}
+
+.compare-settings-card {
+  margin-bottom: 12px;
+}
+
+/* When weights are being adjusted, add a subtle pulse to the score column */
+@keyframes score-pulse {
+  0% { background: transparent; }
+  50% { background: rgba(25, 118, 210, 0.08); }
+  100% { background: transparent; }
+}
+
+.compare-score.updating {
+  animation: score-pulse 0.4s ease;
+}
+
+/* ===================================================================
+   Agent detail section — collapsed by default
+   =================================================================== */
+
+.result-layout {
+  margin-top: 8px;
+}
+
+.result-summary {
+  font-size: 0.88rem;
+}
+
+.result-summary h3 {
+  margin-top: 0;
+}
+
+/* Hide the verbose detail sections by default */
+.result-details .detail-card:not(:first-child) {
+  /* Keep first card visible, collapse rest */
+}
+
+/* ===================================================================
+   Failures section — smooth hide
+   =================================================================== */
+
+#failures-section.hidden {
+  display: none !important;
+}
+
+#failures-section:not(.hidden) {
+  animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}

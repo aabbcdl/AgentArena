@@ -705,132 +705,9 @@ function generateVerdictSummary(run) {
 }
 
 function renderVerdictHero(run) {
-  const summary = summarizeRun(run);
-  const verdict = getRunVerdict(run, { scoreWeights: state.scoreWeights });
-  const trustSummary = getRunTrustSummary(run);
-  const best = verdict.bestAgent;
-  const fastest = verdict.fastest;
-  const cheapest = verdict.lowestKnownCost;
-  const badges = taskMeaningBadges(run.task, t);
-  const verdictText = generateVerdictSummary(run);
-
-  const badgeHtml = badges.map((b) => `<span class="meaning-badge">${escapeHtml(b)}</span>`).join("");
-
-  let winnerHtml;
-  if (best && best.status === "success") {
-    const runtime = runtimeIdentity(best);
-    const passedJudges = best.judgeResults.filter((j) => j.success).length;
-    const totalJudges = best.judgeResults.length;
-    const scoreReasons = getCompositeScoreReasons(best, run, state.scoreWeights)
-      .map((reason) => {
-        switch (reason) {
-          case "tests":
-            return localText("测试最强", "Best tests");
-          case "lint":
-            return localText("Lint 最干净", "Cleanest lint");
-          case "precision":
-            return localText("改动最精准", "Most precise diff");
-          case "judges":
-            return localText("Judge 最稳", "Strongest judges");
-          case "duration":
-            return localText("速度最快", "Fastest");
-          case "cost":
-            return localText("成本最低", "Lowest cost");
-          default:
-            return reason;
-        }
-      })
-      .slice(0, 3);
-    const tags = [];
-    tags.push(`<span class="compare-tag compare-tag-best">${escapeHtml(localText("综合最佳", "Overall Best"))}</span>`);
-    if (fastest && recordKey(fastest) === recordKey(best)) {
-      tags.push(`<span class="compare-tag compare-tag-fast">${escapeHtml(localText("最快", "Fastest"))}</span>`);
-    }
-    if (cheapest && recordKey(cheapest) === recordKey(best)) {
-      tags.push(`<span class="compare-tag compare-tag-cheap">${escapeHtml(localText("最省", "Cheapest"))}</span>`);
-    }
-
-    winnerHtml = `
-      <div class="winner-card">
-        <span class="winner-eyebrow">
-          <svg class="icon" aria-hidden="true"><use href="#icon-trophy"/></svg>
-          ${escapeHtml(localText("综合最佳 Agent", "Overall Best Agent"))}
-        </span>
-        <span class="winner-name">${escapeHtml(resultLabel(best))}</span>
-        ${runtime.model ? `<span class="winner-model">${escapeHtml(runtime.model)} · ${escapeHtml(runtime.reasoning)}</span>` : ""}
-        <div class="winner-stats">
-          <div class="winner-stat">
-            <span class="winner-stat-label">${escapeHtml(localText("综合分", "Composite Score"))}</span>
-            <span class="winner-stat-value">${escapeHtml(formatCompositeScore(best, run, state.scoreWeights))}</span>
-          </div>
-          <div class="winner-stat">
-            <span class="winner-stat-label">${escapeHtml(localText("通过率", "Pass Rate"))}</span>
-            <span class="winner-stat-value">${passedJudges}/${totalJudges}</span>
-          </div>
-          <div class="winner-stat">
-            <span class="winner-stat-label">${escapeHtml(localText("测试", "Tests"))}</span>
-            <span class="winner-stat-value">${escapeHtml(formatTestMetric(best))}</span>
-          </div>
-          <div class="winner-stat">
-            <span class="winner-stat-label">${escapeHtml(localText("耗时", "Duration"))}</span>
-            <span class="winner-stat-value">${escapeHtml(formatDuration(best.durationMs))}</span>
-          </div>
-          <div class="winner-stat">
-            <span class="winner-stat-label">${escapeHtml(localText("成本", "Cost"))}</span>
-            <span class="winner-stat-value">${escapeHtml(formatCost(best))}</span>
-          </div>
-          <div class="winner-stat">
-            <span class="winner-stat-label">${escapeHtml(localText("令牌数", "Tokens"))}</span>
-            <span class="winner-stat-value">${escapeHtml(String(best.tokenUsage ?? "N/A"))}</span>
-          </div>
-        </div>
-        ${scoreReasons.length > 0 ? `<p class="muted">${escapeHtml(localText("领先原因", "Why it leads"))}: ${escapeHtml(scoreReasons.join(" · "))}</p>` : ""}
-        <div class="winner-tags">${tags.join("")}</div>
-      </div>
-    `;
-  } else {
-    winnerHtml = `
-      <div class="no-winner-card">
-        <span>${escapeHtml(localText("无通过的 Agent", "No Passing Agent"))}</span>
-        <span class="muted" style="font-weight:400;font-size:0.85rem">${escapeHtml(localText("所有 agent 均未通过本次测试", "All agents failed this benchmark"))}</span>
-      </div>
-    `;
-  }
-
-  elements.verdictHero.innerHTML = `
-    <div class="verdict-hero">
-      <div class="verdict-summary">
-        <div class="verdict-badges">${badgeHtml}</div>
-        <p class="verdict-text">${escapeHtml(verdictText)}</p>
-        <p class="score-scope-hint muted">${escapeHtml(localText("⚠️ 分数仅用于本次 run 内部比较，不代表绝对排名。", "⚠️ Scores compare variants within this run only — not absolute rankings."))}</p>
-        <p class="trust-hint ${trustSummary.level === "caution" ? "warning-text" : "muted"}">${escapeHtml(trustSummary.level === "strong" ? t("trustRunStrong") : t("trustRunCaution"))}</p>
-        <div class="stats-row">
-          <div class="stat-item">
-            <span class="stat-label">${escapeHtml(t("metrics.agents"))}</span>
-            <span class="stat-value">${summary.totalAgents}</span>
-          </div>
-          <div class="stat-item">
-            <span class="stat-label">${escapeHtml(t("metrics.success"))}</span>
-            <span class="stat-value success">${summary.successCount}</span>
-          </div>
-          <div class="stat-item">
-            <span class="stat-label">${escapeHtml(t("metrics.failed"))}</span>
-            <span class="stat-value${summary.failedCount > 0 ? " danger" : ""}">${summary.failedCount}</span>
-          </div>
-          <div class="stat-item">
-            <span class="stat-label">${escapeHtml(localText("令牌数", "Tokens"))}</span>
-            <span class="stat-value">${typeof summary.totalTokens === "number" && !Number.isNaN(summary.totalTokens) ? summary.totalTokens.toLocaleString() : "—"}</span>
-          </div>
-          <div class="stat-item">
-            <span class="stat-label">${escapeHtml(t("metrics.knownCost"))}</span>
-            <span class="stat-value">${typeof summary.knownCost === "number" && !Number.isNaN(summary.knownCost) ? "$" + summary.knownCost.toFixed(2) : "—"}</span>
-          </div>
-        </div>
-      </div>
-      ${winnerHtml}
-    </div>
-  `;
+  // Merged into renderSummaryCard — no-op
 }
+
 
 function renderComparisonBars(run) {
   const results = getCompareResults(run, { sort: "status", scoreWeights: state.scoreWeights });
@@ -1295,68 +1172,14 @@ function renderSelectedAgentV2() {
 
 
 function renderRecommendationCard(run) {
-  // Clean up previous recommendation cards and cost projections
-  document.querySelectorAll(".recommendation-hero, .cost-projection").forEach((el) => { el.remove(); });
-
-  const verdict = getRunVerdict(run, { scoreWeights: state.scoreWeights });
-  const best = verdict.bestAgent;
-  if (!best || best.status !== "success") return;
-
-  const runtime = runtimeIdentity(best);
-  const passed = best.judgeResults.filter((j) => j.success).length;
-  const total = best.judgeResults.length;
-  const reasons = [];
-  reasons.push(`${localText("综合分", "Composite Score")} ${formatCompositeScore(best, run, state.scoreWeights)}`);
-  if (passed === total) reasons.push(localText("全部 Judge 通过", "All judges passed"));
-  if (verdict.fastest && recordKey(verdict.fastest) === recordKey(best)) reasons.push(localText("速度最快", "Fastest"));
-  if (verdict.lowestKnownCost && recordKey(verdict.lowestKnownCost) === recordKey(best)) reasons.push(localText("成本最低", "Lowest cost"));
-  if (reasons.length === 0) reasons.push(localText("综合评分最高", "Highest overall score"));
-
-  const el = document.querySelector("#verdict-hero");
-  if (!el) return;
-  const card = document.createElement("div");
-  card.className = "recommendation-hero";
-  const reasonTags = reasons.map((r) => `<span class="rec-tag">${escapeHtml(r)}</span>`).join("");
-  const modelTag = runtime.model ? `<span class="rec-tag rec-tag-model">${escapeHtml(runtime.model)}</span>` : "";
-  const durationTag = `<span class="rec-tag rec-tag-duration">⚡ ${escapeHtml(formatDuration(best.durationMs))}</span>`;
-  const costTag = `<span class="rec-tag rec-tag-cost">💰 ${escapeHtml(formatCost(best))}</span>`;
-  card.innerHTML = `
-    <span class="recommendation-eyebrow">💡 ${escapeHtml(localText("推荐", "Recommendation"))}</span>
-    <span class="recommendation-agent">${escapeHtml(localText("对于你的仓库，推荐使用", "For your repo, we recommend"))} <strong>${escapeHtml(resultLabel(best))}</strong></span>
-    <div class="recommendation-tags">${reasonTags}${modelTag}${durationTag}${costTag}</div>
-  `;
-  el.parentNode.insertBefore(card, el);
+  // Merged into renderSummaryCard — no-op
 }
+
 
 function renderCostProjection(run) {
-  const knownCostResults = run.results.filter((r) => r.costKnown && r.estimatedCostUsd > 0);
-  if (knownCostResults.length === 0) return;
-
-  const runsPerMonth = 100;
-  const rows = knownCostResults.map((r) => {
-    const monthly = r.estimatedCostUsd * runsPerMonth;
-    return `
-      <div class="cost-proj-row">
-        <span class="cost-proj-agent">${escapeHtml(resultLabel(r))}</span>
-        <span class="cost-proj-single">${escapeHtml(formatCost(r))}</span>
-        <span class="cost-proj-monthly">$${monthly.toFixed(2)}</span>
-      </div>
-    `;
-  }).join("");
-
-  const section = document.createElement("section");
-  section.className = "cost-projection";
-  section.innerHTML = `
-    <div class="cost-proj-title">${escapeHtml(localText("成本预测", "Cost Projection"))} <span class="muted">(${runsPerMonth} ${escapeHtml(localText("次/月", "runs/mo"))})</span></div>
-    <div class="cost-proj-header">
-      <span>${escapeHtml(localText("Agent", "Agent"))}</span>
-      <span>${escapeHtml(localText("单次", "Per Run"))}</span>
-      <span>${escapeHtml(localText("月度预估", "Monthly Est."))}</span>
-    </div>
-    ${rows}
-  `;
-  elements.verdictHero.after(section);
+  // Merged into renderSummaryCard — no-op
 }
+
 
 function renderLeaderboard(run) {
   if (!run || state.runs.length < 1) {
@@ -1664,6 +1487,10 @@ function renderSummaryCard(run) {
           <div class="summary-metric">
             <span class="summary-metric-label">${escapeHtml(localText("已知成本", "Known Cost"))}</span>
             <span class="summary-metric-value">$${summary.knownCost.toFixed(2)}</span>
+          </div>
+          <div class="summary-metric">
+            <span class="summary-metric-label">${escapeHtml(localText("月估算(100次)", "Monthly Est. (100 runs)"))}</span>
+            <span class="summary-metric-value">$${(summary.knownCost * 100).toFixed(0)}</span>
           </div>` : ""}
         </div>
       </div>
@@ -1693,8 +1520,12 @@ function renderDashboard(run) {
   renderCompareTableV2(run);
   // 横向条形图
   renderComparisonBars(run);
-  // 失败与风险
+  // 失败与风险 — only show when there are actual failures
   renderFailures(run);
+  if (elements.failuresSection) {
+    const hasFailed = run.results.some(r => r.status !== "success");
+    setHidden(elements.failuresSection, !hasFailed);
+  }
   // 高级分析内部
   renderTaskBrief(run);
   renderRunInfo(run);
@@ -1705,7 +1536,8 @@ function renderDashboard(run) {
   renderAgentTrendTableV2(run);
   populateJudgeFilters(run);
   renderSelectedAgentV2();
-  renderMarkdownPanel();
+  // Markdown panel hidden — use export buttons instead
+  // renderMarkdownPanel();
   renderCodeReviewSection(elements.dashboard, run);
   // 团队成本计算器
   renderTeamCostCalculator(elements.dashboard, run);

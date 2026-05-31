@@ -470,8 +470,9 @@
 
           <section class="report-zone report-zone-summary">
             <section id="summary-card"></section>
-            <section id="verdict-hero"></section>
             <section id="task-trace"></section>
+            <!-- verdict-hero hidden: info merged into summary-card -->
+            <section id="verdict-hero" class="hidden"></section>
           </section>
 
           <section class="report-zone report-zone-compare">
@@ -505,8 +506,8 @@
                 </div>
                 <p class="muted preset-hint" data-i18n="scorePresetHint">Re-scores the current view only. The archived scoring is preserved.</p>
                 <div class="weight-slider-section">
-                  <details open>
-                    <summary data-i18n="scoreWeightsCustomTitle">Custom weights (advanced)</summary>
+                  <details>
+                    <summary data-i18n="scoreWeightsCustomTitle">⚙️ Custom weights (advanced)</summary>
                     <div class="weight-sliders" id="weight-sliders"></div>
                   </details>
                 </div>

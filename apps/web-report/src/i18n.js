@@ -353,7 +353,7 @@ const en = {
 
   // Score preset buttons
   scorePresetLabel: "Score preset:",
-  scorePresetHint: "Re-scores the current view only. The archived scoring is preserved.",
+  scorePresetHint: "Weights control how the composite score is calculated — higher weight = that dimension matters more for ranking. Changes only affect the current view; the archived score is preserved.",
   scoreWeightsCustomTitle: "Custom weights (advanced)",
   scorePresetPracticalBtn: "🎯 Practical (Default)",
   scorePresetBalancedBtn: "⚖️ Balanced",
@@ -847,7 +847,7 @@ const zhCN = {
 
   // Score preset buttons
   scorePresetLabel: "评分预设:",
-  scorePresetHint: "仅重新计算当前视图的得分，归档评分保持不变。",
+  scorePresetHint: "权重控制综合分的计算方式——权重越高，该维度对排名的影响越大。修改仅影响当前视图，归档评分保持不变。",
   scoreWeightsCustomTitle: "自定义权重（高级）",
   scorePresetPracticalBtn: "🎯 实用模式 (默认)",
   scorePresetBalancedBtn: "⚖️ 平衡模式",
