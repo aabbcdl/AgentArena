@@ -8,6 +8,7 @@ const en = {
   themeLabelLight: "Light",
   themeLabelDark: "Dark",
   languageLabel: "Language",
+  languageEnglishLabel: "English",
   languageChineseLabel: "Chinese",
   runsFolderTitle: "Recommended: Load Run Folder",
   runsFolderHint:
@@ -492,6 +493,7 @@ const zhCN = {
   themeLabelLight: "浅色",
   themeLabelDark: "深色",
   languageLabel: "语言",
+  languageEnglishLabel: "English",
   languageChineseLabel: "中文",
   runsFolderTitle: "推荐：打开结果文件夹",
   runsFolderHint:

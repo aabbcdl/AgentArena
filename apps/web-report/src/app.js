@@ -463,7 +463,7 @@ function renderStaticText() {
   setText("update-banner-text", t("updateAvailable"));
   setText("language-label", t("languageLabel"));
   if (elements.languageSelect.options[0]) {
-    elements.languageSelect.options[0].text = "English";
+    elements.languageSelect.options[0].text = t("languageEnglishLabel");
   }
   if (elements.languageSelect.options[1]) {
     elements.languageSelect.options[1].text = t("languageChineseLabel");
