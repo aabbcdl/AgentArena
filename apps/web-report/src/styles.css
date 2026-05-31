@@ -4996,3 +4996,361 @@ textarea:focus-visible {
   }
 }
 
+
+/* ===================================================================
+   Results Summary Card — the first thing users see on the dashboard
+   =================================================================== */
+
+.summary-card {
+  background: var(--surface-primary, #fff);
+  border: 1px solid var(--border, #e0e0e0);
+  border-radius: 12px;
+  padding: 24px;
+  margin-bottom: 20px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+}
+
+.summary-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.summary-verdict-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin: 0 0 6px 0;
+  color: var(--text-primary, #1a1a1a);
+}
+
+.summary-verdict-text {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  color: var(--text-secondary, #555);
+}
+
+.summary-badges {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+.summary-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.summary-badge-pass {
+  background: color-mix(in srgb, var(--success, #2e7d32) 12%, transparent);
+  color: var(--success, #2e7d32);
+}
+
+.summary-badge-fail {
+  background: color-mix(in srgb, var(--danger, #e53935) 12%, transparent);
+  color: var(--danger, #e53935);
+}
+
+.summary-badge-fast {
+  background: color-mix(in srgb, var(--accent, #1976d2) 12%, transparent);
+  color: var(--accent, #1976d2);
+}
+
+.summary-badge-cheap {
+  background: color-mix(in srgb, #7b1fa2 12%, transparent);
+  color: #7b1fa2;
+}
+
+.summary-card-body {
+  display: flex;
+  gap: 32px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.summary-card-left {
+  flex: 1;
+  min-width: 200px;
+}
+
+.summary-card-right {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 160px;
+}
+
+/* Winner block */
+.summary-winner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.summary-winner-icon {
+  font-size: 1.8rem;
+  flex-shrink: 0;
+}
+
+.summary-winner-name {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text-primary, #1a1a1a);
+}
+
+.summary-winner-model {
+  font-size: 0.8rem;
+}
+
+.summary-winner-fail .summary-winner-name {
+  color: var(--danger, #e53935);
+}
+
+/* Score block */
+.summary-score-block {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.summary-score-value {
+  font-size: 2.4rem;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+
+.summary-score-grade {
+  font-size: 0.85rem;
+  font-weight: 700;
+  padding: 2px 10px;
+  border-radius: 12px;
+}
+
+/* Score grade color classes */
+.score-excellent {
+  color: #1b5e20;
+  background: color-mix(in srgb, #1b5e20 10%, transparent);
+}
+
+.score-good {
+  color: #2e7d32;
+  background: color-mix(in srgb, #2e7d32 10%, transparent);
+}
+
+.score-fair {
+  color: #e65100;
+  background: color-mix(in srgb, #e65100 10%, transparent);
+}
+
+.score-poor, .score-failed {
+  color: #c62828;
+  background: color-mix(in srgb, #c62828 10%, transparent);
+}
+
+/* Metrics in the right column */
+.summary-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.summary-metric-label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted, #999);
+  font-weight: 600;
+}
+
+.summary-metric-value {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-primary, #1a1a1a);
+}
+
+/* Pass rate bar */
+.summary-pass-ring {
+  height: 6px;
+  background: var(--surface-tertiary, #eee);
+  border-radius: 3px;
+  overflow: hidden;
+  margin: 2px 0;
+}
+
+.summary-pass-bar {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+/* ===================================================================
+   Simplified Compare Table (6 columns + expandable detail)
+   =================================================================== */
+
+.compare-table-compact th {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-muted, #999);
+  font-weight: 600;
+  padding: 8px 12px;
+  border-bottom: 2px solid var(--border, #e0e0e0);
+  white-space: nowrap;
+}
+
+.compare-table-compact td {
+  padding: 10px 12px;
+  vertical-align: middle;
+}
+
+.compare-table-compact .compare-row {
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.compare-table-compact .compare-row:hover {
+  background: var(--surface-hover, #f5f5f5);
+}
+
+.compare-table-compact .compare-row.active {
+  background: color-mix(in srgb, var(--accent, #1976d2) 8%, transparent);
+}
+
+.compare-variant strong {
+  display: block;
+  font-size: 0.9rem;
+}
+
+.compare-model-muted {
+  font-size: 0.75rem;
+  margin-top: 2px;
+}
+
+.compare-tags-inline {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+
+.compare-status {
+  text-align: center;
+  font-size: 1.1rem;
+}
+
+/* Score cell with inline grade label */
+.score-cell {
+  font-size: 1.15rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.score-grade-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  margin-left: 4px;
+  opacity: 0.8;
+}
+
+.score-cell.score-excellent, .score-cell.score-excellent .score-grade-label { color: #1b5e20; }
+.score-cell.score-good, .score-cell.score-good .score-grade-label { color: #2e7d32; }
+.score-cell.score-fair, .score-cell.score-fair .score-grade-label { color: #e65100; }
+.score-cell.score-poor, .score-cell.score-failed,
+.score-cell.score-poor .score-grade-label, .score-cell.score-failed .score-grade-label { color: #c62828; }
+
+.compare-passrate {
+  min-width: 90px;
+}
+
+.compare-passrate .judge-bar-wrap {
+  height: 5px;
+  margin-bottom: 3px;
+}
+
+.compare-passrate .judge-bar-label {
+  font-size: 0.75rem;
+  color: var(--text-muted, #999);
+}
+
+.compare-duration {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Failed agents section */
+.compare-failed-section {
+  margin-top: 16px;
+  border: 1px solid color-mix(in srgb, var(--danger, #e53935) 25%, transparent);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.compare-failed-summary {
+  cursor: pointer;
+  padding: 10px 16px;
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--danger, #e53935);
+  background: color-mix(in srgb, var(--danger, #e53935) 5%, transparent);
+  list-style: none;
+}
+
+.compare-failed-summary::-webkit-details-marker {
+  display: none;
+}
+
+.compare-failed-summary::before {
+  content: "▸ ";
+  display: inline;
+}
+
+.compare-failed-section[open] .compare-failed-summary::before {
+  content: "▾ ";
+}
+
+.compare-table-failed {
+  border-top: none;
+  margin: 0;
+}
+
+.compare-table-failed .compare-row {
+  opacity: 0.85;
+}
+
+/* Detail row in compact table */
+.compare-detail-row td {
+  padding: 0;
+  background: var(--surface-secondary, #fafafa);
+}
+
+/* Responsive: stack on narrow screens */
+@media (max-width: 640px) {
+  .summary-card-body {
+    flex-direction: column;
+  }
+  .summary-card-right {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .summary-metric {
+    min-width: 120px;
+  }
+  .compare-table-compact th:nth-child(5),
+  .compare-table-compact td:nth-child(5) {
+    display: none;
+  }
+}

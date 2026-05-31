@@ -80,6 +80,35 @@ export function createDashboardModule(deps) {
     const sign = value > 0 ? "+" : "";
     return `${sign}${typeof value === "number" && unit === "$" ? value.toFixed(4) : value}${unit}`;
   };
+/**
+ * Map a composite score (0-100) to a human-readable grade with CSS class.
+ *
+ * Grade bands:
+ *   0-40   → "Failed"   (red)     — run failed or critical judges failed
+ *   40-65  → "Fair"     (orange)  — partial success, room for improvement
+ *   65-80  → "Good"     (green)   — solid result
+ *   80-100 → "Excellent" (deep green) — outstanding result
+ *
+ * @param {number} score - Composite score 0-100
+ * @param {string} [status] - Result status ("success" | "failed" | "cancelled")
+ * @returns {{ label: string, labelZh: string, cssClass: string, color: string }}
+ */
+function scoreGrade(score, status) {
+  if (status === "failed" || status === "cancelled") {
+    return { label: "Failed", labelZh: "\u5931\u8d25", cssClass: "score-failed", color: "var(--danger, #e53935)" };
+  }
+  if (score >= 80) {
+    return { label: "Excellent", labelZh: "\u4f18\u79c0", cssClass: "score-excellent", color: "var(--success, #2e7d32)" };
+  }
+  if (score >= 65) {
+    return { label: "Good", labelZh: "\u826f\u597d", cssClass: "score-good", color: "var(--success, #43a047)" };
+  }
+  if (score >= 40) {
+    return { label: "Fair", labelZh: "\u4e00\u822c", cssClass: "score-fair", color: "var(--warning, #f57c00)" };
+  }
+  return { label: "Poor", labelZh: "\u8f83\u5dee", cssClass: "score-poor", color: "var(--danger, #e53935)" };
+}
+
 
 /**
  * Render an enhanced empty state with icon, title, message, and dual CTA buttons
@@ -1022,80 +1051,121 @@ function renderCompareTableV2(run) {
   const showAll = state._compareShowAll || results.length <= COMPARE_PAGE_SIZE;
   const displayResults = showAll ? results : results.slice(0, COMPARE_PAGE_SIZE);
 
-  elements.compareTable.innerHTML = `
-    <table class="compare-table">
+  // Separate passed and failed results for cleaner display
+  const passedResults = displayResults.filter(r => r.status === "success");
+  const failedResults = displayResults.filter(r => r.status !== "success");
+
+  // ── Build the simplified compare table (6 core columns) ──
+  function buildCompareRow(result, index, allResults) {
+    const passedJudges = result.judgeResults.filter((judge) => judge.success).length;
+    const totalJudges = result.judgeResults.length;
+    const passRatio = totalJudges > 0 ? passedJudges / totalJudges : 0;
+    const passPercent = Math.round(passRatio * 100);
+    const isActive = recordKey(result) === state.selectedAgentId ? "active" : "";
+    const key = recordKey(result);
+    const runtime = runtimeIdentity(result);
+    const isBest = key === bestKey;
+    const rowClass = [isActive, isBest ? "compare-row-best" : "", result.status === "failed" ? "compare-row-failed" : ""].filter(Boolean).join(" ");
+    const medal = index < 3 && allResults.length > 1 ? medals[index] : "";
+
+    // Score with grade
+    let scoreCell = "—";
+    if (typeof result.compositeScore === "number") {
+      const grade = scoreGrade(result.compositeScore, result.status);
+      const gradeLabel = localText(grade.labelZh, grade.label);
+      scoreCell = `<span class="score-cell ${grade.cssClass}" title="${escapeHtml(gradeLabel)}">${escapeHtml(result.compositeScore.toFixed(1))} <small class="score-grade-label">${escapeHtml(gradeLabel)}</small></span>`;
+    }
+
+    // Status icon
+    const statusIcon = result.status === "success" ? "\u2705" : result.status === "cancelled" ? "\u23f9\ufe0f" : "\u274c";
+
+    // Tags
+    const tags = [];
+    if (key === bestKey) tags.push(`<span class="compare-tag compare-tag-best">${escapeHtml(localText("最佳", "Best"))}</span>`);
+    if (key === fastestKey) tags.push(`<span class="compare-tag compare-tag-fast">${escapeHtml(localText("最快", "Fastest"))}</span>`);
+    if (key === cheapestKey) tags.push(`<span class="compare-tag compare-tag-cheap">${escapeHtml(localText("最省", "Cheapest"))}</span>`);
+
+    // Pass rate bar
+    const barColor = passPercent === 100 ? "var(--success)" : passPercent >= 50 ? "var(--warning)" : "var(--danger)";
+
+    return `
+      <tr class="compare-row ${rowClass}" data-compare-agent-id="${escapeHtml(key)}" tabindex="0" role="button" aria-label="${escapeHtml(localText("展开详情", "Expand details") + " " + resultLabel(result))}">
+        <td class="compare-rank">${medal || index + 1}</td>
+        <td class="compare-variant">
+          <strong>${escapeHtml(resultLabel(result))}</strong>
+          ${tags.length > 0 ? `<div class="compare-tags-inline">${tags.join("")}</div>` : ""}
+          <div class="compare-model-muted muted">${escapeHtml(runtime.model || "")}</div>
+        </td>
+        <td class="compare-status"><span title="${escapeHtml(translateStatus(result.status, t))}">${statusIcon}</span></td>
+        <td class="compare-score">${scoreCell}</td>
+        <td class="compare-passrate">
+          <div class="judge-bar-wrap"><div class="judge-bar" style="width:${passPercent}%;background:${barColor}"></div></div>
+          <span class="judge-bar-label">${passedJudges}/${totalJudges}</span>
+        </td>
+        <td class="compare-duration">${escapeHtml(formatDuration(result.durationMs))}</td>
+      </tr>
+      ${key === state.expandedCompareAgentId ? `<tr class="compare-detail-row"><td colspan="6">${renderInlineAgentDetail(result)}</td></tr>` : ""}
+    `;
+  }
+
+  let tableHtml = `
+    <table class="compare-table compare-table-compact">
       <thead>
         <tr>
-          <th>#</th>
-          <th>${escapeHtml(localText("配置名称", "Variant"))}</th>
-          <th>${escapeHtml(localText("模型", "Model"))}</th>
-          <th>${escapeHtml(localText("版本", "Version"))}</th>
-          <th>${escapeHtml(localText("可信度", "Verification"))}</th>
-          <th>${escapeHtml(localText("状态", "Status"))}</th>
-          <th>${escapeHtml(localText("综合分", "Composite Score"))}</th>
-          <th>${escapeHtml(localText("Judge 通过率", "Judge Pass Rate"))}</th>
-          <th>${escapeHtml(localText("耗时", "Duration"))}</th>
-          <th>${escapeHtml(t("metrics.tokens"))}</th>
-          <th>${escapeHtml(localText("成本", "Cost"))}</th>
-          <th>${escapeHtml(localText("测试", "Tests"))}</th>
-          <th>${escapeHtml(localText("Lint", "Lint"))}</th>
-          <th>${escapeHtml(localText("Diff 精准度", "Diff Precision"))}</th>
-          <th>${escapeHtml(localText("改动文件", "Changed"))}</th>
-          <th>${escapeHtml(localText("标签", "Tags"))}</th>
+          <th style="width:40px">#</th>
+          <th>${escapeHtml(localText("配置", "Variant"))}</th>
+          <th style="width:50px">${escapeHtml(localText("状态", "Status"))}</th>
+          <th style="width:120px">${escapeHtml(localText("综合分", "Score"))}</th>
+          <th style="width:120px">${escapeHtml(localText("通过率", "Pass Rate"))}</th>
+          <th style="width:90px">${escapeHtml(localText("耗时", "Duration"))}</th>
         </tr>
       </thead>
       <tbody>
-        ${displayResults
-          .map((result, index) => {
-            const passedJudges = result.judgeResults.filter((judge) => judge.success).length;
-            const totalJudges = result.judgeResults.length;
-            const passRatio = totalJudges > 0 ? passedJudges / totalJudges : 0;
-            const passPercent = Math.round(passRatio * 100);
-            const isActive = recordKey(result) === state.selectedAgentId ? "active" : "";
-            const key = recordKey(result);
-            const runtime = runtimeIdentity(result);
-            const isBest = key === bestKey;
-            const rowClass = [isActive, isBest ? "compare-row-best" : "", result.status === "failed" ? "compare-row-failed" : ""].filter(Boolean).join(" ");
-            const medal = index < 3 && results.length > 1 ? medals[index] : "";
-            const tags = [];
-            if (key === bestKey) tags.push(`<span class="compare-tag compare-tag-best">${escapeHtml(localText("最佳", "Best"))}</span>`);
-            if (key === fastestKey) tags.push(`<span class="compare-tag compare-tag-fast">${escapeHtml(localText("最快", "Fastest"))}</span>`);
-            if (key === cheapestKey) tags.push(`<span class="compare-tag compare-tag-cheap">${escapeHtml(localText("最省", "Cheapest"))}</span>`);
+  `;
 
-            const barColor = passPercent === 100 ? "var(--success)" : passPercent >= 50 ? "var(--warning)" : "var(--danger)";
+  // Passed results first
+  passedResults.forEach((result, i) => {
+    tableHtml += buildCompareRow(result, i, displayResults);
+  });
 
-            return `
-              <tr class="${rowClass}" data-compare-agent-id="${escapeHtml(key)}" tabindex="0" role="button" aria-label="${escapeHtml(localText("选择 agent", "Select agent") + " " + resultLabel(result))}">
-                <td class="compare-rank">${medal || index + 1}</td>
-                <td><strong>${escapeHtml(resultLabel(result))}</strong><br /><code>${escapeHtml(baseAgentLabel(result))}</code></td>
-                <td><span class="compare-model">${escapeHtml(runtime.model)}</span><br /><span class="muted" style="font-size:0.75rem">${escapeHtml(runtime.reasoning)}</span></td>
-                <td>${escapeHtml(runtime.version)}</td>
-                <td>${escapeHtml(runtimeVerificationLabel(result))}</td>
-                <td><span class="status-badge ${statusClass(result.status)}">${escapeHtml(translateStatus(result.status, t))}</span></td>
-                <td>${escapeHtml(formatCompositeScore(result, run, state.scoreWeights))}</td>
-                <td>
-                  <div class="judge-bar-wrap">
-                    <div class="judge-bar" style="width:${passPercent}%;background:${barColor}"></div>
-                  </div>
-                  <span class="judge-bar-label">${passedJudges}/${totalJudges} (${passPercent}%)</span>
-                </td>
-                <td>${escapeHtml(formatDuration(result.durationMs))}</td>
-                <td>${escapeHtml(String(result.tokenUsage ?? "N/A"))}</td>
-                <td>${escapeHtml(formatCost(result))}</td>
-                <td>${escapeHtml(formatTestMetric(result))}</td>
-                <td>${escapeHtml(formatLintMetric(result))}</td>
-                <td>${escapeHtml(formatDiffPrecisionMetric(result))}</td>
-                <td>${escapeHtml(String(result.changedFiles.length))}</td>
-                <td>${tags.join(" ")}</td>
-              </tr>
-              ${key === state.expandedCompareAgentId ? `<tr class="compare-detail-row"><td colspan="16">${renderInlineAgentDetail(result)}</td></tr>` : ""}
-            `;
-          })
-          .join("")}
+  // Failed results in a separate section if any exist
+  if (failedResults.length > 0 && passedResults.length > 0) {
+    tableHtml += `
       </tbody>
     </table>
-    ${!showAll ? `<div class="compare-show-more"><button class="btn-link" data-action="show-all-compare">${escapeHtml(localText(`显示全部 ${results.length} 个变体`, `Show all ${results.length} variants`))}</button></div>` : ""}
+    <details class="compare-failed-section" ${failedResults.length <= 3 ? "open" : ""}>
+      <summary class="compare-failed-summary">
+        \u274c ${escapeHtml(localText("失败", "Failed"))} (${failedResults.length})
+      </summary>
+      <table class="compare-table compare-table-compact compare-table-failed">
+        <thead>
+          <tr>
+            <th style="width:40px">#</th>
+            <th>${escapeHtml(localText("配置", "Variant"))}</th>
+            <th style="width:50px">${escapeHtml(localText("状态", "Status"))}</th>
+            <th style="width:120px">${escapeHtml(localText("综合分", "Score"))}</th>
+            <th style="width:120px">${escapeHtml(localText("通过率", "Pass Rate"))}</th>
+            <th style="width:90px">${escapeHtml(localText("耗时", "Duration"))}</th>
+          </tr>
+        </thead>
+        <tbody>
+    `;
+    failedResults.forEach((result, i) => {
+      tableHtml += buildCompareRow(result, passedResults.length + i, displayResults);
+    });
+  } else if (failedResults.length > 0) {
+    failedResults.forEach((result, i) => {
+      tableHtml += buildCompareRow(result, i, displayResults);
+    });
+  }
+
+  tableHtml += `
+      </tbody>
+    </table>
+    ${!showAll ? `<div class="compare-show-more"><button class="btn-link" data-action="show-all-compare">${escapeHtml(localText("显示全部 " + results.length + " 个变体", "Show all " + results.length + " variants"))}</button></div>` : ""}
   `;
+
+  elements.compareTable.innerHTML = tableHtml;
 
   // Set up show-all handler via event delegation (avoids global namespace pollution)
   const showAllBtn = elements.compareTable.querySelector('[data-action="show-all-compare"]');
@@ -1385,12 +1455,145 @@ function renderLeaderboard(run) {
   `;
 }
 
+
+/**
+ * Render the top-level Results Summary Card.
+ *
+ * This is the FIRST thing users see on the dashboard. It answers three
+ * questions in 5 seconds:
+ *   1. How did it go? (overall verdict)
+ *   2. Who's best? (winner with score grade)
+ *   3. Why? (key differentiators)
+ */
+function renderSummaryCard(run) {
+  const summary = summarizeRun(run);
+  const verdict = getRunVerdict(run, { scoreWeights: state.scoreWeights });
+  const best = verdict.bestAgent;
+  const fastest = verdict.fastest;
+  const cheapest = verdict.lowestKnownCost;
+
+  if (!elements.summaryCard) return;
+
+  // ── Compute score for the best agent ──
+  let scoreHtml = "";
+  let gradeInfo = null;
+  if (best && typeof best.compositeScore === "number") {
+    gradeInfo = scoreGrade(best.compositeScore, best.status);
+    const gradeLabel = localText(gradeInfo.labelZh, gradeInfo.label);
+    scoreHtml = `
+      <div class="summary-score-block">
+        <div class="summary-score-value ${gradeInfo.cssClass}">${escapeHtml(best.compositeScore.toFixed(1))}</div>
+        <span class="summary-score-grade ${gradeInfo.cssClass}">${escapeHtml(gradeLabel)}</span>
+        <span class="muted" style="font-size:0.75rem">${escapeHtml(localText("/ 100 分", "/ 100 pts"))}</span>
+      </div>
+    `;
+  }
+
+  // ── Pass rate ──
+  let passRateHtml = "";
+  if (best) {
+    const passed = best.judgeResults.filter(j => j.success).length;
+    const total = best.judgeResults.length;
+    const pct = total > 0 ? Math.round((passed / total) * 100) : 0;
+    const barColor = pct === 100 ? "var(--success)" : pct >= 50 ? "var(--warning)" : "var(--danger)";
+    passRateHtml = `
+      <div class="summary-metric">
+        <span class="summary-metric-label">${escapeHtml(localText("通过率", "Pass Rate"))}</span>
+        <div class="summary-pass-ring">
+          <div class="summary-pass-bar" style="width:${pct}%;background:${barColor}"></div>
+        </div>
+        <span class="summary-metric-value">${passed}/${total} (${pct}%)</span>
+      </div>
+    `;
+  }
+
+  // ── Verdict sentence ──
+  const verdictText = generateVerdictSummary(run);
+
+  // ── Quick badges ──
+  const badges = [];
+  if (summary.successCount > 0) {
+    badges.push(`<span class="summary-badge summary-badge-pass">${escapeHtml(localText("通过", "Passed"))} ${summary.successCount}</span>`);
+  }
+  if (summary.failedCount > 0) {
+    badges.push(`<span class="summary-badge summary-badge-fail">${escapeHtml(localText("失败", "Failed"))} ${summary.failedCount}</span>`);
+  }
+  if (fastest && recordKey(fastest) !== recordKey(best)) {
+    badges.push(`<span class="summary-badge summary-badge-fast">\u26a1 ${escapeHtml(resultLabel(fastest))} ${escapeHtml(formatDuration(fastest.durationMs))}</span>`);
+  }
+  if (cheapest && cheapest.estimatedCostUsd > 0 && recordKey(cheapest) !== recordKey(best)) {
+    badges.push(`<span class="summary-badge summary-badge-cheap">\ud83d\udcb0 ${escapeHtml(resultLabel(cheapest))} ${escapeHtml(formatCost(cheapest))}</span>`);
+  }
+
+  // ── Winner name ──
+  let winnerBlock = "";
+  if (best && best.status === "success") {
+    const runtime = runtimeIdentity(best);
+    winnerBlock = `
+      <div class="summary-winner">
+        <span class="summary-winner-icon">\ud83c\udfc6</span>
+        <div>
+          <div class="summary-winner-name">${escapeHtml(resultLabel(best))}</div>
+          <div class="summary-winner-model muted">${escapeHtml(runtime.model || runtime.provider || "")}</div>
+        </div>
+      </div>
+    `;
+  } else if (summary.successCount === 0) {
+    winnerBlock = `
+      <div class="summary-winner summary-winner-fail">
+        <span class="summary-winner-icon">\u274c</span>
+        <div>
+          <div class="summary-winner-name">${escapeHtml(localText("无通过的 Agent", "No Passing Agent"))}</div>
+          <div class="summary-winner-model muted">${escapeHtml(localText("所有 agent 均未通过", "All agents failed"))}</div>
+        </div>
+      </div>
+    `;
+  }
+
+  elements.summaryCard.innerHTML = `
+    <div class="summary-card">
+      <div class="summary-card-header">
+        <div class="summary-verdict">
+          <h2 class="summary-verdict-title">${escapeHtml(localText("结果摘要", "Results Summary"))}</h2>
+          <p class="summary-verdict-text">${escapeHtml(verdictText)}</p>
+        </div>
+        <div class="summary-badges">${badges.join("")}</div>
+      </div>
+      <div class="summary-card-body">
+        <div class="summary-card-left">
+          ${winnerBlock}
+          ${scoreHtml}
+        </div>
+        <div class="summary-card-right">
+          ${passRateHtml}
+          <div class="summary-metric">
+            <span class="summary-metric-label">${escapeHtml(localText("总耗时", "Total Time"))}</span>
+            <span class="summary-metric-value">${escapeHtml(formatDuration(Math.max(...run.results.map(r => r.durationMs || 0))))}</span>
+          </div>
+          <div class="summary-metric">
+            <span class="summary-metric-label">${escapeHtml(localText("Agent 数量", "Agents"))}</span>
+            <span class="summary-metric-value">${summary.totalAgents}</span>
+          </div>
+          ${summary.knownCost > 0 ? `
+          <div class="summary-metric">
+            <span class="summary-metric-label">${escapeHtml(localText("已知成本", "Known Cost"))}</span>
+            <span class="summary-metric-value">$${summary.knownCost.toFixed(2)}</span>
+          </div>` : ""}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 function renderDashboard(run) {
   setHidden(elements.emptyState, true);
   setHidden(elements.dashboard, false);
 
   elements.taskTitle.textContent = run.task.title;
   elements.taskMeta.textContent = `${run.task.id} | ${formatRelativeTime(run.createdAt, localText)}`;
+
+  // 首屏摘要卡（5 秒看懂结果）
+  renderSummaryCard(run);
 
   // 首屏推荐卡片
   renderRecommendationCard(run);
@@ -1470,6 +1673,8 @@ function renderDashboard(run) {
     renderRecommendationCard,
     renderCostProjection,
     renderLeaderboard,
+    renderSummaryCard,
+    scoreGrade,
     renderDashboard
   };
 }

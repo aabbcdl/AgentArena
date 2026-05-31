@@ -83,6 +83,7 @@ const elements = {
   dashboard: document.querySelector("#dashboard"),
   taskTitle: document.querySelector("#task-title"),
   taskMeta: document.querySelector("#task-meta"),
+  summaryCard: document.querySelector("#summary-card"),
   verdictHero: document.querySelector("#verdict-hero"),
 
   // Leaderboard
