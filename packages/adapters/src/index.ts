@@ -1,6 +1,9 @@
 export type { AdapterEvent, AdapterEventType, ParsedAdapterOutput } from "./adapter-events.js";
 export { emitEvent, parseAdapterEvents } from "./adapter-events.js";
-export { getAdapter, getCodexDefaultResolvedRuntime, listAvailableAdapters, loadAndRegisterPlugins, preflightAdapters } from "./adapter-registry.js";
+export { detectInstalledAgents, getAdapter, getCodexDefaultResolvedRuntime, listAvailableAdapters, loadAndRegisterPlugins, preflightAdapters } from "./adapter-registry.js";
+export type { AgentDetectionResult } from "./adapter-registry.js";
+export type { InstallGuide } from "./install-guides.js";
+export { getInstallGuide, INSTALL_GUIDES, listInstallGuides } from "./install-guides.js";
 export type { ClaudeProviderProfileInput } from "./claude-provider-profiles.js";
 export {
   __providerProfileTestUtils,

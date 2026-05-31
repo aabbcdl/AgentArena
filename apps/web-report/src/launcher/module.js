@@ -143,7 +143,7 @@ export function createLauncherModule(deps) {
   function defaultVariant(config) {
     const base = {
       id: clientRandomId(),
-      enabled: true,
+      enabled: false,
       displayLabel: config.labelKeyEn.replace(' Variants', ''),
       model: ''
     };
@@ -165,7 +165,7 @@ export function createLauncherModule(deps) {
     if (reasoning) labelParts.push(reasoning);
     return {
       id: clientRandomId(),
-      enabled: true,
+      enabled: false,
       displayLabel: labelParts.join(' · '),
       model,
       reasoningEffort: reasoning,
@@ -528,6 +528,30 @@ export function createLauncherModule(deps) {
           <label class="field">
             <span>${escapeHtml(localText("Base URL", "Base URL"))} <span class="field-optional">${escapeHtml(localText("选填", "optional"))}</span></span>
             <input data-role="provider-base-url" type="text" value="${escapeHtml(editor.baseUrl)}" />
+            <div class="base-url-warning" data-role="base-url-warning" style="display: none; margin-top: 8px; padding: 12px; background: #fff3cd; border: 1px solid #ffc107; border-radius: 4px; color: #856404;">
+              <div style="display: flex; align-items: start; gap: 8px;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink: 0; margin-top: 2px;">
+                  <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                  <line x1="12" y1="9" x2="12" y2="13"/>
+                  <line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
+                <div style="flex: 1;">
+                  <strong>${escapeHtml(localText("⚠️ 第三方 API 风险提示", "⚠️ Third-Party API Risk"))}</strong>
+                  <p style="margin: 4px 0 0 0; font-size: 0.9em;">
+                    ${escapeHtml(localText(
+                      "此 Base URL 不在官方白名单中。您的 API Key 将被发送到第三方服务器。请确保您信任该服务提供商。",
+                      "This Base URL is not in the official whitelist. Your API key will be sent to a third-party server. Please ensure you trust this service provider."
+                    ))}
+                  </p>
+                  <p style="margin: 4px 0 0 0; font-size: 0.85em; opacity: 0.8;">
+                    ${escapeHtml(localText(
+                      "官方白名单：api.anthropic.com, api.openai.com, generativelanguage.googleapis.com, dashscope.aliyuncs.com",
+                      "Official whitelist: api.anthropic.com, api.openai.com, generativelanguage.googleapis.com, dashscope.aliyuncs.com"
+                    ))}
+                  </p>
+                </div>
+              </div>
+            </div>
           </label>
           <label class="field">
             <span>${escapeHtml(localText("API 格式", "API Format"))} <span class="field-required">${escapeHtml(localText("必填", "required"))}</span></span>
@@ -751,7 +775,7 @@ export function createLauncherModule(deps) {
           if (saved[savedKey]?.length) {
             state[stateKey] = saved[savedKey].map((sv) => ({
               ...(config.id === 'codex' ? defaultCodexVariant() : defaultVariant(config)),
-              enabled: sv.enabled ?? true,
+              enabled: sv.enabled ?? false,
               displayLabel: sv.displayLabel ?? config.labelKeyEn.replace(' Variants', ''),
               model: sv.model ?? "",
               ...(sv.reasoningEffort !== undefined ? { reasoningEffort: sv.reasoningEffort } : {})
@@ -1019,17 +1043,46 @@ export function createLauncherModule(deps) {
               ${realAdapters
                 .map((adapter) => {
                   const checked = state.launcherSelectedAgentIds.includes(adapter.id) ? "checked" : "";
+                  const detectInfo = state.installedAgents?.get(adapter.id);
+                  const versionBadge = detectInfo?.version ? ` <span style="font-size:0.75em;color:var(--text-muted);background:var(--surface-tertiary);padding:1px 6px;border-radius:4px;">v${escapeHtml(detectInfo.version)}</span>` : "";
                   return `
                     <div class="checkbox-item">
                       <label class="checkbox">
                         <input type="checkbox" data-role="real-agent" value="${escapeHtml(adapter.id)}" ${checked} />
-                        <span>${escapeHtml(adapter.title)}</span>
+                        <span>${escapeHtml(adapter.title)}${versionBadge}</span>
                       </label>
                     </div>
                   `;
                 })
                 .join("")}
             </div>
+            ${(() => {
+              const uninstalled = (state.installGuides || []).filter(g => {
+                const info = state.installedAgents?.get(g.id);
+                return info && !info.installed;
+              });
+              if (uninstalled.length === 0) return "";
+              const platform = navigator.platform?.toLowerCase()?.includes("win") ? "windows" : navigator.platform?.toLowerCase()?.includes("mac") ? "macos" : "linux";
+              return `<details style="margin-top:12px;font-size:0.85em;">
+                <summary style="cursor:pointer;color:var(--text-secondary);font-weight:600;">
+                  ${escapeHtml(localText("📦 未安装的 Agent 及安装方法", "📦 Uninstalled Agents & Install Commands"))} (${uninstalled.length})
+                </summary>
+                <div style="margin-top:8px;display:grid;gap:8px;">
+                  ${uninstalled.map(g => {
+                    const cmds = g.install?.[platform] || g.install?.all || {};
+                    const entries = Object.entries(cmds).filter(([k]) => k !== "WARNING" && k !== "note");
+                    const warnings = g.warnings || [];
+                    const postInstall = g.postInstall || [];
+                    return `<div style="padding:10px;background:var(--surface-secondary);border-radius:6px;border-left:3px solid var(--text-muted);">
+                      <div style="font-weight:600;margin-bottom:6px;">${escapeHtml(g.displayName)}${g.homepage ? ` &middot; <a href="${escapeHtml(g.homepage)}" target="_blank" rel="noopener" style="font-weight:400;font-size:0.9em;">${escapeHtml(localText("官网", "Homepage"))}</a>` : ""}</div>
+                      ${warnings.map(w => `<div style="color:var(--warning,orange);font-size:0.85em;margin-bottom:4px;">⚠ ${escapeHtml(w)}</div>`).join("")}
+                      ${entries.map(([label, cmd]) => `<div style="display:flex;align-items:center;gap:6px;margin:3px 0;"><span style="color:var(--text-muted);min-width:80px;font-size:0.85em;">${escapeHtml(label)}:</span><code style="flex:1;background:var(--surface-tertiary);padding:2px 6px;border-radius:3px;font-size:0.85em;word-break:break-all;">${escapeHtml(cmd)}</code><button type="button" class="btn-copy-install" data-copy="${escapeHtml(cmd)}" style="padding:2px 8px;font-size:0.8em;cursor:pointer;border:1px solid var(--border);border-radius:3px;background:var(--surface);white-space:nowrap;" title="${escapeHtml(localText("复制命令", "Copy command"))}">📋</button></div>`).join("")}
+                      ${postInstall.length > 0 ? `<div style="margin-top:6px;font-size:0.8em;color:var(--text-muted);">${postInstall.map(p => escapeHtml(p)).join("<br>")}</div>` : ""}
+                    </div>`;
+                  }).join("")}
+                </div>
+              </details>`;
+            })()}
             <div class="launcher-actions" style="margin-top: 12px;">
               <button type="button" class="btn btn-secondary" id="detect-all-agents">${escapeHtml(localText("重新检测", "Re-detect"))}</button>
               <span class="muted" style="font-size: 0.85em;">${escapeHtml(localText("检测新安装的 Agent CLI", "Detect newly installed Agent CLIs"))}</span>
@@ -1132,7 +1185,14 @@ export function createLauncherModule(deps) {
       }
 
       state.serviceInfo = await infoResponse.json();
-      state.availableAdapters = await adaptersResponse.json();
+      const allAdapters = await adaptersResponse.json();
+
+      // Filter out IDE adapters (cursor, copilot, windsurf) - kept in backend for future use
+      // These IDE adapters have poor automation support and are hidden from UI
+      // Trae is also hidden due to poor usability
+      const hiddenAdapterIds = new Set(['cursor', 'copilot', 'windsurf', 'trae']);
+      state.availableAdapters = allAdapters.filter(adapter => !hiddenAdapterIds.has(adapter.id));
+
       state.availableTaskPacks = await taskPacksResponse.json();
       state.runStatus = await runStatusResponse.json();
 
@@ -1177,10 +1237,46 @@ export function createLauncherModule(deps) {
   async function checkInstalledAgents() {
     if (!state.availableAdapters || state.availableAdapters.length === 0) {
       state.installedAgents = new Map();
+      state.installGuides = [];
       return;
     }
 
-    // Filter real adapters (non-demo, non-variant-managed)
+    // Fetch install guides in parallel with detection
+    try {
+      const guidesResponse = await apiFetch("/api/install-guides");
+      if (guidesResponse.ok) {
+        state.installGuides = await guidesResponse.json();
+      }
+    } catch {
+      state.installGuides = [];
+    }
+
+    // Use the EchoBird-style agent detection endpoint (preferred)
+    try {
+      const detectionResponse = await apiFetch("/api/agent-detection");
+      if (detectionResponse.ok) {
+        const detectionResults = await detectionResponse.json();
+        const results = new Map();
+        for (const r of detectionResults) {
+          results.set(r.id, {
+            installed: r.installed,
+            status: r.installed ? "ready" : "missing",
+            summary: r.detail || (r.installed ? ("v" + r.version) : "Not installed"),
+            version: r.version,
+            configExists: r.configExists,
+            configFilesFound: r.configFilesFound,
+            configFilesMissing: r.configFilesMissing,
+            installGuide: r.installGuide,
+          });
+        }
+        state.installedAgents = results;
+        return;
+      }
+    } catch {
+      // Fall through to legacy preflight detection
+    }
+
+    // Fallback: legacy preflight-based detection
     const variantAgentIds = new Set(VARIANT_CONFIGS.map(c => c.baseAgentId));
     variantAgentIds.add('claude-code');
     const realAdapters = state.availableAdapters.filter(
@@ -1188,8 +1284,6 @@ export function createLauncherModule(deps) {
     );
 
     const results = new Map();
-
-    // Run preflight checks in parallel
     const checks = realAdapters.map(async (adapter) => {
       try {
         const response = await apiFetch("/api/preflight", {
@@ -1197,7 +1291,6 @@ export function createLauncherModule(deps) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ baseAgentId: adapter.id, displayLabel: adapter.title })
         });
-
         if (response.ok) {
           const result = await response.json();
           const installed = result.status === "ready" || result.status === "unverified";
@@ -1205,11 +1298,10 @@ export function createLauncherModule(deps) {
         } else {
           results.set(adapter.id, { installed: false, status: "error", summary: null });
         }
-      } catch (error) {
+      } catch {
         results.set(adapter.id, { installed: false, status: "error", summary: null });
       }
     });
-
     await Promise.all(checks);
     state.installedAgents = results;
   }
@@ -1361,7 +1453,7 @@ export function createLauncherModule(deps) {
       elements.launcherAgents.querySelectorAll("[data-codex-variant-id]")
     ).map((element) => ({
       id: element.getAttribute("data-codex-variant-id"),
-      enabled: element.querySelector('[data-role="variant-enabled"]')?.checked ?? true,
+      enabled: element.querySelector('[data-role="variant-enabled"]')?.checked ?? false,
       displayLabel: element.querySelector('[data-role="variant-label"]')?.value ?? "Codex CLI",
       model: element.querySelector('[data-role="variant-model"]')?.value ?? "",
       reasoningEffort: element.querySelector('[data-role="variant-reasoning"]')?.value ?? "",
@@ -1399,7 +1491,7 @@ export function createLauncherModule(deps) {
         elements.launcherAgents.querySelectorAll(`[${variantDataAttr(config.id)}]`)
       ).map((element) => ({
         id: element.getAttribute(variantDataAttr(config.id)),
-        enabled: element.querySelector(`[data-role="${rp}enabled"]`)?.checked ?? true,
+        enabled: element.querySelector(`[data-role="${rp}enabled"]`)?.checked ?? false,
         displayLabel: element.querySelector(`[data-role="${rp}label"]`)?.value ?? config.labelKeyEn.replace(' Variants', ''),
         model: element.querySelector(`[data-role="${rp}model"]`)?.value ?? ""
       }));
@@ -1502,6 +1594,13 @@ export function createLauncherModule(deps) {
     const messages = validateLauncher();
     renderLauncherValidation(messages);
     if (messages.some((m) => m.level === "error")) {
+      // Expand the launcher and scroll to validation errors so the user sees them
+      state.launcherExpanded = true;
+      render();
+      // Wait for DOM update, then scroll to validation messages
+      requestAnimationFrame(() => {
+        elements.launcherValidation?.scrollIntoView({ behavior: "smooth", block: "center" });
+      });
       return;
     }
 

@@ -130,7 +130,8 @@ test("checkRateLimit: blocks requests over the general limit", () => {
 
 test("checkRateLimit: blocks expensive path requests over the expensive limit", () => {
   const ip = `test-expensive-${Date.now()}`;
-  for (let i = 0; i < 10; i++) {
+  // RATE_LIMIT_EXPENSIVE_MAX = 30 (increased from 10 to reduce 429 errors on preflight)
+  for (let i = 0; i < 30; i++) {
     checkRateLimit(ip, "/api/run");
   }
   const result = checkRateLimit(ip, "/api/run");
@@ -152,8 +153,8 @@ test("checkRateLimit: different IPs have independent limits", () => {
 
 test("checkRateLimit: expensive paths are tracked separately", () => {
   const ip = `test-mixed-${Date.now()}`;
-  // Hit expensive limit
-  for (let i = 0; i < 10; i++) {
+  // Hit expensive limit (RATE_LIMIT_EXPENSIVE_MAX = 30)
+  for (let i = 0; i < 30; i++) {
     checkRateLimit(ip, "/api/run");
   }
   // Expensive path should be blocked

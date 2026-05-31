@@ -13,7 +13,7 @@ import { auditLogger, logger, metrics } from "@agentarena/core";
 // Rate limiting
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX_REQUESTS = 120;
-const RATE_LIMIT_EXPENSIVE_MAX = 10;
+const RATE_LIMIT_EXPENSIVE_MAX = 30; // Increased from 10 - preflight is called frequently by UI
 const RATE_LIMIT_EXPENSIVE_PATHS = new Set([
   "/api/run",
   "/api/run/cancel",

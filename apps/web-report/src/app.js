@@ -1102,6 +1102,32 @@ elements.launcherAgents?.addEventListener("change", (event) => {
 });
 elements.launcherAgents.addEventListener("input", () => {
   syncLauncherStateFromDom();
+
+  // Check Base URL and show warning if it's a third-party host
+  const baseUrlInput = elements.launcherAgents.querySelector('[data-role="provider-base-url"]');
+  const warningDiv = elements.launcherAgents.querySelector('[data-role="base-url-warning"]');
+
+  if (baseUrlInput && warningDiv) {
+    const baseUrl = baseUrlInput.value.trim();
+    const ALLOWED_API_HOSTS = new Set([
+      "api.anthropic.com",
+      "api.openai.com",
+      "generativelanguage.googleapis.com",
+      "dashscope.aliyuncs.com"
+    ]);
+
+    let shouldShowWarning = false;
+    if (baseUrl) {
+      try {
+        const hostname = new URL(baseUrl).hostname.toLowerCase();
+        shouldShowWarning = !ALLOWED_API_HOSTS.has(hostname);
+      } catch {
+        // Invalid URL, don't show warning
+      }
+    }
+
+    warningDiv.style.display = shouldShowWarning ? "block" : "none";
+  }
 });
 elements.launcherAgents.addEventListener("click", async (event) => {
   const target = event.target;
@@ -1243,59 +1269,87 @@ elements.launcherAgents.addEventListener("click", async (event) => {
     handleTestConnection(target);
   }
 
-  // Detect all agents button
+  // Detect all agents button — uses the new /api/agent-detection endpoint
+  // which checks every adapter (including ones not shown in the UI).
   if (target.id === "detect-all-agents") {
-    const agentCheckboxes = Array.from(
-      elements.launcherAgents.querySelectorAll('[data-role="real-agent"]')
-    );
-
     target.disabled = true;
     target.innerHTML = `<span class="spinner"></span> ${escapeHtml(t("testConnectionTesting"))}`;
 
-    const results = [];
-    for (const checkbox of agentCheckboxes) {
-      const agentId = checkbox.value;
-      const agentLabel = checkbox.parentElement?.querySelector("span")?.textContent || agentId;
-
-      try {
-        const response = await apiFetch("/api/preflight", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ baseAgentId: agentId, displayLabel: agentLabel })
-        });
-
-        if (response.ok) {
-          const result = await response.json();
-          results.push({
-            agentId,
-            agentLabel,
-            status: result.status,
-            installed: result.status === "ready" || result.status === "unverified"
-          });
-        } else {
-          results.push({ agentId, agentLabel, status: "error", installed: false });
-        }
-      } catch (error) {
-        results.push({ agentId, agentLabel, status: "error", installed: false });
+    try {
+      const response = await apiFetch("/api/agent-detection");
+      if (!response.ok) {
+        throw new Error(`Detection API returned ${response.status}`);
       }
+      const results = await response.json();
+
+      // Filter out demo adapters (they're always "available")
+      const externalResults = results.filter(r => r.id && !r.id.startsWith("demo-"));
+      const installed = externalResults.filter(r => r.installed);
+      const notInstalled = externalResults.filter(r => !r.installed);
+
+      let message = "";
+      if (installed.length > 0) {
+        message += `\u2713 ${installed.map(r => `${r.displayName}${r.version ? ` (v${r.version})` : ""}`).join(", ")}\n`;
+      }
+      if (notInstalled.length > 0) {
+        message += `\u2717 ${notInstalled.map(r => r.displayName).join(", ")}`;
+      }
+      if (!message) {
+        message = t("detectAllAgents") + ": 0 agents found.";
+      }
+
+      alert(message);
+
+      // Re-render the launcher to update version badges and install guide visibility
+      if (typeof renderLauncher === "function") {
+        // Update state with fresh detection data
+        const detectMap = new Map();
+        for (const r of results) {
+          detectMap.set(r.id, {
+            installed: r.installed,
+            status: r.installed ? "ready" : "missing",
+            summary: r.detail || (r.installed ? ("v" + r.version) : "Not installed"),
+            version: r.version,
+            configExists: r.configExists,
+            configFilesFound: r.configFilesFound,
+            configFilesMissing: r.configFilesMissing,
+            installGuide: r.installGuide,
+          });
+        }
+        state.installedAgents = detectMap;
+        renderLauncher();
+      }
+    } catch (error) {
+      alert(`Detection failed: ${error instanceof Error ? error.message : String(error)}`);
     }
 
     target.disabled = false;
     target.textContent = t("detectAllAgents");
+  }
 
-    const installed = results.filter(r => r.installed);
-    const notInstalled = results.filter(r => !r.installed);
-
-    let message = "";
-    if (installed.length > 0) {
-      message += `✓ ${installed.map(r => r.agentLabel).join(", ")}\n`;
-    }
-    if (notInstalled.length > 0) {
-      message += `✗ ${notInstalled.map(r => r.agentLabel).join(", ")}`;
-    }
-
-    if (message) {
-      alert(message);
+  // Copy install command to clipboard
+  if (target.classList?.contains("btn-copy-install")) {
+    const cmd = target.getAttribute("data-copy");
+    if (cmd) {
+      navigator.clipboard?.writeText(cmd).then(() => {
+        const orig = target.textContent;
+        target.textContent = "\u2713";
+        target.style.color = "var(--accent, green)";
+        setTimeout(() => {
+          target.textContent = orig;
+          target.style.color = "";
+        }, 1500);
+      }).catch(() => {
+        // Fallback: select the code text
+        const codeEl = target.previousElementSibling;
+        if (codeEl) {
+          const range = document.createRange();
+          range.selectNodeContents(codeEl);
+          const sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(range);
+        }
+      });
     }
   }
 });

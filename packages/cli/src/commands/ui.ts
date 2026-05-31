@@ -35,7 +35,9 @@ import {
   handleAdaptersList,
   handleAdhocTaskpackDelete,
   handleAdhocTaskpacksList,
+  handleAgentDetection,
   handleCreateAdhocTaskpack,
+  handleInstallGuides,
   handlePreflight,
   handleProviderProfileCreate,
   handleProviderProfileDelete,
@@ -361,6 +363,18 @@ export async function runUi(parsed: ParsedArgs): Promise<void> {
       // GET /api/taskpacks
       if (request.method === "GET" && requestUrl.pathname === "/api/taskpacks") {
         sendApiResponse(response, await handleTaskpacksList());
+        return;
+      }
+
+      // GET /api/agent-detection — EchoBird-style agent detection
+      if (request.method === "GET" && requestUrl.pathname === "/api/agent-detection") {
+        sendApiResponse(response, await withErrorHandling(handleAgentDetection()));
+        return;
+      }
+
+      // GET /api/install-guides — install guide definitions for all agents
+      if (request.method === "GET" && requestUrl.pathname === "/api/install-guides") {
+        sendApiResponse(response, await withErrorHandling(handleInstallGuides()));
         return;
       }
 

@@ -10,8 +10,10 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import {
   deleteClaudeProviderProfile,
+  detectInstalledAgents,
   listAvailableAdapters,
   listClaudeProviderProfiles,
+  listInstallGuides,
   preflightAdapters,
   saveClaudeProviderProfile,
   setClaudeProviderProfileSecret,
@@ -144,8 +146,9 @@ export async function handleUiInfo(codexDefaults: unknown, host: string, port: n
       secretStored: profile.secretStored,
       isBuiltIn: profile.isBuiltIn
     })),
-    riskNotice:
-      "Provider-switched Claude Code variants use compatibility settings and may behave differently from official Claude Code.",
+    riskNotice: providerProfiles.some((p) => p.kind !== "official")
+      ? "Provider-switched Claude Code variants use compatibility settings and may behave differently from official Claude Code."
+      : null,
     host,
     port,
     authRequired: !isLocalhost
@@ -468,4 +471,33 @@ export async function handleAdhocTaskpackDelete(adhocId: string): Promise<ApiRes
 export async function handleTaskpacksList(): Promise<ApiResponse> {
   const taskPacks = await listOfficialTaskPacks();
   return jsonResponse(taskPacks);
+}
+
+// ─── Agent Detection & Install Guides ───
+
+/**
+ * GET /api/agent-detection
+ *
+ * Returns detection results for all registered adapters: whether each CLI
+ * is installed, its version, config file status, and install instructions.
+ * Uses the EchoBird-inspired `detectInstalledAgents()` function.
+ */
+export async function handleAgentDetection(): Promise<ApiResponse> {
+  try {
+    const results = await detectInstalledAgents();
+    return jsonResponse(results);
+  } catch (error) {
+    logger.error("server", "agent_detection.error", "Agent detection failed", { error });
+    return jsonResponse({ error: "Agent detection failed." }, 500);
+  }
+}
+
+/**
+ * GET /api/install-guides
+ *
+ * Returns all install guide definitions so the frontend can render
+ * install instructions for uninstalled agents without additional requests.
+ */
+export async function handleInstallGuides(): Promise<ApiResponse> {
+  return jsonResponse(listInstallGuides());
 }

@@ -1,3 +1,6 @@
+import { promises as fs } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import type {
   AdapterPreflightOptions,
   AdapterPreflightResult,
@@ -6,6 +9,7 @@ import type {
 } from "@agentarena/core";
 import { demoProfiles } from "./adapter-capabilities.js";
 import { adapterWarn } from "./adapter-diagnostics.js";
+import { getInstallGuide, type InstallGuide } from "./install-guides.js";
 import { createAiderAdapter } from "./aider-adapter.js";
 import { AugmentAdapter } from "./augment-adapter.js";
 import { ClaudeCodeAdapter } from "./claude-adapter.js";
@@ -123,4 +127,150 @@ export async function loadAndRegisterPlugins(pluginPaths: string[]): Promise<voi
     adapterWarn(`Adapter plugin "${diagnostic.pluginPath}" was ${diagnostic.level}: ${diagnostic.message}`);
   }
   registerExternalAdapters(externalAdapters, adapters);
+}
+
+// ─── Agent Detection (EchoBird-inspired) ───
+
+export interface AgentDetectionResult {
+  /** Adapter ID */
+  id: string;
+  /** Display name */
+  displayName: string;
+  /** Whether the CLI binary was found and responds to --version */
+  installed: boolean;
+  /** Detected version string, or empty if not installed */
+  version: string;
+  /** Whether any expected config file exists */
+  configExists: boolean;
+  /** Paths of config files that were found */
+  configFilesFound: string[];
+  /** Paths of config files that were expected but missing */
+  configFilesMissing: string[];
+  /** Install guide for this agent (if available) */
+  installGuide?: InstallGuide;
+  /** Diagnostic message (e.g. "not found", "version mismatch") */
+  detail?: string;
+}
+
+/**
+ * Check if any of the given config file paths (relative to HOME) exist.
+ */
+async function checkConfigFiles(relativePaths: string[]): Promise<{ found: string[]; missing: string[] }> {
+  const home = os.homedir();
+  const found: string[] = [];
+  const missing: string[] = [];
+  for (const relPath of relativePaths) {
+    const absPath = path.join(home, relPath);
+    try {
+      await fs.access(absPath);
+      found.push(relPath);
+    } catch {
+      missing.push(relPath);
+    }
+  }
+  return { found, missing };
+}
+
+/**
+ * Try running `<binary> --version` and parse a semver-like token from stdout.
+ * Returns the version string or undefined if the command fails or produces no version.
+ */
+async function probeVersion(binaryName: string, versionArgs: string[], timeoutMs = 10_000): Promise<string | undefined> {
+  const { runProcess } = await import("./process-utils.js");
+  const cmd = process.platform === "win32" && !binaryName.endsWith(".cmd") && !binaryName.endsWith(".bat") && !binaryName.endsWith(".exe")
+    ? `${binaryName}.cmd`
+    : binaryName;
+
+  try {
+    const result = await runProcess(cmd, versionArgs, process.cwd(), timeoutMs);
+    if (result.exitCode !== 0 || result.error) {
+      return undefined;
+    }
+    const output = `${result.stdout}\n${result.stderr}`.trim();
+    // Extract semver-like token: 1.2.3 or 1.2 or 1.2.3-beta.1
+    const semverMatch = output.match(/\b(\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?)\b/);
+    if (semverMatch) return semverMatch[1];
+    const looseMatch = output.match(/\b(\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?)\b/);
+    return looseMatch?.[1];
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Detect all registered agents using install guide data.
+ *
+ * Detection logic (per adapter):
+ *   1. If no install guide exists → skip (demo adapters, etc.)
+ *   2. Try running `<binary> --version` for each declared binary name
+ *   3. If version is obtained → binary is installed
+ *   4. If config files are declared → check if any exist
+ *   5. installed = version found AND (no configFiles declared OR at least one config exists)
+ *
+ * This fixes the Augment Code false positive: the old preflight only ran
+ * `--help` which can succeed for similarly-named binaries. Now we require
+ * `--version` to produce a valid version AND check that config files exist.
+ */
+export async function detectInstalledAgents(): Promise<AgentDetectionResult[]> {
+  const results: AgentDetectionResult[] = [];
+
+  for (const adapter of adapters.values()) {
+    // Skip demo adapters — they are always "available"
+    if (adapter.kind === "demo") continue;
+
+    const guide = getInstallGuide(adapter.id);
+    if (!guide) {
+      // No install guide → report as unknown
+      results.push({
+        id: adapter.id,
+        displayName: adapter.title,
+        installed: false,
+        version: "",
+        configExists: false,
+        configFilesFound: [],
+        configFilesMissing: [],
+        detail: "No install guide configured for this adapter.",
+      });
+      continue;
+    }
+
+    // Step 1: Try --version for each declared binary name
+    let version: string | undefined;
+    const versionArgs = guide.detection.versionCommand ?? ["--version"];
+    for (const binaryName of guide.detection.binaryNames) {
+      version = await probeVersion(binaryName, versionArgs);
+      if (version) break; // First successful binary wins
+    }
+
+    // Step 2: Check config files (if declared)
+    const configCheck = guide.detection.configFiles?.length
+      ? await checkConfigFiles(guide.detection.configFiles)
+      : { found: [], missing: [] };
+
+    // Step 3: Determine installed status
+    // installed = version found AND (no config required OR at least one config exists)
+    const configRequired = (guide.detection.configFiles?.length ?? 0) > 0;
+    const installed = !!version && (!configRequired || configCheck.found.length > 0);
+
+    let detail: string | undefined;
+    if (!version) {
+      detail = `CLI binary not found. Tried: ${guide.detection.binaryNames.join(", ")}`;
+    } else if (configRequired && configCheck.found.length === 0) {
+      detail = `CLI found (v${version}) but no config files detected. Expected one of: ${guide.detection.configFiles?.join(", ")}`;
+    }
+
+    results.push({
+      id: adapter.id,
+      displayName: guide.displayName,
+      installed,
+      version: version ?? "",
+      configExists: configCheck.found.length > 0,
+      configFilesFound: configCheck.found,
+      configFilesMissing: configCheck.missing,
+      installGuide: guide,
+      detail,
+    });
+  }
+
+  return results;
 }

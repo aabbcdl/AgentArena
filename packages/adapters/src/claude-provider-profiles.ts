@@ -500,14 +500,8 @@ export async function saveClaudeProviderProfile(input: ClaudeProviderProfileInpu
     ]);
     if (!ALLOWED_API_HOSTS.has(parsedHost)) {
       const riskFlag: ClaudeProviderRiskFlag = "baseUrl-redirects-traffic";
-      if (!input._confirmBaseUrlRisk) {
-        throw new Error(
-          `baseUrl "${input.baseUrl}" points to a host that is not in the known API provider list. ` +
-          `This means your API key will be sent to a third-party server. ` +
-          `If you trust this provider, set _confirmBaseUrlRisk: true to acknowledge the risk. ` +
-          `Known hosts: ${[...ALLOWED_API_HOSTS].join(", ")}`
-        );
-      }
+      // Always allow third-party API hosts, but mark them with a risk flag
+      // The UI will display a warning to the user
       if (!input.riskFlags?.includes(riskFlag)) {
         input.riskFlags = [...(input.riskFlags ?? []), riskFlag];
       }
