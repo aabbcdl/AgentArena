@@ -22,6 +22,7 @@ export type TraceEventType =
   // Adapter lifecycle (canonical names from packages/adapters/src/adapter-events.ts)
   | "adapter.start"
   | "adapter.message"
+  | "adapter.prompt"
   | "adapter.tool_use"
   | "adapter.file_change"
   | "adapter.usage"
@@ -37,6 +38,8 @@ export type TraceEventType =
   | "adapter.gemini.result"
   | "adapter.qwen.result"
   | "adapter.trae.result"
+  // Transport fallback events
+  | "adapter.transport_fallback"
   // Agent runner lifecycle
   | "agent.copy_failed"
   | "agent.skipped"
@@ -182,6 +185,7 @@ export interface AgentRunResult {
   sweBench?: SweBenchMetrics;
   cursorBench?: CursorBenchMetrics;
   liveBench?: LiveBenchMetrics;
+  assembledPrompt?: string;
 }
 
 export interface BenchmarkCancellation {

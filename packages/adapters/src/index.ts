@@ -19,6 +19,8 @@ export {
 } from "./claude-provider-profiles.js";
 export { loadAdapterPlugins, registerExternalAdapters } from "./plugin-registry.js";
 export { probeAuthConfig, probeCliExists, probeClaudeLikeAuthFast, probeQuickPreflight } from "./invocation-probes.js";
+export { StreamJsonTransport, TextTransport, RawTransport, TransportChain, createClaudeTransportChain } from "./transport.js";
+export type { Transport, TransportResult, TransportChainOptions, TransportChainResult } from "./transport.js";
 
 import { parseClaudeEvents, parseCodexEvents, parseGeminiEvents } from "./event-parsers.js";
 import { agentTimeoutMs, formatTimeoutMessage, runProcess, terminateProcessTree } from "./process-utils.js";

@@ -14,6 +14,7 @@ import { buildAgentPrompt, createPreflightResult, savePromptArtifact } from "./a
 import { getClaudeProviderProfileSecret, writeClaudeWorkspaceSettings } from "./claude-provider-profiles.js";
 import { parseClaudeEvents } from "./event-parsers.js";
 import { probeClaudeLikeAuth, probeClaudeLikeAuthFast, probeClaudeProfileAuth, probeHelp, probeInvocationVersion } from "./invocation-probes.js";
+import { createClaudeTransportChain, type TransportChainResult } from "./transport.js";
 import { agentTimeoutMs, runProcess } from "./process-utils.js";
 import { resolveClaudeRuntime } from "./runtime-resolution.js";
 
@@ -117,23 +118,13 @@ abstract class ClaudeLikeAdapter implements AgentAdapter {
       extraArgs?: string[];
       extraEnvironment?: NodeJS.ProcessEnv;
       resolvedRuntime?: AgentResolvedRuntime;
+      /** Whether this is a third-party provider (enables transport fallback) */
+      isThirdPartyProvider?: boolean;
     }
   ): Promise<AdapterExecutionResult> {
     const prompt = buildAgentPrompt(context);
     await savePromptArtifact(prompt, context.workspacePath, context);
     const invocation = await this.resolveInvocation();
-    const args = [
-      ...invocation.argsPrefix,
-      ...(options?.extraArgs ?? []),
-      "-p",
-      "--output-format",
-      "stream-json",
-      "--verbose",
-      "--permission-mode",
-      "bypassPermissions",
-      "--no-session-persistence",
-      prompt
-    ];
     const versionProbe = await probeInvocationVersion(invocation, context.workspacePath, {
       ...context.environment,
       ...options?.extraEnvironment
@@ -151,28 +142,33 @@ abstract class ClaudeLikeAdapter implements AgentAdapter {
           : options?.resolvedRuntime?.agentVersionSource
     };
 
+    // Create transport chain with fallback for third-party providers
+    const transportChain = createClaudeTransportChain(
+      invocation,
+      options?.isThirdPartyProvider ?? false,
+      options?.extraArgs ?? [],
+      { transportTimeoutMs: 8_000, logFallbacks: true }
+    );
+
     await context.trace({
       type: "adapter.start",
       message: `Starting ${this.title} adapter`,
       metadata: {
         command: invocation.displayCommand,
-        args,
+        transportChain: transportChain.transportIds,
         resolvedRuntime
       }
     });
 
-    let execution: Awaited<ReturnType<typeof runProcess>>;
+    let chainResult: TransportChainResult;
     try {
-      execution = await runProcess(
-        invocation.command,
-        args,
+      chainResult = await transportChain.execute(
+        prompt,
         context.workspacePath,
-        agentTimeoutMs(),
         {
           ...context.environment,
           ...options?.extraEnvironment
-        },
-        context.signal
+        }
       );
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -193,14 +189,27 @@ abstract class ClaudeLikeAdapter implements AgentAdapter {
       };
     }
 
-    const parsed = parseClaudeEvents(execution.stdout);
+    const { result: transportResult, attempts, usedFallback } = chainResult;
+    const execution = transportResult.processResult;
+    const parsed = transportResult.parsed;
 
-    // Emit tool_use trace events for each tool call detected in the stream
-    for (const tc of parsed.toolCalls) {
+    // Emit tool_use trace events for each tool call detected
+    if (parsed?.toolCalls) {
+      for (const tc of parsed.toolCalls) {
+        await context.trace({
+          type: "adapter.tool_use",
+          message: tc.name,
+          metadata: { toolName: tc.name, input: tc.input }
+        });
+      }
+    }
+
+    // Emit transport fallback info if applicable
+    if (usedFallback) {
       await context.trace({
-        type: "adapter.tool_use",
-        message: tc.name,
-        metadata: { toolName: tc.name, input: tc.input }
+        type: "adapter.transport_fallback",
+        message: `Transport fallback occurred: ${attempts.map(a => a.transportId).join(" → ")}`,
+        metadata: { attempts, finalTransport: transportResult.transportId }
       });
     }
 
@@ -209,8 +218,8 @@ abstract class ClaudeLikeAdapter implements AgentAdapter {
       summary = `${this.title} process error: ${execution.error}`;
     } else if (execution.timedOut) {
       summary = `${this.title} timed out before producing a final message.`;
-    } else if (parsed.summaryFromEvents) {
-      summary = parsed.summaryFromEvents;
+    } else if (parsed?.summary) {
+      summary = parsed.summary;
     } else if (execution.exitCode === 0) {
       summary = `${this.title} completed without a final message.`;
     } else {
@@ -225,15 +234,17 @@ abstract class ClaudeLikeAdapter implements AgentAdapter {
         timedOut: execution.timedOut,
         signal: execution.signal,
         error: execution.error,
-        sessionId: parsed.sessionId,
-        tokenUsage: parsed.tokenUsage,
-        estimatedCostUsd: parsed.estimatedCostUsd,
-        costKnown: parsed.costKnown,
+        sessionId: parsed?.sessionId,
+        tokenUsage: parsed?.tokenUsage ?? 0,
+        estimatedCostUsd: parsed?.estimatedCostUsd ?? 0,
+        costKnown: parsed?.costKnown ?? false,
         resolvedRuntime,
-        parsedError: parsed.error,
+        parsedError: parsed?.error,
         stderr: execution.stderr.trim(),
         stdout: execution.stdout,
-        workspacePath: context.workspacePath
+        workspacePath: context.workspacePath,
+        transportUsed: transportResult.transportId,
+        usedFallback
       }
     });
 
@@ -251,11 +262,11 @@ abstract class ClaudeLikeAdapter implements AgentAdapter {
     }
 
     return {
-      status: execution.exitCode === 0 && !execution.error && !parsed.error ? "success" : "failed",
+      status: execution.exitCode === 0 && !execution.error && !parsed?.error ? "success" : "failed",
       summary,
-      tokenUsage: parsed.tokenUsage,
-      estimatedCostUsd: parsed.estimatedCostUsd,
-      costKnown: parsed.costKnown,
+      tokenUsage: parsed?.tokenUsage ?? 0,
+      estimatedCostUsd: parsed?.estimatedCostUsd ?? 0,
+      costKnown: parsed?.costKnown ?? false,
       changedFilesHint: [],
       resolvedRuntime
     };
@@ -444,7 +455,8 @@ export class ClaudeCodeAdapter extends ClaudeLikeAdapter {
     const result = await this.executeClaudeLike(context, "adapter.claude.result", "Claude Code", {
       extraArgs,
       extraEnvironment: providerRuntime.environment,
-      resolvedRuntime: runtime
+      resolvedRuntime: runtime,
+      isThirdPartyProvider: profile.kind !== "official"
     });
 
     return {
