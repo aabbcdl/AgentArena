@@ -8,6 +8,7 @@ import type {
   AgentResolvedRuntime,
   TraceEventType
 } from "@agentarena/core";
+import { writeExecutionEvidence, type ToolCallRecord } from "@agentarena/core";
 import { CLAUDE_CODE_CAPABILITY, type InvocationSpec } from "./adapter-capabilities.js";
 import { formatAdapterError } from "./adapter-diagnostics.js";
 import { buildAgentPrompt, createPreflightResult, savePromptArtifact } from "./adapter-helpers.js";
@@ -150,6 +151,8 @@ abstract class ClaudeLikeAdapter implements AgentAdapter {
       { transportTimeoutMs: 8_000, logFallbacks: true }
     );
 
+    const startedAt = Date.now();
+
     await context.trace({
       type: "adapter.start",
       message: `Starting ${this.title} adapter`,
@@ -248,7 +251,7 @@ abstract class ClaudeLikeAdapter implements AgentAdapter {
       }
     });
 
-    // Save stdout/stderr to files for debugging
+    // Save stdout/stderr to files for debugging (legacy)
     try {
       const fs = await import("node:fs/promises");
       const stdoutPath = context.workspacePath + "/agent-stdout.jsonl";
@@ -261,8 +264,45 @@ abstract class ClaudeLikeAdapter implements AgentAdapter {
       // Best effort — don't fail the run if we can't write the file
     }
 
+    // Write evidence for structured collection
+    const status = execution.exitCode === 0 && !execution.error && !parsed?.error ? "success" as const : "failed" as const;
+    try {
+      const toolCallRecords: ToolCallRecord[] = (parsed?.toolCalls ?? []).map(tc => ({
+        timestamp: new Date().toISOString(),
+        name: tc.name,
+        input: tc.input,
+        success: true,
+      }));
+
+      await writeExecutionEvidence(
+        { adapterId: this.id, workspacePath: context.workspacePath },
+        {
+          toolCalls: toolCallRecords,
+          exitCode: execution.exitCode ?? -1,
+          stdout: execution.stdout,
+          stderr: execution.stderr,
+          meta: {
+            adapterId: this.id,
+            startTime: new Date(Date.now() - (Date.now() - startedAt)).toISOString(),
+            endTime: new Date().toISOString(),
+            durationMs: Date.now() - startedAt,
+            tokenUsage: parsed?.tokenUsage,
+            estimatedCostUsd: parsed?.estimatedCostUsd,
+            costKnown: parsed?.costKnown,
+            sessionId: parsed?.sessionId,
+            transportUsed: transportResult.transportId,
+            usedFallback,
+            status,
+            summary,
+          },
+        }
+      );
+    } catch {
+      // Best effort — don't fail the run if evidence writing fails
+    }
+
     return {
-      status: execution.exitCode === 0 && !execution.error && !parsed?.error ? "success" : "failed",
+      status,
       summary,
       tokenUsage: parsed?.tokenUsage ?? 0,
       estimatedCostUsd: parsed?.estimatedCostUsd ?? 0,

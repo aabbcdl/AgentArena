@@ -2,7 +2,7 @@
 
 export type LogLevel = "DEBUG" | "INFO" | "WARN" | "ERROR";
 
-export type LogComponent = "runner" | "server" | "trace" | "publish" | "judge" | "adapter" | "core";
+export type LogComponent = "runner" | "server" | "trace" | "publish" | "judge" | "adapter" | "core" | "evidence";
 
 export interface StructuredLogEntry {
   timestamp: string;
