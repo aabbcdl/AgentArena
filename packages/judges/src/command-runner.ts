@@ -1,4 +1,6 @@
 import { spawn } from "node:child_process";
+import { access } from "node:fs/promises";
+import path from "node:path";
 import {
   BenchmarkCancelledError,
   type CommandExecutionSpec,
@@ -88,6 +90,14 @@ const SAFE_COMMANDS = new Set([
 
 const RISKY_COMMANDS = new Set(["curl", "wget", "sed", "awk", "tee"]);
 const COMMANDS_USING_E_FLAG = new Set(["echo", "printf", "type", "which", "where"]);
+const WINDOWS_BATCH_COMMAND = /\.(?:cmd|bat)$/i;
+const WINDOWS_EXECUTABLE_SUFFIX = /\.(?:com|exe|cmd|bat)$/i;
+
+interface CommandSpawnSpec {
+  command: string;
+  args: string[];
+  windowsVerbatimArguments?: boolean;
+}
 
 export interface CommandSecurityOptions {
   allowEval?: boolean;
@@ -168,6 +178,65 @@ function commandBasenameForAllowlist(commandToken: string): string {
     : commandToken;
   // Strip Windows executable suffixes so `node.exe`, `python.cmd`, `git.bat` are matched
   return basename.replace(/\.(exe|cmd|bat)$/i, "");
+}
+
+function quoteWindowsCmdArgument(value: string): string {
+  if (/[%"\r\n]/.test(value)) {
+    throw new Error(
+      "Unsupported Windows cmd.exe argument: values passed through .cmd/.bat shims cannot contain %, double quotes, or newlines."
+    );
+  }
+  return `"${value.replace(/\\+$/u, (slashes) => `${slashes}${slashes}`)}"`;
+}
+
+async function resolveWindowsCommandPath(command: string, environment: NodeJS.ProcessEnv): Promise<string> {
+  if (process.platform !== "win32" || /[/\\]/.test(command)) {
+    return command;
+  }
+
+  const pathValue = environment.PATH ?? environment.Path ?? "";
+  const pathEntries = pathValue
+    .split(path.delimiter)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  const extensions = WINDOWS_EXECUTABLE_SUFFIX.test(command)
+    ? [""]
+    : (environment.PATHEXT ?? environment.PathExt ?? ".COM;.EXE;.CMD;.BAT")
+        .split(";")
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+
+  for (const entry of pathEntries) {
+    for (const extension of extensions) {
+      const candidate = path.join(entry, `${command}${extension}`);
+      try {
+        await access(candidate);
+        return candidate;
+      } catch {
+        // Continue searching PATH.
+      }
+    }
+  }
+
+  return command;
+}
+
+async function resolveCommandSpawnSpec(
+  command: string,
+  args: string[],
+  environment: NodeJS.ProcessEnv
+): Promise<CommandSpawnSpec> {
+  const resolvedCommand = await resolveWindowsCommandPath(command, environment);
+  if (process.platform === "win32" && WINDOWS_BATCH_COMMAND.test(resolvedCommand)) {
+    const commandLine = `"${[resolvedCommand, ...args].map(quoteWindowsCmdArgument).join(" ")}"`;
+    return {
+      command: environment.ComSpec ?? environment.COMSPEC ?? process.env.ComSpec ?? process.env.COMSPEC ?? "cmd.exe",
+      args: ["/d", "/s", "/v:off", "/c", commandLine],
+      windowsVerbatimArguments: true,
+    };
+  }
+
+  return { command: resolvedCommand, args };
 }
 
 function resolveCommandSecurityOptions(options?: CommandSecurityOptions): Required<CommandSecurityOptions> {
@@ -284,11 +353,26 @@ export async function executeCommand(
     [cmd, cmdArgs] = parseCommand(commandOrCmd, options);
   }
 
+  let spawnSpec: CommandSpawnSpec;
+  try {
+    spawnSpec = await resolveCommandSpawnSpec(cmd, cmdArgs, environment);
+  } catch (error) {
+    return {
+      exitCode: -1,
+      stdout: "",
+      stderr: error instanceof Error ? error.message : String(error),
+      durationMs: Date.now() - startedAt,
+      cwd
+    };
+  }
+
   return await new Promise((resolve, reject) => {
-    const child = spawn(cmd, cmdArgs, {
+    const child = spawn(spawnSpec.command, spawnSpec.args, {
       cwd,
       env: environment,
       shell: false,
+      windowsHide: true,
+      windowsVerbatimArguments: spawnSpec.windowsVerbatimArguments ?? false,
       stdio: ["ignore", "pipe", "pipe"]
     });
 

@@ -21,6 +21,15 @@ async function setupWorkspace() {
   return dir;
 }
 
+async function fileExists(filePath) {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 const ALLOWED_NAMES = ["PATH", "HOME", "NODE"];
 
 test("file-exists judge passes when file exists", async () => {
@@ -173,6 +182,93 @@ test("command step runs and captures output", async () => {
 
   await fs.rm(workspace, { recursive: true, force: true });
 });
+
+test(
+  "command step resolves Windows npm .cmd shims without shell injection",
+  { skip: process.platform !== "win32" ? "Windows-specific command shim behavior" : false },
+  async () => {
+    const workspace = await setupWorkspace();
+    const shimDir = path.join(workspace, "shim bin");
+    const capturePath = path.join(workspace, "capture.json");
+    const markerPath = path.join(workspace, "injected.txt");
+    const shimPath = path.join(shimDir, "npm.cmd");
+    const scriptPath = path.join(shimDir, "npm-shim.mjs");
+
+    try {
+      await fs.mkdir(shimDir, { recursive: true });
+      await fs.writeFile(
+        scriptPath,
+        [
+          'import { writeFileSync } from "node:fs";',
+          "writeFileSync(process.env.AGENTARENA_CAPTURE, JSON.stringify(process.argv.slice(2)), 'utf8');",
+          "console.log('shim ok');",
+        ].join("\n"),
+        "utf8"
+      );
+      await fs.writeFile(shimPath, `@echo off\n"${process.execPath}" "${scriptPath}" %*\n`, "utf8");
+
+      const markerArgPath = markerPath.replace(/\\/g, "/");
+      const dangerousArg = `safe&echo injected>${markerArgPath}`;
+      const result = await runCommandStep(
+        {
+          id: "npm-shim",
+          label: "npm shim",
+          command: `npm "${dangerousArg}" "plain arg"`,
+          cwd: ".",
+          timeoutMs: 10000,
+          env: {
+            PATH: shimDir,
+            AGENTARENA_CAPTURE: capturePath
+          }
+        },
+        workspace,
+        []
+      );
+
+      assert.equal(result.exitCode, 0);
+      assert.match(result.stdout, /shim ok/);
+      assert.deepEqual(JSON.parse(await fs.readFile(capturePath, "utf8")), [dangerousArg, "plain arg"]);
+      assert.equal(await fileExists(markerPath), false);
+    } finally {
+      await fs.rm(workspace, { recursive: true, force: true });
+    }
+  }
+);
+
+test(
+  "command step rejects Windows batch arguments that cmd.exe would expand",
+  { skip: process.platform !== "win32" ? "Windows-specific command shim behavior" : false },
+  async () => {
+    const workspace = await setupWorkspace();
+    const shimDir = path.join(workspace, "shim-bin");
+    const shimPath = path.join(shimDir, "npm.cmd");
+    const scriptPath = path.join(shimDir, "npm-shim.mjs");
+
+    try {
+      await fs.mkdir(shimDir, { recursive: true });
+      await fs.writeFile(scriptPath, "console.log('should not run');\n", "utf8");
+      await fs.writeFile(shimPath, `@echo off\n"${process.execPath}" "${scriptPath}" %*\n`, "utf8");
+
+      const result = await runCommandStep(
+        {
+          id: "npm-expand",
+          label: "npm expand",
+          command: "npm \"a%PATH%b\"",
+          cwd: ".",
+          timeoutMs: 10000,
+          env: { PATH: shimDir }
+        },
+        workspace,
+        []
+      );
+
+      assert.notEqual(result.exitCode, 0);
+      assert.match(result.stderr, /unsupported.*cmd\.exe/i);
+    } finally {
+      await fs.rm(workspace, { recursive: true, force: true });
+    }
+  }
+);
 
 test("command step aborts when signal is cancelled", async () => {
   const workspace = await setupWorkspace();
