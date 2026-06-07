@@ -23,6 +23,7 @@ export interface ParsedArgs {
   updateSnapshots: boolean;
   cleanupWorkspaces: boolean;
   dryRun: boolean;
+  agentTimeout?: number;
   maxConcurrency?: number;
   json: boolean;
   templateName?: string;
@@ -400,6 +401,18 @@ export function parseArgs(argv: string[]): ParsedArgs {
       case "--dry-run":
         parsed.dryRun = true;
         break;
+      case "--agent-timeout": {
+        const rawAgentTimeout = args.shift();
+        const agentTimeoutValue = Number(rawAgentTimeout);
+        if (!rawAgentTimeout || !Number.isFinite(agentTimeoutValue) || agentTimeoutValue <= 0) {
+          throw new Error(
+            "--agent-timeout requires a positive number of milliseconds. " +
+            "Example: --agent-timeout 600000 (10 minutes).",
+          );
+        }
+        parsed.agentTimeout = agentTimeoutValue;
+        break;
+      }
       case "--template":
         parsed.templateName = args.shift();
         if (!parsed.templateName) {

@@ -192,6 +192,42 @@ test("agentarena run --dry-run prints the plan without executing", { timeout: 30
   }
 });
 
+test("agentarena run --agent-timeout validates and is accepted", { timeout: 30_000 }, async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-cli-"));
+  try {
+    const repoPath = path.join(tempDir, "repo");
+    const taskPath = path.join(tempDir, "task-to.json");
+    await mkdir(repoPath, { recursive: true });
+    await writeFile(path.join(repoPath, "README.md"), "# Temp Repo\n", "utf8");
+    await writeJson(taskPath, {
+      schemaVersion: "agentarena.taskpack/v1",
+      id: "cli-to",
+      title: "CLI TO",
+      prompt: "x",
+      judges: [
+        { id: "pass", type: "command", label: "p", command: "node -e \"process.exit(0)\"" }
+      ]
+    });
+
+    // Valid value is accepted (paired with --dry-run so no agent executes).
+    const ok = await runCli(
+      ["run", "--repo", repoPath, "--task", taskPath, "--agents", "demo-fast", "--agent-timeout", "60000", "--dry-run"],
+      path.resolve(".")
+    );
+    assert.equal(ok.code, 0);
+
+    // Invalid value is rejected with a helpful message.
+    const bad = await runCli(
+      ["run", "--repo", repoPath, "--task", taskPath, "--agents", "demo-fast", "--agent-timeout", "0", "--dry-run"],
+      path.resolve(".")
+    );
+    assert.notEqual(bad.code, 0);
+    assert.match((bad.stderr || "") + (bad.stdout || ""), /--agent-timeout requires a positive number/);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("agentarena run exits with code 1 on failed benchmark", { timeout: 60_000 }, async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-cli-"));
   try {

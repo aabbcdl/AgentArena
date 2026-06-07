@@ -109,6 +109,18 @@ export async function runBenchmarkCommand(
     );
   }
 
+  // The adapter- and runner-level execution timeouts are read from the
+  // environment at run time, so map the per-run --agent-timeout flag onto them
+  // here. The runner wrapper must stay above the adapter timeout, so add a grace
+  // margin. (Previously a timeout could only be set via an undocumented env var.)
+  if (parsed.agentTimeout !== undefined) {
+    process.env.AGENTARENA_AGENT_TIMEOUT_MS = String(parsed.agentTimeout);
+    process.env.AGENTARENA_AGENT_EXECUTE_TIMEOUT_MS = String(parsed.agentTimeout + 60_000);
+    if (parsed.format !== "json") {
+      console.log(`Per-agent timeout: ${parsed.agentTimeout}ms`);
+    }
+  }
+
   const runStartMs = Date.now();
 
   if (parsed.format !== "json") {
