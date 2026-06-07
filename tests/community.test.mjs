@@ -6,6 +6,8 @@ import {
   clearCachedCommunityData,
   findCommunityRank,
   getCachedCommunityData,
+  renderCommunityLeaderboard,
+  safeCommunityRunCount,
   setCachedCommunityData,
 } from "../apps/web-report/dist/view-model/community.js";
 
@@ -69,6 +71,55 @@ test("clearCachedCommunityData removes cached entry", () => {
 
   clearCachedCommunityData("to-clear");
   assert.equal(getCachedCommunityData("to-clear"), null);
+});
+
+test("safeCommunityRunCount only accepts non-negative integer counts", () => {
+  assert.equal(safeCommunityRunCount(3, 1), 3);
+  assert.equal(safeCommunityRunCount("4", 1), 4);
+  assert.equal(safeCommunityRunCount("<img src=x onerror=alert(1)>", 2), 2);
+  assert.equal(safeCommunityRunCount(-1, 2), 2);
+  assert.equal(safeCommunityRunCount(1.5, 2), 2);
+});
+
+test("renderCommunityLeaderboard escapes remote data and translated labels", () => {
+  const container = { innerHTML: "" };
+  const t = (key, count) => {
+    const labels = {
+      communityAgent: 'Agent <img src=x onerror="alert(1)">',
+      communityAvgScore: "Avg Score",
+      communityBasedOn: `Based on ${count} <script>alert(1)</script>`,
+      communityLastSeen: "Last Seen",
+      communityModel: "Model",
+      communityRuns: "Runs",
+      communitySuccessRate: "Success"
+    };
+    return labels[key] ?? key;
+  };
+
+  renderCommunityLeaderboard(
+    container,
+    {
+      totalRuns: '<img src=x onerror="alert(1)">',
+      entries: [
+        {
+          avgScore: 99.9,
+          displayLabel: '<img src=x onerror="alert(1)">',
+          lastPublishedAt: "not-a-date",
+          model: "<svg/onload=alert(1)>",
+          runCount: '<script>alert(1)</script>',
+          successRate: 1
+        }
+      ]
+    },
+    t,
+    "en"
+  );
+
+  assert.match(container.innerHTML, /Based on 1/);
+  assert.doesNotMatch(container.innerHTML, /<script/i);
+  assert.doesNotMatch(container.innerHTML, /<img/i);
+  assert.doesNotMatch(container.innerHTML, /<svg/i);
+  assert.match(container.innerHTML, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
 });
 
 test("findCommunityRank returns null when no community data", () => {

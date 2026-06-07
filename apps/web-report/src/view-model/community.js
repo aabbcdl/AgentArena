@@ -90,24 +90,30 @@ export function clearCachedCommunityData(taskPackId) {
 /**
  * Render community leaderboard HTML table
  */
+export function safeCommunityRunCount(value, fallback = 0) {
+  const count = Number(value);
+  return Number.isSafeInteger(count) && count >= 0 ? count : fallback;
+}
+
 export function renderCommunityLeaderboard(container, indexData, t, locale) {
   if (!indexData || !indexData.entries || indexData.entries.length === 0) {
-    container.innerHTML = `<p class="community-empty">${t("communityNoData")}</p>`;
+    container.innerHTML = `<p class="community-empty">${escapeHtml(t("communityNoData"))}</p>`;
     return;
   }
 
   const isZhCn = locale === "zh-CN";
   const entries = indexData.entries;
+  const totalRuns = safeCommunityRunCount(indexData.totalRuns, entries.length);
 
-  let html = `<div class="community-meta">${t("communityBasedOn", indexData.totalRuns)}</div>`;
+  let html = `<div class="community-meta">${escapeHtml(t("communityBasedOn", totalRuns))}</div>`;
   html += `<table class="community-table"><thead><tr>`;
   html += `<th>#</th>`;
-  html += `<th>${t("communityAgent")}</th>`;
-  html += `<th>${t("communityModel")}</th>`;
-  html += `<th>${t("communityAvgScore")}</th>`;
-  html += `<th>${t("communitySuccessRate")}</th>`;
-  html += `<th>${t("communityRuns")}</th>`;
-  html += `<th>${t("communityLastSeen")}</th>`;
+  html += `<th>${escapeHtml(t("communityAgent"))}</th>`;
+  html += `<th>${escapeHtml(t("communityModel"))}</th>`;
+  html += `<th>${escapeHtml(t("communityAvgScore"))}</th>`;
+  html += `<th>${escapeHtml(t("communitySuccessRate"))}</th>`;
+  html += `<th>${escapeHtml(t("communityRuns"))}</th>`;
+  html += `<th>${escapeHtml(t("communityLastSeen"))}</th>`;
   html += `</tr></thead><tbody>`;
 
   for (let i = 0; i < entries.length; i++) {
@@ -130,7 +136,7 @@ export function renderCommunityLeaderboard(container, indexData, t, locale) {
     html += `<td class="score-cell">${typeof entry.avgScore === "number" ? entry.avgScore.toFixed(1) : "-"}</td>`;
     html += `<td>${typeof entry.successRate === "number" ? (entry.successRate * 100).toFixed(0) + "%" : "-"}</td>`;
     html += `<td>${escapeHtml(String(entry.runCount))}</td>`;
-    html += `<td>${lastSeenStr}</td>`;
+    html += `<td>${escapeHtml(lastSeenStr)}</td>`;
     html += `</tr>`;
   }
 
