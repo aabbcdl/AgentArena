@@ -51,10 +51,13 @@ git commit -m "chore: version packages"
 ### Dry run first
 
 ```bash
-pnpm changeset publish --dry-run
+pnpm changeset status --verbose
+pnpm -r publish --dry-run --access public --no-git-checks
 ```
 
-Verify the package list and versions look correct.
+Verify the package list, versions, and tarball contents look correct. `changeset publish`
+does not support a dry-run flag; use `changeset status` for the release plan and
+`pnpm publish --dry-run` for package packing validation.
 
 ### Publish for real
 
@@ -101,6 +104,7 @@ Before publishing, verify:
 - [ ] `pnpm build` succeeds
 - [ ] `pnpm test` passes (all 400+ tests)
 - [ ] `pnpm lint` clean
-- [ ] `pnpm changeset publish --dry-run` shows expected packages
+- [ ] `pnpm changeset status --verbose` shows expected packages
+- [ ] `pnpm -r publish --dry-run --access public --no-git-checks` succeeds
 - [ ] Working tree is clean
 - [ ] You are on `main` at the latest commit
