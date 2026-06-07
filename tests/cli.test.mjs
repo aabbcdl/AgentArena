@@ -892,7 +892,7 @@ test("agentarena init-ci writes a benchmark workflow", async () => {
   assert.equal(result.code, 0);
   const content = await readFile(workflowPath, "utf8");
   assert.match(content, /name: AgentArena Benchmark/);
-  assert.match(content, /run --repo \. --task agentarena\.taskpack\.yaml --agents demo-fast,codex/);
+  assert.match(content, /run --repo \. --task 'agentarena\.taskpack\.yaml' --agents 'demo-fast,codex'/);
   assert.match(content, /pr-comment\.md/);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
@@ -925,9 +925,9 @@ test("agentarena init-ci supports nightly templates and custom output directorie
   const content = await readFile(workflowPath, "utf8");
   assert.match(content, /name: AgentArena Nightly Benchmark/);
   assert.match(content, /schedule:/);
-  assert.match(content, /doctor --agents demo-fast --probe-auth --strict --json > \.agentarena\/nightly\/doctor\.json/);
+  assert.match(content, /doctor --agents 'demo-fast' --probe-auth --strict --json > '\.agentarena\/nightly\/doctor\.json'/);
   assert.doesNotMatch(content, /Comment benchmark summary on PR/);
-  assert.match(content, /cat \.agentarena\/nightly\/summary\.md >> "\$GITHUB_STEP_SUMMARY"/);
+  assert.match(content, /cat '\.agentarena\/nightly\/summary\.md' >> "\$GITHUB_STEP_SUMMARY"/);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }

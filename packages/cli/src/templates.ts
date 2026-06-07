@@ -443,11 +443,27 @@ export interface CiWorkflowOptions {
   outputDir: string;
 }
 
+function assertSingleLineWorkflowValue(label: string, value: string): string {
+  if (/[\r\n]/.test(value)) {
+    throw new Error(`${label} cannot contain line breaks.`);
+  }
+  return value;
+}
+
+function shellQuote(value: string): string {
+  assertSingleLineWorkflowValue("workflow shell argument", value);
+  return `'${value.replaceAll("'", "'\"'\"'")}'`;
+}
+
 export function buildCiWorkflow(options: CiWorkflowOptions): string {
   const { taskPath, agentIds, template, outputDir } = options;
-  const normalizedTaskPath = taskPath.replaceAll("\\", "/");
-  const normalizedAgents = agentIds.join(",");
-  const normalizedOutputDir = outputDir.replaceAll("\\", "/");
+  const normalizedTaskPath = assertSingleLineWorkflowValue("task path", taskPath.replaceAll("\\", "/"));
+  const normalizedAgents = assertSingleLineWorkflowValue("agent list", agentIds.join(","));
+  const normalizedOutputDir = assertSingleLineWorkflowValue("output directory", outputDir.replaceAll("\\", "/"));
+  const doctorJsonPath = `${normalizedOutputDir}/doctor.json`;
+  const runJsonPath = `${normalizedOutputDir}/run.json`;
+  const summaryMdPath = `${normalizedOutputDir}/summary.md`;
+  const prCommentPath = `${normalizedOutputDir}/pr-comment.md`;
   const workflowName =
     template === "nightly"
       ? "AgentArena Nightly Benchmark"
@@ -478,12 +494,12 @@ export function buildCiWorkflow(options: CiWorkflowOptions): string {
   workflow_dispatch:`;
   const doctorCommand =
     template === "nightly"
-      ? `node packages/cli/dist/index.js doctor --agents ${normalizedAgents} --probe-auth --strict --json > ${normalizedOutputDir}/doctor.json`
-      : `node packages/cli/dist/index.js doctor --agents ${normalizedAgents} --probe-auth --json > ${normalizedOutputDir}/doctor.json`;
+      ? `node packages/cli/dist/index.js doctor --agents ${shellQuote(normalizedAgents)} --probe-auth --strict --json > ${shellQuote(doctorJsonPath)}`
+      : `node packages/cli/dist/index.js doctor --agents ${shellQuote(normalizedAgents)} --probe-auth --json > ${shellQuote(doctorJsonPath)}`;
   const publishSummaryStep =
     template === "pull-request"
       ? `      - name: Publish benchmark summary
-        run: cat ${normalizedOutputDir}/pr-comment.md >> "$GITHUB_STEP_SUMMARY"
+        run: cat ${shellQuote(prCommentPath)} >> "$GITHUB_STEP_SUMMARY"
 
       - name: Comment benchmark summary on PR
         if: github.event_name == 'pull_request'
@@ -492,7 +508,7 @@ export function buildCiWorkflow(options: CiWorkflowOptions): string {
           script: |
             const fs = require("node:fs");
             const marker = "<!-- agentarena-benchmark-summary -->";
-            const body = \`\${marker}\\n\${fs.readFileSync("${normalizedOutputDir}/pr-comment.md", "utf8")}\`;
+            const body = \`\${marker}\\n\${fs.readFileSync(${JSON.stringify(prCommentPath)}, "utf8")}\`;
             const issue_number = context.payload.pull_request.number;
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
@@ -517,7 +533,7 @@ export function buildCiWorkflow(options: CiWorkflowOptions): string {
               });
             }`
       : `      - name: Publish benchmark summary
-        run: cat ${normalizedOutputDir}/summary.md >> "$GITHUB_STEP_SUMMARY"`;
+        run: cat ${shellQuote(summaryMdPath)} >> "$GITHUB_STEP_SUMMARY"`;
   return `name: ${workflowName}
 
 ${permissionsBlock}
@@ -551,13 +567,13 @@ jobs:
         run: pnpm build
 
       - name: Prepare AgentArena output directories
-        run: mkdir -p ${normalizedOutputDir}
+        run: mkdir -p ${shellQuote(normalizedOutputDir)}
 
       - name: Doctor adapters
         run: ${doctorCommand}
 
       - name: Run benchmark
-        run: node packages/cli/dist/index.js run --repo . --task ${normalizedTaskPath} --agents ${normalizedAgents} --output ${normalizedOutputDir} --json > ${normalizedOutputDir}/run.json
+        run: node packages/cli/dist/index.js run --repo . --task ${shellQuote(normalizedTaskPath)} --agents ${shellQuote(normalizedAgents)} --output ${shellQuote(normalizedOutputDir)} --json > ${shellQuote(runJsonPath)}
 
 ${publishSummaryStep}
 

@@ -95,3 +95,52 @@ test("buildCiWorkflow normalizes Windows paths", () => {
   assert.ok(result.includes("tasks/windows/demo.yaml"));
   assert.ok(result.includes("output/dir"));
 });
+
+test("buildCiWorkflow shell-quotes user-controlled run arguments", () => {
+  const result = buildCiWorkflow({
+    taskPath: "tasks/demo task's.yaml",
+    agentIds: ["demo-fast", "codex;echo injected"],
+    template: "pull-request",
+    outputDir: ".agentarena/ci output's",
+  });
+
+  assert.ok(result.includes("mkdir -p '.agentarena/ci output'\"'\"'s'"));
+  assert.ok(result.includes("--task 'tasks/demo task'\"'\"'s.yaml'"));
+  assert.ok(result.includes("--agents 'demo-fast,codex;echo injected'"));
+  assert.ok(result.includes("--output '.agentarena/ci output'\"'\"'s'"));
+  assert.ok(result.includes("> '.agentarena/ci output'\"'\"'s/run.json'"));
+  assert.ok(result.includes('fs.readFileSync(".agentarena/ci output\'s/pr-comment.md", "utf8")'));
+});
+
+test("buildCiWorkflow rejects line breaks in user-controlled values", () => {
+  assert.throws(
+    () =>
+      buildCiWorkflow({
+        taskPath: "tasks/demo.yaml\nmalicious",
+        agentIds: ["demo-fast"],
+        template: "smoke",
+        outputDir: "results",
+      }),
+    /task path cannot contain line breaks/,
+  );
+  assert.throws(
+    () =>
+      buildCiWorkflow({
+        taskPath: "tasks/demo.yaml",
+        agentIds: ["demo-fast\nmalicious"],
+        template: "smoke",
+        outputDir: "results",
+      }),
+    /agent list cannot contain line breaks/,
+  );
+  assert.throws(
+    () =>
+      buildCiWorkflow({
+        taskPath: "tasks/demo.yaml",
+        agentIds: ["demo-fast"],
+        template: "smoke",
+        outputDir: "results\nmalicious",
+      }),
+    /output directory cannot contain line breaks/,
+  );
+});
