@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { safeTraceCategoryClass } from "../apps/web-report/src/trace-replay.js";
 import { TraceReplayer } from "../apps/web-report/src/trace-replay-bridge.js";
 import {
   buildPrTable,
@@ -25,6 +26,19 @@ import {
   missingCoreComparisonData,
   resultRecordKey
 } from "../apps/web-report/src/view-model.js";
+
+test("safeTraceCategoryClass preserves normal trace categories", () => {
+  assert.equal(safeTraceCategoryClass("agent"), "agent");
+  assert.equal(safeTraceCategoryClass(" Preflight "), "preflight");
+  assert.equal(safeTraceCategoryClass("snapshot_1"), "snapshot_1");
+});
+
+test("safeTraceCategoryClass strips markup and attribute-breaking characters", () => {
+  assert.equal(safeTraceCategoryClass('error" onclick="alert(1)'), "error-onclick-alert-1");
+  assert.equal(safeTraceCategoryClass("<script>alert(1)</script>"), "script-alert-1-script");
+  assert.equal(safeTraceCategoryClass(""), "other");
+  assert.equal(safeTraceCategoryClass("---"), "other");
+});
 
 function createRun(runId, taskTitle, overrides = {}) {
   return {

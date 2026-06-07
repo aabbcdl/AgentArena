@@ -2,6 +2,15 @@
  * Trace Replay UI Module
  * Provides visual replay interface for trace events.
  */
+export function safeTraceCategoryClass(value) {
+  const cleaned = String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return /[a-z0-9]/.test(cleaned) ? cleaned : "other";
+}
+
 export function createTraceReplayModule({ escapeHtml, t }) {
   let currentTimeline = null;
   let currentStepIndex = 0;
@@ -44,7 +53,7 @@ export function createTraceReplayModule({ escapeHtml, t }) {
     const contentEl = document.getElementById('trace-replay-content');
     if (!contentEl) return;
 
-    const categoryClass = step.category || 'other';
+    const categoryClass = safeTraceCategoryClass(step.category);
     const metadataHtml = step.events.length > 0 && step.events[0].metadata
       ? `<div class="trace-step-metadata">${escapeHtml(JSON.stringify(step.events[0].metadata, null, 2))}</div>`
       : '';
