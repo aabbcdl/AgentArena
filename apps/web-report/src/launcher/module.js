@@ -16,6 +16,15 @@
  * - defaultModelPlaceholder: placeholder text for the model input
  */
 
+export function safeExternalHref(value) {
+  try {
+    const url = new URL(String(value ?? "").trim());
+    return url.protocol === "http:" || url.protocol === "https:" ? url.href : "";
+  } catch {
+    return "";
+  }
+}
+
 export function createLauncherModule(deps) {
   const {
     state,
@@ -1129,8 +1138,9 @@ export function createLauncherModule(deps) {
                     const entries = Object.entries(cmds).filter(([k]) => k !== "WARNING" && k !== "note");
                     const warnings = g.warnings || [];
                     const postInstall = g.postInstall || [];
+                    const homepageHref = safeExternalHref(g.homepage);
                     return `<div style="padding:10px;background:var(--surface-secondary);border-radius:6px;border-left:3px solid var(--text-muted);">
-                      <div style="font-weight:600;margin-bottom:6px;">${escapeHtml(g.displayName)}${g.homepage ? ` &middot; <a href="${escapeHtml(g.homepage)}" target="_blank" rel="noopener" style="font-weight:400;font-size:0.9em;">${escapeHtml(localText("官网", "Homepage"))}</a>` : ""}</div>
+                      <div style="font-weight:600;margin-bottom:6px;">${escapeHtml(g.displayName)}${homepageHref ? ` &middot; <a href="${escapeHtml(homepageHref)}" target="_blank" rel="noopener" style="font-weight:400;font-size:0.9em;">${escapeHtml(localText("官网", "Homepage"))}</a>` : ""}</div>
                       ${warnings.map(w => `<div style="color:var(--warning,orange);font-size:0.85em;margin-bottom:4px;">⚠ ${escapeHtml(w)}</div>`).join("")}
                       ${entries.map(([label, cmd]) => `<div style="display:flex;align-items:center;gap:6px;margin:3px 0;"><span style="color:var(--text-muted);min-width:80px;font-size:0.85em;">${escapeHtml(label)}:</span><code style="flex:1;background:var(--surface-tertiary);padding:2px 6px;border-radius:3px;font-size:0.85em;word-break:break-all;">${escapeHtml(cmd)}</code><button type="button" class="btn-copy-install" data-copy="${escapeHtml(cmd)}" style="padding:2px 8px;font-size:0.8em;cursor:pointer;border:1px solid var(--border);border-radius:3px;background:var(--surface);white-space:nowrap;" title="${escapeHtml(localText("复制命令", "Copy command"))}">📋</button></div>`).join("")}
                       ${postInstall.length > 0 ? `<div style="margin-top:6px;font-size:0.8em;color:var(--text-muted);">${postInstall.map(p => escapeHtml(p)).join("<br>")}</div>` : ""}

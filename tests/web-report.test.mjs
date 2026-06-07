@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { safeExternalHref } from "../apps/web-report/src/launcher/module.js";
 import { safeTraceCategoryClass } from "../apps/web-report/src/trace-replay.js";
 import { TraceReplayer } from "../apps/web-report/src/trace-replay-bridge.js";
 import {
@@ -26,6 +27,14 @@ import {
   missingCoreComparisonData,
   resultRecordKey
 } from "../apps/web-report/src/view-model.js";
+
+test("safeExternalHref only allows absolute http and https URLs", () => {
+  assert.equal(safeExternalHref("https://example.com/docs"), "https://example.com/docs");
+  assert.equal(safeExternalHref("http://example.com/download"), "http://example.com/download");
+  assert.equal(safeExternalHref("javascript:alert(1)"), "");
+  assert.equal(safeExternalHref("data:text/html,<script>alert(1)</script>"), "");
+  assert.equal(safeExternalHref("/relative/path"), "");
+});
 
 test("safeTraceCategoryClass preserves normal trace categories", () => {
   assert.equal(safeTraceCategoryClass("agent"), "agent");
