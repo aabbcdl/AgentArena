@@ -193,6 +193,21 @@ test("agentarena run exits with code 1 on failed benchmark", { timeout: 60_000 }
   }
 });
 
+test("agentarena --version prints the version and exits 0", { timeout: 60_000 }, async () => {
+  const result = await runCli(["--version"], path.resolve("."));
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /\d+\.\d+\.\d+/);
+});
+
+test("agentarena -V short flag prints the version and exits 0", { timeout: 60_000 }, async () => {
+  const result = await runCli(["-V"], path.resolve("."));
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /\d+\.\d+\.\d+/);
+  assert.doesNotMatch(result.stderr, /Unknown argument/);
+});
+
 test("agentarena doctor exits with code 0 in strict mode when all adapters are ready", { timeout: 60_000 }, async () => {
   const result = await runCli(
     ["doctor", "--agents", "demo-fast,demo-budget", "--strict"],
@@ -530,6 +545,86 @@ test("agentarena run supports JSON output", { timeout: 60_000 }, async () => {
   assert.equal(summary.scoreWeights.status, 0.24);
   assert.equal(typeof summary.results[0].compositeScore, "number");
   assert.equal(Array.isArray(summary.results[0].scoreReasons), true);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("agentarena run writes a trend.md when >=2 prior comparable runs exist", { timeout: 60_000 }, async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-cli-"));
+  try {
+    const repoPath = path.join(tempDir, "repo");
+    const outputPath = path.join(tempDir, "output-trend");
+    const taskPath = path.join(tempDir, "task-trend.json");
+
+    await mkdir(repoPath, { recursive: true });
+    await writeFile(path.join(repoPath, "README.md"), "# Temp Repo\n", "utf8");
+
+    const taskId = "cli-trend";
+    await writeJson(taskPath, {
+      schemaVersion: "agentarena.taskpack/v1",
+      id: taskId,
+      title: "CLI Trend",
+      prompt: "Produce a trend report",
+      judges: [
+        {
+          id: "pass",
+          type: "command",
+          label: "Always pass",
+          command: "node -e \"process.exit(0)\""
+        }
+      ]
+    });
+
+    // Seed two prior comparable runs (same task id) as top-level *.json files in
+    // the output root, which is exactly where the variance scan looks. These two
+    // give comparableRuns.length === 2 (> 1), triggering the trend report.
+    await mkdir(outputPath, { recursive: true });
+    const seedRun = (runId, createdAt, score) => ({
+      runId,
+      createdAt,
+      repoPath,
+      outputPath: path.join(outputPath, runId),
+      scoreMode: "practical",
+      task: { id: taskId, title: "CLI Trend" },
+      preflights: [],
+      results: [
+        {
+          agentId: "demo-fast",
+          baseAgentId: "demo-fast",
+          variantId: "demo-fast",
+          displayLabel: "Demo Fast",
+          status: "success",
+          compositeScore: score,
+          durationMs: 1000,
+          tokenUsage: 100,
+          estimatedCostUsd: 0.08,
+          costKnown: true,
+          changedFiles: [],
+          judgeResults: []
+        }
+      ]
+    });
+    await writeJson(path.join(outputPath, "prev-1.json"), seedRun("prev-1", "2026-01-01T00:00:00Z", 70));
+    await writeJson(path.join(outputPath, "prev-2.json"), seedRun("prev-2", "2026-01-02T00:00:00Z", 75));
+
+    const result = await runCli(
+      ["run", "--repo", repoPath, "--task", taskPath, "--agents", "demo-fast", "--output", outputPath],
+      path.resolve(".")
+    );
+
+    assert.equal(result.code, 0);
+    assert.match(result.stdout, /Trend report:/);
+
+    // Find the freshly created run subdir (the one that is not a seed JSON file).
+    const entries = await readdir(outputPath, { withFileTypes: true });
+    const runDir = entries.find((e) => e.isDirectory());
+    assert.ok(runDir, "Expected a run output subdirectory");
+    const trendContent = await readFile(path.join(outputPath, runDir.name, "trend.md"), "utf8");
+    assert.match(trendContent, /Multi-Run Agent Comparison/);
+    assert.match(trendContent, /Demo Fast/);
+    // 2 seeded prior runs + 1 current run = 3 total runs aggregated.
+    assert.match(trendContent, /\*\*Total Runs\*\*: 3/);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }

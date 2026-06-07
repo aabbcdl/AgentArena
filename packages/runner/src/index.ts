@@ -9,6 +9,7 @@ import {
   type BenchmarkRun,
   getDefaultWeights,
   isAbortError,
+  logger,
   type ScoreMode,
   throwIfAborted,
 } from "@agentarena/core";
@@ -22,6 +23,7 @@ import {
   createSkippedRunResult,
 } from "./result-builder.js";
 import { collectResults } from "./result-collection.js";
+import { checkTaskCompatibility } from "./task-compatibility.js";
 import { cleanupWorkspace, formatErrorDetails, formatErrorMessage, type WorkspaceCleanupResult } from "./workspace.js";
 import { prepareWorkspace } from "./workspace-prep.js";
 
@@ -55,7 +57,6 @@ export interface BenchmarkOptions {
   onProgress?: (event: BenchmarkProgressEvent) => void | Promise<void>;
   scoreMode?: ScoreMode;
   tokenBudget?: number;
-  categories?: string[];
   debug?: boolean;
 }
 
@@ -101,7 +102,28 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
   };
 
   // Step 1: Resolve and validate the repository
-  const { repoPath, task } = await resolveAndValidateRepo(options);
+  const resolved = await resolveAndValidateRepo(options);
+  const repoPath = resolved.repoPath;
+  // Wire the CLI --token-budget flag: when options.tokenBudget is set it
+  // overrides task.metadata.tokenBudget for this run, so token-efficiency
+  // scoring (judges + result assembly read task.metadata.tokenBudget) uses the
+  // CLI value. Applied immutably to a fresh task object.
+  const task =
+    options.tokenBudget !== undefined && Number.isFinite(options.tokenBudget) && options.tokenBudget > 0
+      ? {
+          ...resolved.task,
+          metadata: {
+            ...(resolved.task.metadata ?? {
+              source: "community" as const,
+              owner: "unknown",
+              repoTypes: [],
+              tags: [],
+              dependencies: []
+            }),
+            tokenBudget: options.tokenBudget
+          }
+        }
+      : resolved.task;
 
   // Step 2: Prepare workspace directories and temp paths
   const { runId, outputPath, workspaceRootPath } = await prepareWorkspace({
@@ -128,6 +150,58 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
     message: `Created run ${runId}.`,
     metadata: { runId, outputPath }
   });
+
+  // Step 2.5: Non-fatal task/repo compatibility preflight signal.
+  // Surfaces a warning when the task pack's requirements (scripts, fixtures,
+  // runtimes) are not satisfied by the resolved repo, but does NOT hard-fail —
+  // the run still attempts to execute (preserving prior behavior). The result
+  // is exposed via the progress event metadata so the UI/CLI can show it.
+  try {
+    const compatibility = await checkTaskCompatibility(task, repoPath);
+    if (compatibility.status !== "compatible") {
+      const failedChecks = compatibility.checks
+        .filter((check) => check.status !== "pass")
+        .map((check) => `${check.label}: ${check.message}`);
+      await safeProgress({
+        phase: "preflight",
+        message: `Task compatibility warning: ${compatibility.summary}`,
+        metadata: {
+          compatibility: {
+            status: compatibility.status,
+            summary: compatibility.summary,
+            checks: compatibility.checks,
+            failedChecks
+          }
+        }
+      });
+      logger.warn(
+        "runner",
+        "task.compatibility_warning",
+        `Task "${task.id}" compatibility: ${compatibility.status} — ${compatibility.summary}`,
+        { metadata: { failedChecks } }
+      );
+    } else {
+      await safeProgress({
+        phase: "preflight",
+        message: "Task compatibility check passed.",
+        metadata: {
+          compatibility: {
+            status: compatibility.status,
+            summary: compatibility.summary,
+            checks: compatibility.checks,
+            failedChecks: []
+          }
+        }
+      });
+    }
+  } catch (compatibilityError) {
+    // Compatibility evaluation is best-effort; never let it abort the run.
+    logger.warn(
+      "runner",
+      "task.compatibility_check_failed",
+      `Task compatibility check could not run: ${compatibilityError instanceof Error ? compatibilityError.message : String(compatibilityError)}`
+    );
+  }
 
   // Step 3: Run preflight checks
   await safeProgress({

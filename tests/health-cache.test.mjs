@@ -119,6 +119,35 @@ describe("HealthCache", () => {
     assert.equal(await cache.has("test", "provider"), false);
   });
 
+  it("keys distinct endpoints under the same adapter/provider separately", async () => {
+    // Two profiles can share an id but point at different baseUrls. Each must
+    // get its own cache entry so a verdict for one does not mask the other.
+    await cache.set("claude-code", "shared-id", "ready", "endpoint A ok", {
+      endpoint: "https://a.example.com",
+    });
+    await cache.set("claude-code", "shared-id", "blocked", "endpoint B failed", {
+      endpoint: "https://b.example.com",
+    });
+
+    const a = await cache.get("claude-code", "shared-id", "https://a.example.com");
+    const b = await cache.get("claude-code", "shared-id", "https://b.example.com");
+
+    assert.equal(a.status, "ready");
+    assert.equal(b.status, "blocked");
+    // The no-endpoint key is a third, independent slot.
+    assert.equal(await cache.get("claude-code", "shared-id"), undefined);
+  });
+
+  it("invalidate only drops the matching endpoint key", async () => {
+    await cache.set("claude-code", "p", "ready", "A", { endpoint: "https://a.example.com" });
+    await cache.set("claude-code", "p", "ready", "B", { endpoint: "https://b.example.com" });
+
+    await cache.invalidate("claude-code", "p", "https://a.example.com");
+
+    assert.equal(await cache.has("claude-code", "p", "https://a.example.com"), false);
+    assert.equal(await cache.has("claude-code", "p", "https://b.example.com"), true);
+  });
+
   it("should cleanup expired entries", async () => {
     const shortCache = new HealthCache({
       cacheDir: tempDir,

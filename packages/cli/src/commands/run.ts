@@ -3,9 +3,11 @@ import path from "node:path";
 import { listAvailableAdapters } from "@agentarena/adapters";
 import { type BenchmarkRun, createCancellation, formatDuration } from "@agentarena/core";
 import {
+  aggregateMultiRuns,
   computeVarianceAnalysis,
   enrichRunWithScores,
   formatDecisionReport,
+  formatMultiRunReport,
   formatVarianceReport,
   generateDecisionReport,
   getReportCopy,
@@ -98,6 +100,15 @@ export async function runBenchmarkCommand(
 
   const selections = normalizeCliSelections(parsed);
 
+  // --probe-timeout is a doctor-only option (it tunes the auth-probe timeout in
+  // `agentarena doctor`). The run preflight does not consume it, so warn rather
+  // than silently ignore it.
+  if (parsed.probeTimeout !== undefined) {
+    console.warn(
+      "[agentarena] --probe-timeout is only used by 'agentarena doctor'; it has no effect on 'run' and will be ignored.",
+    );
+  }
+
   const runStartMs = Date.now();
 
   if (parsed.format !== "json") {
@@ -149,7 +160,6 @@ export async function runBenchmarkCommand(
       maxConcurrency: parsed.maxConcurrency,
       scoreMode: parsed.scoreMode,
       tokenBudget: parsed.tokenBudget,
-      categories: parsed.categories,
       debug: parsed.debug,
       cancellation,
       onProgress:
@@ -198,6 +208,7 @@ export async function runBenchmarkCommand(
   // Variance analysis: check for previous runs with the same task
   const runsDir = path.dirname(benchmark.outputPath);
   let varianceReportText: string | null = null;
+  let trendReportPath: string | null = null;
   try {
     const allRunFiles = await fs.readdir(runsDir);
     const jsonFiles = allRunFiles.filter((f) => f.endsWith(".json")).slice(-50);
@@ -229,6 +240,19 @@ export async function runBenchmarkCommand(
     if (comparableRuns.length > 1) {
       const varianceReport = computeVarianceAnalysis(comparableRuns);
       varianceReportText = formatVarianceReport(varianceReport);
+
+      // Multi-run trend: aggregate the prior comparable runs together with the
+      // current run (already in memory — no extra scan) and write a trend.md
+      // artifact summarizing per-agent performance across runs.
+      try {
+        const trendComparison = aggregateMultiRuns([...comparableRuns, benchmark]);
+        const trendReport = formatMultiRunReport(trendComparison);
+        trendReportPath = path.join(benchmark.outputPath, "trend.md");
+        await fs.writeFile(trendReportPath, trendReport, "utf8");
+      } catch (trendError) {
+        trendReportPath = null;
+        console.warn(`[agentarena] Trend report skipped: ${trendError instanceof Error ? trendError.message : String(trendError)}`);
+      }
     }
   } catch (varianceError) {
     console.warn(`[agentarena] Variance analysis skipped: ${varianceError instanceof Error ? varianceError.message : String(varianceError)}`);
@@ -337,6 +361,9 @@ export async function runBenchmarkCommand(
     console.log(`  PR comment:         ${report.prCommentPath}`);
     console.log(`  Decision report:    ${decisionReportPath}`);
     console.log(`  CSV export:         ${csvPath}`);
+    if (trendReportPath) {
+      console.log(`  Trend report:       ${trendReportPath}`);
+    }
 
     if (varianceReportText) {
       console.log(`\n${varianceReportText}`);

@@ -420,6 +420,9 @@ export class ClaudeCodeAdapter extends ClaudeLikeAdapter {
           },
           preflightTimeoutMs(),
           {
+            // Key the health cache on the provider baseUrl so two profiles that
+            // share an id but point at different endpoints do not collide.
+            endpoint: resolved.profile.baseUrl,
             useCache: true,
             forceProbe: false,
           }

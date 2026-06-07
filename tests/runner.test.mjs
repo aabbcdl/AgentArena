@@ -965,3 +965,223 @@ test("runBenchmark returns cancelled results and still runs teardown after abort
 
   await rm(tempDir, { recursive: true, force: true });
 });
+
+test("runBenchmark tokenBudget option overrides task.metadata for tokenEfficiencyScore", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-runner-"));
+  const repoPath = path.join(tempDir, "repo");
+  const outputPath = path.join(tempDir, "output");
+  const taskPath = path.join(tempDir, "task-budget.json");
+
+  await mkdir(repoPath, { recursive: true });
+  await writeFile(path.join(repoPath, "README.md"), "# Temp Repo\n", "utf8");
+  await writeJson(path.join(repoPath, "package.json"), { name: "temp-repo", version: "0.0.0" });
+
+  // Metadata budget is tiny (1 token) -> efficiency would be ~0 without override.
+  // The CLI override budget is huge -> efficiency should clamp to 1.0, proving
+  // options.tokenBudget overrides task.metadata.tokenBudget.
+  await writeJson(taskPath, {
+    schemaVersion: "agentarena.taskpack/v1",
+    id: "token-budget-demo",
+    title: "Token Budget Demo",
+    prompt: "Test token budget override.",
+    metadata: {
+      source: "official",
+      owner: "test",
+      repoTypes: ["node-js"],
+      tags: ["test"],
+      dependencies: [],
+      tokenBudget: 1
+    },
+    judges: [
+      {
+        id: "pass",
+        type: "command",
+        label: "Always pass",
+        command: "node -e \"process.exit(0)\""
+      }
+    ]
+  });
+
+  const benchmark = await runBenchmark({
+    repoPath,
+    taskPath,
+    agentIds: ["demo-fast"],
+    outputPath,
+    tokenBudget: 10_000_000
+  });
+
+  const result = benchmark.results[0];
+  assert.equal(result.status, "success");
+  assert.equal(
+    result.tokenEfficiencyScore,
+    1,
+    "CLI tokenBudget override should yield a full efficiency score (1.0)"
+  );
+});
+
+test("runBenchmark without tokenBudget option keeps task.metadata budget for scoring", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-runner-"));
+  const repoPath = path.join(tempDir, "repo");
+  const outputPath = path.join(tempDir, "output");
+  const taskPath = path.join(tempDir, "task-budget-meta.json");
+
+  await mkdir(repoPath, { recursive: true });
+  await writeFile(path.join(repoPath, "README.md"), "# Temp Repo\n", "utf8");
+  await writeJson(path.join(repoPath, "package.json"), { name: "temp-repo", version: "0.0.0" });
+
+  // Tiny metadata budget, no CLI override -> efficiency must be < 1.0.
+  await writeJson(taskPath, {
+    schemaVersion: "agentarena.taskpack/v1",
+    id: "token-budget-meta-demo",
+    title: "Token Budget Meta Demo",
+    prompt: "Test token budget metadata fallback.",
+    metadata: {
+      source: "official",
+      owner: "test",
+      repoTypes: ["node-js"],
+      tags: ["test"],
+      dependencies: [],
+      tokenBudget: 1
+    },
+    judges: [
+      {
+        id: "pass",
+        type: "command",
+        label: "Always pass",
+        command: "node -e \"process.exit(0)\""
+      }
+    ]
+  });
+
+  const benchmark = await runBenchmark({
+    repoPath,
+    taskPath,
+    agentIds: ["demo-fast"],
+    outputPath
+  });
+
+  const result = benchmark.results[0];
+  assert.equal(result.status, "success");
+  assert.ok(
+    typeof result.tokenEfficiencyScore === "number" && result.tokenEfficiencyScore < 1,
+    "Without CLI override, the tiny metadata budget should produce efficiency < 1.0"
+  );
+});
+
+test("runBenchmark surfaces a non-fatal task compatibility warning without throwing", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-runner-"));
+  const repoPath = path.join(tempDir, "repo");
+  const outputPath = path.join(tempDir, "output");
+  const taskPath = path.join(tempDir, "task-incompat.json");
+
+  // Repo intentionally has NO package.json and NO build/lint scripts, so the
+  // compatibility checker flags the task as partially compatible ("warning").
+  await mkdir(repoPath, { recursive: true });
+  await writeFile(path.join(repoPath, "README.md"), "# Bare Repo\n", "utf8");
+
+  await writeJson(taskPath, {
+    schemaVersion: "agentarena.taskpack/v1",
+    id: "incompat-demo",
+    title: "Incompatible Demo",
+    prompt: "Task that needs scripts the repo does not provide.",
+    judges: [
+      {
+        id: "needs-build",
+        type: "compilation",
+        label: "Project compiles"
+      },
+      {
+        id: "needs-fixture",
+        type: "file-exists",
+        label: "Fixture file present",
+        path: "fixtures/required-by-task.txt"
+      }
+    ]
+  });
+
+  const events = [];
+  // Must not throw despite the incompatibility — the run proceeds as before.
+  const benchmark = await runBenchmark({
+    repoPath,
+    taskPath,
+    agentIds: ["demo-fast"],
+    outputPath,
+    onProgress: (event) => {
+      events.push(event);
+    }
+  });
+
+  // The run completed (did not hard-fail on the compatibility signal).
+  assert.equal(benchmark.results.length, 1);
+
+  // A compatibility warning was surfaced via progress metadata.
+  const compatEvent = events.find(
+    (event) => event.metadata && event.metadata.compatibility
+  );
+  assert.ok(compatEvent, "Expected a progress event carrying compatibility metadata");
+  assert.equal(compatEvent.metadata.compatibility.status, "warning");
+  assert.ok(
+    Array.isArray(compatEvent.metadata.compatibility.checks) &&
+      compatEvent.metadata.compatibility.checks.length > 0,
+    "Compatibility metadata should include the individual checks"
+  );
+  assert.ok(
+    compatEvent.metadata.compatibility.failedChecks.length > 0,
+    "Compatibility metadata should list the failed/warned checks"
+  );
+  assert.match(compatEvent.message, /compatibility warning/i);
+
+  await rm(tempDir, { recursive: true, force: true });
+});
+
+test("runBenchmark reports a passing compatibility check for a compatible task", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-runner-"));
+  const repoPath = path.join(tempDir, "repo");
+  const outputPath = path.join(tempDir, "output");
+  const taskPath = path.join(tempDir, "task-compat.json");
+
+  // Builtin repo source short-circuits to "compatible" in the checker.
+  const builtinRepoPath = path.join(tempDir, "builtin-repos", "node-starter");
+  await mkdir(builtinRepoPath, { recursive: true });
+  await writeFile(path.join(builtinRepoPath, "README.md"), "# Builtin\n", "utf8");
+  await writeJson(path.join(builtinRepoPath, "package.json"), { name: "b", version: "0.0.0" });
+  await mkdir(repoPath, { recursive: true });
+  await writeFile(path.join(repoPath, "README.md"), "# User\n", "utf8");
+
+  await writeJson(taskPath, {
+    schemaVersion: "agentarena.taskpack/v1",
+    id: "compat-demo",
+    title: "Compatible Demo",
+    prompt: "A builtin-repo task.",
+    repoSource: "builtin://node-starter",
+    judges: [
+      {
+        id: "pass",
+        type: "command",
+        label: "Always pass",
+        command: "node -e \"process.exit(0)\""
+      }
+    ]
+  });
+
+  const events = [];
+  await runBenchmark({
+    repoPath,
+    taskPath,
+    agentIds: ["demo-fast"],
+    outputPath,
+    builtinReposRoot: path.join(tempDir, "builtin-repos"),
+    onProgress: (event) => {
+      events.push(event);
+    }
+  });
+
+  const compatEvent = events.find(
+    (event) => event.metadata && event.metadata.compatibility
+  );
+  assert.ok(compatEvent, "Expected a compatibility progress event");
+  assert.equal(compatEvent.metadata.compatibility.status, "compatible");
+  assert.equal(compatEvent.metadata.compatibility.failedChecks.length, 0);
+
+  await rm(tempDir, { recursive: true, force: true });
+});

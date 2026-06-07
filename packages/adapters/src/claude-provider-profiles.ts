@@ -30,7 +30,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { ClaudeProviderProfile, ClaudeProviderRiskFlag } from "@agentarena/core";
-import { hasInternalDnsResolution, isInternalUrl, logger } from "@agentarena/core";
+import { getHealthCache, hasInternalDnsResolution, isInternalUrl, logger } from "@agentarena/core";
 
 interface ProfileRegistryFile {
   schemaVersion: 1;
@@ -490,6 +490,59 @@ export async function getClaudeProviderProfile(profileId?: string): Promise<Clau
 }
 
 // ---------------------------------------------------------------------------
+// Health-cache invalidation
+//
+// The Claude adapter caches preflight/auth verdicts in the HealthCache, keyed
+// on (adapterId, providerId, endpoint) where endpoint is the profile baseUrl.
+// When a profile's secret or baseUrl changes — or the profile is deleted — any
+// cached verdict is stale and must be dropped, otherwise a fixed credential
+// would still report the old "blocked" status (and vice versa).
+// ---------------------------------------------------------------------------
+
+const CLAUDE_ADAPTER_ID = "claude-code";
+
+/**
+ * Invalidate any cached health verdict for a Claude provider profile.
+ *
+ * Drops both the endpoint-specific cache key (matching what the adapter wrote
+ * using the profile baseUrl) and the no-endpoint key, so the next preflight
+ * re-probes with the updated configuration. Best-effort: cache failures are
+ * logged but never block the profile operation.
+ *
+ * @param profileId - The provider profile ID.
+ * @param endpoints - Candidate endpoints (baseUrls) whose keys should be dropped.
+ */
+async function invalidateProfileHealth(profileId: string, endpoints: Array<string | undefined>): Promise<void> {
+  try {
+    const cache = getHealthCache();
+    // Always drop the no-endpoint key plus every provided endpoint key.
+    const targets = new Set<string | undefined>([undefined, ...endpoints.map((value) => value?.trim() || undefined)]);
+    for (const endpoint of targets) {
+      await cache.invalidate(CLAUDE_ADAPTER_ID, profileId, endpoint);
+    }
+  } catch (error) {
+    logger.warn(
+      "adapter",
+      "profile.health_invalidate_failed",
+      `Failed to invalidate health cache for profile "${profileId}": ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+}
+
+/**
+ * Resolve a profile's current baseUrl from the registry (best-effort).
+ * Used so secret/delete operations can invalidate the endpoint-specific key.
+ */
+async function lookupProfileBaseUrl(profileId: string): Promise<string | undefined> {
+  try {
+    const registry = await readRegistry();
+    return registry.profiles.find((entry) => entry.id === profileId)?.baseUrl;
+  } catch {
+    return undefined;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Section 3: Profile CRUD (save, get, list, delete, buildEnvironment)
 // ---------------------------------------------------------------------------
 
@@ -588,11 +641,16 @@ export async function saveClaudeProviderProfile(input: ClaudeProviderProfileInpu
   });
 
   const nextProfiles = registry.profiles.filter((entry) => entry.id !== id);
+  const previousBaseUrl = registry.profiles.find((entry) => entry.id === id)?.baseUrl;
   nextProfiles.push(profile);
   await writeRegistry({
     schemaVersion: 1,
     profiles: nextProfiles
   });
+
+  // Saving a profile may change its baseUrl or other auth-affecting fields, so
+  // any cached health verdict (keyed on old or new baseUrl) is now stale.
+  await invalidateProfileHealth(profile.id, [previousBaseUrl, profile.baseUrl]);
 
   return {
     ...profile,
@@ -606,6 +664,7 @@ export async function deleteClaudeProviderProfile(profileId: string): Promise<vo
   }
 
   const registry = await readRegistry();
+  const removedBaseUrl = registry.profiles.find((entry) => entry.id === profileId)?.baseUrl;
   await writeRegistry({
     schemaVersion: 1,
     profiles: registry.profiles.filter((entry) => entry.id !== profileId)
@@ -616,6 +675,9 @@ export async function deleteClaudeProviderProfile(profileId: string): Promise<vo
   } else {
     await deleteSecretFile(profileId);
   }
+
+  // The profile is gone — drop any cached health verdict for it.
+  await invalidateProfileHealth(profileId, [removedBaseUrl]);
 }
 
 export async function setClaudeProviderProfileSecret(profileId: string, secret: string): Promise<void> {
@@ -623,12 +685,17 @@ export async function setClaudeProviderProfileSecret(profileId: string, secret: 
     throw new Error("The built-in official Claude profile does not use a stored secret.");
   }
 
+  // Resolve the endpoint up front so both the set and clear paths can drop the
+  // cached health verdict — changing the secret can flip a "blocked" verdict.
+  const baseUrl = await lookupProfileBaseUrl(profileId);
+
   if (!secret.trim()) {
     if (process.platform === "win32") {
       await deleteSecretWindows(profileId);
     } else {
       await deleteSecretFile(profileId);
     }
+    await invalidateProfileHealth(profileId, [baseUrl]);
     return;
   }
 
@@ -637,6 +704,8 @@ export async function setClaudeProviderProfileSecret(profileId: string, secret: 
   } else {
     await setSecretFile(profileId, secret.trim());
   }
+
+  await invalidateProfileHealth(profileId, [baseUrl]);
 }
 
 export async function getClaudeProviderProfileSecret(profileId: string): Promise<string | null> {

@@ -34,7 +34,6 @@ export interface ParsedArgs {
   noOpen?: boolean;
   scoreMode?: ScoreMode;
   tokenBudget?: number;
-  categories?: string[];
   rotationId?: string;
   welcome?: boolean;
   verbose?: boolean;
@@ -90,7 +89,6 @@ Run Command:
   Scoring Options:
     --score-mode <mode>        Scoring mode (practical, balanced, issue-resolution, efficiency-first, rotating-tasks, comprehensive)
     --token-budget <n>         Token budget limit for efficiency scoring
-    --categories <list>        Comma-separated task categories to include
 
   Scoring Mode Descriptions:
     practical                  Focus on practical correctness (default)
@@ -492,18 +490,12 @@ export function parseArgs(argv: string[]): ParsedArgs {
         break;
       }
       case "--categories": {
-        const categoriesValue = args.shift();
-        if (!categoriesValue) {
-          throw new Error("--categories requires a comma-separated list. Example: --categories coding,math,reasoning");
-        }
-        parsed.categories = categoriesValue
-          .split(",")
-          .map((value) => value.trim())
-          .filter(Boolean);
-        if (parsed.categories.length === 0) {
-          throw new Error("--categories list cannot be empty. Example: --categories coding,math,reasoning");
-        }
-        break;
+        // Removed: --categories was never wired into the run path (silent no-op).
+        // Reject it clearly so users are not misled into thinking it filters tasks.
+        throw new Error(
+          "--categories is not supported. Task selection by category is not implemented; " +
+          "remove this flag. Use separate task packs to scope categories."
+        );
       }
       case "--verbose":
       case "-v":
@@ -560,6 +552,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
         process.exit(0);
         break; // eslint-disable-line no-fallthrough
       case "--version":
+      case "-V":
         parsed.command = "version";
         return parsed;
       default:
