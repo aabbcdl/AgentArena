@@ -22,6 +22,7 @@ export interface ParsedArgs {
   strict: boolean;
   updateSnapshots: boolean;
   cleanupWorkspaces: boolean;
+  dryRun: boolean;
   maxConcurrency?: number;
   json: boolean;
   templateName?: string;
@@ -233,6 +234,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     strict: false,
     updateSnapshots: false,
     cleanupWorkspaces: false,
+    dryRun: false,
     json: false,
     force: false,
     verbose: false,
@@ -394,6 +396,9 @@ export function parseArgs(argv: string[]): ParsedArgs {
         break;
       case "--cleanup-workspaces":
         parsed.cleanupWorkspaces = true;
+        break;
+      case "--dry-run":
+        parsed.dryRun = true;
         break;
       case "--template":
         parsed.templateName = args.shift();

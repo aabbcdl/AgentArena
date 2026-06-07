@@ -122,6 +122,52 @@ export async function runBenchmarkCommand(
     console.log("");
   }
 
+  if (parsed.dryRun) {
+    const resolvedOutput = parsed.outputPath
+      ? path.resolve(parsed.outputPath)
+      : "(default: <repo>/.agentarena/runs)";
+    if (parsed.format === "json") {
+      console.log(
+        JSON.stringify(
+          {
+            dryRun: true,
+            repoPath: parsed.repoPath,
+            taskPath: parsed.taskPath,
+            outputPath: resolvedOutput,
+            scoreMode: parsed.scoreMode ?? "practical",
+            tokenBudget: parsed.tokenBudget ?? null,
+            maxConcurrency: parsed.maxConcurrency ?? null,
+            probeAuth: parsed.probeAuth,
+            agents: selections.map((selection) => ({
+              baseAgentId: selection.baseAgentId,
+              variantId: selection.variantId,
+              displayLabel: selection.displayLabel,
+              model: selection.config?.model ?? null,
+            })),
+          },
+          null,
+          2,
+        ),
+      );
+    } else {
+      console.log("Dry run — resolved plan (no agents executed):");
+      console.log(`  Output:       ${resolvedOutput}`);
+      console.log(`  Score mode:   ${parsed.scoreMode ?? "practical"}`);
+      console.log(`  Token budget: ${parsed.tokenBudget ?? "(task default)"}`);
+      console.log(`  Concurrency:  ${parsed.maxConcurrency ?? "(default)"}`);
+      console.log(`  Probe auth:   ${parsed.probeAuth ? "yes" : "no"}`);
+      console.log("  Agents:");
+      for (const selection of selections) {
+        const model = selection.config?.model
+          ? ` (model: ${selection.config.model})`
+          : "";
+        console.log(`    - ${selection.displayLabel}${model}`);
+      }
+      console.log("\nRe-run without --dry-run to execute.");
+    }
+    return;
+  }
+
   function elapsed(): string {
     const sec = Math.floor((Date.now() - runStartMs) / 1000);
     const m = Math.floor(sec / 60);

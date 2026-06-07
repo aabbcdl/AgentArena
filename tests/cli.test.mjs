@@ -156,6 +156,42 @@ test("agentarena run exits with code 0 on successful benchmark", { timeout: 60_0
   }
 });
 
+test("agentarena run --dry-run prints the plan without executing", { timeout: 30_000 }, async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-cli-"));
+  try {
+    const repoPath = path.join(tempDir, "repo");
+    const outputPath = path.join(tempDir, "output-dry");
+    const taskPath = path.join(tempDir, "task-dry.json");
+
+    await mkdir(repoPath, { recursive: true });
+    await writeFile(path.join(repoPath, "README.md"), "# Temp Repo\n", "utf8");
+    await writeJson(taskPath, {
+      schemaVersion: "agentarena.taskpack/v1",
+      id: "cli-dry",
+      title: "CLI Dry",
+      prompt: "Should not run",
+      judges: [
+        { id: "pass", type: "command", label: "Always pass", command: "node -e \"process.exit(0)\"" }
+      ]
+    });
+
+    const result = await runCli(
+      ["run", "--repo", repoPath, "--task", taskPath, "--agents", "demo-fast", "--output", outputPath, "--dry-run"],
+      path.resolve(".")
+    );
+
+    assert.equal(result.code, 0);
+    assert.match(result.stdout, /Dry run/);
+    assert.match(result.stdout, /Agents:/);
+    // Nothing executed, so no run directory should have been written.
+    let outputExists = true;
+    try { await readdir(outputPath); } catch { outputExists = false; }
+    assert.equal(outputExists, false, "output dir must not exist after a dry run");
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("agentarena run exits with code 1 on failed benchmark", { timeout: 60_000 }, async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-cli-"));
   try {
