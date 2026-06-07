@@ -754,6 +754,22 @@ function applySingleRun(run, markdown = null) {
   }
 }
 
+// Shows the "Replay trace" toggle only when the selected run actually has trace
+// data, and keeps its label/aria state in sync with the panel. Without an entry
+// point the trace replay panel (a headline feature) was unreachable.
+function updateTraceReplayToggle() {
+  const toggle = document.getElementById("trace-replay-toggle");
+  if (!toggle) return;
+  const hasTrace = !!state.run?.results?.some((result) => result.tracePath || result.traceFile);
+  setHidden(toggle, !hasTrace);
+  const open = !!traceReplay.isVisible();
+  toggle.setAttribute("aria-expanded", open ? "true" : "false");
+  const label = toggle.querySelector("[data-trace-toggle-label]");
+  if (label) {
+    label.textContent = open ? localText("隐藏轨迹", "Hide trace") : localText("回放执行轨迹", "Replay trace");
+  }
+}
+
 async function renderCommunityView() {
   if (!elements.communitySection) return;
   if (!state.run) {
@@ -868,6 +884,7 @@ function render() {
     const wsHome = document.querySelector('.workspace-home');
     if (wsHome) wsHome.classList.remove('hidden');
     traceReplay.hide(); // Clean up setInterval when navigating away
+    updateTraceReplayToggle();
     elements.agentCount.textContent = "0";
     elements.agentList.className = "agent-list empty-state";
     elements.agentList.textContent = t("agentListEmpty");
@@ -886,6 +903,10 @@ function render() {
     const wsHome = document.querySelector('.workspace-home');
     if (wsHome) wsHome.classList.add('hidden');
     try { renderCommunityView(); } catch(e) { console.error("[agentarena] renderCommunityView error:", e); renderErrors.push(`Community: ${e instanceof Error ? e.message : String(e)}`); }
+    updateTraceReplayToggle();
+    if (traceReplay.isVisible()) {
+      try { traceReplay.loadTraceForRun(state.run); } catch(e) { console.error("[agentarena] trace reload error:", e); }
+    }
   }
 
   // Show render errors visibly so users can report them instead of staring at a blank page
@@ -1720,6 +1741,26 @@ for (const [key, elementName] of Object.entries(scoreWeightElements)) {
   });
 }
 
+// The custom "advanced" weight sliders (#weight-sliders) are rendered by
+// renderWeightSliders() and rebuilt on every re-render, so we delegate from the
+// persistent container. Each slider carries its weight key in data-weight and a
+// 0-100 value. Without this, dragging only updated the % label and never
+// re-scored. Debounced so a drag re-scores once the user pauses.
+const weightSlidersContainer = document.getElementById("weight-sliders");
+if (weightSlidersContainer) {
+  const debouncedSliderUpdate = debounce(
+    (key, value) => updateScoreWeight(key, value),
+    200
+  );
+  weightSlidersContainer.addEventListener("input", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement) || target.dataset.weight === undefined) {
+      return;
+    }
+    debouncedSliderUpdate(target.dataset.weight, Number(target.value ?? 0) / 100);
+  });
+}
+
 elements.scoreWeightsReset?.addEventListener("click", () => {
   state.scoreWeights = /** @type {Record<string, number>} */ ({ ...DEFAULT_SCORE_WEIGHTS });
   renderScoreWeightsControls();
@@ -1960,6 +2001,21 @@ hideUpdateBanner();
 
 // Trace Replay UI setup
 traceReplay.setupEventListeners();
+
+// Entry point for the trace replay panel (previously unreachable: show() was
+// never called). Toggles the panel and loads the current run's trace.
+const traceReplayToggleBtn = document.getElementById("trace-replay-toggle");
+if (traceReplayToggleBtn) {
+  traceReplayToggleBtn.addEventListener("click", () => {
+    if (traceReplay.isVisible()) {
+      traceReplay.hide();
+    } else {
+      traceReplay.show();
+      traceReplay.loadTraceForRun(state.run);
+    }
+    updateTraceReplayToggle();
+  });
+}
 
 // Feature 2: Live validation on task select and agent changes
 elements.launcherTaskSelect.addEventListener("change", () => {
