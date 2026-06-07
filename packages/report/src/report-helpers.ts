@@ -261,7 +261,11 @@ export function sanitizeRun(run: BenchmarkRun): BenchmarkRun {
         cwd: sanitizeWorkspaceScopedPath(step.cwd, result.workspacePath, result.agentId)
       })),
       tracePath: sanitizePath(result.tracePath, run.outputPath, "run"),
-      workspacePath: `workspace/${portableBasename(result.workspacePath)}`
+      workspacePath: `workspace/${portableBasename(result.workspacePath)}`,
+      // The assembled prompt can embed repo file contents or secrets pulled into
+      // context; never ship it in shareable/published output. The task intent
+      // stays visible via run.task.prompt, which is the human-authored source.
+      assembledPrompt: result.assembledPrompt === undefined ? undefined : "[redacted]"
     }))
   };
 }

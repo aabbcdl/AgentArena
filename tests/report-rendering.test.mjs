@@ -2,7 +2,7 @@ import assert from "node:assert";
 import { describe, it } from "node:test";
 import { escapeHtml } from "../packages/core/dist/index.js";
 import { renderHtml } from "../packages/report/dist/html-template.js";
-import { generateCsv } from "../packages/report/dist/index.js";
+import { generateCsv, sanitizeRun } from "../packages/report/dist/index.js";
 
 describe("report rendering", () => {
   describe("escapeHtml", () => {
@@ -103,6 +103,44 @@ describe("report rendering", () => {
 
       const csv = generateCsv(run);
       assert.ok(csv.includes("n/a"));
+    });
+  });
+
+  describe("sanitizeRun", () => {
+    const baseResult = {
+      agentId: "demo-fast",
+      workspacePath: "/tmp/ws/demo-fast",
+      tracePath: "/abs/out/agents/demo-fast/trace.jsonl",
+      preflight: { command: "secret-cmd" },
+      setupResults: [],
+      judgeResults: [],
+      teardownResults: []
+    };
+    const baseRun = {
+      runId: "r1",
+      createdAt: "2026-01-01T00:00:00Z",
+      repoPath: "/abs/repo",
+      outputPath: "/abs/out",
+      task: { id: "t", title: "T", prompt: "do x" },
+      preflights: []
+    };
+
+    it("redacts the assembled prompt from shareable output", () => {
+      const run = {
+        ...baseRun,
+        results: [{ ...baseResult, assembledPrompt: "internal file contents and API_KEY=sk-leak-123" }]
+      };
+      const sanitized = sanitizeRun(run);
+      assert.equal(sanitized.results[0].assembledPrompt, "[redacted]");
+      assert.ok(
+        !JSON.stringify(sanitized).includes("API_KEY=sk-leak-123"),
+        "prompt secret must not survive sanitization"
+      );
+    });
+
+    it("leaves an absent assembled prompt undefined", () => {
+      const run = { ...baseRun, results: [{ ...baseResult, assembledPrompt: undefined }] };
+      assert.equal(sanitizeRun(run).results[0].assembledPrompt, undefined);
     });
   });
 
