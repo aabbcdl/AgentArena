@@ -81,6 +81,43 @@ test("JsonlTraceRecorder query supports limit, offset, and reverse", async () =>
   await fs.rm(dir, { recursive: true, force: true });
 });
 
+test("JsonlTraceRecorder query warns when skipping malformed JSONL", async () => {
+  const dir = tempDir();
+  const filePath = path.join(dir, "trace.jsonl");
+  const recorder = new JsonlTraceRecorder(filePath);
+  const originalWarn = console.warn;
+  const warnings = [];
+
+  await fs.mkdir(dir, { recursive: true });
+  await fs.writeFile(
+    filePath,
+    [
+      JSON.stringify({ timestamp: "2026-01-01T00:00:00Z", agentId: "a", type: "info", message: "first" }),
+      "{not valid json",
+      JSON.stringify({ timestamp: "2026-01-01T00:00:01Z", agentId: "a", type: "error", message: "second" })
+    ].join("\n"),
+    "utf8"
+  );
+
+  console.warn = (message) => {
+    warnings.push(String(message));
+  };
+
+  try {
+    const events = await recorder.query();
+
+    assert.equal(events.length, 2);
+    assert.deepEqual(events.map((event) => event.message), ["first", "second"]);
+    assert.ok(
+      warnings.some((line) => line.includes("trace.malformed") && line.includes("Skipping malformed trace line")),
+      `expected trace malformed warning, got ${JSON.stringify(warnings)}`
+    );
+  } finally {
+    console.warn = originalWarn;
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("JsonlTraceRecorder getEventCount and getEventTypes", async () => {
   const dir = tempDir();
   const filePath = path.join(dir, "trace.jsonl");

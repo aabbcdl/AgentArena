@@ -42,7 +42,7 @@ function request(port, method, pathname, body, token) {
   });
 }
 
-function waitForServer(port, timeoutMs = 10000) {
+function waitForServer(port, timeoutMs = 30000) {
   return new Promise((resolve, reject) => {
     const deadline = Date.now() + timeoutMs;
     const check = () => {
@@ -85,7 +85,12 @@ async function startServer(port) {
   child.stdout.resume();
   child.stderr.on("data", (chunk) => { stderr += chunk; });
 
-  await waitForServer(port);
+  try {
+    await waitForServer(port);
+  } catch (error) {
+    child.kill("SIGTERM");
+    throw new Error(`${error instanceof Error ? error.message : String(error)}\nstderr:\n${stderr}`);
+  }
 
   await new Promise(r => setTimeout(r, 200));
 

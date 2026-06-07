@@ -7,6 +7,15 @@ import { createGunzip, createGzip } from "node:zlib";
 import { ensureDirectory, logger, metrics, type TraceEvent } from "@agentarena/core";
 import { matchesFilter, type TraceFilter, type TraceQueryOptions } from "./types.js";
 
+function logMalformedTraceLine(filePath: string, line: string): void {
+  logger.warn("trace", "trace.malformed", "Skipping malformed trace line", {
+    metadata: {
+      filePath,
+      preview: line.slice(0, 100)
+    }
+  });
+}
+
 /**
  * Read trace events from a JSONL file using streaming to handle large files.
  * Returns the events and a count of any malformed lines encountered.
@@ -24,7 +33,7 @@ async function readTraceFileStreaming(filePath: string): Promise<{ events: Trace
       events.push(JSON.parse(line) as TraceEvent);
     } catch {
       malformedCount++;
-      console.warn(`[trace] Skipping malformed line in ${filePath}: ${line.slice(0, 100)}`);
+      logMalformedTraceLine(filePath, line);
     }
   }
 
@@ -61,6 +70,7 @@ async function queryTraceFileStream(
         }
       } catch {
         malformedCount++;
+        logMalformedTraceLine(filePath, line);
       }
     }
     filtered.reverse();
@@ -92,6 +102,7 @@ async function queryTraceFileStream(
       }
     } catch {
       malformedCount++;
+      logMalformedTraceLine(filePath, line);
     }
   }
 
