@@ -33,7 +33,7 @@
     "yaml": "2.9.0"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json && node ../../scripts/copy-cli-assets.mjs",
+    "build": "node ../../scripts/clean-package-dist.mjs && tsc -p tsconfig.json && node ../../scripts/copy-cli-assets.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   }
 }

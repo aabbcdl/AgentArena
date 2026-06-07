@@ -22,7 +22,7 @@
     "yaml": "2.9.0"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "node ../../scripts/clean-package-dist.mjs && tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   }
 }
