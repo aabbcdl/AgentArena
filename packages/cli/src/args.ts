@@ -23,6 +23,7 @@ export interface ParsedArgs {
   updateSnapshots: boolean;
   cleanupWorkspaces: boolean;
   dryRun: boolean;
+  resumeFrom?: string;
   agentTimeout?: number;
   teamSize?: number;
   dailyRuns?: number;
@@ -84,6 +85,7 @@ Run Command:
     --update-snapshots         Update snapshot files if they differ
     --cleanup-workspaces       Remove agent workspace directories after run
     --dry-run                  Print the resolved run plan without executing agents
+    --resume <run-dir>         Resume a previous run directory by reusing completed agent results
     --agent-timeout <ms>       Per-agent execution timeout in milliseconds
     --team-size <n>            Team size used for decision-report cost estimates (default: 10)
     --daily-runs <n>           Runs per day used for decision-report cost estimates (default: 5)
@@ -408,6 +410,12 @@ export function parseArgs(argv: string[]): ParsedArgs {
         break;
       case "--dry-run":
         parsed.dryRun = true;
+        break;
+      case "--resume":
+        parsed.resumeFrom = args.shift();
+        if (!parsed.resumeFrom) {
+          throw new Error("--resume requires a run directory. Example: --resume .agentarena/runs/run-123");
+        }
         break;
       case "--agent-timeout": {
         const rawAgentTimeout = args.shift();

@@ -156,6 +156,31 @@ export async function runBenchmarkCommand(
 
   const selections = normalizeCliSelections(parsed);
   const repeatCount = parsed.repeat ?? 1;
+  let outputRootPath = parsed.outputPath ? path.resolve(parsed.outputPath) : undefined;
+  let resumeFromPath: string | undefined;
+  let resumeRunId: string | undefined;
+
+  if (parsed.resumeFrom) {
+    if (repeatCount > 1) {
+      throw new Error("--resume cannot be combined with --repeat; resume one run at a time.");
+    }
+    resumeFromPath = path.resolve(parsed.resumeFrom);
+    const resumeStat = await fs.stat(resumeFromPath).catch((error: unknown) => {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        throw new Error(`--resume run directory not found: ${resumeFromPath}`);
+      }
+      throw error;
+    });
+    if (!resumeStat.isDirectory()) {
+      throw new Error(`--resume must point to a run directory: ${resumeFromPath}`);
+    }
+    const resumeOutputRoot = path.dirname(resumeFromPath);
+    if (outputRootPath && outputRootPath !== resumeOutputRoot) {
+      throw new Error("--resume already determines the output root; remove --output or point it to the resume parent directory.");
+    }
+    outputRootPath = resumeOutputRoot;
+    resumeRunId = path.basename(resumeFromPath);
+  }
 
   // --probe-timeout is a doctor-only option (it tunes the auth-probe timeout in
   // `agentarena doctor`). The run preflight does not consume it, so warn rather
@@ -192,6 +217,9 @@ export async function runBenchmarkCommand(
     console.log(`Repository: ${parsed.repoPath}`);
     console.log(`Task: ${parsed.taskPath}`);
     console.log(`Agents: ${parsed.agentIds.join(", ")}`);
+    if (resumeFromPath) {
+      console.log(`Resume from: ${resumeFromPath}`);
+    }
     if (parsed.probeAuth) {
       console.log(`Authentication probe: enabled`);
     }
@@ -199,9 +227,7 @@ export async function runBenchmarkCommand(
   }
 
   if (parsed.dryRun) {
-    const resolvedOutput = parsed.outputPath
-      ? path.resolve(parsed.outputPath)
-      : "(default: <repo>/.agentarena/runs)";
+    const resolvedOutput = outputRootPath ?? "(default: <repo>/.agentarena/runs)";
     if (parsed.format === "json") {
       console.log(
         JSON.stringify(
@@ -210,6 +236,7 @@ export async function runBenchmarkCommand(
             repoPath: parsed.repoPath,
             taskPath: parsed.taskPath,
             outputPath: resolvedOutput,
+            resumeFrom: resumeFromPath ?? null,
             scoreMode: parsed.scoreMode ?? "practical",
             tokenBudget: parsed.tokenBudget ?? null,
             repeat: repeatCount,
@@ -229,6 +256,9 @@ export async function runBenchmarkCommand(
     } else {
       console.log("Dry run — resolved plan (no agents executed):");
       console.log(`  Output:       ${resolvedOutput}`);
+      if (resumeFromPath) {
+        console.log(`  Resume from:  ${resumeFromPath}`);
+      }
       console.log(`  Score mode:   ${parsed.scoreMode ?? "practical"}`);
       console.log(`  Token budget: ${parsed.tokenBudget ?? "(task default)"}`);
       console.log(`  Repeat:       ${repeatCount}`);
@@ -275,9 +305,9 @@ export async function runBenchmarkCommand(
       taskPath: parsed.taskPath,
       agentIds: selections.map((selection) => selection.baseAgentId),
       agents: selections,
-      outputPath: parsed.outputPath
-        ? path.resolve(parsed.outputPath)
-        : undefined,
+      runId: resumeRunId,
+      outputPath: outputRootPath,
+      resumeFrom: resumeFromPath,
       probeAuth: parsed.probeAuth,
       updateSnapshots: parsed.updateSnapshots,
       cleanupWorkspaces: parsed.cleanupWorkspaces,

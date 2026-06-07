@@ -717,6 +717,64 @@ test("runBenchmark isolates workspace roots when concurrent runs reuse the same 
   await rm(tempDir, { recursive: true, force: true });
 });
 
+test("runBenchmark resumes completed agent results from a run directory", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-runner-"));
+  const repoPath = path.join(tempDir, "repo");
+  const outputPath = path.join(tempDir, "output");
+  const taskPath = path.join(tempDir, "task.json");
+
+  await mkdir(repoPath, { recursive: true });
+  await writeFile(path.join(repoPath, "README.md"), "# Temp Repo\n", "utf8");
+  await writeJson(path.join(repoPath, "package.json"), { name: "temp-repo", version: "0.0.0" });
+  await writeJson(taskPath, {
+    schemaVersion: "agentarena.taskpack/v1",
+    id: "resume-demo",
+    title: "Resume Demo",
+    prompt: "Create a benchmark note.",
+    judges: [
+      {
+        id: "pass",
+        type: "command",
+        label: "Always pass",
+        command: "node -e \"process.exit(0)\""
+      }
+    ]
+  });
+
+  const firstRun = await runBenchmark({
+    repoPath,
+    taskPath,
+    agentIds: ["demo-fast"],
+    outputPath,
+    runId: "resume-run"
+  });
+
+  const fastResultPath = path.join(firstRun.outputPath, "agents", "demo-fast", "result.json");
+  const persistedFastResult = JSON.parse(await readFile(fastResultPath, "utf8"));
+  persistedFastResult.summary = "RESUMED_SENTINEL";
+  await writeFile(fastResultPath, JSON.stringify(persistedFastResult, null, 2), "utf8");
+
+  const resumedRun = await runBenchmark({
+    repoPath,
+    taskPath,
+    agentIds: ["demo-fast", "demo-budget"],
+    outputPath,
+    runId: "resume-run",
+    resumeFrom: firstRun.outputPath
+  });
+
+  assert.equal(resumedRun.results.length, 2);
+  const fast = resumedRun.results.find((result) => result.variantId === "demo-fast");
+  const budget = resumedRun.results.find((result) => result.variantId === "demo-budget");
+  assert.ok(fast);
+  assert.ok(budget);
+  assert.equal(fast.summary, "RESUMED_SENTINEL");
+  assert.equal(budget.status, "success");
+  assert.ok(await readFile(path.join(resumedRun.outputPath, "agents", "demo-budget", "result.json"), "utf8"));
+
+  await rm(tempDir, { recursive: true, force: true });
+});
+
 test("runBenchmark aborts adapter execution when agent timeout elapses", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-runner-"));
   const repoPath = path.join(tempDir, "repo");

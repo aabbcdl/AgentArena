@@ -192,6 +192,46 @@ test("agentarena run --dry-run prints the plan without executing", { timeout: 30
   }
 });
 
+test("agentarena run --resume is accepted in dry-run and rejects repeat", { timeout: 30_000 }, async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-cli-"));
+  try {
+    const repoPath = path.join(tempDir, "repo");
+    const outputRoot = path.join(tempDir, "output-resume");
+    const resumePath = path.join(outputRoot, "resume-run");
+    const taskPath = path.join(tempDir, "task-resume.json");
+
+    await mkdir(repoPath, { recursive: true });
+    await mkdir(resumePath, { recursive: true });
+    await writeFile(path.join(repoPath, "README.md"), "# Temp Repo\n", "utf8");
+    await writeJson(taskPath, {
+      schemaVersion: "agentarena.taskpack/v1",
+      id: "cli-resume",
+      title: "CLI Resume",
+      prompt: "Resume preview",
+      judges: [
+        { id: "pass", type: "command", label: "Always pass", command: "node -e \"process.exit(0)\"" }
+      ]
+    });
+
+    const ok = await runCli(
+      ["run", "--repo", repoPath, "--task", taskPath, "--agents", "demo-fast", "--resume", resumePath, "--dry-run"],
+      path.resolve(".")
+    );
+    assert.equal(ok.code, 0);
+    assert.match(ok.stdout, /Resume from:/);
+    assert.match(ok.stdout, new RegExp(resumePath.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&")));
+
+    const bad = await runCli(
+      ["run", "--repo", repoPath, "--task", taskPath, "--agents", "demo-fast", "--resume", resumePath, "--repeat", "2", "--dry-run"],
+      path.resolve(".")
+    );
+    assert.notEqual(bad.code, 0);
+    assert.match((bad.stderr || "") + (bad.stdout || ""), /--resume cannot be combined with --repeat/);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("agentarena run --agent-timeout validates and is accepted", { timeout: 30_000 }, async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-cli-"));
   try {
