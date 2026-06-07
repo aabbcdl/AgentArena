@@ -53,6 +53,31 @@ export function agentTimeoutMs(): number {
   return resolveTimeoutMs(process.env.AGENTARENA_AGENT_TIMEOUT_MS, DEFAULT_AGENT_TIMEOUT_MS);
 }
 
+/**
+ * Default preflight auth probe timeout: 60 seconds.
+ *
+ * Third-party providers (mimo, etc.) may have higher latency than official Anthropic API.
+ * 60s provides enough headroom for slow networks + model cold starts.
+ * Overridable via AGENTARENA_PREFLIGHT_TIMEOUT_MS env var.
+ */
+const DEFAULT_PREFLIGHT_TIMEOUT_MS = 60_000;
+
+export function preflightTimeoutMs(): number {
+  return resolveTimeoutMs(process.env.AGENTARENA_PREFLIGHT_TIMEOUT_MS, DEFAULT_PREFLIGHT_TIMEOUT_MS);
+}
+
+/**
+ * Default transport timeout: 120 seconds.
+ *
+ * Third-party providers may have high latency. 120s provides generous headroom.
+ * Overridable via AGENTARENA_TRANSPORT_TIMEOUT_MS env var.
+ */
+const DEFAULT_TRANSPORT_TIMEOUT_MS = 120_000;
+
+export function transportTimeoutMs(): number {
+  return resolveTimeoutMs(process.env.AGENTARENA_TRANSPORT_TIMEOUT_MS, DEFAULT_TRANSPORT_TIMEOUT_MS);
+}
+
 export function formatTimeoutMessage(timeoutMs: number): string {
   return `Process timed out after ${timeoutMs}ms.`;
 }
@@ -139,7 +164,8 @@ export async function runProcess(
   cwd: string,
   timeoutMs = agentTimeoutMs(),
   environment?: NodeJS.ProcessEnv,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  stdinInput?: string
 ): Promise<ProcessResult> {
   return await new Promise((resolve) => {
     let child: ReturnType<typeof spawn> | null = null;
@@ -244,12 +270,21 @@ export async function runProcess(
       child = spawn(command, args, {
         cwd,
         env: environment,
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: [stdinInput !== undefined ? "pipe" : "ignore", "pipe", "pipe"],
         shell: process.platform === "win32",
         windowsHide: true,
         windowsVerbatimArguments: false,
         ...(process.platform !== "win32" ? { detached: true } : {})
       });
+
+      // Feed stdin input (e.g. prompt text) then close the stream.
+      // This avoids shell escaping issues on Windows where special
+      // characters in the prompt (quotes, backticks, etc.) would break
+      // argument parsing under shell: true.
+      if (stdinInput !== undefined && child.stdin) {
+        child.stdin.write(stdinInput);
+        child.stdin.end();
+      }
       if (signal?.aborted) {
         onAbort();
         return;
@@ -343,10 +378,9 @@ export async function terminateProcessTree(pid: number): Promise<void> {
       try {
         execFileSync("taskkill", ["/F", "/T", "/PID", String(pid)], { stdio: "ignore" });
         return; // Success
-      } catch {
-        if (attempt < 2) {
-          await new Promise((resolve) => setTimeout(resolve, 200));
-        }
+      } catch { /* best-effort: retry loop handles failure */ }
+      if (attempt < 2) {
+        await new Promise((resolve) => setTimeout(resolve, 200));
       }
     }
     // Final fallback: try child.kill
@@ -359,7 +393,7 @@ export async function terminateProcessTree(pid: number): Promise<void> {
     // Unix: kill entire process group
     try {
       process.kill(-pid, "SIGTERM");
-    } catch {
+    } catch { /* best-effort: fall back to single-process kill */
       try {
         process.kill(pid, "SIGTERM");
       } catch (error) {
@@ -374,7 +408,7 @@ export async function terminateProcessTree(pid: number): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, TERMINATE_ESCALATE_MS));
     try {
       process.kill(-pid, "SIGKILL");
-    } catch {
+    } catch { /* best-effort: fall back to single-process kill */
       try {
         process.kill(pid, "SIGKILL");
       } catch (error) {

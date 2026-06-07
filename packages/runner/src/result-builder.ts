@@ -40,6 +40,7 @@ interface BaseResultOptions {
   sweBench?: AgentRunResult["sweBench"];
   cursorBench?: AgentRunResult["cursorBench"];
   liveBench?: AgentRunResult["liveBench"];
+  assembledPrompt?: string;
 }
 
 /**
@@ -78,7 +79,8 @@ export function createBaseResult(options: BaseResultOptions): AgentRunResult {
     tokenEfficiencyScore: options.tokenEfficiencyScore,
     sweBench: options.sweBench,
     cursorBench: options.cursorBench,
-    liveBench: options.liveBench
+    liveBench: options.liveBench,
+    assembledPrompt: options.assembledPrompt
   };
 }
 

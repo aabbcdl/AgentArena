@@ -1,7 +1,8 @@
-import { isAbortError } from "@agentarena/core";
+import os from "node:os";
+import { isAbortError, logger } from "@agentarena/core";
 import { formatErrorMessage } from "./workspace.js";
 
-const DEFAULT_AGENT_CONCURRENCY = 1;
+const DEFAULT_AGENT_CONCURRENCY = Math.min(4, os.cpus().length || 1);
 const DEFAULT_AGENT_EXECUTE_TIMEOUT_MS = 30 * 60 * 1_000;
 
 export { DEFAULT_AGENT_CONCURRENCY };
@@ -63,7 +64,7 @@ export async function mapWithConcurrency<T, R>(
           return;
         }
         results[currentIndex] = error instanceof Error ? error : new Error(String(error));
-        console.error(`mapWithConcurrency: item[${currentIndex}] failed: ${formatErrorMessage(error)}`);
+        logger.error("runner", "concurrency.item_failed", `mapWithConcurrency: item[${currentIndex}] failed: ${formatErrorMessage(error)}`, { error });
       }
     }
   }

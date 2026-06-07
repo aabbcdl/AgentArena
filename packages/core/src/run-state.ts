@@ -85,7 +85,7 @@ export async function saveRunState(cwd: string, state: UiRunState): Promise<void
     logger.warn("core", "run_state.persist_failed", `Failed to persist run state: ${err instanceof Error ? err.message : String(err)}`, {
       error: err
     });
-    try { await fs.unlink(tmpPath).catch(() => {}); } catch {}
+    try { await fs.unlink(tmpPath); } catch { /* best-effort: cleanup partial write */ }
   }
 }
 

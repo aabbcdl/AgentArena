@@ -275,24 +275,22 @@ pnpm test:web-report:e2e
 
 ## Official Task Pack Library
 
-23 task packs covering common development scenarios:
+19 task packs covering common development scenarios:
 
 **Quality & Testing**
 - `test-coverage` — increase test coverage for existing modules
 - `failing-test-fix` — fix a failing test suite
-- `lint-clean` — fix lint errors and warnings
 
 **Bug Fixes & Refactoring**
 - `react-bugfix` — fix a React component bug
 - `small-refactor` — refactor a small module
-- `cross-module-refactor` — refactor across multiple modules
-- `multi-file-rename` — rename symbols across files
+- `cross-module-refactor` — refactor across multiple modules *(builtin repo)*
+- `multi-file-rename` — rename symbols across files *(builtin repo)*
 - `config-repair` — fix broken configuration
 
 **API & Backend**
 - `python-api` — add a Python API endpoint
 - `go-microservice` — add a Go microservice feature
-- `json-api` — build a JSON API endpoint
 - `json-contract-repair` — fix JSON schema/contract issues
 
 **DevOps & Infrastructure**
@@ -317,9 +315,6 @@ pnpm test:web-report:e2e
 - `repo-health` — comprehensive repository health check
 - `performance-optimize` — optimize performance bottlenecks
 - `snapshot-fix` — fix snapshot-related issues
-- `compilation-check` — verify build passes
-- `directory-structure` — verify directory structure
-- `full-e2e` — end-to-end validation
 
 Official task packs live under [`examples/taskpacks/official/`](./examples/taskpacks/official/README.md).
 

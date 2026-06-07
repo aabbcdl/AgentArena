@@ -9,21 +9,21 @@ import type {
 } from "@agentarena/core";
 import { demoProfiles } from "./adapter-capabilities.js";
 import { adapterWarn } from "./adapter-diagnostics.js";
-import { getInstallGuide, type InstallGuide } from "./install-guides.js";
 import { createAiderAdapter } from "./aider-adapter.js";
-import { AugmentAdapter } from "./augment-adapter.js";
+import { createAugmentAdapter } from "./augment-adapter.js";
 import { ClaudeCodeAdapter } from "./claude-adapter.js";
 import { CodexCliAdapter } from "./codex-adapter.js";
 import { createCopilotAdapter } from "./copilot-adapter.js";
 import { CursorAdapter } from "./cursor-adapter.js";
 import { DemoAdapter } from "./demo-adapter.js";
-import { GeminiCliAdapter } from "./gemini-adapter.js";
+import { createGeminiAdapter } from "./gemini-adapter.js";
+import { getInstallGuide, type InstallGuide } from "./install-guides.js";
 import { createKiloAdapter } from "./kilo-adapter.js";
 import { createOpencodeAdapter } from "./opencode-adapter.js";
 import { loadAdapterPlugins, registerExternalAdapters } from "./plugin-registry.js";
 import { QwenCodeAdapter } from "./qwen-adapter.js";
 import { resolveCodexRuntime } from "./runtime-resolution.js";
-import { TraeAdapter } from "./trae-adapter.js";
+import { createTraeAdapter } from "./trae-adapter.js";
 import { WindsurfAdapter } from "./windsurf-adapter.js";
 
 function registerAdapter(adapter: AgentAdapter): [string, AgentAdapter] {
@@ -37,14 +37,14 @@ const adapterEntries: Array<[string, AgentAdapter]> = [
   registerAdapter(new CodexCliAdapter()),
   registerAdapter(new ClaudeCodeAdapter()),
   registerAdapter(new CursorAdapter()),
-  registerAdapter(new GeminiCliAdapter()),
+  registerAdapter(createGeminiAdapter()),
   registerAdapter(createAiderAdapter()),
   registerAdapter(createCopilotAdapter()),
   registerAdapter(createKiloAdapter()),
   registerAdapter(createOpencodeAdapter()),
   registerAdapter(new QwenCodeAdapter()),
-  registerAdapter(new TraeAdapter()),
-  registerAdapter(new AugmentAdapter()),
+  registerAdapter(createTraeAdapter()),
+  registerAdapter(createAugmentAdapter()),
   registerAdapter(new WindsurfAdapter())
 ];
 
@@ -75,7 +75,7 @@ export function getAdapter(agentId: string): AgentAdapter {
   return adapter;
 }
 
-const PREFLIGHT_TIMEOUT_MS = 30_000;
+const PREFLIGHT_TIMEOUT_MS = 120_000;
 
 export async function preflightAdapters(
   selections: AdapterPreflightOptions["selection"][],
@@ -97,7 +97,7 @@ export async function preflightAdapters(
           }),
           new Promise<never>((_, reject) => {
             timeoutHandle = setTimeout(
-              () => reject(new Error(`Preflight for "${selection.baseAgentId}" timed out after ${PREFLIGHT_TIMEOUT_MS}ms.`)),
+              () => reject(new Error(`Preflight for "${selection.baseAgentId}" timed out after ${PREFLIGHT_TIMEOUT_MS}ms. The agent CLI may not be installed, or it is hanging. Try running "${selection.displayLabel || selection.baseAgentId}" manually in your terminal to check.`)),
               PREFLIGHT_TIMEOUT_MS
             );
           })
@@ -165,7 +165,7 @@ async function checkConfigFiles(relativePaths: string[]): Promise<{ found: strin
       await fs.access(absPath);
       found.push(relPath);
     } catch {
-      missing.push(relPath);
+      missing.push(relPath); /* intentional: file may not exist */
     }
   }
   return { found, missing };
@@ -193,7 +193,7 @@ async function probeVersion(binaryName: string, versionArgs: string[], timeoutMs
     const looseMatch = output.match(/\b(\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?)\b/);
     return looseMatch?.[1];
   } catch {
-    return undefined;
+    return undefined; /* intentional: CLI not found */
   }
 }
 

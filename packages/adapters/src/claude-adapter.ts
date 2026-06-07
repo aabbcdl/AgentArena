@@ -8,16 +8,15 @@ import type {
   AgentResolvedRuntime,
   TraceEventType
 } from "@agentarena/core";
-import { writeExecutionEvidence, type ToolCallRecord } from "@agentarena/core";
+import { type ToolCallRecord, writeExecutionEvidence } from "@agentarena/core";
 import { CLAUDE_CODE_CAPABILITY, type InvocationSpec } from "./adapter-capabilities.js";
 import { formatAdapterError } from "./adapter-diagnostics.js";
 import { buildAgentPrompt, createPreflightResult, savePromptArtifact } from "./adapter-helpers.js";
 import { getClaudeProviderProfileSecret, writeClaudeWorkspaceSettings } from "./claude-provider-profiles.js";
-import { parseClaudeEvents } from "./event-parsers.js";
-import { probeClaudeLikeAuth, probeClaudeLikeAuthFast, probeClaudeProfileAuth, probeHelp, probeInvocationVersion } from "./invocation-probes.js";
-import { createClaudeTransportChain, type TransportChainResult } from "./transport.js";
-import { agentTimeoutMs, runProcess } from "./process-utils.js";
+import { probeClaudeLikeAuth, probeClaudeLikeAuthFast, probeHelp, probeInvocationVersion } from "./invocation-probes.js";
+import { preflightTimeoutMs, transportTimeoutMs } from "./process-utils.js";
 import { resolveClaudeRuntime } from "./runtime-resolution.js";
+import { createClaudeTransportChain, type TransportChainResult } from "./transport.js";
 
 async function resolveClaudeInvocation(): Promise<InvocationSpec> {
   const command = process.env.AGENTARENA_CLAUDE_BIN?.trim() || "claude";
@@ -148,7 +147,7 @@ abstract class ClaudeLikeAdapter implements AgentAdapter {
       invocation,
       options?.isThirdPartyProvider ?? false,
       options?.extraArgs ?? [],
-      { transportTimeoutMs: 8_000, logFallbacks: true }
+      { transportTimeoutMs: transportTimeoutMs(), logFallbacks: true }
     );
 
     const startedAt = Date.now();
@@ -283,7 +282,7 @@ abstract class ClaudeLikeAdapter implements AgentAdapter {
           stderr: execution.stderr,
           meta: {
             adapterId: this.id,
-            startTime: new Date(Date.now() - (Date.now() - startedAt)).toISOString(),
+            startTime: new Date(startedAt).toISOString(),
             endTime: new Date().toISOString(),
             durationMs: Date.now() - startedAt,
             tokenUsage: parsed?.tokenUsage,
@@ -402,7 +401,7 @@ export class ClaudeCodeAdapter extends ClaudeLikeAdapter {
               options?.selection?.config.model ?? resolved.profile.primaryModel
             ).then(r => r.environment).catch(() => ({})))
           },
-          5_000, // 5s timeout for fast probe
+          preflightTimeoutMs(),
           {
             useCache: true,
             forceProbe: false,

@@ -1,5 +1,163 @@
 
 import { resultStore } from "../utils/storage.js";
+import { DEFAULT_SCORE_WEIGHTS, formatDiffPrecisionMetric, formatLintMetric, formatTestMetric, getCompositeScoreDetails } from "../view-model/scoring.js";
+
+/**
+ * Render a score breakdown table showing how the composite score was calculated.
+ */
+function renderScoreBreakdown(result, run, localText, escapeHtml) {
+  if (!run || typeof result.compositeScore !== "number") return "";
+
+  const details = getCompositeScoreDetails(result, run, run.scoreWeights || DEFAULT_SCORE_WEIGHTS);
+  const components = details.components;
+  const weights = details.weights;
+
+  const rows = [
+    { key: "status", label: localText("状态", "Status"), component: components.status, weight: weights.status, note: result.status === "success" ? localText("✅ 成功", "✅ Success") : localText("❌ 失败", "❌ Failed") },
+    { key: "tests", label: localText("测试", "Tests"), component: components.tests, weight: weights.tests, note: formatTestMetric(result) === "n/a" ? localText("⚠️ 未配置", "⚠️ Not configured") : formatTestMetric(result) },
+    { key: "criticalJudges", label: localText("关键 Judge", "Critical Judges"), component: components.criticalJudges, weight: weights.criticalJudges, note: "" },
+    { key: "nonCriticalJudges", label: localText("其他 Judge", "Other Judges"), component: components.nonCriticalJudges, weight: weights.nonCriticalJudges, note: "" },
+    { key: "precision", label: localText("Diff 精准度", "Diff Precision"), component: components.precision, weight: weights.precision, note: formatDiffPrecisionMetric(result) === "n/a" ? localText("⚠️ 未配置", "⚠️ Not configured") : formatDiffPrecisionMetric(result) },
+    { key: "lint", label: localText("Lint", "Lint"), component: components.lint, weight: weights.lint, note: formatLintMetric(result) === "n/a" ? localText("⚠️ 未配置", "⚠️ Not configured") : formatLintMetric(result) },
+    { key: "duration", label: localText("耗时", "Duration"), component: components.duration, weight: weights.duration, note: "" },
+    { key: "cost", label: localText("费用", "Cost"), component: components.cost, weight: weights.cost, note: "" },
+  ].filter(r => r.weight && r.weight > 0);
+
+  const tableRows = rows.map(r => {
+    const pct = Math.round(r.component * 100);
+    const weighted = Math.round(r.component * r.weight * 100);
+    const barClass = pct >= 80 ? "score-bar-good" : pct >= 50 ? "score-bar-mid" : "score-bar-low";
+    return `
+      <tr>
+        <td class="score-dim-label">${escapeHtml(r.label)}</td>
+        <td class="score-dim-weight">${Math.round(r.weight * 100)}%</td>
+        <td class="score-dim-bar">
+          <div class="score-bar-track">
+            <div class="score-bar-fill ${barClass}" style="width:${pct}%"></div>
+          </div>
+          <span class="score-bar-pct">${pct}%</span>
+        </td>
+        <td class="score-dim-weighted">${weighted}</td>
+        <td class="score-dim-note">${escapeHtml(r.note)}</td>
+      </tr>`;
+  }).join("");
+
+  return `
+    <div class="score-breakdown">
+      <div class="score-breakdown-header">
+        <strong>${escapeHtml(localText("评分明细", "Score Breakdown"))}</strong>
+        <span class="score-breakdown-total">${details.total.toFixed(1)}</span>
+      </div>
+      <table class="score-breakdown-table">
+        <thead>
+          <tr>
+            <th>${escapeHtml(localText("维度", "Dimension"))}</th>
+            <th>${escapeHtml(localText("权重", "Weight"))}</th>
+            <th>${escapeHtml(localText("得分", "Score"))}</th>
+            <th>${escapeHtml(localText("加权", "Weighted"))}</th>
+            <th>${escapeHtml(localText("说明", "Note"))}</th>
+          </tr>
+        </thead>
+        <tbody>${tableRows}</tbody>
+      </table>
+    </div>`;
+}
+
+/**
+ * Render an error source badge based on the result summary.
+ * Categorizes errors into: task-pack, agent, model, framework.
+ */
+function renderFailureAnalysis(result, localText, escapeHtml) {
+  if (result.status === "success") return "";
+  const failedJudges = (result.judgeResults || []).filter((j) => !j.success);
+  if (failedJudges.length === 0) return "";
+
+  const passed = (result.judgeResults || []).filter((j) => j.success).length;
+  const total = (result.judgeResults || []).length;
+
+  const rows = failedJudges
+    .map((j) => {
+      const stderr = j.stderr ? j.stderr.trim() : "";
+      const shortStderr = stderr.length > 300 ? stderr.substring(0, 300) + "…" : stderr;
+      return `
+        <div class="failure-judge-row">
+          <div class="failure-judge-label">❌ ${escapeHtml(j.label || j.judgeId)}</div>
+          ${j.expectation ? `<div class="failure-judge-expectation">${escapeHtml(localText("期望: ", "Expected: "))}<code>${escapeHtml(j.expectation)}</code></div>` : ""}
+          ${shortStderr ? `<pre class="failure-judge-stderr">${escapeHtml(shortStderr)}</pre>` : ""}
+          ${j.command ? `<div class="failure-judge-command"><code>${escapeHtml(j.command)}</code></div>` : ""}
+        </div>`;
+    })
+    .join("");
+
+  return `
+    <div class="failure-analysis">
+      <div class="failure-analysis-header">
+        <strong>${escapeHtml(localText("失败原因分析", "Failure Analysis"))}</strong>
+        <span class="failure-analysis-count">${passed}/${total} ${escapeHtml(localText("通过", "passed"))}</span>
+      </div>
+      <div class="failure-analysis-rows">${rows}</div>
+    </div>`;
+}
+
+/**
+ * Render an error source badge based on the result summary.
+ * Categorizes errors into: task-pack, agent, model, framework.
+ */
+function renderErrorBadge(result, localText, escapeHtml) {
+  if (result.status === "success") return "";
+  const summary = (result.summary || "").toLowerCase();
+
+  let source = "";
+  let hint = "";
+  let cssClass = "error-badge";
+
+  if (summary.includes("setup commands failed") || summary.includes("task pack setup failed")) {
+    source = localText("📦 任务包配置问题", "📦 Task Pack Issue");
+    hint = localText(
+      "任务包的 setup 命令执行失败，这不是 Agent 或模型的问题。请检查任务包的 setupCommands 配置。",
+      "The task pack's setup command failed. This is NOT an agent/model issue. Check the task pack's setupCommands config."
+    );
+    cssClass += " error-badge--task-pack";
+  } else if (summary.includes("timed out") && (summary.includes("transport") || summary.includes("stream-json"))) {
+    source = localText("⏱️ 传输超时", "⏱️ Transport Timeout");
+    hint = localText(
+      "Agent CLI 响应太慢，可能是模型 API 限流或网络问题。尝试增加 AGENTARENA_TRANSPORT_TIMEOUT_MS。",
+      "Agent CLI responded too slowly. Likely model API rate limiting or network issues. Try increasing AGENTARENA_TRANSPORT_TIMEOUT_MS."
+    );
+    cssClass += " error-badge--model";
+  } else if (summary.includes("429") || summary.includes("rate_limit") || summary.includes("rate limit")) {
+    source = localText("🚫 模型 API 限流", "🚫 Model API Rate Limited");
+    hint = localText(
+      "模型 API 返回 429 限流错误。这不是 Agent 的问题，请联系 API 提供方提高配额。",
+      "Model API returned 429 rate limit. This is NOT an agent issue. Contact your API provider for higher quota."
+    );
+    cssClass += " error-badge--model";
+  } else if (summary.includes("cli could not be launched") || summary.includes("cli not found") || summary.includes("missing")) {
+    source = localText("🔧 Agent 未安装", "🔧 Agent Not Installed");
+    hint = localText(
+      "Agent CLI 未找到或无法启动。请安装对应的 CLI 工具。",
+      "Agent CLI not found or could not be launched. Install the corresponding CLI tool."
+    );
+    cssClass += " error-badge--agent";
+  } else if (summary.includes("authentication") || summary.includes("auth") || summary.includes("api key")) {
+    source = localText("🔑 认证失败", "🔑 Authentication Failed");
+    hint = localText(
+      "Agent CLI 认证失败。请检查 API Key 配置。",
+      "Agent CLI authentication failed. Check your API key configuration."
+    );
+    cssClass += " error-badge--agent";
+  } else if (summary.includes("exit code") && !summary.includes("exit code 0")) {
+    source = localText("⚠️ Agent 执行失败", "⚠️ Agent Execution Failed");
+    hint = localText(
+      "Agent CLI 以非零退出码结束。可能是模型响应异常或 Agent 内部错误。",
+      "Agent CLI exited with non-zero code.可能是模型响应异常或 Agent 内部错误。"
+    );
+    cssClass += " error-badge--agent";
+  }
+
+  if (!source) return "";
+  return `<div class="${cssClass}"><strong>${source}</strong><br><small>${escapeHtml(hint)}</small></div>`;
+}
 
 export function createDetailFragments({
   state,
@@ -234,7 +392,10 @@ export function createDetailFragments({
         </div>
         <div class="agent-radar-chart" data-agent-id="${escapeHtml(result.agentId)}" style="margin-top:12px;"></div>
       </div>
+      ${renderScoreBreakdown(result, state.run, localText, escapeHtml)}
       <div class="agent-summary-text">
+        ${renderErrorBadge(result, localText, escapeHtml)}
+        ${renderFailureAnalysis(result, localText, escapeHtml)}
         <span>${escapeHtml(result.summary || "")}</span>
         <button type="button" class="view-full-link" data-role="view-full-details">${escapeHtml(localText("查看完整详情", "View Full Details"))}</button>
       </div>
@@ -519,7 +680,7 @@ export function createDetailFragments({
       lines.push(`## ${localText("最佳 Agent", "Best Agent")}: ${best.displayLabel}\n`);
       lines.push(`- ${localText("分数", "Score")}: ${best.compositeScore?.toFixed(0)}/100`);
       lines.push(`- ${localText("耗时", "Duration")}: ${(best.durationMs / 1000).toFixed(0)}s`);
-      lines.push(`- ${localText("成本", "Cost")}: $${best.estimatedCostUsd.toFixed(2)}\n`);
+      lines.push(`- ${localText("成本", "Cost")}: ${best.costKnown ? "$" + best.estimatedCostUsd.toFixed(2) : localText("未知", "unknown")}\n`);
     }
 
     return lines.join("\n");
@@ -533,8 +694,8 @@ export function createDetailFragments({
 
     const best = successful.reduce((a, b) => ((a.compositeScore ?? 0) > (b.compositeScore ?? 0) ? a : b));
     return localText(
-      `${best.displayLabel} 在 "${run.task.title}" 中得分最高：${best.compositeScore?.toFixed(0)}/100，成本 $${best.estimatedCostUsd.toFixed(2)}，耗时 ${(best.durationMs / 1000).toFixed(0)} 秒。`,
-      `${best.displayLabel} won with score ${best.compositeScore?.toFixed(0)}/100 on "${run.task.title}". Cost: $${best.estimatedCostUsd.toFixed(2)}, Duration: ${(best.durationMs / 1000).toFixed(0)}s.`
+      `${best.displayLabel} 在 "${run.task.title}" 中得分最高：${best.compositeScore?.toFixed(0)}/100，成本 ${best.costKnown ? "$" + best.estimatedCostUsd.toFixed(2) : "未知"}，耗时 ${(best.durationMs / 1000).toFixed(0)} 秒。`,
+      `${best.displayLabel} won with score ${best.compositeScore?.toFixed(0)}/100 on "${run.task.title}". Cost: ${best.costKnown ? "$" + best.estimatedCostUsd.toFixed(2) : "unknown"}, Duration: ${(best.durationMs / 1000).toFixed(0)}s.`
     );
   }
 

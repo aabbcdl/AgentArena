@@ -53,8 +53,8 @@ for (const api of BLOCKED_APIS) {
 // Freeze essential worker communication to prevent judge code from
 // intercepting the message channel (e.g. replacing postMessage to capture
 // evaluate results or inject fake responses).
-try { Object.freeze(self.postMessage); } catch {}
-try { Object.defineProperty(self, 'onmessage', { configurable: false }); } catch {}
+try { Object.freeze(self.postMessage); } catch { /* best-effort: may already be frozen */ }
+try { Object.defineProperty(self, 'onmessage', { configurable: false }); } catch { /* best-effort: may not be configurable */ }
 
 /**
  * Verify HMAC-SHA256 signature of judge code using SubtleCrypto.
@@ -64,18 +64,17 @@ try { Object.defineProperty(self, 'onmessage', { configurable: false }); } catch
 let cryptoKey = null;
 
 async function verifyCodeSignature(code, expectedHmac) {
-  if (!cryptoKey || !expectedHmac) return true; // No key = skip verification
+  if (!cryptoKey || !expectedHmac) return false; // No key = reject execution (key must be set first)
   try {
     const encoder = new TextEncoder();
-    const signature = await self.crypto.subtle.sign(
+    // Convert hex HMAC to bytes for constant-time comparison via SubtleCrypto
+    const expectedBytes = new Uint8Array(expectedHmac.match(/.{2}/g).map(b => parseInt(b, 16)));
+    return await self.crypto.subtle.verify(
       'HMAC',
       cryptoKey,
+      expectedBytes,
       encoder.encode(code)
     );
-    const actualHmac = Array.from(new Uint8Array(signature))
-      .map(b => b.toString(16).padStart(2, '0'))
-      .join('');
-    return actualHmac === expectedHmac;
   } catch {
     return false;
   }
@@ -106,9 +105,19 @@ self.onmessage = async (e) => {
     case 'load_code': {
       try {
         // ── Integrity verification ──
-        // If an HMAC is provided, verify the code hasn't been tampered with
-        // (e.g. via direct IndexedDB manipulation).
-        if (payload.hmac && cryptoKey) {
+        // Require HMAC key to be initialized before loading any code.
+        // This prevents code execution during the race window before init_crypto.
+        if (!cryptoKey) {
+          self.postMessage({
+            type: 'load_code_error',
+            id,
+            error: 'HMAC key not initialized — send init_crypto before load_code'
+          });
+          break;
+        }
+
+        // Verify the code hasn't been tampered with (e.g. via direct IndexedDB manipulation).
+        if (payload.hmac) {
           const valid = await verifyCodeSignature(payload.code, payload.hmac);
           if (!valid) {
             self.postMessage({
@@ -118,6 +127,13 @@ self.onmessage = async (e) => {
             });
             break;
           }
+        } else {
+          self.postMessage({
+            type: 'load_code_error',
+            id,
+            error: 'Judge code must include HMAC signature'
+          });
+          break;
         }
 
         const registeredJudgeIds = [];

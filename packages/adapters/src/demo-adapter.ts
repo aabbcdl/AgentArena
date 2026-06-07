@@ -6,7 +6,6 @@ import type {
   AgentAdapter
 } from "@agentarena/core";
 import { DEMO_CAPABILITY, type DemoProfile } from "./adapter-capabilities.js";
-import type { AdapterEvent } from "./adapter-events.js";
 import { createPreflightResult } from "./adapter-helpers.js";
 import { buildDemoSummary, computeTokenUsage, writeDemoArtifacts } from "./demo-helpers.js";
 import { getAdaptersPackageVersion } from "./invocation-probes.js";
@@ -40,12 +39,8 @@ export class DemoAdapter implements AgentAdapter {
 
   async execute(context: AdapterExecutionContext): Promise<AdapterExecutionResult> {
     // Emit standardized adapter.start event
-    const startEvent: AdapterEvent = {
-      type: "adapter.start",
-      timestamp: new Date().toISOString()
-    };
     await context.trace({
-      type: startEvent.type,
+      type: "adapter.start",
       message: `Starting ${this.title}`,
       metadata: {
         repoPath: context.repoPath,
@@ -62,42 +57,23 @@ export class DemoAdapter implements AgentAdapter {
 
     // Emit standardized adapter.file_change events
     for (const filePath of changedFilesHint) {
-      const fileEvent: AdapterEvent = {
-        type: "adapter.file_change",
-        path: filePath,
-        action: "create",
-        timestamp: new Date().toISOString()
-      };
       await context.trace({
-        type: fileEvent.type,
+        type: "adapter.file_change",
         message: `Created ${filePath}`,
         metadata: { path: filePath, action: "create" }
       });
     }
 
     // Emit standardized adapter.usage event
-    const usageEvent: AdapterEvent = {
-      type: "adapter.usage",
-      inputTokens: Math.round(tokenUsage * 0.6),
-      outputTokens: Math.round(tokenUsage * 0.4),
-      timestamp: new Date().toISOString()
-    };
     await context.trace({
-      type: usageEvent.type,
+      type: "adapter.usage",
       message: `Token usage: ${tokenUsage}`,
-      metadata: { inputTokens: usageEvent.inputTokens, outputTokens: usageEvent.outputTokens }
+      metadata: { inputTokens: Math.round(tokenUsage * 0.6), outputTokens: Math.round(tokenUsage * 0.4) }
     });
 
     // Emit standardized adapter.result event
-    const resultEvent: AdapterEvent = {
-      type: "adapter.result",
-      status: "success",
-      summary,
-      totalCostUsd: this.profile.estimatedCostUsd,
-      timestamp: new Date().toISOString()
-    };
     await context.trace({
-      type: resultEvent.type,
+      type: "adapter.result",
       message: summary,
       metadata: {
         tokenUsage,

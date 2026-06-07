@@ -147,21 +147,8 @@
             </svg>
             <div>
               <p class="brand-name">AgentArena</p>
-              <p class="brand-tagline" id="app-title">Web Report</p>
+              <p class="brand-tagline" id="app-title" data-i18n="sidebarTagline">跑分配置</p>
             </div>
-          </div>
-          <div class="language-control">
-            <label id="language-label" for="language-select">Language</label>
-            <select id="language-select">
-              <option value="en">English</option>
-              <option value="zh-CN">中文</option>
-            </select>
-          </div>
-          <div class="theme-control">
-            <button id="theme-toggle" type="button" class="theme-toggle-btn" aria-label="Toggle theme">
-              <svg class="icon"><use href="#icon-zap"/></svg>
-              <span id="theme-label">Light</span>
-            </button>
           </div>
           <p id="app-description" class="muted brand-description">Benchmark the coding agents you already run locally, then inspect which setup actually performs better on your real repository tasks.</p>
         </div>
@@ -179,12 +166,26 @@
 
         <section class="panel">
           <div class="panel-header">
-            <h2 id="agents-heading">Agents</h2>
+            <h2 id="agents-heading" title="已加载报告中参与的 Agent 数量（与当前配置中选择的 Agent 数量含义不同）">Agents</h2>
             <span id="agent-count" class="muted">0</span>
           </div>
-          <div id="agent-list" class="agent-list empty-state">No report loaded.</div>
+          <div id="agent-list" class="agent-list empty-state" data-i18n="agentListEmpty">运行完成后自动显示参与的 Agents</div>
           <p id="agent-list-hint" class="muted picker-help" style="padding: 0 var(--space-3) var(--space-2); font-size: var(--text-xs);">Click to filter comparison table</p>
         </section>
+
+        <div class="sidebar-footer">
+          <div class="language-control">
+            <label id="language-label" for="language-select" class="sr-only">Language</label>
+            <select id="language-select">
+              <option value="en">English</option>
+              <option value="zh-CN">中文</option>
+            </select>
+          </div>
+          <button id="theme-toggle" type="button" class="theme-toggle-btn" aria-label="Toggle theme" title="切换主题">
+            <svg class="icon"><use href="#icon-zap"/></svg>
+            <span id="theme-label">Light</span>
+          </button>
+        </div>
       </aside>
 
       <main class="content">
@@ -209,15 +210,20 @@
                 Use the same repository, the same task, and the same judges to compare local agent setups or to baseline one agent over time.
               </p>
               <div class="welcome-demo-inline">
-                <button id="try-demo-btn" class="btn btn-primary btn-lg" type="button">
-                  <svg class="icon"><use href="#icon-play"/></svg>
-                  <span id="try-demo-text">Try Demo</span>
-                </button>
-                <button id="configure-agents-btn" class="btn btn-ghost btn-lg" type="button">
-                  <svg class="icon"><use href="#icon-settings"/></svg>
-                  <span data-i18n="configureAgentsBtn">Configure Agents</span>
-                </button>
-                <p class="muted demo-hint" id="demo-hint" data-i18n="demoHint">Load sample data to explore the interface</p>
+                <div class="welcome-btn-group">
+                  <button id="try-demo-btn" class="btn btn-primary btn-lg" type="button">
+                    <svg class="icon"><use href="#icon-play"/></svg>
+                    <span id="try-demo-text">Try Demo</span>
+                  </button>
+                  <p class="muted demo-hint" id="demo-hint" data-i18n="demoHint" style="margin: 4px 0 0; font-size: 0.8rem;">Load sample data to explore the interface</p>
+                </div>
+                <div class="welcome-btn-group">
+                  <button id="configure-agents-btn" class="btn btn-ghost btn-lg" type="button">
+                    <svg class="icon"><use href="#icon-settings"/></svg>
+                    <span data-i18n="configureAgentsBtn">Configure Agents</span>
+                  </button>
+                  <p class="muted" style="margin: 4px 0 0; font-size: 0.8rem;" data-i18n="configureAgentsHint">下滑进入配置并运行</p>
+                </div>
               </div>
             </div>
 
@@ -255,34 +261,6 @@
               </div>
             </div>
           </div>
-
-          <details class="detail-card support-notes" id="inspiration-credits">
-            <summary data-i18n="inspirationCreditsTitle">评分系统设计灵感来源</summary>
-            <div class="credits-grid">
-              <div class="credit-item">
-                <span class="credit-icon" aria-hidden="true">🎯</span>
-                <div>
-                  <strong data-i18n="issueResolutionCreditLabel">Issue Resolution Mode</strong>
-                  <p class="muted" data-i18n="issueResolutionCredit">参考 SWE-Bench (MIT License) — 用项目测试套件验证补丁正确性</p>
-                </div>
-              </div>
-              <div class="credit-item">
-                <span class="credit-icon" aria-hidden="true">⚡</span>
-                <div>
-                  <strong data-i18n="efficiencyFirstCreditLabel">Efficiency First Mode</strong>
-                  <p class="muted" data-i18n="efficiencyFirstCredit">参考行业最佳实践 — 以 Token 性价比为核心指标</p>
-                </div>
-              </div>
-              <div class="credit-item">
-                <span class="credit-icon" aria-hidden="true">🔄</span>
-                <div>
-                  <strong data-i18n="rotatingTasksCreditLabel">Rotating Tasks Mode</strong>
-                  <p class="muted" data-i18n="rotatingTasksCredit">参考 LiveBench (Apache 2.0) — 防污染轮换 + 客观真值评分</p>
-                </div>
-              </div>
-            </div>
-            <p class="muted credit-disclaimer" data-i18n="creditDisclaimer">本实现完全独立，与上述项目无官方关联</p>
-          </details>
         </section>
 
         <section class="workspace-home">
@@ -309,7 +287,7 @@
                   <input id="launcher-repo-path" type="text" />
                   <label class="checkbox" style="margin-top:6px;font-size:0.85em;">
                     <input id="launcher-use-builtin" type="checkbox" />
-                    <span id="launcher-use-builtin-label">🚀 Use built-in demo repo (no local project needed)</span>
+                    <span id="launcher-use-builtin-label" data-i18n="builtinRepoLabel">🚀 使用内置 Demo 仓库（无需本地项目）</span>
                   </label>
                 </label>
                 <label class="field">
@@ -318,7 +296,10 @@
                 </label>
                 <label class="field">
                   <span id="launcher-task-path-label">Task Pack Path</span>
-                  <input id="launcher-task-path" type="text" />
+                  <div id="task-pack-summary" class="path-summary-tag" style="display:none; padding: 6px 10px; background: var(--surface, #f3f4f6); border-radius: 6px; font-size: 0.85rem;">
+                    📦 <span id="task-pack-short-name">—</span>
+                  </div>
+                  <input id="launcher-task-path" type="text" placeholder="输入自定义任务包路径..." />
                 </label>
                 <div id="task-pack-detail" class="task-pack-detail hidden"></div>
               </div>
@@ -333,7 +314,8 @@
                 <div class="launcher-inline-options">
                   <label class="checkbox">
                     <input id="launcher-probe-auth" type="checkbox" checked />
-                    <span id="launcher-probe-auth-label">Probe auth before run</span>
+                    <span id="launcher-probe-auth-label" data-i18n="probeAuthLabel">运行前先探测鉴权</span>
+                    <span class="tooltip-icon" data-tooltip="跑分前向 Agent 发送测试请求确认鉴权可用。若 Agent 启动慢或使用第三方服务，超时会导致整个任务失败。遇到 'probe timed out' 错误时可关闭此项。">ℹ</span>
                   </label>
                   <label class="field launcher-inline-field">
                     <span id="launcher-concurrency-label">Concurrency</span>
@@ -377,32 +359,35 @@
                 <div class="panel-header">
                   <h3 id="launcher-progress-title">Live Progress</h3>
                 </div>
-                <p id="launcher-current-agent" class="muted"></p>
+                <p id="launcher-current-agent" class="launcher-current-agent"></p>
                 <div id="launcher-log-list" class="launcher-log-list"></div>
               </section>
             </section>
             <details id="result-loader-panel" class="detail-card workspace-card workspace-card-secondary workspace-loader" open>
-              <summary id="result-loader-summary">Open Existing Results</summary>
+              <summary id="result-loader-summary" data-i18n="loadHistoryTitle">加载历史报告</summary>
               <p id="result-loader-message" class="muted result-loader-message" hidden></p>
               <div id="loading-indicator" class="loading-indicator hidden">
                 <div class="loading-spinner"></div>
                 <span id="loading-message" class="muted">Loading results...</span>
               </div>
-              <label class="file-picker recommended-picker">
-                <strong id="runs-folder-title">Recommended: Load Run Folder</strong>
+              <label class="file-picker recommended-picker btn-primary">
+                <strong id="runs-folder-title">📁 打开结果文件夹 <span class="btn-badge">推荐</span></strong>
                 <p id="runs-folder-hint" class="muted picker-help">Load an existing run when you want to compare earlier baselines or inspect a saved result again.</p>
                 <input id="runs-folder" type="file" webkitdirectory directory multiple />
               </label>
-              <label class="file-picker">
-                <strong id="summary-file-title">Load Summary JSON</strong>
+              <label class="file-picker btn-secondary">
+                <strong id="summary-file-title">打开 Summary JSON</strong>
                 <p id="summary-file-hint" class="muted picker-help">Use this only if you want to open a single `summary.json` file.</p>
                 <input id="summary-file" type="file" accept=".json,application/json" />
               </label>
-              <label class="file-picker">
-                <strong id="markdown-file-title">Optional: Load Markdown Summary</strong>
-                <p id="markdown-file-hint" class="muted picker-help">Adds share text, PR table, and markdown panel for the selected run.</p>
-                <input id="markdown-file" type="file" accept=".md,text/markdown,text/plain" />
-              </label>
+              <details class="sub-options">
+                <summary data-i18n="moreOptions" style="cursor:pointer; font-size: 0.85rem; color: var(--color-muted, #6b7280); padding: 8px 0;">更多选项</summary>
+                <label class="file-picker btn-ghost">
+                  <strong id="markdown-file-title">打开 Markdown Summary</strong>
+                  <p id="markdown-file-hint" class="muted picker-help">Adds share text, PR table, and markdown panel for the selected run.</p>
+                  <input id="markdown-file" type="file" accept=".md,text/markdown,text/plain" />
+                </label>
+              </details>
             </details>
           </div>
         </section>
@@ -764,10 +749,38 @@
         <span id="sticky-bar-summary" class="sticky-bar-summary" data-i18n="stickyBarHint">Select agents and a task to start benchmarking</span>
         <button id="sticky-bar-run-btn" type="button" class="btn btn-primary">
           <svg class="icon"><use href="#icon-play"/></svg>
-          <span id="sticky-bar-run-text" data-i18n="launcherRunButton">Start Benchmark</span>
+          <span id="sticky-bar-run-text" data-i18n="launcherRunButton">开始跑分</span>
         </button>
       </div>
     </div>
+
+    <details class="detail-card support-notes" id="inspiration-credits" style="max-width: 800px; margin: 0 auto 24px; padding: 0 16px; opacity: 0.7;">
+      <summary data-i18n="inspirationCreditsTitle">评分系统设计灵感来源</summary>
+      <div class="credits-grid">
+        <div class="credit-item">
+          <span class="credit-icon" aria-hidden="true">🎯</span>
+          <div>
+            <strong data-i18n="issueResolutionCreditLabel">Issue Resolution Mode</strong>
+            <p class="muted" data-i18n="issueResolutionCredit">参考 SWE-Bench (MIT License) — 用项目测试套件验证补丁正确性</p>
+          </div>
+        </div>
+        <div class="credit-item">
+          <span class="credit-icon" aria-hidden="true">⚡</span>
+          <div>
+            <strong data-i18n="efficiencyFirstCreditLabel">Efficiency First Mode</strong>
+            <p class="muted" data-i18n="efficiencyFirstCredit">参考行业最佳实践 — 以 Token 性价比为核心指标</p>
+          </div>
+        </div>
+        <div class="credit-item">
+          <span class="credit-icon" aria-hidden="true">🔄</span>
+          <div>
+            <strong data-i18n="rotatingTasksCreditLabel">Rotating Tasks Mode</strong>
+            <p class="muted" data-i18n="rotatingTasksCredit">参考 LiveBench (Apache 2.0) — 防污染轮换 + 客观真值评分</p>
+          </div>
+        </div>
+      </div>
+      <p class="muted credit-disclaimer" data-i18n="creditDisclaimer">本实现完全独立，与上述项目无官方关联</p>
+    </details>
 
     <script type="module" src="./app.js"></script>
     <script>

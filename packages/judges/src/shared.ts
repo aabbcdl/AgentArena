@@ -20,8 +20,14 @@ export const COMMAND_JUDGE_FIELDS = new Set([...COMMON_JUDGE_FIELDS, "command", 
 export const DEFAULT_JUDGE_TIMEOUT_MS = 5 * 60 * 1_000;
 
 export function hasReDoSRisk(pattern: string): boolean {
+  // Nested quantifiers: (a+)+ or (a*)*
   if (/\([^)]*[+*][^)]*\)[+*?]/.test(pattern)) return true;
+  // Alternation with quantifier: (a|b)+
   if (/\([^)]*\|[^)]*\)[+*]/.test(pattern)) return true;
+  // Adjacent quantified groups: (a+)(b+)
+  if (/\([^)]*[+*]\)[^(]*\([^)]*[+*]\)/.test(pattern)) return true;
+  // Backreference-like overlapping: (a|aa)+ or ([a-z]|a)+
+  if (/\(\w+\|(\w+)[^)]*\)[+*]/.test(pattern)) return true;
   return false;
 }
 
@@ -440,7 +446,7 @@ export function parseBiomeSummary(payload: unknown): ParsedLintSummary | null {
       }
 
       const severity = entry.severity;
-      if (severity === "error") {
+      if (severity === "error" || severity === "critical" || severity === "fatal") {
         summary.errorCount += 1;
       } else if (severity === "warning") {
         summary.warningCount += 1;

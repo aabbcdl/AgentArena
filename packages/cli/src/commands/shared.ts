@@ -308,11 +308,17 @@ export async function hasAvailableAdapters(): Promise<boolean> {
 }
 
 export function showWelcomeMessage(): void {
-  console.log("\n🎉 欢迎使用 AgentArena！");
+  console.log("\n🎉 Welcome to AgentArena! / 欢迎使用 AgentArena！");
   console.log("");
-  console.log("快速开始：");
-  console.log("  agentarena doctor    - 检查环境配置");
-  console.log("  agentarena ui        - 启动 Web 界面");
-  console.log("  agentarena run       - 开始基准测试");
+  console.log("Quick start / 快速开始：");
+  console.log("  agentarena doctor             Check environment / 检查环境配置");
+  console.log("  agentarena list-adapters      See available adapters / 查看可用适配器");
+  console.log("  agentarena ui                 Start web UI / 启动 Web 界面");
+  console.log("  agentarena run --help         Run a benchmark / 运行基准测试");
+  console.log("");
+  console.log("First time? Install an adapter first:");
+  console.log("  npm install -g @openai/codex@latest    (for Codex)");
+  console.log("  npm install -g @anthropic-ai/claude-code  (for Claude Code)");
+  console.log("  Then run: agentarena doctor --probe-auth");
   console.log("");
 }

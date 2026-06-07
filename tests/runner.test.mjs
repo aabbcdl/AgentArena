@@ -945,7 +945,10 @@ test("runBenchmark returns cancelled results and still runs teardown after abort
     onProgress: (event) => {
       events.push(event);
       if (event.phase === "agent-start") {
-        setTimeout(() => controller.abort(), 100);
+        // Delay must be long enough for setup to complete and the adapter to
+        // actually start executing. Too short and the abort fires during setup,
+        // which has an early-return path that skips teardown.
+        setTimeout(() => controller.abort(), 1000);
       }
     }
   });

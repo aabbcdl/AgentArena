@@ -7,12 +7,10 @@ import {
   type BenchmarkCancellation,
   buildExecutionEnvironment,
   type CommandStepResult,
-  copyRepository,
   createWorkspaceSandbox,
   type DiffPrecisionSummary,
   type DiffSummary,
   diffSnapshots,
-  ensureDirectory,
   isAbortError,
   logger,
   metrics,
@@ -20,39 +18,36 @@ import {
   type TraceEvent,
   throwIfAborted,
 } from "@agentarena/core";
-import { runCommandSteps, runJudges } from "@agentarena/judges";
+import { runJudges } from "@agentarena/judges";
 import type { loadTaskPack } from "@agentarena/taskpacks";
 import { JsonlTraceRecorder } from "@agentarena/trace";
 import { agentExecuteTimeoutMs } from "./concurrency.js";
+import { buildFinalResult } from "./result-assembly.js";
 import {
   buildChangedFiles,
-  createBaseResult,
   createCancellationSummary,
-  createCancelledRunResult,
-  createSkippedRunResult,
-  mergeResolvedRuntime,
-  summarizeCommandStepFailure
 } from "./result-builder.js";
 import { buildDiffPrecision, collectChangedFiles } from "./snapshot.js";
 import { wrapWithTimeout } from "./timeout-utils.js";
+import type { AgentRunContext } from "./types.js";
 import { debugLog, formatErrorDetails, formatErrorMessage } from "./workspace.js";
+import {
+  runSetupCommands,
+  runTeardownCommands,
+  setupWorkspaceAndPrechecks,
+} from "./workspace-operations.js";
 
+export type { AgentRunContext } from "./types.js";
+
+/**
+ * Grace period added on top of agentTimeoutMs for the outer wrapWithTimeout.
+ * The adapter has its own setTimeout at agentTimeoutMs; this outer wrapper
+ * at agentTimeoutMs + 5s catches the case where the adapter's internal timeout
+ * doesn't cleanly resolve (e.g., stuck in a finally block after SIGTERM).
+ */
 const AGENT_EXECUTE_TIMEOUT_GRACE_MS = 5_000;
 /** Timeout for teardown commands (30 seconds) */
 const TEARDOWN_TIMEOUT_MS = 30_000;
-
-export interface AgentRunContext {
-  task: Awaited<ReturnType<typeof loadTaskPack>>;
-  adapter: ReturnType<typeof getAdapter>;
-  agentOutputPath: string;
-  workspacePath: string;
-  tracePath: string;
-  traceRecorder: JsonlTraceRecorder;
-  executionEnvironment: ReturnType<typeof buildExecutionEnvironment>;
-  cancellation: BenchmarkCancellation | undefined;
-  throwIfCancelled: (stage: string) => void;
-  debug: boolean;
-}
 
 export async function createAgentRunContext(
   outputPath: string,
@@ -83,149 +78,6 @@ export async function createAgentRunContext(
     throwIfCancelled,
     debug: options.debug ?? false
   };
-}
-
-export async function setupWorkspaceAndPrechecks(
-  repoPath: string,
-  preflight: AdapterPreflightResult,
-  context: AgentRunContext
-): Promise<AgentRunResult | undefined> {
-  const { agentOutputPath, workspacePath, traceRecorder, throwIfCancelled } = context;
-
-  if (preflight.status === "missing" || preflight.status === "blocked") {
-    await ensureDirectory(agentOutputPath);
-    await traceRecorder.record({
-      agentId: preflight.agentId,
-      timestamp: new Date().toISOString(),
-      type: "preflight.result",
-      message: preflight.summary,
-      metadata: {
-        status: preflight.status,
-        command: preflight.command,
-        details: preflight.details
-      }
-    });
-    await traceRecorder.record({
-      agentId: preflight.agentId,
-      timestamp: new Date().toISOString(),
-      type: "agent.skipped",
-      message: `Skipped ${preflight.agentId} because preflight status is ${preflight.status}.`,
-      metadata: {
-        status: preflight.status
-      }
-    });
-    return createSkippedRunResult(preflight, context.tracePath, workspacePath);
-  }
-
-  await ensureDirectory(agentOutputPath);
-
-  throwIfCancelled("workspace setup");
-
-  try {
-    await copyRepository(repoPath, workspacePath);
-  } catch (error) {
-    const errorDetails = formatErrorDetails(error);
-    await traceRecorder.record({
-      agentId: preflight.agentId,
-      timestamp: new Date().toISOString(),
-      type: "agent.copy_failed",
-      message: "Failed to copy repository to workspace.",
-      metadata: errorDetails
-    });
-    return {
-      ...createSkippedRunResult(preflight, context.tracePath, workspacePath),
-      summary: `Failed to copy repository: ${errorDetails.message}`
-    };
-  }
-
-  await traceRecorder.record({
-    agentId: preflight.agentId,
-    timestamp: new Date().toISOString(),
-    type: "preflight.result",
-    message: preflight.summary,
-    metadata: {
-      status: preflight.status,
-      command: preflight.command,
-      details: preflight.details
-    }
-  });
-
-  return undefined;
-}
-
-export async function runSetupCommands(
-  preflight: AdapterPreflightResult,
-  context: AgentRunContext
-): Promise<{ setupResults: CommandStepResult[]; earlyResult?: AgentRunResult }> {
-  const { task, workspacePath, traceRecorder, throwIfCancelled, cancellation } = context;
-
-  let setupResults: CommandStepResult[] = [];
-  try {
-    throwIfCancelled("setup");
-    setupResults = await runCommandSteps(task.setupCommands, workspacePath, task.envAllowList, cancellation?.signal);
-  } catch (error) {
-    if (isAbortError(error)) {
-      return {
-        setupResults: [],
-        earlyResult: createCancelledRunResult(preflight, context.tracePath, workspacePath, formatErrorMessage(error))
-      };
-    }
-    const errorDetails = formatErrorDetails(error);
-    await traceRecorder.record({
-      agentId: preflight.agentId,
-      timestamp: new Date().toISOString(),
-      type: "setup.error",
-      message: "Setup commands execution failed.",
-      metadata: errorDetails
-    });
-    return {
-      setupResults: [],
-      earlyResult: {
-        ...createSkippedRunResult(preflight, context.tracePath, workspacePath),
-        summary: `Setup commands failed: ${errorDetails.message}`,
-        setupResults: []
-      }
-    };
-  }
-
-  await traceRecorder.record({
-    agentId: preflight.agentId,
-    timestamp: new Date().toISOString(),
-    type: "setup.finish",
-    message:
-      setupResults.length === 0
-        ? "No setup commands executed."
-        : setupResults.every((value) => value.success)
-          ? "All setup commands passed."
-          : "One or more setup commands failed.",
-    metadata: {
-      setupResults: setupResults.map((value) => ({
-        stepId: value.stepId,
-        label: value.label,
-        success: value.success,
-        exitCode: value.exitCode
-      }))
-    }
-  });
-
-  if (setupResults.some((value) => !value.success)) {
-    const failedStep = setupResults.find((value) => !value.success) ?? setupResults[0];
-    return {
-      setupResults,
-      earlyResult: createBaseResult({
-        preflight,
-        tracePath: context.tracePath,
-        workspacePath,
-        status: "failed",
-        summary: failedStep
-          ? summarizeCommandStepFailure("setup", failedStep)
-          : "Setup command failed but no result was captured.",
-        setupResults
-      })
-    };
-  }
-
-  return { setupResults, earlyResult: undefined };
 }
 
 export interface BeforeSnapshotResult {
@@ -339,7 +191,7 @@ export async function executeAgent(
       adapterTimedOut
         ? new Error(`${adapter.title} execution timed out after ${adapterTimeoutMs}ms.`)
         : error;
-    
+
     if (adapterTimedOut) {
       metrics.agentTimeoutTotal.inc({ agentId: preflight.agentId, adapterKind: adapter.kind });
       logger.warn("adapter", "agent.timeout", `${adapter.title} execution timed out`, {
@@ -354,7 +206,7 @@ export async function executeAgent(
         error
       });
     }
-    
+
     const errorDetails = formatErrorDetails(error);
     await traceRecorder.record({
       agentId: preflight.agentId,
@@ -458,47 +310,6 @@ export async function runJudgesAndAfterSnapshot(
   return { judgeResults, judgeError, afterSnapshot, diff, changedFiles, diffPrecision, diffReliable };
 }
 
-export async function runTeardownCommands(
-  preflight: AdapterPreflightResult,
-  adapterError: unknown,
-  judgeError: unknown,
-  context: AgentRunContext,
-  signal?: AbortSignal
-): Promise<{ teardownResults: CommandStepResult[]; teardownError: unknown }> {
-  const { task, workspacePath, traceRecorder, cancellation } = context;
-
-  let teardownResults: CommandStepResult[] = [];
-  let teardownError: unknown;
-  const teardownShouldIgnoreCancellation =
-    cancellation?.signal?.aborted === true || isAbortError(adapterError) || isAbortError(judgeError);
-
-  try {
-    const effectiveSignal = teardownShouldIgnoreCancellation
-      ? signal
-      : (signal ?? cancellation?.signal);
-    teardownResults = await runCommandSteps(
-      task.teardownCommands,
-      workspacePath,
-      task.envAllowList,
-      effectiveSignal
-    );
-  } catch (error) {
-    if (!isAbortError(error)) {
-      teardownError = error;
-      const errorDetails = formatErrorDetails(error);
-      await traceRecorder.record({
-        agentId: preflight.agentId,
-        timestamp: new Date().toISOString(),
-        type: "teardown.error",
-        message: "Teardown commands execution failed.",
-        metadata: errorDetails
-      });
-    }
-  }
-
-  return { teardownResults, teardownError };
-}
-
 export async function recordFinalEvents(
   preflight: AdapterPreflightResult,
   judgeResults: Awaited<ReturnType<typeof runJudges>>,
@@ -516,8 +327,14 @@ export async function recordFinalEvents(
     metadata: {
       judgeResults: judgeResults.map((value) => ({
         label: value.label,
+        type: value.type,
         success: value.success,
-        exitCode: value.exitCode
+        exitCode: value.exitCode,
+        command: value.command,
+        target: value.target,
+        expectation: value.expectation,
+        stdout: value.stdout?.substring(0, 500),
+        stderr: value.stderr?.substring(0, 500)
       })),
       judgeError: judgeError ? formatErrorMessage(judgeError) : undefined
     }
@@ -542,169 +359,6 @@ export async function recordFinalEvents(
       })),
       teardownError: teardownError ? formatErrorMessage(teardownError) : undefined
     }
-  });
-}
-
-export function buildFinalResult(
-  preflight: AdapterPreflightResult,
-  adapterResult: Awaited<ReturnType<typeof context.adapter.execute>> | undefined,
-  adapterError: unknown,
-  startedAt: number,
-  setupResults: CommandStepResult[],
-  judgeResults: Awaited<ReturnType<typeof runJudges>>,
-  teardownResults: CommandStepResult[],
-  diff: DiffSummary,
-  changedFiles: string[],
-  collectedFiles: string[],
-  diffPrecision: DiffPrecisionSummary | undefined,
-  cancelled: boolean,
-  success: boolean,
-  context: AgentRunContext
-): AgentRunResult {
-  const { adapter, workspacePath, tracePath, task } = context;
-  const durationMs = Date.now() - startedAt;
-
-  if (cancelled) {
-    return createBaseResult({
-      preflight,
-      tracePath,
-      workspacePath,
-      status: "cancelled",
-      summary: createCancellationSummary("agent execution"),
-      durationMs,
-      changedFiles,
-      changedFilesHint: collectedFiles,
-      setupResults,
-      judgeResults,
-      teardownResults,
-      diff,
-      diffPrecision
-    });
-  }
-
-  if (adapterError) {
-    const errorMessage = formatErrorMessage(adapterError);
-    return createBaseResult({
-      preflight,
-      tracePath,
-      workspacePath,
-      status: "failed",
-      summary: `${adapter.title} crashed: ${errorMessage}`,
-      durationMs,
-      changedFiles,
-      changedFilesHint: collectedFiles,
-      setupResults,
-      diff,
-      diffPrecision
-    });
-  }
-
-  if (!adapterResult) {
-    return createBaseResult({
-      preflight,
-      tracePath,
-      workspacePath,
-      status: "failed",
-      summary: `${adapter.title} did not return a result.`,
-      durationMs,
-      changedFiles,
-      changedFilesHint: collectedFiles,
-      setupResults,
-      diff,
-      diffPrecision
-    });
-  }
-
-  const tokenUsage = adapterResult.tokenUsage;
-  const tokenBudget = task.metadata?.tokenBudget;
-  const tokenUsageBreakdown = adapterResult.tokenUsageBreakdown;
-  const tokenEfficiencyScore =
-    tokenUsage && tokenBudget && Number.isFinite(tokenBudget) && Number.isFinite(tokenUsage) && tokenBudget > 0
-      ? Math.min(1, tokenBudget / tokenUsage)
-      : undefined;
-
-  const patchValidationJudgeResult = judgeResults.find(
-    (result) => result.type === "patch-validation"
-  );
-  const patchValidationResult = patchValidationJudgeResult
-    ? {
-        resolved: patchValidationJudgeResult.success,
-        failToPassResults: [],
-        passToPassResults: []
-      }
-    : undefined;
-
-  const resolutionRate = patchValidationResult?.resolved !== undefined
-    ? (patchValidationResult.resolved ? 1 : 0)
-    : undefined;
-
-  const sweBench = patchValidationResult !== undefined
-    ? { patchValidationResult, resolutionRate }
-    : undefined;
-
-  const taskCategory = task.metadata?.taskCategories?.[0];
-  const contaminationChecked = task.metadata?.antiContamination !== undefined;
-  const difficultyGeneration = task.metadata?.difficultyEvolution?.generation;
-
-  const liveBench = taskCategory !== undefined || contaminationChecked !== undefined || difficultyGeneration !== undefined
-    ? { taskCategory, contaminationChecked, difficultyGeneration }
-    : undefined;
-
-  const finalStatus = success ? "success" : "failed";
-  const durationSeconds = durationMs / 1000;
-  
-  metrics.agentStatusTotal.inc({ status: finalStatus, agentId: preflight.agentId, adapterKind: adapter.kind });
-  metrics.agentDurationSeconds.observe({ agentId: preflight.agentId, status: finalStatus }, durationSeconds);
-  
-  if (adapterResult.tokenUsage) {
-    metrics.agentTokenUsage.observe({ agentId: preflight.agentId }, adapterResult.tokenUsage);
-  }
-  
-  if (adapterResult.estimatedCostUsd && adapterResult.costKnown) {
-    metrics.agentCostUsd.observe({ agentId: preflight.agentId }, adapterResult.estimatedCostUsd);
-  }
-  
-  const passedJudges = judgeResults.filter(j => j.success).length;
-  const totalJudges = judgeResults.length;
-  if (totalJudges > 0) {
-    metrics.judgePassRate.set({ agentId: preflight.agentId }, passedJudges / totalJudges);
-  }
-  
-  logger.info("adapter", "agent.complete", `Agent execution completed: ${adapter.title}`, {
-    agentId: preflight.agentId,
-    variantId: preflight.variantId,
-    metadata: {
-      status: finalStatus,
-      durationMs,
-      tokenUsage: adapterResult.tokenUsage,
-      costUsd: adapterResult.estimatedCostUsd,
-      judgesPassed: passedJudges,
-      judgesTotal: totalJudges
-    }
-  });
-
-  return createBaseResult({
-    preflight,
-    tracePath,
-    workspacePath,
-    status: success ? "success" : "failed",
-    summary: adapterResult.summary,
-    durationMs,
-    tokenUsage: adapterResult.tokenUsage,
-    estimatedCostUsd: adapterResult.estimatedCostUsd,
-    costKnown: adapterResult.costKnown,
-    changedFiles,
-    changedFilesHint: collectedFiles,
-    setupResults,
-    judgeResults,
-    teardownResults,
-    diff,
-    diffPrecision,
-    resolvedRuntime: mergeResolvedRuntime(adapterResult.resolvedRuntime, preflight.resolvedRuntime),
-    tokenUsageBreakdown,
-    tokenEfficiencyScore,
-    sweBench,
-    liveBench
   });
 }
 
@@ -848,8 +502,34 @@ export async function runAgent(
 
   await recordFinalEvents(preflight, judgeResults, judgeError, teardownResults, teardownError, success, context);
 
+  // Extract the assembled prompt for inclusion in the result.
+  // Three-layer fallback (any layer may silently produce undefined):
+  //   1. Trace events: adapter.prompt event written by the adapter
+  //   2. File fallback: prompt.txt in the workspace (some adapters write this)
+  //   3. undefined: prompt omitted from result (UI shows "no prompt available")
+  let assembledPrompt: string | undefined;
+  try {
+    const promptEvents = await context.traceRecorder.query({
+      filter: { type: "adapter.prompt", agentId: preflight.agentId },
+      limit: 1
+    });
+    const promptEvent = promptEvents[0];
+    if (promptEvent?.metadata?.prompt && typeof promptEvent.metadata.prompt === "string") {
+      assembledPrompt = promptEvent.metadata.prompt;
+    }
+  } catch {
+    // Trace query failed — try file fallback
+    try {
+      const promptPath = path.join(context.workspacePath, "prompt.txt");
+      assembledPrompt = await fs.readFile(promptPath, "utf8");
+    } catch {
+      // Both layers failed — prompt will be undefined in result
+    }
+  }
+
   return buildFinalResult(
     preflight,
+    context,
     adapterResult,
     adapterError,
     startedAt,
@@ -862,7 +542,7 @@ export async function runAgent(
     diffPrecision,
     cancelled,
     success,
-    context
+    assembledPrompt
   );
   } finally {
     // Clean up intermediate files on cancellation

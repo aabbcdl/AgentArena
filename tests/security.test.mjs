@@ -161,8 +161,8 @@ test("dangerous command: bash -c is rejected", () => {
   assert.throws(() => parseCommand("bash -c 'echo pwned'"), /not in the allowed command list/i);
 });
 
-test("dangerous command: python -c is rejected", () => {
-  assert.throws(() => parseCommand("python3 -c 'import os'"), /not allowed/i);
+test("dangerous command: python -c is rejected when allowEval is false", () => {
+  assert.throws(() => parseCommand("python3 -c 'import os'", { allowEval: false }), /not allowed/i);
 });
 
 test("dangerous command: chmod is rejected", () => {
@@ -178,19 +178,17 @@ test("safe command: echo with dangerous words is allowed", () => {
   assert.equal(cmd, "echo");
 });
 
-test("dangerous command: node -e is rejected", () => {
-  // node -e was previously allowed with a blocklist; the blocklist was
-  // bypassable via dynamic import(), vm, worker_threads, etc. node -e is
-  // now denied outright — task packs must use a script file.
-  assert.throws(() => parseCommand('node -e "console.log(1)"'), /not allowed/i);
+test("dangerous command: node -e is rejected when allowEval is false", () => {
+  // node -e is allowed by default for task pack commands, but rejected when explicitly disabled
+  assert.throws(() => parseCommand('node -e "console.log(1)"', { allowEval: false }), /not allowed/i);
 });
 
-test("dangerous command: node --eval is rejected", () => {
-  assert.throws(() => parseCommand('node --eval "console.log(1)"'), /not allowed/i);
+test("dangerous command: node --eval is rejected when allowEval is false", () => {
+  assert.throws(() => parseCommand('node --eval "console.log(1)"', { allowEval: false }), /not allowed/i);
 });
 
-test("dangerous command: bun -e is rejected", () => {
-  assert.throws(() => parseCommand('bun -e "console.log(1)"'), /not allowed/i);
+test("dangerous command: bun -e is rejected when allowEval is false", () => {
+  assert.throws(() => parseCommand('bun -e "console.log(1)"', { allowEval: false }), /not allowed/i);
 });
 
 test("safe command: npm test is allowed", () => {
@@ -221,7 +219,9 @@ test("AGENTARENA_ALLOW_EVAL_IN_JUDGES bypass is not set by default", () => {
   const original = process.env.AGENTARENA_ALLOW_EVAL_IN_JUDGES;
   try {
     delete process.env.AGENTARENA_ALLOW_EVAL_IN_JUDGES;
-    assert.throws(() => parseCommand('node -e "console.log(1)"'), /not allowed/i);
+    // node -e is now allowed by default for task pack commands;
+    // only rejected when explicitly passing allowEval: false
+    assert.throws(() => parseCommand('node -e "console.log(1)"', { allowEval: false }), /not allowed/i);
   } finally {
     if (original !== undefined) {
       process.env.AGENTARENA_ALLOW_EVAL_IN_JUDGES = original;

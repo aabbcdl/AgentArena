@@ -12,7 +12,7 @@ import {
 } from "@agentarena/core";
 import type { InvocationSpec } from "./adapter-capabilities.js";
 import { formatAdapterError } from "./adapter-diagnostics.js";
-import { buildAgentPrompt, createPreflightResult, getChangedFilesFromGit } from "./adapter-helpers.js";
+import { buildAgentPrompt, createPreflightResult, getChangedFilesFromGit, savePromptArtifact } from "./adapter-helpers.js";
 import { probeHelp, probeInvocationVersion } from "./invocation-probes.js";
 import { agentTimeoutMs, runProcess } from "./process-utils.js";
 
@@ -297,6 +297,7 @@ export class QwenCodeAdapter implements AgentAdapter {
     await ensureDirectory(metadataDir);
 
     const prompt = buildAgentPrompt(context);
+    await savePromptArtifact(prompt, context.workspacePath, context);
     const invocation = await resolveQwenInvocation();
     const resolvedRuntime = await resolveQwenRuntime({
       requestedModel: context.selection.config?.model,

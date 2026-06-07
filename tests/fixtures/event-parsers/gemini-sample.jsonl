@@ -1,0 +1,3 @@
+{"type":"system","session_id":"sess_gem_001"}
+{"type":"assistant","message":{"content":[{"type":"text","text":"Analyzing the repository structure."}],"usage":{"input_tokens":3000,"output_tokens":400,"cache_creation_input_tokens":0,"cache_read_input_tokens":500}}}
+{"type":"result","result":"Analysis complete.","total_cost_usd":0.015,"usage":{"input_tokens":3000,"output_tokens":400,"cache_creation_input_tokens":0,"cache_read_input_tokens":500}}

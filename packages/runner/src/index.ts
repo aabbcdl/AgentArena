@@ -32,6 +32,8 @@ export { agentConcurrency, agentExecuteTimeoutMs, DEFAULT_AGENT_CONCURRENCY, map
 export { normalizeSelections } from "./normalize-selections.js";
 export type { RepoResolution, RepoResolutionOptions } from "./repo-resolution.js";
 export { buildDiffPrecision, collectChangedFiles } from "./snapshot.js";
+export type { CompatibilityCheck, CompatibilityCheckResult } from "./task-compatibility.js";
+export { checkTaskCompatibility } from "./task-compatibility.js";
 export { wrapWithTimeout } from "./timeout-utils.js";
 export type { WorkspaceCleanupResult } from "./workspace.js";
 export { cleanupWorkspace, debugLog, formatErrorDetails, formatErrorMessage } from "./workspace.js";
@@ -111,6 +113,10 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
   await writeRunMarker(outputPath, "in-progress", { runId });
 
   const selections = normalizeSelections(options);
+  // Track all workspace paths for cleanup. Added BEFORE runAgent so that even
+  // if runAgent throws, the path is in the Set for the finally-block cleanup.
+  // If the entire benchmark is aborted before a callback runs, that workspace
+  // was never created so no cleanup is needed.
   const workspacePaths = new Set<string>();
 
   throwIfAborted(cancellation?.signal, createCancellationSummary("startup"));

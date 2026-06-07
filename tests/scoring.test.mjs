@@ -122,14 +122,14 @@ test("computeCompositeScore works with efficiency-first mode - low token efficie
     status: "success",
     tokenEfficiencyScore: 0.2,
     tokenUsage: 50000,
-    judgeResults: []
+    judgeResults: [{ type: "test-result", success: true }]
   });
   const run = createRun({ results: [result] });
 
   const score = computeCompositeScore(result, run, undefined, "efficiency-first");
   assert.ok(score >= 0 && score <= 100, `Score should be 0-100, got ${score}`);
-  // With low token efficiency, score should be lower
-  assert.ok(score < 70, `Score should be lower with poor token efficiency, got ${score}`);
+  // With low token efficiency, score should be lower than perfect
+  assert.ok(score < 90, `Score should be lower with poor token efficiency, got ${score}`);
 });
 
 test("computeCompositeScore works with rotating-tasks mode", () => {
@@ -444,7 +444,7 @@ test("normalizeApplicableWeights migrates legacy 'judges' key to criticalJudges/
     durationMs: 1000,
     estimatedCostUsd: 0.05,
     costKnown: true,
-    judgeResults: [{ success: true, critical: true }, { success: true }]
+    judgeResults: [{ type: "test-result", success: true, critical: true }, { success: true }]
   });
   const run = createRun({ results: [result] });
 
@@ -474,7 +474,7 @@ test("normalizeApplicableWeights does not overwrite existing criticalJudges when
     durationMs: 1000,
     estimatedCostUsd: 0.05,
     costKnown: true,
-    judgeResults: [{ success: true }]
+    judgeResults: [{ type: "test-result", success: true }]
   });
   const run = createRun({ results: [result] });
 

@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { ensureDirectory } from "./snapshot.js";
 import { logger } from "./logging.js";
+import { ensureDirectory } from "./snapshot.js";
 
 /**
  * Evidence directory name within workspace.
@@ -254,7 +254,10 @@ export async function collectEvidence(
     const toolCallsPath = path.join(evidenceDir, EVIDENCE_FILES.TOOL_CALLS);
     const content = await fs.readFile(toolCallsPath, "utf8");
     const lines = content.split("\n").filter((l) => l.trim());
-    result.toolCalls = lines.map((line) => JSON.parse(line) as ToolCallRecord);
+    result.toolCalls = lines.flatMap((line) => {
+      try { return [JSON.parse(line) as ToolCallRecord]; }
+      catch { return []; }
+    });
   } catch {
     // File doesn't exist or invalid - skip
   }

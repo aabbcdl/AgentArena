@@ -52,8 +52,13 @@ export function filterApplicableWeights(
   const hasPatchValidation = typeof result.sweBench?.patchValidationResult === "object"
     && result.sweBench?.patchValidationResult !== null;
 
+  const hasTestJudge = (result.judgeResults ?? []).some(j => j.type === "test-result");
+  const hasLintJudge = (result.judgeResults ?? []).some(j => j.type === "lint-check");
+
   const applicable: Record<string, number> = {};
   for (const [key, weight] of Object.entries(weights)) {
+    if (key === "tests" && !hasTestJudge) continue;
+    if (key === "lint" && !hasLintJudge) continue;
     if (key === "precision" && !hasPrecision) continue;
     if (key === "tokenEfficiency" && !hasTokenEfficiency) continue;
     if (key === "resolutionRate" && !hasResolutionRate) continue;

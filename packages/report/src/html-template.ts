@@ -141,7 +141,6 @@ function renderAgentCards(run: BenchmarkRun): string {
   return (run.results as ScoredResult[])
     .map((result) => {
       const runtime = formatRuntimeIdentity(result);
-      const _changedFiles = result.changedFiles;
       const addedFiles =
         result.diff.added.length === 0
           ? "<li>None</li>"

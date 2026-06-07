@@ -23,7 +23,7 @@
     "@agentarena/judges": "workspace:*",
     "@agentarena/taskpacks": "workspace:*",
     "@agentarena/trace": "workspace:*",
-    "picomatch": "4.0.3"
+    "picomatch": "4.0.4"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

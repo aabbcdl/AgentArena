@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { logger } from "./logging.js";
 import { ensureDirectory } from "./snapshot.js";
 import type { AdapterPreflightStatus } from "./types/agent.js";
 
@@ -87,7 +88,7 @@ export class HealthCache {
       await fs.writeFile(this.cachePath, JSON.stringify(entries, null, 2), "utf8");
     } catch (error) {
       // Non-fatal: log but don't throw
-      console.warn(`Warning: Failed to persist health cache: ${error instanceof Error ? error.message : String(error)}`);
+      logger.warn("core", "health_cache.persist_failed", `Failed to persist health cache: ${error instanceof Error ? error.message : String(error)}`, { error });
     }
   }
 

@@ -42,6 +42,7 @@ export interface ParsedArgs {
   authToken?: string;
   format?: 'human' | 'json';
   resultFile?: string;
+  last?: boolean;
   githubToken?: string;
   maxRuns?: number;
   trustProxy?: boolean;
@@ -62,6 +63,7 @@ Commands:
   init-ci          Create a CI workflow file for automated benchmarks
   publish          Publish a benchmark result to the community leaderboard
   clean            Remove old benchmark runs (keeps most recent 50 by default)
+  validate         Validate a task pack file without running a benchmark
   ui               Start the web UI server
 
 Run Command:
@@ -77,11 +79,13 @@ Run Command:
     --probe-auth               Test adapter authentication before running
     --update-snapshots         Update snapshot files if they differ
     --cleanup-workspaces       Remove agent workspace directories after run
-    --max-concurrency <n>      Maximum number of agents to run in parallel (default: 1)
+    --max-concurrency <n>      Maximum number of agents to run in parallel (default: min(4, cpuCount))
     --json                     Output results as JSON
     --verbose, -v              Show verbose error messages with stack traces
     -V                         Show version number
-    --debug                    Show detailed debug output (adapter comms, judge timing, trace events)
+    --debug                    Show detailed debug output (implies --verbose)
+    --locale <lang>            Report locale: en, zh-CN (default: en)
+    --format <fmt>             Output format: json, human (default: human)
 
   Scoring Options:
     --score-mode <mode>        Scoring mode (practical, balanced, issue-resolution, efficiency-first, rotating-tasks, comprehensive)
@@ -120,6 +124,7 @@ Doctor Command:
     --probe-auth               Test authentication for each adapter
     --probe-timeout <ms>       Timeout for auth probes in milliseconds (default: 5000)
     --strict                   Exit with error if any adapter is not ready
+    --force                    Skip health cache, re-probe all adapters
     --json                     Output results as JSON
 
 List Adapters Command:
@@ -160,6 +165,7 @@ Publish Command:
     <result-file>              Path to summary.json from a benchmark run
 
   Optional:
+    --last                     Publish the most recent benchmark run (no need to specify file)
     --token <token>            GitHub personal access token (default: gh auth token or GITHUB_TOKEN env)
 
 UI Command:
@@ -171,6 +177,12 @@ UI Command:
     --auth-token <token>       Custom auth token for non-localhost access (default: auto-generated)
     --no-open                  Don't open browser automatically
     --trust-proxy              Trust X-Forwarded-For header for rate limiting (when behind reverse proxy)
+
+Validate Command:
+  agentarena validate <taskpack-path>
+
+  Validate a task pack file without running a benchmark.
+  Reports schema errors, unknown fields, and judge configuration issues.
 
 Global Options:
   -w, --welcome                Show welcome message with getting started tips
@@ -517,6 +529,9 @@ export function parseArgs(argv: string[]): ParsedArgs {
         parsed.format = 'json';
         parsed.json = true;
         break;
+      case "--last":
+        parsed.last = true;
+        break;
       case "--token":
         parsed.githubToken = args.shift();
         if (!parsed.githubToken) {
@@ -551,6 +566,11 @@ export function parseArgs(argv: string[]): ParsedArgs {
         // Positional argument: first non-flag arg after command is resultFile (for publish)
         if (!token.startsWith("-") && parsed.command === "publish" && !parsed.resultFile) {
           parsed.resultFile = token;
+          break;
+        }
+        // Positional argument: first non-flag arg after validate is taskPath
+        if (!token.startsWith("-") && parsed.command === "validate" && !parsed.taskPath) {
+          parsed.taskPath = token;
           break;
         }
         throw new Error(

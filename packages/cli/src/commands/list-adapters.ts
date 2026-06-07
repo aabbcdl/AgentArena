@@ -1,4 +1,8 @@
-import { listAvailableAdapters } from "@agentarena/adapters";
+import {
+  listAvailableAdapters,
+  preflightAdapters,
+} from "@agentarena/adapters";
+import { createAgentSelection } from "@agentarena/core";
 import {
   getAvailabilityEmoji,
   groupByTier,
@@ -6,6 +10,7 @@ import {
 
 export async function runListAdapters(parsed: {
   format?: string;
+  detect?: boolean;
 }): Promise<void> {
   const adapters = listAvailableAdapters()
     .map((adapter) => ({
@@ -15,6 +20,18 @@ export async function runListAdapters(parsed: {
       capability: adapter.capability,
     }))
     .sort((left, right) => left.id.localeCompare(right.id));
+
+  // Run quick detection to show installed/auth status
+  let preflightMap: Map<string, { status: string; summary: string }> | undefined;
+  try {
+    const selections = adapters
+      .filter((a) => a.kind !== "demo")
+      .map((a) => createAgentSelection({ baseAgentId: a.id, displayLabel: a.title }));
+    const preflights = await preflightAdapters(selections, { probeAuth: false });
+    preflightMap = new Map(preflights.map((p) => [p.agentId, { status: p.status, summary: p.summary }]));
+  } catch {
+    // Detection failed — show static info only
+  }
 
   if (parsed.format === "json") {
     console.log(JSON.stringify(adapters, null, 2));
@@ -35,6 +52,13 @@ export async function runListAdapters(parsed: {
         `     ${getAvailabilityEmoji(adapter.capability.tokenAvailability)} tokens | ${getAvailabilityEmoji(adapter.capability.costAvailability)} cost | ${getAvailabilityEmoji(adapter.capability.traceRichness)} trace`,
       );
 
+      // Show detection status if available
+      const detected = preflightMap?.get(adapter.id);
+      if (detected) {
+        const statusIcon = detected.status === "ready" ? "✓" : detected.status === "unverified" ? "?" : "✗";
+        console.log(`     installed: ${statusIcon} ${detected.status} — ${detected.summary}`);
+      }
+
       if (adapter.capability.authPrerequisites.length > 0) {
         console.log(
           `     auth: ${adapter.capability.authPrerequisites.join("; ")}`,
@@ -43,6 +67,7 @@ export async function runListAdapters(parsed: {
       for (const limitation of adapter.capability.knownLimitations) {
         console.log(`     limitation: ${limitation}`);
       }
+      console.log(`     test: agentarena doctor --agents ${adapter.id}`);
       console.log("");
     }
     console.log("");

@@ -54,12 +54,18 @@ let adaptersPackageVersionCache: { value: Promise<string | undefined> } | null =
 
 export async function getAdaptersPackageVersion(): Promise<string | undefined> {
   if (!adaptersPackageVersionCache) {
-    const promise = readPackageVersion(path.join(import.meta.dirname, "..")).catch((error) => {
-      adaptersPackageVersionCache = null;
-      // biome-ignore lint/suspicious/noConsole: startup diagnostic
-      console.warn(`Warning: Failed to read adapters package version: ${error instanceof Error ? error.message : String(error)}`);
-      return undefined;
-    });
+    const promise = readPackageVersion(path.join(import.meta.dirname, ".."))
+      .then((version) => {
+        // Cache successful result
+        return version;
+      })
+      .catch((error) => {
+        // Don't cache failures — next call will retry
+        adaptersPackageVersionCache = null;
+        // biome-ignore lint/suspicious/noConsole: startup diagnostic before logger is available
+        console.warn(`Warning: Failed to read adapters package version: ${error instanceof Error ? error.message : String(error)}`);
+        return undefined;
+      });
     adaptersPackageVersionCache = { value: promise };
   }
 
@@ -205,17 +211,19 @@ export async function probeAuthConfig(
 
   // Gemini: check GEMINI_API_KEY or GOOGLE_API_KEY
   if (command.includes("gemini")) {
+    const hasKey = !!(env.GEMINI_API_KEY || env.GOOGLE_API_KEY);
     return {
-      configured: !!(env.GEMINI_API_KEY || env.GOOGLE_API_KEY),
-      hint: "No GEMINI_API_KEY or GOOGLE_API_KEY set"
+      configured: hasKey,
+      hint: hasKey ? undefined : "No GEMINI_API_KEY or GOOGLE_API_KEY set"
     };
   }
 
   // Aider: check OPENAI_API_KEY or ANTHROPIC_API_KEY
   if (command.includes("aider")) {
+    const hasKey = !!(env.OPENAI_API_KEY || env.ANTHROPIC_API_KEY);
     return {
-      configured: !!(env.OPENAI_API_KEY || env.ANTHROPIC_API_KEY),
-      hint: "No OPENAI_API_KEY or ANTHROPIC_API_KEY set"
+      configured: hasKey,
+      hint: hasKey ? undefined : "No OPENAI_API_KEY or ANTHROPIC_API_KEY set"
     };
   }
 
@@ -284,11 +292,12 @@ export async function probeClaudeLikeAuth(
         "--permission-mode",
         "bypassPermissions",
         "--no-session-persistence",
-        prompt
       ],
       cwd,
       timeoutMs,
-      environment
+      environment,
+      undefined,
+      prompt
     );
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
@@ -304,8 +313,11 @@ export async function probeClaudeLikeAuth(
   if (execution.timedOut) {
     return {
       status: "blocked",
-      summary: "Authenticated probe timed out before the CLI produced a result.",
-      details: [execution.stderr.trim()].filter(Boolean)
+      summary: `Authenticated probe timed out (${Math.round(timeoutMs / 1000)}s). The API endpoint may be slow or unreachable.`,
+      details: [
+        execution.stderr.trim(),
+        `Tip: If using a third-party provider, the API server may be slow. Try again or check your network connection.`
+      ].filter(Boolean)
     };
   }
 
@@ -342,7 +354,7 @@ export async function probeClaudeLikeAuth(
 
 /**
  * Fast auth probe with health cache integration.
- * Returns in ≤5s (configurable) with structured failure reasons.
+ * Returns in ≤15s (configurable) with structured failure reasons.
  * Uses HealthCache to avoid redundant probes within TTL.
  */
 export async function probeClaudeLikeAuthFast(
@@ -351,7 +363,7 @@ export async function probeClaudeLikeAuthFast(
   adapterId: string,
   providerId: string,
   environment?: NodeJS.ProcessEnv,
-  timeoutMs: number = 5_000,
+  timeoutMs: number = 15_000,
   options?: {
     endpoint?: string;
     useCache?: boolean;

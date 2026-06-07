@@ -98,6 +98,8 @@ export async function runBenchmarkCommand(
 
   const selections = normalizeCliSelections(parsed);
 
+  const runStartMs = Date.now();
+
   if (parsed.format !== "json") {
     console.log(`\nStarting AgentArena benchmark...`);
     console.log(`Repository: ${parsed.repoPath}`);
@@ -107,6 +109,13 @@ export async function runBenchmarkCommand(
       console.log(`Authentication probe: enabled`);
     }
     console.log("");
+  }
+
+  function elapsed(): string {
+    const sec = Math.floor((Date.now() - runStartMs) / 1000);
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
   }
 
   let cancelled = false;
@@ -150,7 +159,7 @@ export async function runBenchmarkCommand(
               const prefix = event.displayLabel
                 ? `[${event.displayLabel}] `
                 : "";
-              process.stderr.write(`  ${prefix}${event.message}\n`);
+              process.stderr.write(`  [${elapsed()}] ${prefix}${event.message}\n`);
             },
     });
   } finally {
@@ -182,7 +191,7 @@ export async function runBenchmarkCommand(
   );
   await fs.writeFile(
     decisionReportPath,
-    formatDecisionReport(decisionReport),
+    formatDecisionReport(decisionReport, reportLocale),
     "utf8",
   );
 

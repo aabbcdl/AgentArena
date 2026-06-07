@@ -30,7 +30,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { ClaudeProviderProfile, ClaudeProviderRiskFlag } from "@agentarena/core";
-import { hasInternalDnsResolution, isInternalUrl } from "@agentarena/core";
+import { hasInternalDnsResolution, isInternalUrl, logger } from "@agentarena/core";
 
 interface ProfileRegistryFile {
   schemaVersion: 1;
@@ -216,6 +216,15 @@ function encodeForPowerShell(value: string): string {
   return Buffer.from(value, "utf8").toString("base64");
 }
 
+/**
+ * Run a PowerShell script and parse its JSON output.
+ *
+ * SECURITY: The script is encoded as Base64 UTF-16LE for -EncodedCommand,
+ * which eliminates shell injection risk through script content. The user-
+ * provided data (target, password) is Base64-encoded within the script and
+ * decoded at runtime inside PowerShell, so special characters cannot break
+ * out of string interpolation.
+ */
 async function runPowerShellJson(script: string): Promise<unknown> {
   // Encode the entire script as Base64 UTF-16LE for -EncodedCommand,
   // eliminating any risk of shell injection through script content.
@@ -324,6 +333,23 @@ try {
 
 const SECRET_ENCRYPTION_MARKER = "ENC1:";
 
+/**
+ * Derive a machine-bound encryption key from hostname + username.
+ *
+ * THREAT MODEL:
+ * - Protects secrets at rest on shared filesystems (NFS, cloud drives)
+ * - Does NOT protect against local privilege escalation (key derivation
+ *   inputs are publicly known: hostname and username)
+ * - Does NOT protect against a process running as the same user
+ *
+ * CAVEAT: Renaming the machine or user account silently invalidates all
+ * encrypted secrets. The getSecretFile() function catches the decryption
+ * failure and logs a warning, but does NOT auto-recover.
+ *
+ * Algorithm: scrypt (memory-hard KDF) with default parameters.
+ * Salt: agentarena-secret-${hostname}-${username}
+ * Output: 32-byte key for AES-256-GCM
+ */
 function deriveMachineKey(): Buffer {
   const hostname = os.hostname();
   const username = os.userInfo().username;
@@ -352,6 +378,7 @@ function decryptSecret(encrypted: string): string | null {
     decipher.setAuthTag(authTag);
     return decipher.update(ciphertext) + decipher.final("utf8");
   } catch {
+    logger.warn("adapter", "profile.decrypt_failed", `Failed to decrypt secret: decryption error (possible machine-key mismatch)`);
     return null;
   }
 }
@@ -361,9 +388,22 @@ async function setSecretFile(profileId: string, secret: string): Promise<void> {
   const filePath = secretFilePath(profileId);
   const encrypted = encryptSecret(secret.trim());
   await fs.writeFile(filePath, `${encrypted}\n`, { encoding: "utf8", mode: 0o600 });
-  await fs.chmod(filePath, 0o600).catch(() => {});
+  await fs.chmod(filePath, 0o600).catch((err) => {
+    logger.debug("adapter", "profile.chmod_failed", `chmod 0o600 failed for ${filePath}: ${err instanceof Error ? err.message : String(err)}`);
+  });
 }
 
+/**
+ * Read a secret from the file-based storage backend.
+ *
+ * FORMAT MIGRATION HISTORY (newest first):
+ * 1. ENC1: prefix — AES-256-GCM encrypted, machine-bound key (current)
+ * 2. Valid Base64 — decoded and used (legacy, auto-detected)
+ * 3. Raw plaintext — used as-is (oldest legacy, no encoding)
+ *
+ * The fallback chain reads the file once and tries each format in order.
+ * New secrets are always written in ENC1 format via setSecretFile().
+ */
 async function getSecretFile(profileId: string): Promise<string | null> {
   try {
     const raw = (await fs.readFile(secretFilePath(profileId), "utf8")).trim();
@@ -388,6 +428,7 @@ async function getSecretFile(profileId: string): Promise<string | null> {
       }
     } catch {
       // Fall through to return raw value for legacy plaintext files
+      logger.debug("adapter", "profile.secret_decode", `Base64 decode failed for profile "${profileId}"; falling back to raw value`);
     }
     return raw || null;
   } catch {
@@ -485,6 +526,7 @@ export async function saveClaudeProviderProfile(input: ClaudeProviderProfileInpu
     }
   }
 
+  let effectiveRiskFlags: ClaudeProviderRiskFlag[] = [...(input.riskFlags ?? [])];
   if (input.baseUrl) {
     let parsedHost: string;
     try {
@@ -492,18 +534,33 @@ export async function saveClaudeProviderProfile(input: ClaudeProviderProfileInpu
     } catch {
       throw new Error(`baseUrl "${input.baseUrl}" is not a valid URL.`);
     }
+    // Known API hosts that are pre-approved without risk flags.
+    // MAINTENANCE: Add new hosts here when onboarding a new provider.
+    // Unknown hosts are allowed but flagged with "baseUrl-redirects-traffic"
+    // so the UI can display a warning to the user.
     const ALLOWED_API_HOSTS = new Set([
-      "api.anthropic.com",
-      "api.openai.com",
-      "generativelanguage.googleapis.com",
-      "dashscope.aliyuncs.com"
+      "api.anthropic.com",       // Anthropic official
+      "api.openai.com",          // OpenAI official
+      "generativelanguage.googleapis.com",  // Google Gemini
+      "dashscope.aliyuncs.com"   // Alibaba DashScope (Qwen)
     ]);
     if (!ALLOWED_API_HOSTS.has(parsedHost)) {
       const riskFlag: ClaudeProviderRiskFlag = "baseUrl-redirects-traffic";
-      // Always allow third-party API hosts, but mark them with a risk flag
-      // The UI will display a warning to the user
+      // Unknown (non-allowlisted) hosts route Claude traffic to a third-party
+      // server. Require explicit risk acknowledgment before persisting so the
+      // caller cannot silently redirect credentials/traffic to an arbitrary
+      // endpoint. The UI surfaces this as a confirmation step.
+      if (!input._confirmBaseUrlRisk && !input.riskFlags?.includes(riskFlag)) {
+        throw new Error(
+          `baseUrl "${input.baseUrl}" points to a third-party server (${parsedHost}). ` +
+            "Routing Claude traffic there can expose your credentials and data. " +
+            "Confirm the risk to proceed."
+        );
+      }
+      // Acknowledged: allow the host but persist the risk flag so the UI can
+      // display a warning to the user.
       if (!input.riskFlags?.includes(riskFlag)) {
-        input.riskFlags = [...(input.riskFlags ?? []), riskFlag];
+        effectiveRiskFlags = [...(input.riskFlags ?? []), riskFlag];
       }
     }
   }
@@ -525,7 +582,7 @@ export async function saveClaudeProviderProfile(input: ClaudeProviderProfileInpu
     extraEnv: input.extraEnv ?? {},
     writeCommonConfig: input.writeCommonConfig ?? true,
     notes: input.notes,
-    riskFlags: [...new Set([...defaultRiskFlags(input.kind), ...(input.riskFlags ?? [])])],
+    riskFlags: [...new Set([...defaultRiskFlags(input.kind), ...effectiveRiskFlags])],
     isBuiltIn: false,
     secretStored: false
   });

@@ -8,9 +8,15 @@ import { runListAdapters } from "./commands/list-adapters.js";
 import { runBenchmarkCommand } from "./commands/run.js";
 import { hasAvailableAdapters, showWelcomeMessage } from "./commands/shared.js";
 import { runUi } from "./commands/ui.js";
+import { runValidate } from "./commands/validate.js";
+import { loadDotEnv } from "./dotenv.js";
 import { runPublish } from "./publish.js";
 
 async function main(): Promise<void> {
+  // Load .env file from project root before anything else.
+  // Does NOT override already-set environment variables.
+  loadDotEnv();
+
   let parsed: ParsedArgs | undefined;
 
   try {
@@ -63,6 +69,9 @@ async function main(): Promise<void> {
       case "clean":
         await runCleanup(parsed);
         break;
+      case "validate":
+        await runValidate(parsed);
+        break;
       case "ui":
         await runUi(parsed);
         break;
@@ -108,17 +117,21 @@ async function main(): Promise<void> {
     }
 
     if (message.includes("ENOENT") || message.includes("does not exist")) {
-      console.error(
-        "\n💡 Hint: check if the file path is correct.",
-      );
+      console.error("\n💡 Hint: check if the file path is correct.");
     } else if (message.includes("Unknown agent")) {
-      console.error(
-        '\n💡 Hint: run "agentarena list-adapters" to see available agents.',
-      );
+      console.error('\n💡 Hint: run "agentarena list-adapters" to see available agents.');
     } else if (message.includes("Missing required")) {
-      console.error(
-        '\n💡 Hint: run "agentarena --help" for usage information.',
-      );
+      console.error('\n💡 Hint: run "agentarena --help" for usage information.');
+    } else if (message.includes("EADDRINUSE") || message.includes("already in use")) {
+      // Already handled by ui.ts with specific port suggestion
+    } else if (message.includes("ECONNREFUSED") || message.includes("fetch failed")) {
+      console.error("\n💡 Hint: check your network connection and API endpoint.");
+    } else if (message.includes("401") || message.includes("Unauthorized") || message.includes("authentication")) {
+      console.error("\n💡 Hint: check your API key. Run 'agentarena doctor --probe-auth' to diagnose.");
+    } else if (message.includes("403") || message.includes("Forbidden")) {
+      console.error("\n💡 Hint: your API key may lack required permissions.");
+    } else if (message.includes("429") || message.includes("rate limit")) {
+      console.error("\n💡 Hint: rate limited. Wait a moment and try again.");
     }
 
     if (!parsed?.verbose) {

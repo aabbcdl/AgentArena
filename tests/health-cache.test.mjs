@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import assert from "node:assert/strict";
 import { promises as fs } from "node:fs";
-import path from "node:path";
 import os from "node:os";
-import { HealthCache, resetHealthCache, getHealthCache } from "../packages/core/dist/health-cache.js";
+import path from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
+import { getHealthCache, HealthCache, resetHealthCache } from "../packages/core/dist/health-cache.js";
 
 describe("HealthCache", () => {
   let tempDir;
@@ -26,16 +27,16 @@ describe("HealthCache", () => {
     await cache.set("claude-code", "official", "ready", "CLI is healthy");
 
     const entry = await cache.get("claude-code", "official");
-    expect(entry).toBeDefined();
-    expect(entry.adapterId).toBe("claude-code");
-    expect(entry.providerId).toBe("official");
-    expect(entry.status).toBe("ready");
-    expect(entry.summary).toBe("CLI is healthy");
+    assert.notEqual(entry, undefined);
+    assert.equal(entry.adapterId, "claude-code");
+    assert.equal(entry.providerId, "official");
+    assert.equal(entry.status, "ready");
+    assert.equal(entry.summary, "CLI is healthy");
   });
 
   it("should return undefined for non-existent entries", async () => {
     const entry = await cache.get("nonexistent", "provider");
-    expect(entry).toBeUndefined();
+    assert.equal(entry, undefined);
   });
 
   it("should handle entries with endpoint", async () => {
@@ -44,12 +45,12 @@ describe("HealthCache", () => {
     });
 
     const entry = await cache.get("claude-code", "mimo", "https://api.mimo.com");
-    expect(entry).toBeDefined();
-    expect(entry.endpoint).toBe("https://api.mimo.com");
+    assert.notEqual(entry, undefined);
+    assert.equal(entry.endpoint, "https://api.mimo.com");
 
     // Different endpoint should not match
     const other = await cache.get("claude-code", "mimo", "https://other.com");
-    expect(other).toBeUndefined();
+    assert.equal(other, undefined);
   });
 
   it("should expire entries after TTL", async () => {
@@ -62,13 +63,13 @@ describe("HealthCache", () => {
 
     // Should exist immediately
     const entry1 = await shortCache.get("test", "provider");
-    expect(entry1).toBeDefined();
+    assert.notEqual(entry1, undefined);
 
     // Wait for expiration
     await new Promise((resolve) => setTimeout(resolve, 150));
 
     const entry2 = await shortCache.get("test", "provider");
-    expect(entry2).toBeUndefined();
+    assert.equal(entry2, undefined);
   });
 
   it("should persist cache to disk", async () => {
@@ -79,8 +80,8 @@ describe("HealthCache", () => {
     const data = await fs.readFile(cachePath, "utf8");
     const entries = JSON.parse(data);
 
-    expect(entries).toHaveLength(1);
-    expect(entries[0].adapterId).toBe("test");
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].adapterId, "test");
   });
 
   it("should load cache from disk", async () => {
@@ -105,16 +106,16 @@ describe("HealthCache", () => {
     });
 
     const entry = await newCache.get("loaded", "provider");
-    expect(entry).toBeDefined();
-    expect(entry.summary).toBe("from disk");
+    assert.notEqual(entry, undefined);
+    assert.equal(entry.summary, "from disk");
   });
 
   it("should invalidate entries", async () => {
     await cache.set("test", "provider", "ready", "ok");
-    expect(await cache.has("test", "provider")).toBe(true);
+    assert.equal(await cache.has("test", "provider"), true);
 
     await cache.invalidate("test", "provider");
-    expect(await cache.has("test", "provider")).toBe(false);
+    assert.equal(await cache.has("test", "provider"), false);
   });
 
   it("should cleanup expired entries", async () => {
@@ -130,10 +131,10 @@ describe("HealthCache", () => {
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     const removed = await shortCache.cleanup();
-    expect(removed).toBe(2);
+    assert.equal(removed, 2);
 
     const stats = await shortCache.stats();
-    expect(stats.total).toBe(0);
+    assert.equal(stats.total, 0);
   });
 
   it("should clear all entries", async () => {
@@ -143,7 +144,7 @@ describe("HealthCache", () => {
     await cache.clear();
 
     const stats = await cache.stats();
-    expect(stats.total).toBe(0);
+    assert.equal(stats.total, 0);
   });
 
   it("should return all valid entries", async () => {
@@ -151,7 +152,7 @@ describe("HealthCache", () => {
     await cache.set("test2", "p2", "blocked", "fail");
 
     const all = await cache.getAll();
-    expect(all).toHaveLength(2);
+    assert.equal(all.length, 2);
   });
 
   it("should provide accurate stats", async () => {
@@ -167,9 +168,9 @@ describe("HealthCache", () => {
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     const stats = await shortCache.stats();
-    expect(stats.total).toBe(2);
-    expect(stats.valid).toBe(0);
-    expect(stats.expired).toBe(2);
+    assert.equal(stats.total, 2);
+    assert.equal(stats.valid, 0);
+    assert.equal(stats.expired, 2);
   });
 });
 
@@ -181,22 +182,23 @@ describe("HealthCache singleton", () => {
   it("should return the same instance", () => {
     const cache1 = getHealthCache();
     const cache2 = getHealthCache();
-    expect(cache1).toBe(cache2);
+    assert.equal(cache1, cache2);
   });
 
   it("should create new instance after reset", () => {
     const cache1 = getHealthCache();
     resetHealthCache();
     const cache2 = getHealthCache();
-    expect(cache1).not.toBe(cache2);
+    assert.notEqual(cache1, cache2);
   });
 });
 
 describe("probeClaudeLikeAuthFast", () => {
   // This test requires the actual CLI to be installed
   // Skip if not available
-  it.skipIf(!process.env.ANTHROPIC_API_KEY)(
+  it(
     "should use cache for repeated probes",
+    { skip: !process.env.ANTHROPIC_API_KEY },
     async () => {
       // This is an integration test that would require actual CLI
       // Skipping in unit tests

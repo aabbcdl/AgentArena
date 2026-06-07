@@ -134,9 +134,9 @@ export function parseAdapterEvents(stdout: string): ParsedAdapterOutput {
     const line = rawLine.trim();
     if (!line.startsWith("{")) continue;
 
-    let parsed: AdapterEvent;
+    let parsed: unknown;
     try {
-      parsed = JSON.parse(line) as AdapterEvent;
+      parsed = JSON.parse(line);
     } catch {
       parseErrorCount++;
       if (parseErrorCount <= 3) {
@@ -146,49 +146,52 @@ export function parseAdapterEvents(stdout: string): ParsedAdapterOutput {
       continue;
     }
 
-    switch (parsed.type) {
+    if (!parsed || typeof parsed !== "object" || !("type" in parsed)) continue;
+
+    const event = parsed as AdapterEvent;
+    switch (event.type) {
       case "adapter.start":
-        if (parsed.model) eventModel = parsed.model;
-        if (parsed.reasoningEffort) eventReasoningEffort = parsed.reasoningEffort;
+        if (event.model) eventModel = event.model;
+        if (event.reasoningEffort) eventReasoningEffort = event.reasoningEffort;
         break;
 
       case "adapter.message":
         // Keep the last message as potential summary
-        if (parsed.text?.trim()) {
-          summary = parsed.text.trim();
+        if (event.text?.trim()) {
+          summary = event.text.trim();
         }
         break;
 
       case "adapter.file_change":
-        if (parsed.path) {
-          changedFiles.add(parsed.path);
+        if (event.path) {
+          changedFiles.add(event.path);
         }
         break;
 
       case "adapter.usage":
         tokenUsage +=
-          (parsed.inputTokens ?? 0) +
-          (parsed.outputTokens ?? 0) +
-          (parsed.cacheReadTokens ?? 0) +
-          (parsed.cacheWriteTokens ?? 0) +
-          (parsed.reasoningTokens ?? 0);
+          (event.inputTokens ?? 0) +
+          (event.outputTokens ?? 0) +
+          (event.cacheReadTokens ?? 0) +
+          (event.cacheWriteTokens ?? 0) +
+          (event.reasoningTokens ?? 0);
         break;
 
       case "adapter.result":
-        if (parsed.summary?.trim()) {
-          summary = parsed.summary.trim();
+        if (event.summary?.trim()) {
+          summary = event.summary.trim();
         }
-        if (typeof parsed.totalCostUsd === "number" && Number.isFinite(parsed.totalCostUsd)) {
-          estimatedCostUsd = parsed.totalCostUsd;
-          costKnown = parsed.status === "success";
+        if (typeof event.totalCostUsd === "number" && Number.isFinite(event.totalCostUsd)) {
+          estimatedCostUsd = event.totalCostUsd;
+          costKnown = event.status === "success";
         }
-        if (parsed.status === "failed") {
-          error = parsed.summary ?? "Adapter reported failure.";
+        if (event.status === "failed") {
+          error = event.summary ?? "Adapter reported failure.";
         }
         break;
 
       case "adapter.error":
-        error = parsed.message ?? "Unknown adapter error.";
+        error = event.message ?? "Unknown adapter error.";
         break;
     }
   }

@@ -18,6 +18,7 @@ const RATE_LIMIT_EXPENSIVE_PATHS = new Set([
   "/api/run",
   "/api/run/cancel",
   "/api/preflight",
+  "/api/quick-preflight",
   "/api/create-adhoc-taskpack",
   "/api/provider-profiles"
 ]);
@@ -36,6 +37,7 @@ const trustedProxyIps = new Set<string>();
 
 export function setTrustProxy(enabled: boolean, trustedIps?: string[]): void {
   trustProxy = enabled;
+  trustedProxyIps.clear(); // Replace, don't append
   if (trustedIps) {
     for (const ip of trustedIps) {
       trustedProxyIps.add(ip);
@@ -137,7 +139,7 @@ export function checkRateLimit(ip: string, pathname: string): { allowed: boolean
 }
 
 export function startRateLimitCleanup(): NodeJS.Timeout {
-  return setInterval(() => {
+  const handle = setInterval(() => {
     const cutoff = Date.now() - RATE_LIMIT_WINDOW_MS;
     for (const [ip, entry] of rateLimitStore) {
       if (entry.timestamps.length === 0 || entry.timestamps[entry.timestamps.length - 1] < cutoff) {
@@ -158,6 +160,8 @@ export function startRateLimitCleanup(): NodeJS.Timeout {
       }
     }
   }, RATE_LIMIT_WINDOW_MS);
+  handle.unref(); // Don't prevent process exit if server is shut down
+  return handle;
 }
 
 // Auth
@@ -222,6 +226,7 @@ const SENSITIVE_API_PATHS = new Set([
   "/api/run",
   "/api/run/cancel",
   "/api/preflight",
+  "/api/quick-preflight",
   "/api/create-adhoc-taskpack",
 ]);
 

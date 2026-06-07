@@ -252,24 +252,22 @@ pnpm test:web-report:e2e
 
 ## 官方任务包库
 
-23 个任务包覆盖常见开发场景：
+19 个任务包覆盖常见开发场景：
 
 **质量与测试**
 - `test-coverage` — 提升现有模块的测试覆盖率
 - `failing-test-fix` — 修复失败的测试
-- `lint-clean` — 修复 lint 错误和警告
 
 **Bug 修复与重构**
 - `react-bugfix` — 修复 React 组件 bug
 - `small-refactor` — 小规模重构
-- `cross-module-refactor` — 跨模块重构
-- `multi-file-rename` — 跨文件重命名
+- `cross-module-refactor` — 跨模块重构 *(内置仓库)*
+- `multi-file-rename` — 跨文件重命名 *(内置仓库)*
 - `config-repair` — 修复配置问题
 
 **API 与后端**
 - `python-api` — 添加 Python API 端点
 - `go-microservice` — 添加 Go 微服务功能
-- `json-api` — 构建 JSON API
 - `json-contract-repair` — 修复 JSON schema 问题
 
 **DevOps 与基础设施**

@@ -32,7 +32,7 @@ export async function runFileCountJudge(judge: FileCountJudge, workspacePath: st
       expectation: expectationParts.join(", "),
       exitCode: success ? 0 : 1,
       success,
-      stdout: `Actual count=${actual}${matches.length > 0 ? `; matches: ${matches.join(", ")}` : ""}`,
+      stdout: `Actual count=${actual}${matches.length > 0 ? `; matches: ${matches.slice(0, 20).join(", ")}${matches.length > 20 ? ` (and ${matches.length - 20} more)` : ""}` : ""}`,
       stderr: success ? "" : `File count assertion failed for pattern "${judge.pattern}".`,
       durationMs: Date.now() - startedAt,
       critical: judge.critical ?? false

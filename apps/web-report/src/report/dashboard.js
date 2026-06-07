@@ -1,17 +1,16 @@
 import { escapeHtml, formatRelativeTime, setHidden } from "../app-helpers.js";
 import { renderBarChart, renderComparisonBarChart, renderRadarChart } from "../components/charts.js";
-import {baselineTaskWarning, 
-  formatJudgeType, statusClass, 
-  taskIntentSummary, taskMeaningBadges,translateStatus 
+import {baselineTaskWarning,
+  formatJudgeType, statusClass,
+  taskIntentSummary, taskMeaningBadges,translateStatus
 } from "../task-utils.js";
 import { createVirtualList } from "../utils/virtual-list.js";
 import {baseAgentLabel,
-  findPreviousComparableRun, getAgentTrendRows,getCompareResults,getRunCompareRows, getRunToRunAgentDiff, 
-  getRunTrustSummary, 
-  getRunVerdict, getSelectionTrustSummary, resultLabel, runtimeIdentity, 
-  summarizeRun 
+  findPreviousComparableRun, getAgentTrendRows,getCompareResults,getRunCompareRows, getRunToRunAgentDiff,
+  getRunVerdict, getSelectionTrustSummary, resultLabel, runtimeIdentity,
+  summarizeRun
 } from "../view-model/comparison.js";
-import { formatCompositeScore, getCompositeScoreReasons } from "../view-model/scoring.js";
+import { formatCompositeScore } from "../view-model/scoring.js";
 
 const VIRTUAL_LIST_THRESHOLD = 50;
 let runListVirtual = null;
@@ -28,8 +27,7 @@ let runListVirtual = null;
  *   state, elements, judgeFilters, compareFilters, runCompareFilters,
  *   t, localText, formatDuration, formatCost, recordKey,
  *   runtimeVerificationLabel, getArchivedScoreModeLabel, getScoreModeLabel,
- *   runFocusLine, formatDiffPrecisionMetric, formatTestMetric, formatLintMetric,
- *   findJudgeByType, diffPrecisionScore, renderStepCards, renderJudgeCards,
+ *   formatDiffPrecisionMetric, diffPrecisionScore, renderStepCards, renderJudgeCards,
  *   renderDiff, renderMarkdownBlock, renderInlineAgentDetail,
  *   renderCodeReviewSection, renderTeamCostCalculator, setupShareActions,
  *   buildShareCard, buildLeaderboard
@@ -56,11 +54,7 @@ export function createDashboardModule(deps) {
     runtimeVerificationLabel,
     getArchivedScoreModeLabel,
     getScoreModeLabel,
-    runFocusLine,
     formatDiffPrecisionMetric,
-    formatTestMetric,
-    formatLintMetric,
-    findJudgeByType,
     diffPrecisionScore,
     renderStepCards,
     renderJudgeCards,
@@ -95,7 +89,7 @@ export function createDashboardModule(deps) {
  */
 function scoreGrade(score, status) {
   if (status === "failed" || status === "cancelled") {
-    return { label: "Failed", labelZh: "\u5931\u8d25", cssClass: "score-failed", color: "var(--danger, #e53935)" };
+    return { label: "Baseline", labelZh: "\u5931\u8d25\u57fa\u7ebf", cssClass: "score-failed", color: "var(--danger, #e53935)" };
   }
   if (score >= 80) {
     return { label: "Excellent", labelZh: "\u4f18\u79c0", cssClass: "score-excellent", color: "var(--success, #2e7d32)" };
@@ -130,32 +124,6 @@ function renderEmptyState({ title, message, primaryCtaText, primaryCtaAction, se
         ${primaryCtaText ? `<button class="btn btn-primary empty-state-cta" ${primaryCtaAction ? `data-action="${primaryCtaAction}"` : ''}>${escapeHtml(primaryCtaText)}</button>` : ''}
         ${secondaryCtaText ? `<button class="btn btn-ghost empty-state-cta-secondary" ${secondaryCtaAction ? `data-action="${secondaryCtaAction}"` : ''}>${escapeHtml(secondaryCtaText)}</button>` : ''}
       </div>
-    </div>
-  `;
-}
-
-/**
- * Render an error state with warning icon, title, message, and optional retry button
- * @param {Object} options
- * @param {string} options.title - Error title text
- * @param {string} options.message - Error description
- * @param {string} [options.retryText] - Optional retry button text
- * @param {string} [options.retryAction] - Optional retry button action (data attribute)
- * @returns {string} HTML string
- */
-function renderErrorState({ title, message, retryText, retryAction }) {
-  return `
-    <div class="error-state-content">
-      <div class="error-state-icon">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <circle cx="12" cy="12" r="10"/>
-          <line x1="12" y1="8" x2="12" y2="12"/>
-          <line x1="12" y1="16" x2="12.01" y2="16"/>
-        </svg>
-      </div>
-      <h3 class="error-state-title">${escapeHtml(title)}</h3>
-      <p class="error-state-message">${escapeHtml(message)}</p>
-      ${retryText ? `<button class="btn btn-danger error-state-retry" ${retryAction ? `data-action="${retryAction}"` : ''}>${escapeHtml(retryText)}</button>` : ''}
     </div>
   `;
 }
@@ -216,9 +184,12 @@ function renderRunListItem(run) {
   const active = run.runId === state.selectedRunId ? "active" : "";
   const successCount = run.results.filter((result) => result.status === "success").length;
   const hasMarkdown = state.markdownByRunId.has(run.runId);
+  const allSuccess = successCount === run.results.length && run.results.length > 0;
+  const allFailed = successCount === 0 && run.results.length > 0;
+  const statusClass = allSuccess ? "run-card--success" : allFailed ? "run-card--failed" : "run-card--partial";
 
   return `
-    <div class="run-button ${active}" role="button" tabindex="0" data-run-id="${escapeHtml(run.runId)}" aria-label="${escapeHtml(run.task.title)}">
+    <div class="run-button ${active} ${statusClass}" role="button" tabindex="0" data-run-id="${escapeHtml(run.runId)}" aria-label="${escapeHtml(run.task.title)}">
       <div class="run-actions">
         <button type="button" class="run-select-btn" data-role="select-run" data-run-id="${escapeHtml(run.runId)}" title="${escapeHtml(localText("打开这个 run", "Open this run"))}" aria-label="${escapeHtml(localText("打开这个 run", "Open this run"))}">
           <svg class="icon"><use href="#icon-open"/></svg>
@@ -239,6 +210,68 @@ function renderRunListItem(run) {
       <div class="meta">${hasMarkdown ? escapeHtml(t("linkedMarkdown")) : escapeHtml(t("jsonOnly"))}</div>
     </div>
   `;
+}
+
+function appendIcon(parent, iconId) {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", "icon");
+  const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+  use.setAttribute("href", iconId);
+  svg.appendChild(use);
+  parent.appendChild(svg);
+}
+
+function appendTextElement(parent, tagName, className, text) {
+  const element = document.createElement(tagName);
+  if (className) {
+    element.className = className;
+  }
+  element.textContent = text;
+  parent.appendChild(element);
+  return element;
+}
+
+function createRunActionButton(role, runId, iconId, label) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = role === "select-run" ? "run-select-btn" : "run-action-btn";
+  button.dataset.role = role;
+  button.dataset.runId = runId;
+  button.title = label;
+  button.setAttribute("aria-label", label);
+  appendIcon(button, iconId);
+  button.appendChild(document.createTextNode(` ${label}`));
+  return button;
+}
+
+function renderRunListItemNode(run) {
+  const active = run.runId === state.selectedRunId ? "active" : "";
+  const successCount = run.results.filter((result) => result.status === "success").length;
+  const hasMarkdown = state.markdownByRunId.has(run.runId);
+  const allSuccess = successCount === run.results.length && run.results.length > 0;
+  const allFailed = successCount === 0 && run.results.length > 0;
+  const runStatusClass = allSuccess ? "run-card--success" : allFailed ? "run-card--failed" : "run-card--partial";
+  const node = document.createElement("div");
+
+  node.className = ["run-button", active, runStatusClass].filter(Boolean).join(" ");
+  node.setAttribute("role", "button");
+  node.tabIndex = 0;
+  node.dataset.runId = run.runId;
+  node.setAttribute("aria-label", run.task.title);
+
+  const actions = document.createElement("div");
+  actions.className = "run-actions";
+  actions.appendChild(createRunActionButton("select-run", run.runId, "#icon-open", localText("打开这个 run", "Open this run")));
+  actions.appendChild(createRunActionButton("export-run", run.runId, "#icon-export", localText("导出 JSON", "Export JSON")));
+  actions.appendChild(createRunActionButton("delete-run", run.runId, "#icon-delete", localText("从列表移除", "Remove from list")));
+  node.appendChild(actions);
+
+  appendTextElement(node, "strong", "", run.task.title);
+  appendTextElement(node, "div", "meta", formatRelativeTime(run.createdAt, localText));
+  appendTextElement(node, "div", "meta", `${successCount}/${run.results.length} ${localText("成功", "success")}`);
+  appendTextElement(node, "div", "meta", hasMarkdown ? t("linkedMarkdown") : t("jsonOnly"));
+
+  return node;
 }
 
 function renderRunList() {
@@ -275,6 +308,25 @@ function renderRunList() {
 
   elements.runList.className = "run-list";
 
+  // Group runs by task title
+  const grouped = new Map();
+  for (const run of filteredRuns) {
+    const taskTitle = run.task?.title || localText("未知任务", "Unknown Task");
+    if (!grouped.has(taskTitle)) {
+      grouped.set(taskTitle, []);
+    }
+    grouped.get(taskTitle).push(run);
+  }
+
+  // Build grouped HTML
+  let html = "";
+  for (const [taskTitle, runs] of grouped) {
+    if (grouped.size > 1) {
+      html += `<div class="run-list-group-header">${escapeHtml(taskTitle)} <span class="muted">(${runs.length})</span></div>`;
+    }
+    html += runs.map(renderRunListItem).join("");
+  }
+
   // 虚拟滚动：列表项超过阈值时启用
   if (filteredRuns.length > VIRTUAL_LIST_THRESHOLD) {
     if (!runListVirtual) {
@@ -285,7 +337,7 @@ function renderRunList() {
         role: 'listbox'
       });
     }
-    runListVirtual.setItems(filteredRuns, renderRunListItem);
+    runListVirtual.setItems(filteredRuns, renderRunListItemNode);
     // 搜索/过滤后重置滚动位置
     if (query) {
       runListVirtual.scrollToTop();
@@ -296,7 +348,7 @@ function renderRunList() {
       runListVirtual.destroy();
       runListVirtual = null;
     }
-    elements.runList.innerHTML = filteredRuns.map(renderRunListItem).join("");
+    elements.runList.innerHTML = html;
   }
 }
 
@@ -542,6 +594,37 @@ function renderPreflights(run) {
 
 let agentListVirtual = null;
 
+function renderAgentListItemNode(result) {
+  const active = recordKey(result) === state.selectedAgentId ? "active" : "";
+  const runtime = runtimeIdentity(result);
+  const button = document.createElement("button");
+  button.className = ["agent-button", active].filter(Boolean).join(" ");
+  button.type = "button";
+  button.dataset.agentId = recordKey(result);
+  button.style.width = "100%";
+  button.style.height = "100%";
+  button.style.textAlign = "left";
+
+  const row = document.createElement("div");
+  row.className = "row";
+  appendTextElement(row, "strong", "", resultLabel(result));
+
+  const badge = document.createElement("span");
+  badge.className = `status-badge ${statusClass(result.status)}`;
+  badge.textContent = translateStatus(result.status, t);
+  row.appendChild(badge);
+  button.appendChild(row);
+
+  appendTextElement(
+    button,
+    "div",
+    "meta",
+    `${runtime.provider} | ${runtime.model} | ${runtime.version} | ${formatDuration(result.durationMs)} | ${formatCost(result)}`
+  );
+
+  return button;
+}
+
 function renderAgentList(run) {
   elements.agentCount.textContent = String(run.results.length);
   elements.agentList.classList.remove("empty-state");
@@ -560,21 +643,7 @@ function renderAgentList(run) {
       className: 'agent-list virtual-list',
       role: 'listbox'
     });
-    agentListVirtual.setItems(run.results, (result) => {
-      const active = recordKey(result) === state.selectedAgentId ? "active" : "";
-      const runtime = runtimeIdentity(result);
-      return `
-        <button class="agent-button ${active}" type="button" data-agent-id="${escapeHtml(recordKey(result))}" style="width:100%;height:100%;text-align:left;">
-          <div class="row">
-            <strong>${escapeHtml(resultLabel(result))}</strong>
-            <span class="status-badge ${statusClass(result.status)}">${escapeHtml(translateStatus(result.status, t))}</span>
-          </div>
-          <div class="meta">
-            ${escapeHtml(runtime.provider)} | ${escapeHtml(runtime.model)} | ${escapeHtml(runtime.version)} | ${escapeHtml(formatDuration(result.durationMs))} | ${escapeHtml(formatCost(result))}
-          </div>
-        </button>
-      `;
-    });
+    agentListVirtual.setItems(run.results, renderAgentListItemNode);
   } else {
     // Standard rendering for small lists
     elements.agentList.innerHTML = run.results
@@ -646,10 +715,7 @@ function renderMarkdownPanel() {
 
 function generateVerdictSummary(run) {
   const summary = summarizeRun(run);
-  const verdict = getRunVerdict(run, { scoreWeights: state.scoreWeights });
-  const best = verdict.bestAgent;
-  const fastest = verdict.fastest;
-  const cheapest = verdict.lowestKnownCost;
+  const resultCount = (run.results ?? []).length;
 
   if (summary.successCount === 0) {
     return localText(
@@ -657,6 +723,32 @@ function generateVerdictSummary(run) {
       `All ${summary.totalAgents} agent(s) failed this benchmark.`
     );
   }
+
+  // Single agent — no relative ranking language
+  if (resultCount < 2) {
+    const result = run.results.find(r => r.status === "success") ?? run.results[0];
+    const passedJudges = result?.judgeResults?.filter((j) => j.success).length ?? 0;
+    const totalJudges = result?.judgeResults?.length ?? 0;
+    const duration = result ? formatDuration(result.durationMs) : "n/a";
+    const score = result?.compositeScore?.toFixed(1) ?? "n/a";
+
+    if (summary.successCount === summary.totalAgents) {
+      return localText(
+        `本次仅 1 个 agent，无对比基准。通过率 ${passedJudges}/${totalJudges}，综合分 ${score}，耗时 ${duration}。`,
+        `Only 1 agent — no comparison baseline. ${passedJudges}/${totalJudges} judges passed, score ${score}, ${duration}.`
+      );
+    }
+    return localText(
+      `本次仅 1 个 agent，未通过。通过率 ${passedJudges}/${totalJudges}。`,
+      `Only 1 agent — failed. ${passedJudges}/${totalJudges} judges passed.`
+    );
+  }
+
+  // Multi-agent — show relative rankings
+  const verdict = getRunVerdict(run, { scoreWeights: state.scoreWeights });
+  const best = verdict.bestAgent;
+  const fastest = verdict.fastest;
+  const cheapest = verdict.lowestKnownCost;
 
   const bestName = best ? resultLabel(best) : "n/a";
   const passedJudges = best ? best.judgeResults.filter((j) => j.success).length : 0;
@@ -685,7 +777,7 @@ function generateVerdictSummary(run) {
   );
 }
 
-function renderVerdictHero(run) {
+function renderVerdictHero(_run) {
   // Merged into renderSummaryCard — no-op
 }
 
@@ -732,7 +824,7 @@ function renderComparisonBars(run) {
       <div class="bar-row${activeClass}" tabindex="0" role="button" data-bar-agent-id="${escapeHtml(key)}" data-tooltip="${escapeHtml(resultLabel(r))}: ${passed}/${total} (${pct}%)">
         <span class="bar-label" title="${escapeHtml(resultLabel(r))}">${escapeHtml(resultLabel(r))}</span>
         <div class="bar-track"><div class="bar-fill ${color}" style="width:${pct}%"></div></div>
-        <span class="bar-value">${passed}/${total}</span>
+        <span class="bar-value">${total > 0 ? `${passed}/${total}` : "N/A"}</span>
       </div>
     `;
   }).join("");
@@ -827,6 +919,16 @@ function renderComparisonBars(run) {
   // Render radar chart for agent comparison
   const radarContainer = elements.comparisonBars.querySelector("#score-radar-chart");
   if (radarContainer && results.length > 0) {
+    // Disconnect any prior ResizeObserver to prevent leaks
+    if (radarContainer._radarResizeObserver) {
+      radarContainer._radarResizeObserver.disconnect();
+      radarContainer._radarResizeObserver = null;
+    }
+    // Also disconnect canvas-level observer if charts.js stored one there
+    const existingCanvas = radarContainer.querySelector("canvas");
+    if (existingCanvas?._chartResizeObserver) {
+      existingCanvas._chartResizeObserver.disconnect();
+    }
     const radarData = results.slice(0, 3).map(r => ({
       name: resultLabel(r),
       dimensions: [
@@ -837,6 +939,8 @@ function renderComparisonBars(run) {
       ]
     }));
     if (radarData.length > 0) {
+      // Clear previous canvas elements to prevent accumulation
+      radarContainer.replaceChildren();
       const canvas = document.createElement("canvas");
       canvas.width = 300;
       canvas.height = 300;
@@ -844,6 +948,42 @@ function renderComparisonBars(run) {
       renderRadarChart(canvas, radarData[0], { width: 300, height: 300 });
     }
   }
+}
+
+/**
+ * Map a failure summary string to a user-friendly suggestion.
+ * Pattern-matches on keywords from adapter/runtime error messages.
+ */
+function getFailureSuggestion(summary) {
+  const text = (summary || "").toLowerCase();
+  if (/probe.*timed?\s*out|timed?\s*out.*probe|preflight.*timed?\s*out/i.test(text)) {
+    return localText(
+      "鉴权探测超时。建议：① 确认 Agent 服务正在运行；② 在配置页关闭「运行前先探测鉴权」后重试；③ 检查 API Key 是否有效。",
+      "Auth probe timed out. Suggestions: ① Make sure the agent service is running; ② Disable 'Probe auth before run' in config and retry; ③ Verify your API Key."
+    );
+  }
+  if (/401|unauthorized|auth.*fail|authentication.*fail/i.test(text)) {
+    return localText(
+      "鉴权失败，请检查 API Key 配置。",
+      "Authentication failed. Please check your API Key configuration."
+    );
+  }
+  if (/timed?\s*out|timeout/i.test(text)) {
+    return localText(
+      "任务超时，可尝试降低并发数或选择更简单的任务包。",
+      "Task timed out. Try reducing concurrency or choosing a simpler task pack."
+    );
+  }
+  if (/not\s+found|enoent|no\s+such\s+file|command\s+not\s+found/i.test(text)) {
+    return localText(
+      "CLI 工具未找到，请确认已安装并添加到 PATH。",
+      "CLI tool not found. Make sure it is installed and available in PATH."
+    );
+  }
+  return localText(
+    "查看下方技术详情了解具体错误信息。",
+    "Check the technical details below for specific error information."
+  );
 }
 
 function renderFailures(run) {
@@ -854,26 +994,43 @@ function renderFailures(run) {
   }
 
   setHidden(elements.failuresSection, false);
+  const isCompleteFailure = run.results.length > 0 && run.results.every(r => r.status !== "success");
+
   const items = failed.map((r) => {
     const failedJudges = r.judgeResults.filter((j) => !j.success);
     const judgeHtml = failedJudges.length > 0
       ? `<div class="failure-judges">${failedJudges.map((j) => `<span class="failure-judge">${escapeHtml(j.label || j.id)}</span>`).join("")}</div>`
       : "";
+    const suggestion = getFailureSuggestion(r.summary);
     return `
       <div class="failure-item">
         <div class="failure-agent">${escapeHtml(resultLabel(r))}</div>
         <div class="failure-reason">${escapeHtml(r.summary || localText("未知原因", "Unknown reason"))}</div>
         ${judgeHtml}
+        <div class="failure-suggestion">${escapeHtml(suggestion)}</div>
       </div>
     `;
   }).join("");
+
+  const retryBtnHtml = isCompleteFailure
+    ? `<button type="button" class="failure-retry-btn btn-secondary" id="failure-retry-btn">${escapeHtml(localText("← 返回配置重试", "← Back to config and retry"))}</button>`
+    : "";
 
   elements.failuresSection.innerHTML = `
     <div class="failures-section">
       <div class="failures-title">${escapeHtml(localText("失败与风险", "Failures & Risks"))}</div>
       ${items}
+      ${retryBtnHtml}
     </div>
   `;
+
+  // Wire up retry button to navigate back to launcher
+  const retryBtn = document.getElementById("failure-retry-btn");
+  if (retryBtn) {
+    retryBtn.addEventListener("click", () => {
+      if (elements.backToLauncher) elements.backToLauncher.click();
+    });
+  }
 }
 
 function renderCompareTableV2(run) {
@@ -931,7 +1088,17 @@ function renderCompareTableV2(run) {
     if (typeof result.compositeScore === "number") {
       const grade = scoreGrade(result.compositeScore, result.status);
       const gradeLabel = localText(grade.labelZh, grade.label);
-      scoreCell = `<span class="score-cell ${grade.cssClass}" title="${escapeHtml(gradeLabel)}">${escapeHtml(result.compositeScore.toFixed(1))} <small class="score-grade-label">${escapeHtml(gradeLabel)}</small></span>`;
+      const isFailedBand = result.status === "failed" || result.status === "cancelled";
+      const scoreTooltip = isFailedBand
+        ? localText(
+            "失败基线分：Agent 运行失败时按任务复杂度分配的参考分，不代表任务完成情况",
+            "Failure baseline: reference score assigned by task complexity when agent fails, does not represent task completion"
+          )
+        : gradeLabel;
+      const scoreSuffix = isFailedBand
+        ? ` <small class="score-grade-label score-baseline-label">${localText("失败基线", "baseline")}</small>`
+        : ` <small class="score-grade-label">${escapeHtml(gradeLabel)}</small>`;
+      scoreCell = `<span class="score-cell ${grade.cssClass}" title="${escapeHtml(scoreTooltip)}">${escapeHtml(result.compositeScore.toFixed(1))}${scoreSuffix}</span>`;
     }
 
     // Status icon
@@ -958,7 +1125,7 @@ function renderCompareTableV2(run) {
         <td class="compare-score">${scoreCell}</td>
         <td class="compare-passrate">
           <div class="judge-bar-wrap"><div class="judge-bar" style="width:${passPercent}%;background:${barColor}"></div></div>
-          <span class="judge-bar-label">${passedJudges}/${totalJudges}</span>
+          <span class="judge-bar-label">${totalJudges > 0 ? `${passedJudges}/${totalJudges}` : "N/A"}</span>
         </td>
         <td class="compare-duration">${escapeHtml(formatDuration(result.durationMs))}</td>
       </tr>
@@ -1040,6 +1207,8 @@ function renderCompareTableV2(run) {
     const agentId = container.dataset.agentId;
     const result = run.results.find(r => r.agentId === agentId);
     if (!result) return;
+    // Clear previous canvas to prevent accumulation on re-render
+    container.replaceChildren();
     const canvas = document.createElement('canvas');
     canvas.width = 200;
     canvas.height = 200;
@@ -1070,12 +1239,6 @@ function renderSelectedAgentV2() {
   }
 
   const runtime = runtimeIdentity(result);
-  const testJudge = findJudgeByType(result, "test-result");
-  const lintJudge = findJudgeByType(result, "lint-check");
-  const judgeKinds =
-    Array.from(new Set(result.judgeResults.map((judge) => formatJudgeType(judge.type, t)))).join(", ") ||
-    localText("无", "None");
-
   const statusIcon = result.status === "success" ? "\u2705" : "\u274c";
   const passedJudges = result.judgeResults.filter(j => j.success).length;
   const totalJudges = result.judgeResults.length;
@@ -1088,8 +1251,8 @@ function renderSelectedAgentV2() {
     <div class="summary-grid" style="grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px;">
       <div class="summary-row"><span>${escapeHtml(localText("状态", "Status"))}</span><strong>${escapeHtml(translateStatus(result.status, t))}</strong></div>
       <div class="summary-row"><span>${escapeHtml(localText("综合分", "Score"))}</span><strong>${escapeHtml(scoreVal)}${gradeInfo ? ` <small class="${gradeInfo.cssClass}">${escapeHtml(gradeLabel)}</small>` : ""}</strong></div>
-      <div class="summary-row"><span>${escapeHtml(localText("通过率", "Pass Rate"))}</span><strong>${passedJudges}/${totalJudges}</strong></div>
-      <div class="summary-row"><span>${escapeHtml(localText("耗时", "Duration"))}</span><strong>${escapeHtml(formatDuration(result.durationMs))}</strong></div>
+      <div class="summary-row"><span>${escapeHtml(localText("通过率", "Pass Rate"))}</span><strong>${totalJudges > 0 ? `${passedJudges}/${totalJudges}` : escapeHtml(localText("未执行", "N/A"))}</strong></div>
+      <div class="summary-row"><span>${escapeHtml(localText("耗时", "Duration"))}</span><strong>${result.status === 'success' ? escapeHtml(formatDuration(result.durationMs)) : escapeHtml(localText('未产生', 'N/A'))}</strong></div>
       <div class="summary-row"><span>${escapeHtml(localText("改动文件", "Changed"))}</span><strong>${escapeHtml(String(result.changedFiles.length))}</strong></div>
       <div class="summary-row"><span>${escapeHtml(localText("模型", "Model"))}</span><strong>${escapeHtml(runtime.model || "default")}</strong></div>
     </div>
@@ -1135,12 +1298,12 @@ function renderSelectedAgentV2() {
 }
 
 
-function renderRecommendationCard(run) {
+function renderRecommendationCard(_run) {
   // Merged into renderSummaryCard — no-op
 }
 
 
-function renderCostProjection(run) {
+function renderCostProjection(_run) {
   // Merged into renderSummaryCard — no-op
 }
 
@@ -1202,7 +1365,7 @@ function renderLeaderboard(run) {
         <td><code>${escapeHtml(identity.version)}</code></td>
         <td>${stats.runCount}</td>
         <td><strong>${stats.averageScore.toFixed(1)}</strong></td>
-        <td>${(stats.winRate * 100).toFixed(1)}% (${row.winCount}/${row.totalComparisons})</td>
+        <td>${stats.winRateDisplay !== null ? `${(stats.winRate * 100).toFixed(1)}% (${row.winCount}/${row.totalComparisons})` : '<span class="win-rate-na">N/A</span>'}</td>
         <td>${(stats.successRate * 100).toFixed(1)}%</td>
         <td>${escapeHtml(formatDuration(stats.medianDurationMs))}</td>
         <td>${stats.medianCostUsd !== null ? `$${stats.medianCostUsd.toFixed(4)}` : "n/a"}</td>
@@ -1246,8 +1409,10 @@ function renderLeaderboard(run) {
 /**
  * Render the Task Trace section: what was asked vs what came back.
  *
- * This answers the user's question: "Did the agent actually receive the task?
- * What did it return?"
+ * Three tabs per agent:
+ *   1. Task Prompt — the raw task prompt
+ *   2. Full Prompt — the assembled prompt with CRITICAL RULES
+ *   3. Tool Calls — chronological tool call timeline
  */
 function renderTaskTrace(run) {
   if (!elements.taskTrace) return;
@@ -1255,28 +1420,25 @@ function renderTaskTrace(run) {
   const taskPrompt = run.task?.prompt || "";
   const results = run.results || [];
 
-  // Build per-agent trace blocks
-  const agentBlocks = results.map(result => {
+  const agentBlocks = results.map((result, resultIndex) => {
     const summary = result.summary || "";
     const hasRealResponse = summary && summary.trim().length > 0 && !summary.includes("did not return a result");
     const changedFilesCount = (result.changedFiles || []).length;
     const allJudgesPassed = result.judgeResults && result.judgeResults.length > 0 && result.judgeResults.every(j => j.success);
     const isShortResponse = hasRealResponse && summary.trim().length < 200;
 
-    // Detect if agent did no real work but judges passed
     let interpretationNote = "";
     if (isShortResponse && changedFilesCount === 0 && allJudgesPassed && result.status === "success") {
       interpretationNote = `
         <div class="trace-interpretation trace-interpretation-warn">
-          <span>\u26a0\ufe0f</span>
+          <span>⚠️</span>
           <span>${escapeHtml(localText(
-            "Agent 未执行实质性改动，但 Judge 检查项均通过。"通过"仅代表文件未被破坏，不代表完成了任务。",
+            "Agent 未执行实质性改动，但 Judge 检查项均通过。“通过”仅代表文件未被破坏，不代表完成了任务。",
             "Agent made no substantive changes, but all judge checks passed. \"Pass\" only means files were not broken — it does not mean the task was completed."
           ))}</span>
         </div>`;
     }
 
-    // Extract CLI command from trace
     let cliCommand = "";
     if (result.traceEvents) {
       const startEvent = result.traceEvents.find(e => e.type === "adapter.start");
@@ -1286,8 +1448,98 @@ function renderTaskTrace(run) {
       }
     }
 
-    const statusIcon = result.status === "success" ? "\u2705" : "\u274c";
+    // Extract full assembled prompt from trace events
+    let fullPrompt = "";
+    if (result.traceEvents) {
+      const promptEvent = result.traceEvents.find(e => e.type === "adapter.prompt");
+      if (promptEvent?.metadata?.prompt && typeof promptEvent.metadata.prompt === "string") {
+        fullPrompt = promptEvent.metadata.prompt;
+      }
+    }
+
+    // Extract tool calls from trace events
+    const toolCalls = [];
+    if (result.traceEvents) {
+      for (const ev of result.traceEvents) {
+        if (ev.type === "adapter.tool_use" && ev.metadata?.toolName) {
+          toolCalls.push({
+            name: ev.metadata.toolName,
+            input: ev.metadata.input,
+            timestamp: ev.timestamp
+          });
+        }
+      }
+    }
+
+    const statusIcon = result.status === "success" ? "✅" : "❌";
     const label = resultLabel(result);
+    const tabId = `trace-tabs-${resultIndex}`;
+
+    // Tab 1: Task prompt
+    const taskPromptTab = `
+      <div class="task-trace-response-block">
+        <pre style="margin:0;font-size:0.82rem;white-space:pre-wrap;word-break:break-word;max-height:300px;overflow-y:auto;">${escapeHtml(taskPrompt)}</pre>
+      </div>`;
+
+    // Tab 2: Full assembled prompt
+    const fullPromptTab = fullPrompt
+      ? `<div class="task-trace-response-block">
+          <pre style="margin:0;font-size:0.82rem;white-space:pre-wrap;word-break:break-word;max-height:300px;overflow-y:auto;">${escapeHtml(fullPrompt)}</pre>
+        </div>`
+      : `<p class="task-trace-response-empty">${escapeHtml(localText("未记录完整 Prompt。", "Full prompt not recorded."))}</p>`;
+
+    // Tab 3: Tool calls timeline
+    let toolCallsTab = "";
+    if (toolCalls.length > 0) {
+      const rows = toolCalls.map(tc => {
+        const time = tc.timestamp ? new Date(tc.timestamp).toLocaleTimeString() : "";
+        let keyParam = "";
+        if (tc.input && typeof tc.input === "object") {
+          const inp = tc.input;
+          keyParam = inp.file_path || inp.path || inp.command || inp.pattern || "";
+          if (!keyParam) {
+            for (const v of Object.values(inp)) {
+              if (typeof v === "string" && v.length < 200) { keyParam = v; break; }
+            }
+          }
+        } else if (typeof tc.input === "string") {
+          keyParam = tc.input.slice(0, 200);
+        }
+        return `<tr>
+          <td style="font-size:0.78rem;color:var(--text-muted);white-space:nowrap;">${escapeHtml(time)}</td>
+          <td><strong>${escapeHtml(tc.name)}</strong></td>
+          <td style="font-size:0.82rem;font-family:var(--font-mono,monospace);word-break:break-all;">${escapeHtml(keyParam.length > 150 ? keyParam.slice(0, 150) + "..." : keyParam)}</td>
+        </tr>`;
+      }).join("");
+
+      toolCallsTab = `
+        <div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:8px;">${escapeHtml(localText(`${toolCalls.length} 次工具调用`, `${toolCalls.length} tool calls`))}</div>
+        <table class="tool-calls-table" style="width:100%;font-size:0.82rem;border-collapse:collapse;">
+          <thead><tr style="text-align:left;border-bottom:1px solid var(--border-color);">
+            <th style="padding:4px 8px;">${escapeHtml(localText("时间", "Time"))}</th>
+            <th style="padding:4px 8px;">${escapeHtml(localText("工具", "Tool"))}</th>
+            <th style="padding:4px 8px;">${escapeHtml(localText("参数", "Input"))}</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>`;
+    } else {
+      toolCallsTab = `<p class="task-trace-response-empty">${escapeHtml(localText("未记录工具调用。", "No tool calls recorded."))}</p>`;
+    }
+
+    // Tab 4: Raw execution log (all trace events)
+    let rawLogTab = "";
+    if (result.traceEvents && result.traceEvents.length > 0) {
+      const logLines = result.traceEvents.map(ev => {
+        const time = ev.timestamp ? new Date(ev.timestamp).toISOString().replace("T", " ").replace("Z", "") : "";
+        const type = ev.type || "?";
+        const msg = ev.message || "";
+        const meta = ev.metadata ? " " + JSON.stringify(ev.metadata) : "";
+        return `${time} [${type}] ${msg}${meta}`;
+      });
+      rawLogTab = `<pre class="raw-log-pre">${escapeHtml(logLines.join("\n"))}</pre>`;
+    } else {
+      rawLogTab = `<p class="task-trace-response-empty">${escapeHtml(localText("无执行日志。", "No execution logs."))}</p>`;
+    }
 
     return `
       <div class="task-trace-block" style="margin-bottom:12px;">
@@ -1295,7 +1547,7 @@ function renderTaskTrace(run) {
           <span>${statusIcon} ${escapeHtml(label)}</span>
           <span style="font-size:0.75rem;font-weight:400;text-transform:none;letter-spacing:0;">
             ${escapeHtml(localText("状态", "Status"))}: ${escapeHtml(translateStatus(result.status, t))}
-            ${changedFilesCount > 0 ? ` \u00b7 ${changedFilesCount} ${escapeHtml(localText("个文件已改动", "files changed"))}` : ` \u00b7 ${escapeHtml(localText("无改动", "no changes"))}`}
+            ${changedFilesCount > 0 ? ` · ${changedFilesCount} ${escapeHtml(localText("个文件已改动", "files changed"))}` : ` · ${escapeHtml(localText("无改动", "no changes"))}`}
           </span>
         </div>
         ${cliCommand ? `
@@ -1303,11 +1555,16 @@ function renderTaskTrace(run) {
         ` : ""}
         ${interpretationNote}
         <div style="padding:12px 14px;">
-          <div style="font-weight:600;font-size:0.82rem;color:var(--text-muted);margin-bottom:6px;">${escapeHtml(t("taskTraceResponse"))}</div>
-          ${hasRealResponse
-            ? `<pre style="margin:0;font-size:0.82rem;white-space:pre-wrap;word-break:break-word;max-height:200px;overflow-y:auto;">${escapeHtml(summary)}</pre>`
-            : `<p class="task-trace-response-empty">${escapeHtml(t("taskTraceNoResponse"))}</p>`
-          }
+          <div class="trace-tab-bar" data-tab-group="${tabId}">
+            <button class="trace-tab trace-tab-active" data-tab="${tabId}-prompt">${escapeHtml(localText("任务 Prompt", "Task Prompt"))}</button>
+            ${fullPrompt ? `<button class="trace-tab" data-tab="${tabId}-full">${escapeHtml(localText("完整 Prompt", "Full Prompt"))}</button>` : ""}
+            ${toolCalls.length > 0 ? `<button class="trace-tab" data-tab="${tabId}-tools">${escapeHtml(localText("工具调用", "Tool Calls"))} (${toolCalls.length})</button>` : ""}
+            ${result.traceEvents && result.traceEvents.length > 0 ? `<button class="trace-tab" data-tab="${tabId}-rawlog">${escapeHtml(localText("执行日志", "Execution Log"))}</button>` : ""}
+          </div>
+          <div class="trace-tab-content trace-tab-content-active" id="${tabId}-prompt">${taskPromptTab}</div>
+          ${fullPrompt ? `<div class="trace-tab-content" id="${tabId}-full">${fullPromptTab}</div>` : ""}
+          ${toolCalls.length > 0 ? `<div class="trace-tab-content" id="${tabId}-tools">${toolCallsTab}</div>` : ""}
+          ${result.traceEvents && result.traceEvents.length > 0 ? `<div class="trace-tab-content" id="${tabId}-rawlog">${rawLogTab}</div>` : ""}
         </div>
       </div>
     `;
@@ -1316,46 +1573,34 @@ function renderTaskTrace(run) {
   elements.taskTrace.innerHTML = `
     <details class="task-trace-section">
       <summary>
-        <span>\ud83d\udd0d</span>
+        <span>🔍</span>
         ${escapeHtml(t("taskTraceTitle"))}
       </summary>
       <div class="task-trace-body">
-        <div class="task-trace-block">
-          <div class="task-trace-block-header">
-            <span>${escapeHtml(t("taskTracePrompt"))}</span>
-            <button class="btn-copy-trace" data-copy-target="task-prompt">\ud83d\udccb ${escapeHtml(localText("复制", "Copy"))}</button>
-          </div>
-          <pre id="task-prompt-text">${escapeHtml(taskPrompt)}</pre>
-        </div>
         ${agentBlocks}
       </div>
     </details>
   `;
 
-  // Wire up copy button
-  const copyBtn = elements.taskTrace.querySelector('[data-copy-target="task-prompt"]');
-  if (copyBtn) {
-    copyBtn.addEventListener("click", () => {
-      const textEl = document.getElementById("task-prompt-text");
-      if (textEl) {
-        navigator.clipboard?.writeText(textEl.textContent).then(() => {
-          copyBtn.textContent = "\u2713 " + localText("已复制", "Copied");
-          setTimeout(() => { copyBtn.textContent = "\ud83d\udccb " + localText("复制", "Copy"); }, 2000);
-        });
-      }
+  // Wire up tab switching
+  elements.taskTrace.querySelectorAll(".trace-tab").forEach(tab => {
+    tab.addEventListener("click", () => {
+      const tabId = tab.getAttribute("data-tab");
+      const tabBar = tab.closest(".trace-tab-bar");
+      tabBar.querySelectorAll(".trace-tab").forEach((t) => {
+        t.classList.remove("trace-tab-active");
+      });
+      tab.classList.add("trace-tab-active");
+      const parent = tabBar.parentElement;
+      parent.querySelectorAll(".trace-tab-content").forEach((c) => {
+        c.classList.remove("trace-tab-content-active");
+      });
+      const target = parent.querySelector(`#${tabId}`);
+      if (target) target.classList.add("trace-tab-content-active");
     });
-  }
+  });
 }
 
-/**
- * Render the top-level Results Summary Card.
- *
- * This is the FIRST thing users see on the dashboard. It answers three
- * questions in 5 seconds:
- *   1. How did it go? (overall verdict)
- *   2. Who's best? (winner with score grade)
- *   3. Why? (key differentiators)
- */
 function renderSummaryCard(run) {
   const summary = summarizeRun(run);
   const verdict = getRunVerdict(run, { scoreWeights: state.scoreWeights });
@@ -1371,11 +1616,36 @@ function renderSummaryCard(run) {
   if (best && typeof best.compositeScore === "number") {
     gradeInfo = scoreGrade(best.compositeScore, best.status);
     const gradeLabel = localText(gradeInfo.labelZh, gradeInfo.label);
+
+    // Score attribution — explain why score is not 100 when judges all pass
+    const passedJudges = best.judgeResults?.filter(j => j.success).length ?? 0;
+    const totalJudges = best.judgeResults?.length ?? 0;
+    const allJudgesPassed = totalJudges > 0 && passedJudges === totalJudges;
+    let attributionHtml = "";
+    if (allJudgesPassed && best.compositeScore < 90) {
+      const reasons = [];
+      const hasTestJudge = best.judgeResults?.some(j => j.type === "test-result");
+      const hasLintJudge = best.judgeResults?.some(j => j.type === "lint-check");
+      const precisionPct = best.diffPrecision?.score != null ? Math.round(best.diffPrecision.score * 100) : null;
+
+      if (!hasTestJudge) reasons.push(localText("未配测试 judge", "no test judge"));
+      if (!hasLintJudge) reasons.push(localText("未配 lint judge", "no lint judge"));
+      if (precisionPct != null && precisionPct < 80) reasons.push(localText(`Diff 精准度 ${precisionPct}%`, `diff precision ${precisionPct}%`));
+
+      if (reasons.length > 0) {
+        attributionHtml = `<div class="summary-score-attribution">${escapeHtml(localText(
+          `通过率满分，但因${reasons.join("、")}拉低综合分`,
+          `All judges passed, but ${reasons.join(", ")} lowered the score`
+        ))}</div>`;
+      }
+    }
+
     scoreHtml = `
       <div class="summary-score-block">
         <div class="summary-score-value ${gradeInfo.cssClass}">${escapeHtml(best.compositeScore.toFixed(1))}</div>
         <span class="summary-score-grade ${gradeInfo.cssClass}">${escapeHtml(gradeLabel)}</span>
         <span class="muted" style="font-size:0.75rem">${escapeHtml(localText("/ 100 分", "/ 100 pts"))}</span>
+        ${attributionHtml}
       </div>
     `;
   }
@@ -1393,7 +1663,7 @@ function renderSummaryCard(run) {
         <div class="summary-pass-ring">
           <div class="summary-pass-bar" style="width:${pct}%;background:${barColor}"></div>
         </div>
-        <span class="summary-metric-value">${passed}/${total} (${pct}%)</span>
+        <span class="summary-metric-value">${total > 0 ? `${passed}/${total} (${pct}%)` : escapeHtml(localText("未执行", "N/A"))}</span>
       </div>
     `;
   }
@@ -1402,6 +1672,7 @@ function renderSummaryCard(run) {
   const verdictText = generateVerdictSummary(run);
 
   // ── Quick badges ──
+  const resultCount = (run.results ?? []).length;
   const badges = [];
   if (summary.successCount > 0) {
     badges.push(`<span class="summary-badge summary-badge-pass">${escapeHtml(localText("通过", "Passed"))} ${summary.successCount}</span>`);
@@ -1409,10 +1680,10 @@ function renderSummaryCard(run) {
   if (summary.failedCount > 0) {
     badges.push(`<span class="summary-badge summary-badge-fail">${escapeHtml(localText("失败", "Failed"))} ${summary.failedCount}</span>`);
   }
-  if (fastest && recordKey(fastest) !== recordKey(best)) {
+  if (resultCount >= 2 && fastest && recordKey(fastest) !== recordKey(best)) {
     badges.push(`<span class="summary-badge summary-badge-fast">\u26a1 ${escapeHtml(resultLabel(fastest))} ${escapeHtml(formatDuration(fastest.durationMs))}</span>`);
   }
-  if (cheapest && cheapest.estimatedCostUsd > 0 && recordKey(cheapest) !== recordKey(best)) {
+  if (resultCount >= 2 && cheapest && cheapest.estimatedCostUsd > 0 && recordKey(cheapest) !== recordKey(best)) {
     badges.push(`<span class="summary-badge summary-badge-cheap">\ud83d\udcb0 ${escapeHtml(resultLabel(cheapest))} ${escapeHtml(formatCost(cheapest))}</span>`);
   }
 
@@ -1487,6 +1758,9 @@ function renderDashboard(run) {
   elements.taskTitle.textContent = run.task.title;
   elements.taskMeta.textContent = `${run.task.id} | ${formatRelativeTime(run.createdAt, localText)}`;
 
+  // Check if all agents failed — show simplified failure view
+  const isCompleteFailure = run.results.length > 0 && run.results.every(r => r.status !== "success");
+
   // 首屏摘要卡（5 秒看懂结果）
   renderSummaryCard(run);
 
@@ -1508,6 +1782,18 @@ function renderDashboard(run) {
     const hasFailed = run.results.some(r => r.status !== "success");
     setHidden(elements.failuresSection, !hasFailed);
   }
+
+  // When all agents failed, collapse empty analysis sections
+  if (isCompleteFailure) {
+    // Collapse sections that would just show "no data"
+    const sectionsToCollapse = [
+      elements.runCompareSection,
+      elements.runDiffSection,
+      elements.agentTrendSection,
+    ];
+    sectionsToCollapse.forEach(el => { if (el) setHidden(el, true); });
+  }
+
   // 高级分析内部
   renderTaskBrief(run);
   renderRunInfo(run);
@@ -1517,6 +1803,10 @@ function renderDashboard(run) {
   renderAgentList(run);
   renderAgentTrendTableV2(run);
   populateJudgeFilters(run);
+  // Hide judge filters when no judges executed (e.g., complete failure)
+  const hasJudges = run.results.some(r => r.judgeResults && r.judgeResults.length > 0);
+  const judgeFiltersSection = document.querySelector('#judge-filters-title')?.closest('section.detail-card');
+  if (judgeFiltersSection instanceof HTMLElement) setHidden(judgeFiltersSection, !hasJudges);
   renderSelectedAgentV2();
   // Markdown panel hidden — use export buttons instead
   // renderMarkdownPanel();
@@ -1525,18 +1815,25 @@ function renderDashboard(run) {
   renderTeamCostCalculator(elements.dashboard, run);
   // 分享/导出功能
   setupShareActions(elements.dashboard, run);
-  setHidden(elements.runCompareSection, state.runs.length <= 1);
-  setHidden(elements.runDiffSection, !findPreviousComparableRun(state.runs, run));
-  setHidden(
-    elements.agentTrendSection,
-    !state.selectedAgentId || getAgentTrendRows(state.runs, run, state.selectedAgentId).length <= 1
-  );
+  if (!isCompleteFailure) {
+    setHidden(elements.runCompareSection, state.runs.length <= 1);
+    setHidden(elements.runDiffSection, !findPreviousComparableRun(state.runs, run));
+    setHidden(
+      elements.agentTrendSection,
+      !state.selectedAgentId || getAgentTrendRows(state.runs, run, state.selectedAgentId).length <= 1
+    );
+  }
   // 高级分析 summary 文案
   if (elements.advancedAnalysis) {
     const summaryEl = elements.advancedAnalysis.querySelector("summary");
     if (summaryEl) {
-      summaryEl.textContent = localText("高级分析", "Advanced Analysis");
+      summaryEl.innerHTML = `${escapeHtml(localText("高级分析", "Advanced Analysis"))} <span class="muted" style="font-size: 0.8rem; font-weight: normal; margin-left: 8px;">${escapeHtml(localText("跨运行趋势、成本对比、Agent 历史表现", "Cross-run trends, cost comparison, agent history"))}</span>`;
     }
+  }
+
+  // Update sidebar subtitle
+  if (typeof /** @type {any} */ (window).updateSidebarSubtitle === 'function') {
+    /** @type {any} */ (window).updateSidebarSubtitle(isCompleteFailure ? 'error' : 'done', run.task.title);
   }
 
   // 任务轨迹（任务要求 vs Agent 返回）

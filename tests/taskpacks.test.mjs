@@ -14,7 +14,7 @@ function createTempTaskpack(content, filename = "test.yaml") {
 }
 
 function cleanup() {
-  try { rmSync(TEMP_DIR, { recursive: true, force: true }); } catch {}
+  try { rmSync(TEMP_DIR, { recursive: true, force: true }); } catch { /* best-effort: cleanup */ }
 }
 
 it("parses a valid taskpack with all required fields", async () => {

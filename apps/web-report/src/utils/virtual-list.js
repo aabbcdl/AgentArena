@@ -13,7 +13,7 @@
 
 /**
  * @typedef {Object} VirtualListInstance
- * @property {(items: any[], renderItem: (item: any, index: number) => string) => void} setItems
+ * @property {(items: any[], renderItem: (item: any, index: number) => Node | string) => void} setItems
  * @property {() => void} scrollToTop
  * @property {() => HTMLDivElement} getElement
  * @property {() => void} destroy
@@ -35,7 +35,7 @@ export function createVirtualList(container, options) {
 
   /** @type {any[]} */
   let items = [];
-  /** @type {(item: any, index: number) => string} */
+  /** @type {(item: any, index: number) => Node | string} */
   let renderItem = () => '';
   /** @type {number | null} */
   let rafId = null;
@@ -53,8 +53,7 @@ export function createVirtualList(container, options) {
   wrapper.appendChild(spacer);
 
   // 清空容器并挂载
-  container.innerHTML = '';
-  container.appendChild(wrapper);
+  container.replaceChildren(wrapper);
 
   /**
    * 获取当前可视区范围
@@ -106,7 +105,12 @@ export function createVirtualList(container, options) {
       itemEl.setAttribute('role', 'option');
       itemEl.setAttribute('aria-posinset', String(i + 1));
       itemEl.setAttribute('aria-setsize', String(totalItems));
-      itemEl.innerHTML = renderItem(items[i], i);
+      const rendered = renderItem(items[i], i);
+      if (rendered instanceof Node) {
+        itemEl.replaceChildren(rendered);
+      } else {
+        itemEl.textContent = String(rendered);
+      }
       fragment.appendChild(itemEl);
     }
 
@@ -196,7 +200,7 @@ export function createVirtualList(container, options) {
       }
       wrapper.removeEventListener('scroll', onScroll);
       resizeObserver.disconnect();
-      container.innerHTML = '';
+      container.replaceChildren();
     }
   };
 }

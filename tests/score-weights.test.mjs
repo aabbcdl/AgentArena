@@ -68,7 +68,7 @@ test("migrateLegacyWeights passes through non-judges keys unchanged", () => {
 test("filterApplicableWeights removes precision when no expectedChangedPaths", () => {
   const result = filterApplicableWeights(
     { tests: 0.5, precision: 0.3, lint: 0.2 },
-    makeResult(),
+    makeResult({ judgeResults: [{ type: "test-result", success: true }] }),
     makeRun()
   );
   assert.equal(result.precision, undefined);

@@ -325,7 +325,7 @@ test("GET /api/run-status returns idle when no run active", { timeout: 60_000 },
   const port = BASE_PORT + 33;
   // Clean up any persisted run state from previous tests
   const stateDir = path.join(process.cwd(), ".agentarena", "ui");
-  try { await fs.rm(stateDir, { recursive: true, force: true }); } catch {}
+  try { await fs.rm(stateDir, { recursive: true, force: true }); } catch { /* best-effort: cleanup */ }
   const { child } = await startServer(port);
   try {
     const res = await request(port, "GET", "/api/run-status");

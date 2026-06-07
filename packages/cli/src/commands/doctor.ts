@@ -1,4 +1,5 @@
 import {
+  getInstallGuide,
   listAvailableAdapters,
   preflightAdapters,
 } from "@agentarena/adapters";
@@ -35,6 +36,7 @@ export async function runDoctor(parsed: ParsedArgs): Promise<void> {
     console.log("\n🏥 AgentArena Doctor\n");
 
     const groups = groupByTier(preflights);
+    let notReadyCount = 0;
 
     for (const group of groups) {
       console.log(`${group.emoji} ${group.label} (${group.items.length})`);
@@ -45,6 +47,7 @@ export async function runDoctor(parsed: ParsedArgs): Promise<void> {
             : preflight.status === "unverified"
               ? "?"
               : "✗";
+        if (preflight.status !== "ready") notReadyCount++;
         console.log(
           `   • ${preflight.agentId.padEnd(20)} ${preflight.capability.invocationMethod}`,
         );
@@ -69,9 +72,43 @@ export async function runDoctor(parsed: ParsedArgs): Promise<void> {
         for (const limitation of preflight.capability.knownLimitations) {
           console.log(`     limitation: ${limitation}`);
         }
+
+        // Show install guide for missing/blocked adapters
+        if (preflight.status === "missing" || preflight.status === "blocked") {
+          const guide = getInstallGuide(preflight.agentId);
+          if (guide) {
+            console.log(`     💡 How to fix:`);
+            // Show platform-appropriate install commands
+            const platform = process.platform === "win32" ? "windows" : process.platform === "darwin" ? "macos" : "linux";
+            const platformCmds = guide.install[platform] ?? guide.install.all;
+            if (platformCmds) {
+              for (const [method, cmd] of Object.entries(platformCmds)) {
+                console.log(`        $ ${cmd}  (${method})`);
+              }
+            }
+            if (guide.warnings) {
+              for (const warning of guide.warnings) {
+                console.log(`        ⚠ ${warning}`);
+              }
+            }
+            if (guide.postInstall) {
+              for (const note of guide.postInstall) {
+                console.log(`        ℹ ${note}`);
+              }
+            }
+          }
+        }
+
         console.log("");
       }
       console.log("");
+    }
+
+    if (notReadyCount > 0) {
+      console.log(`⚠ ${notReadyCount} adapter(s) are not ready. Fix the issues above and run 'agentarena doctor' again.`);
+      if (parsed.strict) {
+        console.log(`   (--strict mode: exiting with error code 1)`);
+      }
     }
   }
 

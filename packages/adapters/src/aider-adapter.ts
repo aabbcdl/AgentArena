@@ -6,6 +6,7 @@ import type {
   AgentAdapter,
   AgentResolvedRuntime
 } from "@agentarena/core";
+import { adapterWarn } from "./adapter-diagnostics.js";
 import { createCliAdapter } from "./base-cli-adapter.js";
 import { runProcess } from "./process-utils.js";
 
@@ -37,8 +38,7 @@ async function ensureGitRepo(context: AdapterExecutionContext): Promise<void> {
   } catch {
     const gitResult = await runProcess("git", ["init"], context.workspacePath, 30_000, context.environment);
     if (gitResult.exitCode !== 0) {
-      // biome-ignore lint/suspicious/noConsole: adapter diagnostic
-      console.warn(`Warning: Could not initialize git in workspace. Aider may not work correctly: ${gitResult.stderr}`);
+      adapterWarn("Could not initialize git in workspace. Aider may not work correctly", { stderr: gitResult.stderr });
     }
   }
 }

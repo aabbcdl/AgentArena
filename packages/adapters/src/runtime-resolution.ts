@@ -74,7 +74,14 @@ export async function resolveCodexRuntime(context: {
   }
 
   const normalizedEnvModel = normalizeModelName(process.env.AGENTARENA_CODEX_MODEL);
-  const normalizedEnvEffort = normalizeReasoningEffort(process.env.AGENTARENA_CODEX_REASONING_EFFORT);
+  // Read the canonical env var first, fall back to the old name for backward compatibility.
+  // The old name (AGENTARENA_CODEX_REASONING) was used in .env.example before 2026-06-07.
+  const normalizedEnvEffort = normalizeReasoningEffort(
+    process.env.AGENTARENA_CODEX_REASONING_EFFORT ??
+    (process.env.AGENTARENA_CODEX_REASONING
+      ? (console.warn("[agentarena] AGENTARENA_CODEX_REASONING is deprecated, use AGENTARENA_CODEX_REASONING_EFFORT instead"), process.env.AGENTARENA_CODEX_REASONING)
+      : undefined)
+  );
   if (normalizedEnvModel || normalizedEnvEffort) {
     return {
       effectiveModel: normalizedEnvModel,

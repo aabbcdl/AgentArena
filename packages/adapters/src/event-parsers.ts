@@ -67,8 +67,18 @@ export interface ClaudeJsonEvent {
     content?: Array<{
       type?: string;
       text?: string;
+      // tool_use fields
+      id?: string;
+      name?: string;
+      input?: unknown;
     }>;
   };
+}
+
+/** A tool call extracted from Claude's stream-json output */
+export interface ToolCallEvent {
+  name: string;
+  input?: unknown;
 }
 
 const MAX_PARSE_DEPTH = 50; // Prevent stack overflow on deeply nested JSON
@@ -98,12 +108,30 @@ export function extractNestedStringValues(value: unknown, collector: Map<string,
   }
 }
 
+/**
+ * Parse Codex CLI JSON-per-line stdout events.
+ *
+ * CONTRACT WARNING: This parser depends on undocumented Codex CLI output formats.
+ * Expected event types and fields (as of 2025-06):
+ * - `type: "thread.started"` → `thread_id` (string)
+ * - `type: "item.completed"` + `item.type: "agent_message"` → `item.text` (summary)
+ * - `type: "item.completed"` + `item.type: "file_change"` → `item.changes[].path`
+ * - `type: "turn.completed"` → `usage.{input_tokens, cached_input_tokens, output_tokens}`
+ *
+ * If any field is renamed or removed, tokenUsage silently drops to 0 and
+ * changedFilesHint returns empty. See docs/adr/ADR-001-adapter-cli-contract.md.
+ */
 export function parseCodexEvents(stdout: string, workspacePath: string): {
   changedFilesHint: string[];
   tokenUsage: number;
   summaryFromEvents?: string;
   threadId?: string;
   resolvedRuntime?: AgentResolvedRuntime;
+  /**
+   * True when turn.completed events were seen but produced zero tokens.
+   * Indicates the CLI may have changed its usage field names.
+   */
+  tokenCountSuspicious: boolean;
 } {
   const changedFiles = new Set<string>();
   let tokenUsage = 0;
@@ -112,6 +140,7 @@ export function parseCodexEvents(stdout: string, workspacePath: string): {
   let eventModel: string | undefined;
   let eventReasoningEffort: string | undefined;
   let parseErrorCount = 0;
+  let turnCompletedCount = 0;
   const MAX_PARSE_ERRORS = 10; // Stop logging after this many to avoid noise
 
   for (const rawLine of stdout.split(/\r?\n/)) {
@@ -163,11 +192,14 @@ export function parseCodexEvents(stdout: string, workspacePath: string): {
       }
     }
 
-    if (parsed.type === "turn.completed" && parsed.usage) {
-      tokenUsage +=
-        safeNumber(parsed.usage.input_tokens) +
-        safeNumber(parsed.usage.cached_input_tokens) +
-        safeNumber(parsed.usage.output_tokens);
+    if (parsed.type === "turn.completed") {
+      turnCompletedCount += 1;
+      if (parsed.usage) {
+        tokenUsage +=
+          safeNumber(parsed.usage.input_tokens) +
+          safeNumber(parsed.usage.cached_input_tokens) +
+          safeNumber(parsed.usage.output_tokens);
+      }
     }
 
     const stringValues = new Map<string, string>();
@@ -188,6 +220,13 @@ export function parseCodexEvents(stdout: string, workspacePath: string): {
     logger.warn("adapter", "codex.parse_skipped", `parseCodexEvents: Skipped ${parseErrorCount} unparseable lines in total.`);
   }
 
+  // Warn if turn.completed events were seen but produced zero tokens.
+  // This likely means the CLI changed its usage field names.
+  const tokenCountSuspicious = turnCompletedCount > 0 && tokenUsage === 0;
+  if (tokenCountSuspicious) {
+    logger.warn("adapter", "codex.zero_tokens", `parseCodexEvents: Saw ${turnCompletedCount} turn.completed events but tokenUsage is 0. The CLI may have changed its usage field names (expected: input_tokens, cached_input_tokens, output_tokens).`);
+  }
+
   return {
     changedFilesHint: uniqueSorted(Array.from(changedFiles)),
     tokenUsage,
@@ -201,7 +240,8 @@ export function parseCodexEvents(stdout: string, workspacePath: string): {
             source: "event-stream",
             verification: "confirmed"
           }
-        : undefined
+        : undefined,
+    tokenCountSuspicious
   };
 }
 
@@ -240,6 +280,14 @@ export function parseStreamJsonEvents(
   summaryFromEvents?: string;
   sessionId?: string;
   error?: string;
+  toolCalls: ToolCallEvent[];
+  /**
+   * True when the result event was seen but produced zero tokens.
+   * Indicates the CLI may have changed its field names — the tokenUsage
+   * value is likely inaccurate (should be > 0). Callers should mark
+   * the result as "data may be inaccurate" in the UI/report.
+   */
+  tokenCountSuspicious: boolean;
 } {
   let tokenUsage = 0;
   let estimatedCostUsd = 0;
@@ -247,7 +295,9 @@ export function parseStreamJsonEvents(
   let summaryFromEvents: string | undefined;
   let sessionId: string | undefined;
   let error: string | undefined;
+  const toolCalls: ToolCallEvent[] = [];
   let parseErrorCount = 0;
+  let resultEventSeen = false;
   const MAX_PARSE_ERRORS = 10;
 
   for (const rawLine of stdout.split(/\r?\n/)) {
@@ -285,6 +335,13 @@ export function parseStreamJsonEvents(
         summaryFromEvents = text;
       }
 
+      // Extract tool_use entries
+      for (const block of parsed.message.content) {
+        if (block.type === "tool_use" && typeof block.name === "string") {
+          toolCalls.push({ name: block.name, input: block.input });
+        }
+      }
+
       const usage = parsed.message.usage;
       if (usage) {
         tokenUsage +=
@@ -296,6 +353,7 @@ export function parseStreamJsonEvents(
     }
 
     if (parsed.type === "result") {
+      resultEventSeen = true;
       // The result event contains the final cumulative usage summary.
       // Replace the running total to avoid double-counting with per-message usage.
       const usage = parsed.usage;
@@ -326,13 +384,22 @@ export function parseStreamJsonEvents(
     logger.warn("adapter", "stream_json.parse_skipped", `${callerName}: Skipped ${parseErrorCount} unparseable lines in total.`);
   }
 
+  // Warn if result event was seen but produced zero tokens.
+  // This likely means the CLI changed its usage field names.
+  const tokenCountSuspicious = resultEventSeen && tokenUsage === 0;
+  if (tokenCountSuspicious) {
+    logger.warn("adapter", "stream_json.zero_tokens", `${callerName}: Saw "result" event but tokenUsage is 0. The CLI may have changed its usage field names (expected: input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens).`);
+  }
+
   return {
     tokenUsage,
     estimatedCostUsd,
     costKnown,
     summaryFromEvents,
     sessionId,
-    error
+    error,
+    toolCalls,
+    tokenCountSuspicious
   };
 }
 

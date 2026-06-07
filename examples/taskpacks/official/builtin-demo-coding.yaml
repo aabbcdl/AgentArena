@@ -85,13 +85,15 @@ judges:
     type: file-contains
     label: "UserDataError has userId property"
     path: packages/core/src/user-service.ts
-    regex: "userId\\s*[:=]"
+    pattern: "userId\\s*[:=]"
+    regex: true
 
   - id: empty-validation
     type: file-contains
     label: "Empty userId is validated/rejected"
     path: packages/core/src/user-service.ts
-    regex: "(trim|length\\s*===?\\s*0|!\\s*userId|\\.length)"
+    pattern: "(trim|length\\s*===?\\s*0|!\\s*userId|\\.length)"
+    regex: true
 
   - id: runner-catches-error
     type: file-contains
@@ -103,14 +105,15 @@ judges:
     type: file-contains
     label: "CLI has error handling"
     path: packages/cli/src/index.ts
-    regex: "(catch|try|UserDataError|error)"
+    pattern: "(catch|try|UserDataError|error)"
+    regex: true
 
   - id: no-generic-only-catch
-    type: regex-match
+    type: file-contains
     label: "Not just generic catch (has specific error handling)"
     path: packages/runner/src/index.ts
-    regex: "UserDataError"
-    minMatches: 1
+    pattern: "UserDataError"
+    regex: true
 
   - id: error-exported
     type: file-contains

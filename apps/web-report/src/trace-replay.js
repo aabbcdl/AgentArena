@@ -7,6 +7,7 @@ export function createTraceReplayModule({ escapeHtml, t }) {
   let currentStepIndex = 0;
   let playInterval = null;
 
+  // NOTE: TS equivalent in packages/core/src/utils.ts
   function formatDuration(ms) {
     if (ms < 1000) return `${ms}ms`;
     if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
@@ -132,7 +133,9 @@ export function createTraceReplayModule({ escapeHtml, t }) {
       currentStepIndex = 0;
 
       renderTimeline();
-      renderStep(currentTimeline.steps[0]);
+      if (currentTimeline.steps.length > 0) {
+        renderStep(currentTimeline.steps[0]);
+      }
       updateControls();
       updateSummary();
     } catch (error) {

@@ -55,3 +55,14 @@ docs/notes/*.md
 docs/images/*.png
 scripts/BeszelTray.spec
 examples/taskpacks/task-packs.json
+
+# Process/temp files
+findings.md
+progress.md
+task_plan.md
+test-output.txt
+test-screenshot-*.png
+e2e/
+docs/architecture-audit-*
+docs/session-status-*
+scripts/architecture-audit*

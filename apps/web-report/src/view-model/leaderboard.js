@@ -42,6 +42,7 @@ export function serializeLeaderboardIdentity(identity) {
 
 /**
  * Compute the median of a numeric array.
+ * NOTE: TS equivalent in packages/core/src/utils.ts
  * @param {number[]} values
  * @returns {number}
  */
@@ -130,6 +131,8 @@ export function buildLeaderboard(runs, currentRun) {
     const totalComparisons = comparisonMap.get(key) ?? 0;
     const winRate = totalComparisons > 0 ? winCount / totalComparisons : 0;
     const successRate = results.length > 0 ? successCount / results.length : 0;
+    // When agent never succeeded, win rate is meaningless — mark as N/A
+    const winRateDisplay = (successCount === 0 || totalComparisons === 0) ? null : winRate;
 
     const lastSeenAt = agentRuns
       .map((r) => r.createdAt)
@@ -145,6 +148,7 @@ export function buildLeaderboard(runs, currentRun) {
         runCount: agentRuns.length,
         averageScore: Math.round(averageScore * 10) / 10,
         winRate,
+        winRateDisplay,
         successRate,
         medianDurationMs: median(durations),
         medianCostUsd: costs.length > 0 ? median(costs) : null,

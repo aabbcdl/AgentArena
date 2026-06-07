@@ -1,0 +1,4 @@
+{"type":"thread.started","thread_id":"thread_abc123"}
+{"type":"item.completed","item":{"type":"agent_message","text":"I'll analyze the codebase and fix the bug."}}
+{"type":"item.completed","item":{"type":"file_change","changes":[{"path":"/workspace/src/index.ts"}]}}
+{"type":"turn.completed","usage":{"input_tokens":1500,"cached_input_tokens":500,"output_tokens":800},"modelName":"o3","modelSlug":"o3","modelReasoningEffort":"medium"}

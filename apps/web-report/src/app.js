@@ -193,9 +193,8 @@ function loadScoreConfig() {
   try {
     const raw = readStorage("agentarena.webReport.scoreConfig");
     return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
+  } catch { /* ignore parse error */ }
+  return null;
 }
 
 function getScoreModeLabel() {
@@ -275,6 +274,16 @@ function summarizeJudges(taskPack) { return summarizeJudgesImpl(taskPack, t); }
 
 
 function runFocusLine(run) {
+  const resultCount = (run.results ?? []).length;
+
+  // Single agent — no meaningful "best/fastest/cheapest" comparison
+  if (resultCount < 2) {
+    return localText(
+      "本次仅 1 个 agent，无对比基准。",
+      "Only 1 agent in this run — no comparison baseline."
+    );
+  }
+
   const verdict = getRunVerdict(run, { scoreWeights: state.scoreWeights });
   const best = verdict.bestAgent ? resultLabel(verdict.bestAgent) : "n/a";
   const fastest = verdict.fastest ? resultLabel(verdict.fastest) : "n/a";
@@ -454,10 +463,15 @@ const {
   handleFolderSelection: handleFolderSelectionImpl
 } = resultLoaders;
 
+let lastRenderedLang = null;
+
 function renderStaticText() {
-  document.title = `AgentArena · ${t("appTitle")}`;
-  setText("result-loader-summary", t("existingResultsFallback"));
-  setText("app-title", t("appTitle"));
+  if (lastRenderedLang === state.language) return;
+  document.title = state.run
+    ? `AgentArena · ${state.run.task.title}`
+    : `AgentArena · ${t("sidebarTagline")}`;
+  setText("result-loader-summary", t("loadHistoryTitle"));
+  setText("app-title", t("sidebarTagline"));
   setText("app-description", t("appDescription"));
   setText("skip-link", t("skipToContent"));
   setText("update-banner-text", t("updateAvailable"));
@@ -620,18 +634,18 @@ function renderStaticText() {
   setTextBySelector('[data-i18n="heroFeatureHistoryDesc"]', t("heroFeatureHistoryDesc"));
   setTextBySelector('[data-i18n="configureAgentsBtn"]', t("configureAgentsBtn"));
   setTextBySelector('[data-i18n="demoHint"]', t("demoHint"));
-  setTextBySelector('[data-i18n="traceReplayTitle"]', t("traceReplayTitle"));
-  setTextBySelector('[data-i18n="traceReplayPrev"]', t("traceReplayPrev"));
-  setTextBySelector('[data-i18n="traceReplayNext"]', t("traceReplayNext"));
-  setTextBySelector('[data-i18n="traceReplayPlay"]', t("traceReplayPlay"));
-  setTextBySelector('[data-i18n="traceReplayTotalEvents"]', t("traceReplayTotalEvents"));
-  setTextBySelector('[data-i18n="traceReplayDuration"]', t("traceReplayDuration"));
-  setTextBySelector('[data-i18n="traceReplayErrors"]', t("traceReplayErrors"));
-  setTextBySelector('[data-i18n="traceReplayAgent"]', t("traceReplayAgent"));
-  setTextBySelector('[data-i18n="traceReplaySelectRun"]', t("traceReplaySelectRun"));
-  document.querySelector('#trace-replay-prev')?.setAttribute('title', t("traceReplayPrevTitle"));
-  document.querySelector('#trace-replay-next')?.setAttribute('title', t("traceReplayNextTitle"));
-  document.querySelector('#trace-replay-play')?.setAttribute('title', t("traceReplayAutoPlayTitle"));
+  setTextBySelector('[data-i18n="traceReplayTitle"]', t("trace.title"));
+  setTextBySelector('[data-i18n="traceReplayPrev"]', t("trace.prev"));
+  setTextBySelector('[data-i18n="traceReplayNext"]', t("trace.next"));
+  setTextBySelector('[data-i18n="traceReplayPlay"]', t("trace.play"));
+  setTextBySelector('[data-i18n="traceReplayTotalEvents"]', t("trace.totalEvents"));
+  setTextBySelector('[data-i18n="traceReplayDuration"]', t("trace.duration"));
+  setTextBySelector('[data-i18n="traceReplayErrors"]', t("trace.errors"));
+  setTextBySelector('[data-i18n="traceReplayAgent"]', t("trace.agent"));
+  setTextBySelector('[data-i18n="traceReplaySelectRun"]', t("trace.selectRun"));
+  document.querySelector('#trace-replay-prev')?.setAttribute('title', t("trace.prevTitle"));
+  document.querySelector('#trace-replay-next')?.setAttribute('title', t("trace.nextTitle"));
+  document.querySelector('#trace-replay-play')?.setAttribute('title', t("trace.autoPlay"));
   if (elements.sidebarToggle) {
     elements.sidebarToggle.setAttribute("aria-label", t("toggleSidebar"));
   }
@@ -671,6 +685,19 @@ function renderStaticText() {
   renderScoreWeightsControls();
   // Render weight sliders on initial load
   renderWeightSliders(state.scoreWeights);
+
+  // Generic data-i18n handler: translate all elements with data-i18n attribute
+  for (const el of document.querySelectorAll("[data-i18n]")) {
+    const key = el.getAttribute("data-i18n");
+    if (key) {
+      const translated = t(key);
+      if (translated && translated !== key) {
+        el.textContent = translated;
+      }
+    }
+  }
+
+  lastRenderedLang = state.language;
 }
 
 // fetchWithTimeout is imported from ./app-helpers.js
@@ -697,20 +724,16 @@ function updateCurrentRun() {
 }
 
 function applyRuns(runs, markdownByRunId = new Map()) {
-  const locationState = readLocationState();
-  state.runs = sortRuns(runs);
+  // Deduplicate runs by runId (keep latest entry for each runId)
+  const deduped = [...new Map(runs.map(r => [r.runId, r])).values()];
+  state.runs = sortRuns(deduped);
   state.markdownByRunId = markdownByRunId;
-  const preferredRunId =
-    locationState.runId && state.runs.some((run) => run.runId === locationState.runId)
-      ? locationState.runId
-      : state.selectedRunId;
+  // Prefer the currently selected run, then the first available run
+  // Don't use readLocationState() here — it may reference a stale runId
   state.selectedRunId =
-    preferredRunId && state.runs.some((run) => run.runId === preferredRunId)
-      ? preferredRunId
+    state.runs.some((run) => run.runId === state.selectedRunId)
+      ? state.selectedRunId
       : state.runs[0]?.runId ?? null;
-  if (locationState.agentId) {
-    state.selectedAgentId = locationState.agentId;
-  }
   updateCurrentRun();
   persistCachedRuns();
   syncLocationState(state);
@@ -824,13 +847,15 @@ async function renderCommunityView() {
  * reads elements that renderRunList() creates.
  */
 function render() {
-  renderStaticText();
+  const renderErrors = [];
+
+  try { renderStaticText(); } catch(e) { console.error("[agentarena] renderStaticText error:", e); renderErrors.push(`Static text: ${e instanceof Error ? e.message : String(e)}`); }
   if (elements.resultLoaderMessage) {
     elements.resultLoaderMessage.textContent = state.notice ?? "";
     elements.resultLoaderMessage.hidden = !state.notice;
   }
-  try { renderLauncher(); } catch(e) { console.error("[TRACE] renderLauncher error:", e); }
-  try { renderRunList(); } catch(e) { console.error("[TRACE] renderRunList error:", e); }
+  try { renderLauncher(); } catch(e) { console.error("[agentarena] renderLauncher error:", e); renderErrors.push(`Launcher: ${e instanceof Error ? e.message : String(e)}`); }
+  try { renderRunList(); } catch(e) { console.error("[agentarena] renderRunList error:", e); renderErrors.push(`Run list: ${e instanceof Error ? e.message : String(e)}`); }
 
   // Update sticky bar visibility based on launcher panel visibility
   updateStickyBarVisibility();
@@ -845,19 +870,33 @@ function render() {
     traceReplay.hide(); // Clean up setInterval when navigating away
     elements.agentCount.textContent = "0";
     elements.agentList.className = "agent-list empty-state";
-    elements.agentList.textContent = t("noReportLoaded");
+    elements.agentList.textContent = t("agentListEmpty");
     elements.runCompareTable.innerHTML = "";
     elements.runDiffTable.innerHTML = "";
     elements.agentTrendTitle.textContent = t("agentTrendTitle");
     elements.agentTrendTable.innerHTML = "";
     renderMarkdownPanel();
-    return;
+  } else {
+    try {
+      renderDashboard(state.run);
+    } catch (err) {
+      console.error("[agentarena] renderDashboard error:", err);
+      renderErrors.push(`Dashboard: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    const wsHome = document.querySelector('.workspace-home');
+    if (wsHome) wsHome.classList.add('hidden');
+    try { renderCommunityView(); } catch(e) { console.error("[agentarena] renderCommunityView error:", e); renderErrors.push(`Community: ${e instanceof Error ? e.message : String(e)}`); }
   }
 
-  renderDashboard(state.run);
-  const wsHome = document.querySelector('.workspace-home');
-  if (wsHome) wsHome.classList.add('hidden');
-  renderCommunityView();
+  // Show render errors visibly so users can report them instead of staring at a blank page
+  if (renderErrors.length > 0) {
+    state.notice = `⚠️ Render errors (${renderErrors.length}): ${renderErrors.join("; ")}`;
+    if (elements.resultLoaderMessage) {
+      elements.resultLoaderMessage.textContent = state.notice;
+      elements.resultLoaderMessage.hidden = false;
+      elements.resultLoaderMessage.style.color = "#c0392b";
+    }
+  }
 }
 
 // Sticky bar visibility: show when launcher panel is not in viewport
@@ -919,6 +958,22 @@ async function copyToClipboard(value, label) {
   }
 }
 
+/** Update sidebar subtitle based on current state */
+function updateSidebarSubtitle(substate, runName) {
+  const el = document.getElementById('app-title');
+  if (!el) return;
+  const labels = {
+    idle: state.language === 'zh-CN' ? '选择配置，开始跑分' : 'Configure to start',
+    running: state.language === 'zh-CN' ? '跑分进行中…' : 'Running…',
+    done: state.language === 'zh-CN' ? `运行报告 · ${runName || ''}` : `Report · ${runName || ''}`,
+    error: state.language === 'zh-CN' ? '运行失败' : 'Run failed'
+  };
+  el.textContent = labels[substate] || (state.language === 'zh-CN' ? '跑分配置' : 'Benchmark');
+  el.setAttribute('data-state', substate);
+}
+// Expose globally so dashboard.js can call it
+/** @type {any} */ (window).updateSidebarSubtitle = updateSidebarSubtitle;
+
 function downloadTextFile(filename, contents, mimeType) {
   return downloadTextFileImpl(filename, contents, mimeType);
 }
@@ -949,6 +1004,17 @@ elements.launcherTaskSelect.addEventListener("change", (event) => {
         if (!elements.launcherRepoPath.value && state.serviceInfo?.repoPath) {
           elements.launcherRepoPath.value = state.serviceInfo.repoPath;
         }
+      }
+    }
+    // Task pack path summary — hide full path for official packs
+    const taskPackSummary = document.getElementById("task-pack-summary");
+    const taskPackShortName = document.getElementById("task-pack-short-name");
+    if (taskPackSummary && taskPackShortName) {
+      const isCustom = !value;
+      taskPackSummary.style.display = isCustom ? "none" : "flex";
+      elements.launcherTaskPath.style.display = isCustom ? "block" : "none";
+      if (!isCustom && selectedTp) {
+        taskPackShortName.textContent = selectedTp.title || selectedTp.id || value.split(/[\\/]/).pop();
       }
     }
   } else {
@@ -1072,12 +1138,13 @@ function showPreflightToast(buttonEl, status, summary) {
   toast.className = `preflight-toast ${status}`;
   const icon = status === "ready" ? "✓" : status === "unverified" ? "?" : "✗";
   const labelKey = `testConnection${status.charAt(0).toUpperCase() + status.slice(1)}`;
-  toast.textContent = `${icon} ${t(labelKey)}`;
-  if (summary) toast.title = summary;
+  const label = t(labelKey);
+  // Show both label and summary inline so the user can see WHY it failed
+  toast.textContent = summary ? `${icon} ${label} — ${summary}` : `${icon} ${label}`;
   buttonEl.parentElement?.appendChild(toast);
 
-  // Auto-remove after 5 seconds
-  setTimeout(() => toast.remove(), 5000);
+  // Auto-remove after 8 seconds (longer so user can read)
+  setTimeout(() => toast.remove(), 8000);
 }
 
 async function handleTestConnection(buttonEl) {
@@ -1101,7 +1168,7 @@ async function handleTestConnection(buttonEl) {
 
     if (!response.ok) {
       const err = await response.json().catch(() => ({}));
-      showPreflightToast(buttonEl, "error", err.error || `HTTP ${response.status}`);
+      showPreflightToast(buttonEl, "error", err.error || err.message || `HTTP ${response.status}`);
       return;
     }
 
@@ -1124,8 +1191,10 @@ elements.launcherAgents?.addEventListener("change", (event) => {
   const target = event.target;
   if (target?.id === "launcher-global-model-enabled") {
     state.launcherGlobalModelEnabled = target.checked;
+    // Toggle input row visibility without full re-render
+    const inputRow = document.getElementById("launcher-global-model-input-row");
+    if (inputRow) inputRow.style.display = target.checked ? "block" : "none";
     saveLauncherConfig();
-    renderLauncher();
     return;
   }
   if (target?.id === "launcher-global-model") {
@@ -1149,6 +1218,8 @@ elements.launcherAgents?.addEventListener("change", (event) => {
     return;
   }
   syncLauncherStateFromDom();
+  // Re-render to update run button disabled state and validation messages
+  renderLauncher();
 });
 elements.launcherAgents.addEventListener("input", () => {
   syncLauncherStateFromDom();
@@ -1348,7 +1419,7 @@ elements.launcherAgents.addEventListener("click", async (event) => {
         message = t("detectAllAgents") + ": 0 agents found.";
       }
 
-      alert(message);
+      state.notice = message;
 
       // Re-render the launcher to update version badges and install guide visibility
       if (typeof renderLauncher === "function") {
@@ -1370,7 +1441,7 @@ elements.launcherAgents.addEventListener("click", async (event) => {
         renderLauncher();
       }
     } catch (error) {
-      alert(`Detection failed: ${error instanceof Error ? error.message : String(error)}`);
+      state.notice = `Detection failed: ${error instanceof Error ? error.message : String(error)}`;
     }
 
     target.disabled = false;
@@ -1409,20 +1480,18 @@ elements.launcherToggle.addEventListener("click", () => {
   renderLauncher();
 });
 
-// Back to launcher button — scroll to launcher, expand it
+// Back to launcher button — clear run state and show launcher
 if (elements.backToLauncher) {
   elements.backToLauncher.addEventListener("click", () => {
-    // Expand launcher if collapsed
+    // Clear run state so render() shows workspace-home with launcher
+    state.run = null;
+    state.selectedRunId = null;
+    // Expand launcher
     state.launcherExpanded = true;
-    // Ensure launcher panel is visible
-    if (elements.launcherPanel) {
-      elements.launcherPanel.classList.remove("hidden");
-    }
-    renderLauncher();
-    // Scroll to launcher panel immediately
+    render();
+    // Scroll to launcher panel
     if (elements.launcherPanel) {
       elements.launcherPanel.scrollIntoView({ behavior: "smooth", block: "start" });
-      // Add visual highlight to draw attention
       elements.launcherPanel.classList.add("launcher-highlight");
       setTimeout(() => {
         elements.launcherPanel.classList.remove("launcher-highlight");
@@ -1904,7 +1973,16 @@ window.addEventListener("popstate", () => {
   const locationState = readLocationState();
   state.language = locationState.language ?? readStorage("agentarena.webReport.language") ?? state.language;
   document.documentElement.lang = state.language === "zh-CN" ? "zh-CN" : "en";
-  state.selectedRunId = locationState.runId;
+
+  // Validate runId exists in loaded runs — clear URL param if not found
+  if (locationState.runId && state.runs.some((run) => run.runId === locationState.runId)) {
+    state.selectedRunId = locationState.runId;
+  } else if (locationState.runId) {
+    // Run not found — clear stale URL params
+    state.selectedRunId = state.runs[0]?.runId ?? null;
+    syncLocationState(state);
+  }
+
   state.selectedAgentId = locationState.agentId;
   updateCurrentRun();
   render();
@@ -1985,4 +2063,6 @@ function showIndexedDBWarning() {
 detectService();
 syncLocationState(state);
 render();
-initNewModules();
+initNewModules().catch((err) => {
+  console.warn("[agentarena] Module initialization failed:", err);
+});

@@ -7,16 +7,20 @@ import { resultStore } from "./utils/storage.js";
 const RUN_CACHE_STORAGE_KEY = "agentarena.webReport.cachedRuns.v1";
 const RUN_CACHE_MAX_BYTES = 1_500_000;
 
+let persistTimer = null;
+let persistDirty = false;
+let idbPersistTimer = null;
+
 function readStorage(key) {
-  try { return localStorage.getItem(key); } catch { return null; }
+  try { return localStorage.getItem(key); } catch { return null; /* best-effort: storage may be unavailable */ }
 }
 
 function writeStorage(key, value) {
-  try { localStorage.setItem(key, value); return true; } catch { return false; }
+  try { localStorage.setItem(key, value); return true; } catch { return false; /* best-effort: storage may be unavailable */ }
 }
 
 function removeStorage(key) {
-  try { localStorage.removeItem(key); } catch { /* ignore */ }
+  try { localStorage.removeItem(key); } catch { /* best-effort: storage may be unavailable */ }
 }
 
 /**
@@ -41,9 +45,8 @@ export function restoreCachedRuns() {
       ),
       standaloneMarkdown: typeof parsed.standaloneMarkdown === "string" ? parsed.standaloneMarkdown : null
     };
-  } catch {
-    return null;
-  }
+  } catch { /* ignore parse error */ }
+  return null;
 }
 
 /**
@@ -55,21 +58,28 @@ export function persistCachedRuns(state) {
     return;
   }
 
-  const payload = {
-    version: 1,
-    runs: state.runs,
-    markdownEntries: Array.from(state.markdownByRunId.entries()),
-    standaloneMarkdown: state.standaloneMarkdown
-  };
-  const serialized = JSON.stringify(payload);
-  if (serialized.length > RUN_CACHE_MAX_BYTES) {
-    removeStorage(RUN_CACHE_STORAGE_KEY);
-    return;
-  }
-  writeStorage(RUN_CACHE_STORAGE_KEY, serialized);
+  persistDirty = true;
+  clearTimeout(persistTimer);
+  persistTimer = setTimeout(() => {
+    if (!persistDirty) return;
+    persistDirty = false;
 
-  // Async save to IndexedDB (non-blocking)
-  persistRunsToIndexedDB(state);
+    const payload = {
+      version: 1,
+      runs: state.runs,
+      markdownEntries: Array.from(state.markdownByRunId.entries()),
+      standaloneMarkdown: state.standaloneMarkdown
+    };
+    const serialized = JSON.stringify(payload);
+    if (serialized.length > RUN_CACHE_MAX_BYTES) {
+      removeStorage(RUN_CACHE_STORAGE_KEY);
+      return;
+    }
+    writeStorage(RUN_CACHE_STORAGE_KEY, serialized);
+
+    // Async save to IndexedDB (non-blocking)
+    persistRunsToIndexedDB(state);
+  }, 300);
 }
 
 /**
@@ -77,16 +87,19 @@ export function persistCachedRuns(state) {
  */
 async function persistRunsToIndexedDB(state) {
   if (!resultStore.isAvailable() || state.runs.length === 0) return;
-  try {
-    for (const run of state.runs) {
-      await resultStore.saveRun(run);
+  clearTimeout(idbPersistTimer);
+  idbPersistTimer = setTimeout(async () => {
+    try {
+      for (const run of state.runs) {
+        await resultStore.saveRun(run);
+      }
+      for (const [runId, markdown] of state.markdownByRunId) {
+        await resultStore.saveTrace(runId, { markdown });
+      }
+    } catch (err) {
+      console.warn('IndexedDB save failed:', err);
     }
-    for (const [runId, markdown] of state.markdownByRunId) {
-      await resultStore.saveTrace(runId, { markdown });
-    }
-  } catch (err) {
-    console.warn('IndexedDB save failed:', err);
-  }
+  }, 500);
 }
 
 /**

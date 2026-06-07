@@ -13,6 +13,24 @@ const OFFICIAL_TASKPACK_ROOT = path.join(
   "official",
 );
 
+type OfficialTaskPackSummary = {
+  id: string;
+  title: string;
+  description?: string;
+  path: string;
+  source: string;
+  objective?: string;
+  judgeRationale?: string;
+  repoTypes: string[];
+  tags: string[];
+  prompt: string;
+  judges: Array<{ id: string; type: string; label: string }>;
+  difficulty?: string;
+  differentiator?: string;
+  repoSource?: string;
+  i18n?: unknown;
+};
+
 export async function runInitTaskpack(parsed: {
   templateName?: string;
   outputPath?: string;
@@ -22,14 +40,10 @@ export async function runInitTaskpack(parsed: {
   const templateName = parsed.templateName ?? "repo-health";
   const template = TASKPACK_TEMPLATES[templateName];
   if (!template) {
-    console.error(`❌ 未知的任务包模板："${templateName}"`);
-    console.error(`原因：该模板不存在，无法创建任务包`);
-    console.error(
-      `可用模板：${Object.keys(TASKPACK_TEMPLATES).join(", ")}`,
-    );
-    console.error(
-      `使用方法：agentarena init-taskpack --template repo-health`,
-    );
+    console.error(`❌ Unknown template: "${templateName}"`);
+    console.error(`   未知的任务包模板："${templateName}"`);
+    console.error(`   Available templates: ${Object.keys(TASKPACK_TEMPLATES).join(", ")}`);
+    console.error(`   Usage: agentarena init-taskpack --template repo-health`);
     process.exit(1);
   }
 
@@ -39,11 +53,9 @@ export async function runInitTaskpack(parsed: {
   try {
     await fs.access(outputPath);
     if (!parsed.force) {
-      console.error(`❌ 文件已存在：${outputPath}`);
-      console.error(`原因：覆盖现有文件可能导致数据丢失`);
-      console.error(
-        `解决方法：1) 换一个文件名  2) 加 --force 参数强制覆盖`,
-      );
+      console.error(`❌ File already exists: ${outputPath}`);
+      console.error(`   文件已存在：${outputPath}`);
+      console.error(`   Use a different name or add --force to overwrite.`);
       process.exit(1);
     }
   } catch (error) {
@@ -90,12 +102,10 @@ export async function runInitCi(parsed: {
     | "smoke"
     | "nightly";
   if (!["pull-request", "smoke", "nightly"].includes(ciTemplate)) {
-    console.error(`❌ 未知的 CI 模板："${ciTemplate}"`);
-    console.error(`原因：该模板不存在，无法创建 CI 工作流`);
-    console.error(`可用模板：pull-request, smoke, nightly`);
-    console.error(
-      `使用方法：agentarena init-ci --ci-template=pull-request`,
-    );
+    console.error(`❌ Unknown CI template: "${ciTemplate}"`);
+    console.error(`   未知的 CI 模板："${ciTemplate}"`);
+    console.error(`   Available templates: pull-request, smoke, nightly`);
+    console.error(`   Usage: agentarena init-ci --ci-template=pull-request`);
     process.exit(1);
   }
   const ciOutputDir = parsed.ciOutputDir ?? ".agentarena/ci-benchmark";
@@ -104,11 +114,9 @@ export async function runInitCi(parsed: {
   try {
     await fs.access(workflowPath);
     if (!parsed.force) {
-      console.error(`❌ 文件已存在：${workflowPath}`);
-      console.error(`原因：覆盖现有文件可能导致数据丢失`);
-      console.error(
-        `解决方法：1) 换一个文件路径  2) 加 --force 参数强制覆盖`,
-      );
+      console.error(`❌ File already exists: ${workflowPath}`);
+      console.error(`   文件已存在：${workflowPath}`);
+      console.error(`   Use a different path or add --force to overwrite.`);
       process.exit(1);
     }
   } catch (error) {
@@ -245,24 +253,7 @@ export async function runInit(parsed: {
   );
 }
 
-export async function listOfficialTaskPacks(): Promise<
-  Array<{
-    id: string;
-    title: string;
-    description?: string;
-    path: string;
-    source: string;
-    objective?: string;
-    judgeRationale?: string;
-    repoTypes: string[];
-    tags: string[];
-    prompt: string;
-    judges: Array<{ id: string; type: string; label: string }>;
-    difficulty?: string;
-    differentiator?: string;
-    repoSource?: string;
-  }>
-> {
+export async function listOfficialTaskPacks(): Promise<OfficialTaskPackSummary[]> {
   try {
     const { parse: parseYaml } = await import("yaml");
     const { loadTaskPack } = await import("@agentarena/taskpacks");
@@ -281,7 +272,7 @@ export async function listOfficialTaskPacks(): Promise<
       .map((entry) => path.join(OFFICIAL_TASKPACK_ROOT, entry.name))
       .sort();
 
-    const taskPacks = await Promise.all(
+    const taskPackResults = await Promise.allSettled(
       files.map(async (filePath) => {
         const raw = await fs.readFile(filePath, "utf8");
         const taskPack = await loadTaskPack(filePath);
@@ -319,6 +310,15 @@ export async function listOfficialTaskPacks(): Promise<
       }),
     );
 
+    const taskPacks: OfficialTaskPackSummary[] = taskPackResults
+      .filter((r) => {
+        if (r.status === "rejected") {
+          console.warn(`[agentarena] Task pack load failed: ${r.reason instanceof Error ? r.reason.message : String(r.reason)}`);
+        }
+        return r.status === "fulfilled";
+      })
+      .map((r) => (r as PromiseFulfilledResult<OfficialTaskPackSummary>).value);
+
     const difficultyOrder: Record<string, number> = {
       easy: 0,
       medium: 1,
@@ -331,7 +331,8 @@ export async function listOfficialTaskPacks(): Promise<
     );
 
     return taskPacks;
-  } catch {
+  } catch (error) {
+    console.warn(`[agentarena] Failed to list official task packs: ${error instanceof Error ? error.message : String(error)}`);
     return [];
   }
 }

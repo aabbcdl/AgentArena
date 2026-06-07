@@ -389,7 +389,13 @@ export function normalizeApplicableWeights(weights, result, run) {
   const hasPatchValidation = typeof result.sweBench?.patchValidationResult === "object"
     && result.sweBench?.patchValidationResult !== null;
 
+  // Check if test/lint judges exist
+  const hasTestJudge = (result.judgeResults ?? []).some(j => j.type === "test-result");
+  const hasLintJudge = (result.judgeResults ?? []).some(j => j.type === "lint-check");
+
   for (const [key, weight] of Object.entries(migratedWeights)) {
+    if (key === "tests" && !hasTestJudge) continue;
+    if (key === "lint" && !hasLintJudge) continue;
     if (key === "precision" && !isPrecisionApplicable) continue;
     if (key === "tokenEfficiency" && !hasTokenEfficiency) continue;
     if (key === "resolutionRate" && !hasResolutionRate) continue;
@@ -441,6 +447,7 @@ export function getCompositeScoreDetails(result, run, weights = DEFAULT_SCORE_WE
   if (components._hasCriticalFailure) {
     // MUST match backend: normalize applicable weights, compute weighted partial, map to band range
     const partialWeightKeys = ["tests", "nonCriticalJudges", "lint", "precision", "duration", "cost"];
+    /** @type {Record<string, number>} */
     const rawPartialWeights = {};
     for (const key of partialWeightKeys) {
       if (weights[key] !== undefined) rawPartialWeights[key] = weights[key];

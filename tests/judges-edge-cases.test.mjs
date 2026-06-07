@@ -20,7 +20,7 @@ async function createTempWorkspace() {
 async function cleanupTempWorkspace(tmpDir) {
   try {
     await fs.rm(tmpDir, { recursive: true, force: true });
-  } catch {}
+  } catch { /* best-effort: cleanup */ }
 }
 
 // Test file-exists judge

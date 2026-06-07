@@ -4,7 +4,7 @@ import { type BenchmarkRun, ensureDirectory } from "@agentarena/core";
 import { renderHtml } from "./html-template.js";
 import { buildLeaderboard, } from "./leaderboard.js";
 import { renderMarkdown, renderPrComment } from "./markdown-template.js";
-import { buildBadgePayload, getReportCopy, type Locale, sanitizeRun } from "./report-helpers.js";
+import { buildBadgePayload, type Locale, sanitizeRun } from "./report-helpers.js";
 import { enrichRunWithScores } from "./scoring.js";
 
 async function atomicWriteFile(filePath: string, content: string, retries = 3, delayMs = 100): Promise<void> {
@@ -27,6 +27,8 @@ async function atomicWriteFile(filePath: string, content: string, retries = 3, d
 }
 
 export { getDefaultWeights } from "@agentarena/core";
+export type { RunConclusion } from "./conclusion.js";
+export { generateConclusion } from "./conclusion.js";
 export { generateCsv } from "./csv-export.js";
 export {
   type DecisionRecommendation,

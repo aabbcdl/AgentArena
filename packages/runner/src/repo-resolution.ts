@@ -30,7 +30,7 @@ async function createAskpassScript(): Promise<{ scriptPath: string; cleanup: () 
     cleanup: async () => {
       try {
         await fs.rm(tmpDir, { recursive: true, force: true });
-      } catch {}
+      } catch { /* best-effort: temp cleanup */ }
     },
   };
 }
@@ -100,7 +100,16 @@ export async function resolveAndValidateRepo(
         const hasAuth = !!(gitAuthToken || (gitUsername && gitPassword));
 
         let askpass: { scriptPath: string; cleanup: () => Promise<void> } | undefined;
-        const cloneEnv: Record<string, string> = { ...process.env as Record<string, string>, GIT_TERMINAL_PROMPT: "0" };
+        const cloneEnv: Record<string, string> = {
+          HOME: process.env.HOME ?? process.env.USERPROFILE ?? "",
+          PATH: process.env.PATH ?? "",
+          TMPDIR: process.env.TMPDIR ?? process.env.TEMP ?? "/tmp",
+          GIT_TERMINAL_PROMPT: "0",
+          // Preserve SSH and Git auth variables when explicitly set
+          ...(process.env.SSH_AUTH_SOCK ? { SSH_AUTH_SOCK: process.env.SSH_AUTH_SOCK } : {}),
+          ...(process.env.GIT_CONFIG_NOSYSTEM ? { GIT_CONFIG_NOSYSTEM: process.env.GIT_CONFIG_NOSYSTEM } : {}),
+          ...(process.env.GIT_SSH_COMMAND ? { GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND } : {}),
+        };
 
         if (hasAuth) {
           askpass = await createAskpassScript();

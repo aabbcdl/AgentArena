@@ -46,13 +46,25 @@ const BLOCKED_ENV_NAMES = new Set([
   "ELECTRON_RUN_AS_NODE",
 ]);
 
+/**
+ * Parse AGENTARENA_EXTRA_ENV: comma-separated list of additional env var names
+ * to pass through to agent processes (added on top of the baseline allowlist
+ * and the task pack's envAllowList).
+ */
+function getExtraEnvNames(): string[] {
+  const raw = process.env.AGENTARENA_EXTRA_ENV;
+  if (!raw) return [];
+  return raw.split(",").map((s) => s.trim()).filter(Boolean);
+}
+
 export function buildExecutionEnvironment(
   allowedNames: string[],
   overrides: Record<string, string> = {}
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
+  const extraNames = getExtraEnvNames();
 
-  for (const name of [...BASELINE_ENV_NAMES, ...allowedNames]) {
+  for (const name of [...BASELINE_ENV_NAMES, ...allowedNames, ...extraNames]) {
     if (BLOCKED_ENV_NAMES.has(name)) continue;
     const value = process.env[name];
     if (value !== undefined) {

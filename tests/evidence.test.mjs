@@ -1,17 +1,16 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import assert from "node:assert/strict";
 import { promises as fs } from "node:fs";
-import path from "node:path";
 import os from "node:os";
+import path from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import {
-  EVIDENCE_DIR,
-  EVIDENCE_FILES,
-  writeToolCall,
+  collectEvidence,
   writeChangedFiles,
+  writeExecutionEvidence,
+  writeExecutionMeta,
   writeExitCode,
   writeProcessOutput,
-  writeExecutionMeta,
-  collectEvidence,
-  writeExecutionEvidence,
+  writeToolCall,
 } from "../packages/core/dist/evidence.js";
 
 describe("Evidence Module", () => {
@@ -43,10 +42,10 @@ describe("Evidence Module", () => {
     });
 
     const evidence = await collectEvidence(tempDir);
-    expect(evidence.toolCalls).toHaveLength(2);
-    expect(evidence.toolCalls[0].name).toBe("read_file");
-    expect(evidence.toolCalls[1].name).toBe("write_file");
-    expect(evidence.source).toBe("partial");
+    assert.equal(evidence.toolCalls.length, 2);
+    assert.equal(evidence.toolCalls[0].name, "read_file");
+    assert.equal(evidence.toolCalls[1].name, "write_file");
+    assert.equal(evidence.source, "partial");
   });
 
   it("should write and read changed files", async () => {
@@ -55,8 +54,8 @@ describe("Evidence Module", () => {
     await writeChangedFiles(options, ["src/a.ts", "src/b.ts"]);
 
     const evidence = await collectEvidence(tempDir);
-    expect(evidence.changedFiles).toEqual(["src/a.ts", "src/b.ts"]);
-    expect(evidence.source).toBe("partial");
+    assert.deepEqual(evidence.changedFiles, ["src/a.ts", "src/b.ts"]);
+    assert.equal(evidence.source, "partial");
   });
 
   it("should write and read exit code", async () => {
@@ -65,7 +64,7 @@ describe("Evidence Module", () => {
     await writeExitCode(options, 0);
 
     const evidence = await collectEvidence(tempDir);
-    expect(evidence.exitCode).toBe(0);
+    assert.equal(evidence.exitCode, 0);
   });
 
   it("should write and read process output", async () => {
@@ -74,8 +73,8 @@ describe("Evidence Module", () => {
     await writeProcessOutput(options, "stdout content", "stderr content");
 
     const evidence = await collectEvidence(tempDir);
-    expect(evidence.stdout).toBe("stdout content");
-    expect(evidence.stderr).toBe("stderr content");
+    assert.equal(evidence.stdout, "stdout content");
+    assert.equal(evidence.stderr, "stderr content");
   });
 
   it("should write and read execution metadata", async () => {
@@ -91,9 +90,9 @@ describe("Evidence Module", () => {
     });
 
     const evidence = await collectEvidence(tempDir);
-    expect(evidence.meta).toBeDefined();
-    expect(evidence.meta.adapterId).toBe("test");
-    expect(evidence.meta.tokenUsage).toBe(100);
+    assert.notEqual(evidence.meta, undefined);
+    assert.equal(evidence.meta.adapterId, "test");
+    assert.equal(evidence.meta.tokenUsage, 100);
   });
 
   it("should mark as reported when all evidence is present", async () => {
@@ -111,8 +110,8 @@ describe("Evidence Module", () => {
     });
 
     const evidence = await collectEvidence(tempDir);
-    expect(evidence.source).toBe("reported");
-    expect(evidence.complete).toBe(true);
+    assert.equal(evidence.source, "reported");
+    assert.equal(evidence.complete, true);
   });
 
   it("should write all evidence at once with writeExecutionEvidence", async () => {
@@ -134,18 +133,18 @@ describe("Evidence Module", () => {
     });
 
     const evidence = await collectEvidence(tempDir);
-    expect(evidence.toolCalls).toHaveLength(2);
-    expect(evidence.changedFiles).toEqual(["a.ts", "b.ts"]);
-    expect(evidence.exitCode).toBe(0);
-    expect(evidence.stdout).toBe("output");
-    expect(evidence.meta.tokenUsage).toBe(200);
-    expect(evidence.source).toBe("reported");
+    assert.equal(evidence.toolCalls.length, 2);
+    assert.deepEqual(evidence.changedFiles, ["a.ts", "b.ts"]);
+    assert.equal(evidence.exitCode, 0);
+    assert.equal(evidence.stdout, "output");
+    assert.equal(evidence.meta.tokenUsage, 200);
+    assert.equal(evidence.source, "reported");
   });
 
   it("should return inferred when no evidence exists", async () => {
     const evidence = await collectEvidence(tempDir);
-    expect(evidence.source).toBe("inferred");
-    expect(evidence.complete).toBe(false);
-    expect(evidence.toolCalls).toHaveLength(0);
+    assert.equal(evidence.source, "inferred");
+    assert.equal(evidence.complete, false);
+    assert.equal(evidence.toolCalls.length, 0);
   });
 });

@@ -9,7 +9,7 @@ import type {
 } from "@agentarena/core";
 import type { InvocationSpec } from "./adapter-capabilities.js";
 import { formatAdapterError } from "./adapter-diagnostics.js";
-import { buildAgentPrompt, createPreflightResult, getChangedFilesFromGit } from "./adapter-helpers.js";
+import { buildAgentPrompt, createPreflightResult, getChangedFilesFromGit, savePromptArtifact } from "./adapter-helpers.js";
 import { probeHelp, probeInvocationVersion } from "./invocation-probes.js";
 import { agentTimeoutMs, pathExists, runProcess } from "./process-utils.js";
 
@@ -107,6 +107,7 @@ class BaseCliAdapterImpl implements AgentAdapter {
   async execute(context: AdapterExecutionContext): Promise<AdapterExecutionResult> {
     const invocation = await this.resolveInvocation();
     const prompt = buildAgentPrompt(context);
+    await savePromptArtifact(prompt, context.workspacePath, context);
     let runtime: AgentResolvedRuntime;
 
     if (this.config.resolveRuntime) {
@@ -122,7 +123,6 @@ class BaseCliAdapterImpl implements AgentAdapter {
     const args = [
       ...invocation.argsPrefix,
       ...this.config.commandArgs,
-      prompt,
       ...(this.config.extraArgs?.(runtime) ?? [])
     ];
 
@@ -134,7 +134,7 @@ class BaseCliAdapterImpl implements AgentAdapter {
 
     let execution: Awaited<ReturnType<typeof runProcess>>;
     try {
-      execution = await runProcess(invocation.command, args, context.workspacePath, agentTimeoutMs(), context.environment, context.signal);
+      execution = await runProcess(invocation.command, args, context.workspacePath, agentTimeoutMs(), context.environment, context.signal, prompt);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       const actionableMessage = formatAdapterError(errorMessage, this.title, invocation.displayCommand);

@@ -18,6 +18,7 @@ export function wrapWithTimeout<T>(
 ): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timeoutHandle = setTimeout(() => {
+      clearTimeout(timeoutHandle);
       reject(new Error(`${label} timed out after ${timeoutMs}ms.`));
     }, timeoutMs);
 

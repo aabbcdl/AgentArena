@@ -1,7 +1,21 @@
 import { randomUUID } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
+import { logger } from "./logging.js";
 import type { AgentRequestedConfig, AgentSelection, RepoSourceResolution } from "./types/index.js";
+
+/**
+ * Compute the median of a numeric array.
+ * Returns 0 for an empty array.
+ */
+export function median(values: number[]): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? (sorted[mid - 1] + sorted[mid]) / 2
+    : sorted[mid];
+}
 
 export function createRunId(date = new Date()): string {
   const stamp = date.toISOString().replace(/[:.]/g, "-");
@@ -128,13 +142,16 @@ export function isInternalUrl(urlString: string): boolean {
       hostname = hostname.slice(1, -1);
     }
     if (isPrivateIpv6(hostname)) return true;
-    const ipv4Mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i;
-    const match = hostname.match(ipv4Mapped);
+    // Handle all IPv4-mapped IPv6 representations:
+    // ::ffff:1.2.3.4, 0:0:0:0:0:ffff:1.2.3.4, ::ffff:xxxx:xxxx (hex pairs)
+    const normalized = hostname.replace(/^0:0:0:0:0:0:/, "::").replace(/^0+:0+:0+:0+:0+:0+:/, "::");
+    const ipv4Mapped = /^::(?:ffff:)?(\d+\.\d+\.\d+\.\d+)$/i;
+    const match = normalized.match(ipv4Mapped);
     if (match) {
       if (isPrivateIp(match[1])) return true;
     }
-    const ipv4MappedHex = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i;
-    const hexMatch = hostname.match(ipv4MappedHex);
+    const ipv4MappedHex = /^::(?:ffff:)?([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i;
+    const hexMatch = normalized.match(ipv4MappedHex);
     if (hexMatch) {
       const group1 = parseInt(hexMatch[1], 16);
       const group2 = parseInt(hexMatch[2], 16);
@@ -146,6 +163,8 @@ export function isInternalUrl(urlString: string): boolean {
     if (hostname.endsWith(".internal") || hostname.endsWith(".local") || hostname.endsWith(".localhost")) return true;
     return false;
   } catch {
+    // Fail-safe: treat parse errors as internal to prevent SSRF bypass
+    logger.warn("core", "ssrf.isInternalUrl", `Failed to parse URL for SSRF check: ${urlString}`);
     return true;
   }
 }
@@ -190,6 +209,7 @@ export async function hasInternalDnsResolution(urlString: string): Promise<boole
     return false;
   } catch {
     // DNS resolution failure = treat as potentially internal (fail-safe)
+    logger.warn("core", "ssrf.dnsResolution", `DNS resolution check failed for ${urlString}; treating as internal (fail-safe)`);
     return true;
   }
 }

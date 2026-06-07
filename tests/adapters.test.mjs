@@ -392,7 +392,7 @@ test("Claude provider profiles persist metadata without leaking secrets", async 
     if (profileId && supportsWindowsCredentialManager()) {
       try {
         await setClaudeProviderProfileSecret(profileId, "");
-      } catch {}
+      } catch { /* best-effort: secret may already be cleared */ }
     }
     if (originalRoot === undefined) {
       delete process.env.AGENTARENA_CLAUDE_PROFILE_ROOT;
@@ -518,7 +518,7 @@ test("resolveClaudeRuntime and workspace settings respect provider profiles", as
     if (profileId && supportsWindowsCredentialManager()) {
       try {
         await setClaudeProviderProfileSecret(profileId, "");
-      } catch {}
+      } catch { /* best-effort: secret may already be cleared */ }
     }
     if (originalRoot === undefined) {
       delete process.env.AGENTARENA_CLAUDE_PROFILE_ROOT;

@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { promises as fs } from "node:fs";
+import path from "node:path";
 import type {
   BenchmarkRun,
   CommunityAgentResult,
@@ -7,7 +8,7 @@ import type {
   CommunityLeaderboardIndex,
   CommunityRunEntry,
 } from "@agentarena/core";
-import { isScoreMode } from "@agentarena/core";
+import { isScoreMode, median } from "@agentarena/core";
 import { sanitizeRun } from "@agentarena/report";
 import type { ParsedArgs } from "./args.js";
 
@@ -176,15 +177,6 @@ export function extractCommunityEntry(
     scoreMode: sanitized.scoreMode && isScoreMode(sanitized.scoreMode) ? sanitized.scoreMode : "balanced",
     agentResults,
   };
-}
-
-function median(values: number[]): number {
-  if (values.length === 0) return 0;
-  const sorted = [...values].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 0
-    ? (sorted[mid - 1] + sorted[mid]) / 2
-    : sorted[mid];
 }
 
 interface AgentResultWithMeta {
@@ -373,16 +365,56 @@ async function fetchExistingRuns(
 /**
  * Main publish orchestrator
  */
+/**
+ * Find the most recent summary.json in .agentarena/runs/
+ */
+async function findLatestSummaryJson(): Promise<string | null> {
+  const runsDir = path.join(process.cwd(), ".agentarena", "runs");
+  try {
+    const entries = await fs.readdir(runsDir, { withFileTypes: true });
+    const dirs = entries
+      .filter((e) => e.isDirectory())
+      .map((e) => ({ name: e.name, path: path.join(runsDir, e.name) }))
+      .sort((a, b) => b.name.localeCompare(a.name)); // newest first (ISO timestamps sort lexicographically)
+
+    for (const dir of dirs) {
+      const summaryPath = path.join(dir.path, "summary.json");
+      try {
+        await fs.access(summaryPath);
+        return summaryPath;
+      } catch {
+        continue;
+      }
+    }
+  } catch {
+    // .agentarena/runs/ doesn't exist
+  }
+  return null;
+}
+
 export async function runPublish(parsed: ParsedArgs): Promise<void> {
   // 1. Read and validate result file
-  if (!parsed.resultFile) {
+  let resolvedPath = parsed.resultFile;
+
+  if (!resolvedPath && parsed.last) {
+    const latest = await findLatestSummaryJson();
+    if (!latest) {
+      throw new Error(
+        "No benchmark runs found in .agentarena/runs/.\n" +
+        "Run a benchmark first: agentarena run --repo . --task <task.yaml> --agents <agents>"
+      );
+    }
+    resolvedPath = latest;
+    console.log(`Using latest run: ${resolvedPath}`);
+  }
+
+  if (!resolvedPath) {
     throw new Error(
       "Missing result file. Usage: agentarena publish <result-file>\n" +
+      "Or: agentarena publish --last (to publish the most recent run)\n" +
       "The result file should be a summary.json from a benchmark run."
     );
   }
-
-  const resolvedPath = parsed.resultFile;
   let rawData: string;
   try {
     rawData = await fs.readFile(resolvedPath, "utf8");

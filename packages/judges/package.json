@@ -19,8 +19,8 @@
   },
   "dependencies": {
     "@agentarena/core": "workspace:*",
-    "ajv": "8.18.0",
-    "picomatch": "4.0.3"
+    "ajv": "8.20.0",
+    "picomatch": "4.0.4"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

@@ -105,7 +105,8 @@ export function applyScorePreset(state, presetId, renderDeps) {
 }
 
 export function updateScoreWeight(state, key, value, renderDeps) {
-  state.scoreWeights[key] = Number.isFinite(value) && value >= 0 ? value : 0;
+  const newValue = Number.isFinite(value) && value >= 0 ? value : 0;
+  state.scoreWeights = { ...state.scoreWeights, [key]: newValue };
   saveScoreConfig(state);
   renderDeps.renderScoreWeightsControls();
   if (state.run) {

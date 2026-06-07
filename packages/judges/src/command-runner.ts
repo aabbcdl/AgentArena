@@ -86,7 +86,13 @@ const SAFE_COMMANDS = new Set([
   // Task packs that need shell scripts must use a specific interpreter (e.g., node, python).
 ]);
 
+const RISKY_COMMANDS = new Set(["curl", "wget", "sed", "awk", "tee"]);
 const COMMANDS_USING_E_FLAG = new Set(["echo", "printf", "type", "which", "where"]);
+
+export interface CommandSecurityOptions {
+  allowEval?: boolean;
+  allowRiskyCommands?: boolean;
+}
 
 /**
  * Tokenize a shell-style command into [command, args]. Handles single/double quotes
@@ -164,7 +170,51 @@ function commandBasenameForAllowlist(commandToken: string): string {
   return basename.replace(/\.(exe|cmd|bat)$/i, "");
 }
 
-export function parseCommand(command: string): [string, string[]] {
+function resolveCommandSecurityOptions(options?: CommandSecurityOptions): Required<CommandSecurityOptions> {
+  return {
+    allowEval: options?.allowEval ?? process.env.AGENTARENA_ALLOW_EVAL_IN_JUDGES === "1",
+    allowRiskyCommands: options?.allowRiskyCommands ?? process.env.AGENTARENA_ALLOW_RISKY_COMMANDS_IN_JUDGES === "1"
+  };
+}
+
+function validateParsedCommand(
+  commandToken: string,
+  commandArgs: string[],
+  commandForMessage: string,
+  options?: CommandSecurityOptions
+): void {
+  const commandBasename = commandBasenameForAllowlist(commandToken);
+  if (!SAFE_COMMANDS.has(commandBasename)) {
+    throw new Error(
+      `Command "${commandBasename}" is not in the allowed command list. ` +
+      `Allowed commands include: node, npm, npx, pnpm, python, go, cargo, git, etc. ` +
+      `Suggestion: Use a script file (e.g., ./run-check.sh) instead. ` +
+      `Command: "${commandForMessage.slice(0, 100)}"`
+    );
+  }
+
+  const security = resolveCommandSecurityOptions(options);
+  if (!security.allowRiskyCommands && RISKY_COMMANDS.has(commandBasename)) {
+    throw new Error(
+      `Command "${commandBasename}" is disabled by the strict task-pack security policy because it can write files, modify streams, or access the network. ` +
+      `Use a safer command or run this task pack as trusted content. ` +
+      `Command: "${commandForMessage.slice(0, 100)}"`
+    );
+  }
+
+  if (!security.allowEval && (/\s-(?:e|c)\s/.test(commandForMessage) || /\s--eval[\s=]/.test(commandForMessage) || commandArgs.some(a => a === "--eval" || a.startsWith("--eval=") || a === "-e" || a === "-c"))) {
+    if (!COMMANDS_USING_E_FLAG.has(commandBasename)) {
+      throw new Error(
+        `Eval-style invocation (-e/-c/--eval) is not allowed for "${commandBasename}" in setup/judge commands. ` +
+        `The task pack uses "node -e" which is blocked by the security policy. ` +
+        `Fix: Replace the inline code with a script file (e.g., create install-deps.js and run "node install-deps.js"). ` +
+        `Command: "${commandForMessage.slice(0, 100)}"`
+      );
+    }
+  }
+}
+
+export function parseCommand(command: string, options?: CommandSecurityOptions): [string, string[]] {
   const trimmed = command.trim();
   const args = tokenizeCommand(command);
   const commandToken = args[0];
@@ -172,9 +222,18 @@ export function parseCommand(command: string): [string, string[]] {
 
   if (!SAFE_COMMANDS.has(commandBasename)) {
     throw new Error(
-      `Command "${commandBasename}" is not in the allowed command list for judge commands. ` +
+      `Command "${commandBasename}" is not in the allowed command list. ` +
       `Allowed commands include: node, npm, npx, pnpm, python, go, cargo, git, etc. ` +
       `Suggestion: Use a script file (e.g., ./run-check.sh) instead. ` +
+      `Command: "${trimmed.slice(0, 100)}"`
+    );
+  }
+
+  const security = resolveCommandSecurityOptions(options);
+  if (!security.allowRiskyCommands && RISKY_COMMANDS.has(commandBasename)) {
+    throw new Error(
+      `Command "${commandBasename}" is disabled by the strict task-pack security policy because it can write files, modify streams, or access the network. ` +
+      `Use a safer command or run this task pack as trusted content. ` +
       `Command: "${trimmed.slice(0, 100)}"`
     );
   }
@@ -183,22 +242,17 @@ export function parseCommand(command: string): [string, string[]] {
   // by running arbitrary code inside an allowed interpreter.
   // Detects: node -e, node --eval, python -c, ruby -e, perl -e, etc.
   //
-  // node/bun used to have a carve-out blocking only a fixed list of
-  // dangerous module names (child_process, fs, etc). That list was
-  // bypassable via dynamic `import("child_process")`, the `vm` module,
-  // `worker_threads`, string concatenation, and indirect references.
-  // We now deny node -e / bun -e unconditionally — task packs that need
-  // inline JS must use a script file.
-  //
-  // AGENTARENA_ALLOW_EVAL_IN_JUDGES=1 disables this check for test
-  // harnesses that legitimately use inline node -e in fixture task packs.
-  const allowEval = process.env.AGENTARENA_ALLOW_EVAL_IN_JUDGES === "1";
-  if (!allowEval && (/\s-(?:e|c)\s/.test(trimmed) || /\s--eval[\s=]/.test(trimmed))) {
+  // Task pack commands (setup + judge) are trusted content defined by the
+  // user, not by the agent. Allow eval for them. External / untrusted
+  // callers can still block via the options flag.
+  const allowEval = security.allowEval;
+  if (!allowEval && (/\s-(?:e|c)\s/.test(trimmed) || /\s--eval[\s=]/.test(trimmed) || args.some(a => a === "--eval" || a.startsWith("--eval=") || a === "-e" || a === "-c"))) {
     // Allow echo/printf/type/which/where — they use -e for their own flags
     if (!COMMANDS_USING_E_FLAG.has(commandBasename)) {
       throw new Error(
-        `Eval-style invocation (-e/-c/--eval) is not allowed for "${commandBasename}" in judge commands. ` +
-        `Suggestion: Use a script file (e.g., ./run-check.sh or ./run-check.js) instead of inline code. ` +
+        `Eval-style invocation (-e/-c/--eval) is not allowed for "${commandBasename}" in setup/judge commands. ` +
+        `The task pack uses "node -e" which is blocked by the security policy. ` +
+        `Fix: Replace the inline code with a script file (e.g., create install-deps.js and run "node install-deps.js"). ` +
         `Command: "${trimmed.slice(0, 100)}"`
       );
     }
@@ -214,7 +268,8 @@ export async function executeCommand(
   timeoutMs: number,
   timeoutLabel: string,
   signal?: AbortSignal,
-  args?: string[]
+  args?: string[],
+  options?: CommandSecurityOptions
 ): Promise<CommandExecutionCapture> {
   const startedAt = Date.now();
   throwIfCancelled(signal);
@@ -224,8 +279,9 @@ export async function executeCommand(
   if (args !== undefined) {
     cmd = commandOrCmd;
     cmdArgs = args;
+    validateParsedCommand(cmd, cmdArgs, [cmd, ...cmdArgs].join(" "), options);
   } else {
-    [cmd, cmdArgs] = parseCommand(commandOrCmd);
+    [cmd, cmdArgs] = parseCommand(commandOrCmd, options);
   }
 
   return await new Promise((resolve, reject) => {
@@ -365,12 +421,13 @@ export async function runCommandStep(
   step: CommandExecutionSpec,
   workspacePath: string,
   baseAllowedNames: string[],
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  options?: CommandSecurityOptions
 ): Promise<CommandStepResult> {
   const timeoutMs = step.timeoutMs ?? defaultJudgeTimeoutMs();
   const cwd = await resolveCommandWorkingDirectory(workspacePath, step);
   const environment = buildStepEnvironment(baseAllowedNames, step);
-  const result = await executeCommand(step.command, cwd, environment, timeoutMs, "Command step", signal);
+  const result = await executeCommand(step.command, cwd, environment, timeoutMs, "Command step", signal, undefined, options);
 
   return {
     stepId: step.id,
@@ -389,13 +446,14 @@ export async function runCommandSteps(
   steps: CommandExecutionSpec[],
   workspacePath: string,
   baseAllowedNames: string[],
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  options?: CommandSecurityOptions
 ): Promise<CommandStepResult[]> {
   const results: CommandStepResult[] = [];
 
   for (const step of steps) {
     throwIfCancelled(signal);
-    results.push(await runCommandStep(step, workspacePath, baseAllowedNames, signal));
+    results.push(await runCommandStep(step, workspacePath, baseAllowedNames, signal, options));
   }
 
   return results;

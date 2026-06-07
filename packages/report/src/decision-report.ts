@@ -323,16 +323,17 @@ function extractWarnings(results: AgentRunResult[]): string[] {
 /**
  * Format decision report as Markdown for export
  */
-export function formatDecisionReport(report: DecisionReport): string {
+export function formatDecisionReport(report: DecisionReport, locale?: string): string {
+  const zh = locale !== "en";
   const lines: string[] = [];
 
-  lines.push(`# AgentArena 决策报告`);
+  lines.push(zh ? `# AgentArena 决策报告` : `# AgentArena Decision Report`);
   lines.push(``);
-  lines.push(`**生成时间**: ${new Date(report.generatedAt).toLocaleString()}`);
-  lines.push(`**场景**: ${report.scenario}`);
+  lines.push(zh ? `**生成时间**: ${new Date(report.generatedAt).toLocaleString()}` : `**Generated**: ${new Date(report.generatedAt).toLocaleString()}`);
+  lines.push(zh ? `**场景**: ${report.scenario}` : `**Scenario**: ${report.scenario}`);
   lines.push(``);
 
-  lines.push(`## 🏆 推荐方案`);
+  lines.push(zh ? `## 🏆 推荐方案` : `## 🏆 Recommendations`);
   lines.push(``);
 
   for (const rec of report.recommendations) {
@@ -346,18 +347,22 @@ export function formatDecisionReport(report: DecisionReport): string {
     lines.push(`### ${emoji} #${rec.rank} ${rec.displayLabel}`);
     lines.push(``);
     lines.push(
-      `- **推荐度**: ${rec.recommendation === "recommended" ? "推荐" : rec.recommendation === "alternative" ? "备选" : "不推荐"}`
+      zh
+        ? `- **推荐度**: ${rec.recommendation === "recommended" ? "推荐" : rec.recommendation === "alternative" ? "备选" : "不推荐"}`
+        : `- **Recommendation**: ${rec.recommendation}`
     );
-    lines.push(`- **成功率**: ${(rec.successRate * 100).toFixed(0)}%`);
-    lines.push(`- **平均成本**: $${rec.avgCostPerRun.toFixed(2)}/次`);
-    lines.push(`- **平均耗时**: ${(rec.avgDurationMs / 1000).toFixed(0)}s`);
+    lines.push(zh ? `- **成功率**: ${(rec.successRate * 100).toFixed(0)}%` : `- **Success rate**: ${(rec.successRate * 100).toFixed(0)}%`);
+    lines.push(zh ? `- **平均成本**: $${rec.avgCostPerRun.toFixed(2)}/次` : `- **Avg cost**: $${rec.avgCostPerRun.toFixed(2)}/run`);
+    lines.push(zh ? `- **平均耗时**: ${(rec.avgDurationMs / 1000).toFixed(0)}s` : `- **Avg duration**: ${(rec.avgDurationMs / 1000).toFixed(0)}s`);
     lines.push(
-      `- **置信度**: ${rec.confidence === "high" ? "高" : rec.confidence === "medium" ? "中" : "低"}`
+      zh
+        ? `- **置信度**: ${rec.confidence === "high" ? "高" : rec.confidence === "medium" ? "中" : "低"}`
+        : `- **Confidence**: ${rec.confidence}`
     );
     lines.push(``);
 
     if (rec.strengths.length > 0) {
-      lines.push(`**优势**:`);
+      lines.push(zh ? `**优势**:` : `**Strengths**:`);
       for (const s of rec.strengths) {
         lines.push(`- ✅ ${s}`);
       }
@@ -365,7 +370,7 @@ export function formatDecisionReport(report: DecisionReport): string {
     }
 
     if (rec.weaknesses.length > 0) {
-      lines.push(`**劣势**:`);
+      lines.push(zh ? `**劣势**:` : `**Weaknesses**:`);
       for (const w of rec.weaknesses) {
         lines.push(`- ❌ ${w}`);
       }
@@ -373,7 +378,7 @@ export function formatDecisionReport(report: DecisionReport): string {
     }
 
     if (rec.riskFactors.length > 0) {
-      lines.push(`**风险**:`);
+      lines.push(zh ? `**风险**:` : `**Risks**:`);
       for (const r of rec.riskFactors) {
         lines.push(`- ⚠️ ${r}`);
       }
@@ -384,17 +389,19 @@ export function formatDecisionReport(report: DecisionReport): string {
   if (report.teamEstimates.length > 0) {
     const first = report.teamEstimates[0];
     lines.push(
-      `## 💰 团队成本估算（${first.teamSize}人 × ${first.dailyRuns}次/天）`
+      zh
+        ? `## 💰 团队成本估算（${first.teamSize}人 × ${first.dailyRuns}次/天）`
+        : `## 💰 Team cost estimate (${first.teamSize} people × ${first.dailyRuns} runs/day)`
     );
     lines.push(``);
-    lines.push(`| Agent | 月成本 | 单次成本 | 与最便宜差距 |`);
+    lines.push(zh ? `| Agent | 月成本 | 单次成本 | 与最便宜差距 |` : `| Agent | Monthly cost | Per-run cost | vs cheapest |`);
     lines.push(`|-------|--------|----------|-------------|`);
 
     for (const est of report.teamEstimates) {
       const savings =
         est.costComparison.savings > 0
           ? `+$${est.costComparison.savings.toFixed(0)}`
-          : "最便宜";
+          : (zh ? "最便宜" : "cheapest");
       lines.push(
         `| ${est.agentId} | $${est.monthlyCost.toFixed(0)} | $${est.costPerRun.toFixed(2)} | ${savings} |`
       );
@@ -403,7 +410,7 @@ export function formatDecisionReport(report: DecisionReport): string {
   }
 
   if (report.keyInsights.length > 0) {
-    lines.push(`## 🔍 关键发现`);
+    lines.push(zh ? `## 🔍 关键发现` : `## 🔍 Key findings`);
     lines.push(``);
     for (const insight of report.keyInsights) {
       lines.push(`- ${insight}`);
@@ -412,7 +419,7 @@ export function formatDecisionReport(report: DecisionReport): string {
   }
 
   if (report.warnings.length > 0) {
-    lines.push(`## ⚠️ 注意事项`);
+    lines.push(zh ? `## ⚠️ 注意事项` : `## ⚠️ Warnings`);
     lines.push(``);
     for (const warning of report.warnings) {
       lines.push(`- ${warning}`);

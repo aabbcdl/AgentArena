@@ -98,10 +98,12 @@ export function validateInitCiCommand(args: ParsedArgs): ValidationResult {
 }
 
 export function validatePublishCommand(args: ParsedArgs): ValidationResult {
-  if (!args.resultFile) {
+  if (!args.resultFile && !args.last) {
     return {
       ok: false,
-      error: "Missing required argument: <result-file>\nExample: agentarena publish .agentarena/runs/run-xxx/summary.json"
+      error: "Missing required argument: <result-file> or --last\n" +
+        "Usage: agentarena publish <result-file>\n" +
+        "   or: agentarena publish --last"
     };
   }
 
@@ -110,6 +112,16 @@ export function validatePublishCommand(args: ParsedArgs): ValidationResult {
 
 export function validateListAdaptersCommand(_args: ParsedArgs): ValidationResult {
   // List-adapters has no required arguments
+  return { ok: true };
+}
+
+export function validateValidateCommand(args: ParsedArgs): ValidationResult {
+  if (!args.taskPath) {
+    return {
+      ok: false,
+      error: "Missing required argument: <taskpack-path>\nExample: agentarena validate my-task.yaml"
+    };
+  }
   return { ok: true };
 }
 
@@ -135,6 +147,8 @@ export function validateCommandArgs(args: ParsedArgs): ValidationResult {
       return validatePublishCommand(args);
     case "list-adapters":
       return validateListAdaptersCommand(args);
+    case "validate":
+      return validateValidateCommand(args);
     default:
       return { ok: true };
   }

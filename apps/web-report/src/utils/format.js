@@ -5,6 +5,7 @@
 
 /**
  * 格式化持续时间
+ * NOTE: TS equivalent in packages/core/src/utils.ts
  * @param {number} ms - 毫秒数
  * @returns {string} 格式化后的时间字符串
  */

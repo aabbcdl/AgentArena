@@ -18,10 +18,56 @@ const _RUN_CACHE_MAX_BYTES = 1_500_000;
 // Auth / API
 // ---------------------------------------------------------------------------
 
+const AUTH_TOKEN_SESSION_KEY = 'agentarena-auth-token';
+const LEGACY_AUTH_TOKEN_LOCAL_KEY = 'agentarena_token';
+let memoryAuthToken = '';
+
+function readSessionValue(key) {
+  try {
+    return sessionStorage.getItem(key) || '';
+  } catch {
+    return '';
+  }
+}
+
+function writeSessionValue(key, value) {
+  memoryAuthToken = value;
+  try {
+    sessionStorage.setItem(key, value);
+  } catch {
+    // Session storage can be disabled; keep the token in memory for this page.
+  }
+}
+
+function removeSessionValue(key) {
+  memoryAuthToken = '';
+  try {
+    sessionStorage.removeItem(key);
+  } catch {
+    // Best-effort cleanup for browsers with unavailable storage.
+  }
+}
+
+function readLocalValue(key) {
+  try {
+    return localStorage.getItem(key) || '';
+  } catch {
+    return '';
+  }
+}
+
+function removeLocalValue(key) {
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    // Best-effort cleanup for legacy persistent token storage.
+  }
+}
+
 /**
- * Get auth token from URL hash, meta tag, or localStorage.
- * Priority: URL hash > meta tag (localhost auto-inject) > localStorage.
- * If found in hash, persists to localStorage and clears the hash.
+ * Get auth token from URL hash, meta tag, or sessionStorage.
+ * Priority: URL hash > meta tag (localhost auto-inject) > sessionStorage.
+ * Legacy localStorage tokens are migrated once and removed.
  * @returns {string}
  */
 function getAuthToken() {
@@ -30,20 +76,35 @@ function getAuthToken() {
   if (hash) {
     const match = hash.match(/[#&]token=([^&]+)/);
     if (match) {
-      localStorage.setItem('agentarena_token', match[1]);
+      writeSessionValue(AUTH_TOKEN_SESSION_KEY, match[1]);
+      removeLocalValue(LEGACY_AUTH_TOKEN_LOCAL_KEY);
       window.location.hash = '';
       return match[1];
     }
   }
 
   // Check meta tag (localhost auto-inject for seamless UX)
-  const metaToken = document.querySelector('meta[name="agentarena-auth-token"]')?.content;
+  const metaEl = document.querySelector('meta[name="agentarena-auth-token"]');
+  const metaToken = metaEl instanceof HTMLMetaElement ? metaEl.content : undefined;
   if (metaToken) {
-    localStorage.setItem('agentarena_token', metaToken);
+    writeSessionValue(AUTH_TOKEN_SESSION_KEY, metaToken);
+    removeLocalValue(LEGACY_AUTH_TOKEN_LOCAL_KEY);
     return metaToken;
   }
 
-  return localStorage.getItem('agentarena_token') || '';
+  const sessionToken = readSessionValue(AUTH_TOKEN_SESSION_KEY) || memoryAuthToken;
+  if (sessionToken) {
+    return sessionToken;
+  }
+
+  const legacyToken = readLocalValue(LEGACY_AUTH_TOKEN_LOCAL_KEY);
+  if (legacyToken) {
+    writeSessionValue(AUTH_TOKEN_SESSION_KEY, legacyToken);
+    removeLocalValue(LEGACY_AUTH_TOKEN_LOCAL_KEY);
+    return legacyToken;
+  }
+
+  return '';
 }
 
 /**
@@ -63,13 +124,14 @@ function renderAuthRequiredOverlay() {
   overlay.setAttribute('aria-labelledby', 'auth-required-title');
   Object.assign(overlay.style, {
     position: 'fixed', inset: '0', display: 'flex', alignItems: 'center', justifyContent: 'center',
-    background: 'rgba(0,0,0,0.45)', zIndex: '9999', fontFamily: 'system-ui'
+    background: 'rgba(0,0,0,0.55)', zIndex: '9999', fontFamily: 'system-ui'
   });
 
   const card = document.createElement('div');
   Object.assign(card.style, {
-    background: '#fff', color: '#111', padding: '24px 28px', borderRadius: '12px',
-    maxWidth: '440px', boxShadow: '0 12px 32px rgba(0,0,0,0.25)', position: 'relative'
+    background: 'var(--bg-elevated, #211d1a)', color: 'var(--text-primary, #f5f5f4)', padding: '24px 28px', borderRadius: '12px',
+    maxWidth: '440px', boxShadow: '0 12px 32px rgba(0,0,0,0.4)', position: 'relative',
+    border: '1px solid var(--border-strong, rgba(255,255,255,0.08))'
   });
 
   const closeButton = document.createElement('button');
@@ -131,7 +193,8 @@ function renderAuthRequiredOverlay() {
       error.hidden = false;
       return;
     }
-    localStorage.setItem('agentarena_token', token);
+    writeSessionValue(AUTH_TOKEN_SESSION_KEY, token);
+    removeLocalValue(LEGACY_AUTH_TOKEN_LOCAL_KEY);
     window.location.reload();
   });
   input.addEventListener('keydown', (e) => {
@@ -168,7 +231,8 @@ function handleApiError(response) {
       renderAuthRequiredOverlay();
       return true;
     }
-    localStorage.removeItem('agentarena_token');
+    removeSessionValue(AUTH_TOKEN_SESSION_KEY);
+    removeLocalValue(LEGACY_AUTH_TOKEN_LOCAL_KEY);
     renderAuthRequiredOverlay();
     return true;
   }
@@ -281,6 +345,7 @@ function setHidden(element, hidden) {
 
 /**
  * Escape HTML special characters.
+ * NOTE: TS equivalent in packages/core/src/fs-utils.ts
  * @param {string} value
  * @returns {string}
  */

@@ -526,9 +526,9 @@ export function createLauncherModule(deps) {
             <input data-role="provider-homepage" type="text" value="${escapeHtml(editor.homepage)}" />
           </label>
           <label class="field">
-            <span>${escapeHtml(localText("Base URL", "Base URL"))} <span class="field-optional">${escapeHtml(localText("选填", "optional"))}</span></span>
+            <span>${escapeHtml(localText("Base URL", "Base URL"))} <span class="field-required">${escapeHtml(localText("必填", "required"))}</span></span>
             <input data-role="provider-base-url" type="text" value="${escapeHtml(editor.baseUrl)}" />
-            <div class="base-url-warning" data-role="base-url-warning" style="display: none; margin-top: 8px; padding: 12px; background: #fff3cd; border: 1px solid #ffc107; border-radius: 4px; color: #856404;">
+            <div class="base-url-warning" data-role="base-url-warning" style="display: none; margin-top: 8px; padding: 12px; background: var(--warning-soft, rgba(245, 158, 11, 0.12)); border: 1px solid var(--warning, #f59e0b); border-radius: 4px; color: var(--warning-light, #fbbf24);">
               <div style="display: flex; align-items: start; gap: 8px;">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink: 0; margin-top: 2px;">
                   <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
@@ -561,7 +561,7 @@ export function createLauncherModule(deps) {
             </select>
           </label>
           <label class="field">
-            <span>${escapeHtml(localText("主模型", "Primary Model"))} <span class="field-optional">${escapeHtml(localText("选填", "optional"))}</span></span>
+            <span>${escapeHtml(localText("主模型", "Primary Model"))} <span class="field-required">${escapeHtml(localText("必填", "required"))}</span></span>
             <input data-role="provider-primary-model" type="text" value="${escapeHtml(editor.primaryModel)}" placeholder="gpt-5.4" />
           </label>
           <label class="field">
@@ -639,6 +639,7 @@ export function createLauncherModule(deps) {
     setHidden(elements.launcherProgress, !isVisible);
     if (!isVisible) return;
 
+    const phase = state.runStatus?.phase ?? "starting";
     elements.launcherProgressTitle.innerHTML = `${escapeHtml(t("launcherProgressTitle"))}${state.runInProgress ? buildStepIndicatorHtml() : ""}`;
     const currentAgent = state.runStatus?.currentDisplayLabel || state.runStatus?.currentVariantId || state.runStatus?.currentAgentId;
     elements.launcherCurrentAgent.textContent = currentAgent
@@ -646,9 +647,21 @@ export function createLauncherModule(deps) {
       : t("launcherCurrentAgentIdle");
 
     const logs = Array.isArray(state.runStatus?.logs) ? state.runStatus.logs : [];
+    if (logs.length === 0 && state.runInProgress) {
+      const phaseLabel = t(`launcherPhases.${phase}`);
+      elements.launcherLogList.innerHTML = `
+        <div class="launcher-progress-hero">
+          <div class="launcher-progress-spinner"></div>
+          <div class="launcher-progress-hero-text">
+            <strong>${escapeHtml(phaseLabel)}</strong>
+            <span class="muted">${escapeHtml(localText("正在启动，请稍候…", "Starting up, please wait…"))}</span>
+          </div>
+        </div>`;
+      return;
+    }
+
     if (logs.length === 0) {
-      const startingText = localText("正在启动...", "Starting...");
-      elements.launcherLogList.innerHTML = `<div class="muted"><span class="status-badge status-starting">${escapeHtml(startingText)}</span></div>`;
+      elements.launcherLogList.innerHTML = "";
       return;
     }
 
@@ -656,12 +669,12 @@ export function createLauncherModule(deps) {
       .slice()
       .reverse()
       .map((entry) => {
-        const phase = t(`launcherPhases.${entry.phase ?? "starting"}`);
+        const logPhase = t(`launcherPhases.${entry.phase ?? "starting"}`);
         const actor = entry.displayLabel ? `${escapeHtml(entry.displayLabel)} · ` : "";
         return `
           <article class="launcher-log-entry">
             <div class="launcher-log-head">
-              <span class="status-badge status-${escapeHtml(entry.phase ?? "starting")}">${escapeHtml(phase)}</span>
+              <span class="status-badge status-${escapeHtml(entry.phase ?? "starting")}">${escapeHtml(logPhase)}</span>
               <span class="muted">${escapeHtml(new Date(entry.timestamp).toLocaleTimeString())}</span>
             </div>
             <p>${actor}${escapeHtml(entry.message)}</p>
@@ -746,12 +759,29 @@ export function createLauncherModule(deps) {
   }
 
   // -----------------------------------------------------------------------
-  // Main render
+  // Smart idle hint — show only what's actually missing
   // -----------------------------------------------------------------------
+
+  function getSmartIdleHint() {
+    const selectedTaskPack = state.availableTaskPacks.find((tp) => tp.path === elements.launcherTaskPath.value);
+    const isBuiltinTaskPack = selectedTaskPack?.repoSource?.startsWith("builtin://");
+    const hasRepo = isBuiltinTaskPack || elements.launcherRepoPath.value.trim().length > 0;
+    const hasPack = elements.launcherTaskPath.value.trim().length > 0;
+    const hasAgent = selectedLauncherVariants().length > 0;
+    const missing = [];
+    if (!hasPack) missing.push(localText("选择任务包", "select a task pack"));
+    if (!hasRepo) missing.push(localText("填写仓库路径", "set repository path"));
+    if (!hasAgent) missing.push(localText("启用至少 1 个 Agent", "enable at least 1 agent"));
+    if (missing.length === 0) return localText("准备就绪，可以开始跑分", "Ready to run");
+    return localText(`还差一步：${missing[0]}`, `Almost ready: ${missing[0]}`);
+  }
 
   function renderLauncher() {
     setHidden(elements.launcherPanel, false);
     const info = state.serviceInfo || {};
+
+    // Save current task pack selection before re-render
+    const savedTaskPath = elements.launcherTaskSelect?.value || elements.launcherTaskPath?.value || "";
 
     // Restore saved config once on first render
     if (!state._launcherConfigRestored) {
@@ -762,7 +792,7 @@ export function createLauncherModule(deps) {
         elements.launcherOutputPath.value = saved.outputPath || info.defaultOutputPath || "";
         elements.launcherTaskPath.value = saved.taskPath || "";
         elements.launcherProbeAuth.checked = Boolean(saved.probeAuth);
-        state.launcherSelectedAgentIds = saved.selectedAgentIds ?? [];
+        state.launcherSelectedAgentIds = [];
         state.launcherScoreMode = saved.scoreMode || "practical";
         state.launcherGlobalModelOverride = saved.globalModelOverride || "";
         state.launcherGlobalModelEnabled = saved.globalModelEnabled || false;
@@ -851,7 +881,7 @@ export function createLauncherModule(deps) {
     }
 
     // Restore the task select value — try exact match first, then by ID
-    const currentTaskPath = elements.launcherTaskPath.value;
+    const currentTaskPath = savedTaskPath || elements.launcherTaskPath.value;
     if (!currentTaskPath && info.defaultTaskPath) {
       elements.launcherTaskPath.value = info.defaultTaskPath;
       elements.launcherTaskSelect.value = info.defaultTaskPath;
@@ -876,6 +906,18 @@ export function createLauncherModule(deps) {
     const selectedTaskPack = state.availableTaskPacks.find((taskPack) => taskPack.path === selectedTaskPackPath) ?? null;
     renderTaskPackDetail(selectedTaskPack);
 
+    // Task pack path summary — hide full path for official packs
+    const taskPackSummary = document.getElementById("task-pack-summary");
+    const taskPackShortName = document.getElementById("task-pack-short-name");
+    if (taskPackSummary && taskPackShortName) {
+      const isCustom = !elements.launcherTaskSelect.value;
+      taskPackSummary.style.display = isCustom ? "none" : "flex";
+      elements.launcherTaskPath.style.display = isCustom ? "block" : "none";
+      if (!isCustom && selectedTaskPack) {
+        taskPackShortName.textContent = selectedTaskPack.title || selectedTaskPack.id || selectedTaskPackPath.split(/[\\/]/).pop();
+      }
+    }
+
     // Real adapters (non-demo, non-variant-managed)
     const variantAgentIds = new Set(VARIANT_CONFIGS.map(c => c.baseAgentId));
     variantAgentIds.add('claude-code');
@@ -890,6 +932,11 @@ export function createLauncherModule(deps) {
           return checkResult && checkResult.installed;
         })
       : allRealAdapters; // Show all if detection not yet complete
+
+    // Count variant-managed agents that are installed
+    const installedVariantCount = state.installedAgents
+      ? Array.from(state.installedAgents.entries()).filter(([id, info]) => info.installed && variantAgentIds.has(id)).length
+      : 0;
 
     const debugAdapters = state.availableAdapters.filter((adapter) => adapter.kind === "demo");
 
@@ -978,17 +1025,19 @@ export function createLauncherModule(deps) {
 
     elements.launcherAgents.innerHTML = `
       ${taskSummary}
-      <div class="launcher-section">
+      <div class="launcher-section" style="${state.launcherGlobalModelEnabled ? '' : 'padding-bottom: 8px;'}">
         <h4>${escapeHtml(localText("全局模型覆盖", "Global Model Override"))}</h4>
-        <p class="muted">${escapeHtml(localText("启用后，选中的 Agent 将使用此模型（优先级高于各变体配置）。", "When enabled, selected agents use this model (overrides individual variant configs)."))}</p>
-        <label class="field">
-          <span>${escapeHtml(localText("全局模型", "Global Model"))}</span>
-          <input id="launcher-global-model" type="text" value="${escapeHtml(state.launcherGlobalModelOverride)}" placeholder="${escapeHtml(localText("例如: claude-opus-4-6, gpt-5.4", "e.g. claude-opus-4-6, gpt-5.4"))}" />
-        </label>
-        <label class="field" style="display: flex; align-items: center; gap: 8px;">
+        <p class="muted" style="display: ${state.launcherGlobalModelEnabled ? 'block' : 'none'};">${escapeHtml(localText("启用后，选中的 Agent 将使用此模型（优先级高于各变体配置）。", "When enabled, selected agents use this model (overrides individual variant configs)."))}</p>
+        <label class="field" style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
           <input id="launcher-global-model-enabled" type="checkbox" ${state.launcherGlobalModelEnabled ? 'checked' : ''} style="width: auto;" />
           <span>${escapeHtml(localText("启用全局模型覆盖", "Enable global model override"))}</span>
         </label>
+        <div id="launcher-global-model-input-row" style="display: ${state.launcherGlobalModelEnabled ? 'block' : 'none'};">
+          <label class="field">
+            <span>${escapeHtml(localText("全局模型", "Global Model"))}</span>
+            <input id="launcher-global-model" type="text" value="${escapeHtml(state.launcherGlobalModelOverride)}" placeholder="${escapeHtml(localText("例如: claude-opus-4-6, gpt-5.4", "e.g. claude-opus-4-6, gpt-5.4"))}" />
+          </label>
+        </div>
         ${state.launcherGlobalModelEnabled && enabledVariantsForGlobalModel.length > 0 ? `
           <div style="margin-top: 12px; padding: 12px; background: var(--surface-tertiary); border-radius: 6px;">
             <p style="margin: 0 0 8px; font-weight: 600; font-size: 0.9em;">${escapeHtml(localText("选择应用全局模型的 Agent:", "Select agents to apply global model:"))}</p>
@@ -1000,40 +1049,31 @@ export function createLauncherModule(deps) {
         <h4>${escapeHtml(localText("选择参赛 Agent", "Select Agents"))}</h4>
         <p class="muted">${escapeHtml(localText("勾选要参与对比的 Agent。", "Check the agents you want to compare."))}</p>
         ${realAdapters.length === 0
-          ? `<div class="empty-state" style="padding: 20px; text-align: center; background: var(--surface-secondary); border-radius: 8px; margin: 12px 0;">
-              <p style="margin: 0 0 12px; font-size: 1.1em; color: var(--text-secondary);">
+          ? installedVariantCount > 0
+            ? `<p class="muted" style="padding: 12px 16px; background: var(--surface-secondary); border-radius: 8px; margin: 12px 0; font-size: 0.9em;">
+                ${escapeHtml(localText(
+                  `展开下方折叠区，启用想参与跑分的 Agent 配置。已检测到 ${installedVariantCount} 个 Agent。`,
+                  `Expand the sections below to enable agents for benchmarking. ${installedVariantCount} agent(s) detected.`
+                ))}
+              </p>`
+            : `<div class="empty-state" style="padding: 16px; text-align: center; background: var(--surface-secondary); border-radius: 8px; margin: 12px 0;">
+              <p style="margin: 0 0 8px; font-size: 0.95em; color: var(--text-secondary);">
                 <strong>${escapeHtml(localText("未检测到已安装的 Agent", "No installed agents detected"))}</strong>
               </p>
-              <p style="margin: 0 0 16px; font-size: 0.9em; color: var(--text-muted);">
+              <p style="margin: 0 0 12px; font-size: 0.85em; color: var(--text-muted);">
                 ${escapeHtml(localText(
-                  "要运行 Benchmark，你需要先安装至少一个 Agent CLI 工具。",
-                  "To run benchmarks, you need to install at least one Agent CLI tool first."
+                  "需要先安装至少一个 Agent CLI 工具。",
+                  "Install at least one Agent CLI tool first."
                 ))}
               </p>
-              <div style="text-align: left; max-width: 650px; margin: 0 auto; font-size: 0.85em;">
-                <p style="margin: 8px 0; font-weight: 600;">${escapeHtml(localText("支持的 Agent 及安装方式：", "Supported agents and installation:"))}</p>
-                <div style="margin: 12px 0; padding: 12px; background: var(--surface-tertiary); border-radius: 6px;">
-                  <p style="margin: 0 0 8px; font-weight: 600; color: var(--accent);">🚀 ${escapeHtml(localText("推荐（npm 安装，最简单）:", "Recommended (npm install, easiest):"))}</p>
-                  <ul style="margin: 4px 0; padding-left: 20px; line-height: 1.6;">
-                    <li><strong>Claude Code</strong>: <code>npm install -g @anthropic-ai/claude-code</code></li>
-                    <li><strong>Codex CLI</strong>: <code>npm install -g @openai/codex</code></li>
-                    <li><strong>Gemini CLI</strong>: <code>npm install -g @google/gemini-cli</code></li>
-                  </ul>
+              <details style="text-align: left; max-width: 600px; margin: 0 auto; font-size: 0.8em;">
+                <summary style="cursor: pointer; color: var(--text-muted); font-weight: 600;">${escapeHtml(localText("查看安装方式", "Show install instructions"))}</summary>
+                <div style="margin-top: 8px;">
+                  <code style="display: block; padding: 6px 10px; background: var(--surface-tertiary); border-radius: 4px; margin: 4px 0; font-size: 0.9em;">npm install -g @anthropic-ai/claude-code</code>
+                  <code style="display: block; padding: 6px 10px; background: var(--surface-tertiary); border-radius: 4px; margin: 4px 0; font-size: 0.9em;">npm install -g @openai/codex</code>
+                  <code style="display: block; padding: 6px 10px; background: var(--surface-tertiary); border-radius: 4px; margin: 4px 0; font-size: 0.9em;">npm install -g @google/gemini-cli</code>
                 </div>
-                <div style="margin: 12px 0; padding: 12px; background: var(--surface-tertiary); border-radius: 6px;">
-                  <p style="margin: 0 0 8px; font-weight: 600;">🐍 ${escapeHtml(localText("Python 安装:", "Python install:"))}</p>
-                  <ul style="margin: 4px 0; padding-left: 20px; line-height: 1.6;">
-                    <li><strong>Aider</strong>: <code>pip install aider-chat</code></li>
-                  </ul>
-                </div>
-                <div style="margin: 12px 0; padding: 12px; background: var(--surface-tertiary); border-radius: 6px;">
-                  <p style="margin: 0 0 8px; font-weight: 600;">💻 ${escapeHtml(localText("IDE 集成（下载桌面应用）:", "IDE Integration (download desktop app):"))}</p>
-                  <ul style="margin: 4px 0; padding-left: 20px; line-height: 1.6;">
-                    <li><strong>Cursor</strong>: <a href="https://cursor.com" target="_blank" rel="noopener">cursor.com</a></li>
-                    <li><strong>Trae</strong>: <a href="https://trae.ai" target="_blank" rel="noopener">trae.ai</a> (${escapeHtml(localText("字节跳动", "ByteDance"))})</li>
-                    <li><strong>Windsurf</strong>: <a href="https://windsurf.com" target="_blank" rel="noopener">windsurf.com</a> (${escapeHtml(localText("暂无 CLI", "No CLI yet"))})</li>
-                  </ul>
-                </div>
+              </details>
                 <div style="margin: 12px 0; padding: 12px; background: var(--surface-tertiary); border-radius: 6px;">
                   <p style="margin: 0 0 8px; font-weight: 600;">🔧 ${escapeHtml(localText("其他工具:", "Other tools:"))}</p>
                   <ul style="margin: 4px 0; padding-left: 20px; line-height: 1.6;">
@@ -1162,7 +1202,10 @@ export function createLauncherModule(deps) {
       }
     });
 
-    elements.launcherRun.disabled = state.runInProgress;
+    // Disable run button when validation has errors or run in progress
+    const validationMessages = validateLauncher();
+    const hasErrors = validationMessages.some(m => m.level === "error");
+    elements.launcherRun.disabled = state.runInProgress || hasErrors;
     elements.launcherCompactSummary.textContent = state.runInProgress
       ? (currentRunPhaseLabel() || t("launcherStatusRunning"))
       : summarizeLauncherSelection(selectedTaskPack);
@@ -1179,7 +1222,12 @@ export function createLauncherModule(deps) {
     setHidden(elements.launcherBody, !state.launcherExpanded);
     elements.launcherStatus.textContent = state.runInProgress
       ? currentRunPhaseLabel() || t("launcherStatusRunning")
-      : state.notice ?? t("launcherStatusIdle");
+      : state.notice ?? getSmartIdleHint();
+    if (state.runInProgress) {
+      elements.launcherStatus.classList.add("running");
+    } else {
+      elements.launcherStatus.classList.remove("running");
+    }
     renderLauncherProgress();
   }
 
@@ -1348,10 +1396,16 @@ export function createLauncherModule(deps) {
       }
       if (state.runStatus?.state === "error") {
         stopRunStatusPolling();
-        const errorMessage = state.runStatus.error || localText("未知错误", "Unknown error");
+        const rawError = state.runStatus.error || localText("未知错误", "Unknown error");
+        // Wrap raw technical errors in user-friendly context
+        const friendlyError = localText(
+          `Benchmark 失败：${rawError}`,
+          `Benchmark failed: ${rawError}`
+        );
         state.runStatus = null;
         state.runInProgress = false;
-        state.notice = t("launcherStatusError", errorMessage);
+        state.notice = t("launcherStatusError", friendlyError);
+        state.errorDetail = rawError;
         render();
         return;
       }
@@ -1619,6 +1673,9 @@ export function createLauncherModule(deps) {
       requestAnimationFrame(() => {
         elements.launcherValidation?.scrollIntoView({ behavior: "smooth", block: "center" });
       });
+      // Also show alert so the user definitely sees the error
+      const errorText = messages.filter(m => m.level === "error").map(m => m.text).join("\n");
+      alert(errorText);
       return;
     }
 
@@ -1673,7 +1730,7 @@ export function createLauncherModule(deps) {
     elements.launcherRun.disabled = true;
     elements.launcherRun.textContent = localText("正在启动...", "Starting...");
     elements.launcherStatus.textContent = localText("正在提交跑分请求...", "Submitting benchmark request...");
-    elements.launcherStatus.style.color = "var(--accent)";
+    elements.launcherStatus.classList.add("running");
 
     state.runInProgress = true;
     state.launcherExpanded = false;
@@ -1685,7 +1742,8 @@ export function createLauncherModule(deps) {
     };
     state.notice = t("launcherStatusRunning");
     render();
-    elements.launcherPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+    // Scroll to the progress section (below), not the launcher panel (above)
+    elements.launcherProgress?.scrollIntoView({ behavior: "smooth", block: "start" });
 
     try {
       const response = await apiFetch("/api/run", {
@@ -1704,7 +1762,7 @@ export function createLauncherModule(deps) {
       state.runStatus = null;
       state.runInProgress = false;
       state.notice = t("launcherStatusError", error instanceof Error ? error.message : String(error));
-      elements.launcherStatus.style.color = "";
+      elements.launcherStatus.classList.remove("running");
       render();
     }
   }
@@ -1743,12 +1801,21 @@ export function createLauncherModule(deps) {
       writeCommonConfig: readChecked('[data-role="provider-write-common-config"]')
     };
     const secret = editor.querySelector('[data-role="provider-secret"]')?.value ?? "";
+    const isEdit = Boolean(state.launcherProviderEditor?.id);
 
     if (!payload.name) {
       throw new Error(localText("Provider 名称不能为空。", "Provider name is required."));
     }
+    if (!payload.baseUrl) {
+      throw new Error(localText("Base URL 不能为空。", "Base URL is required."));
+    }
+    if (!payload.primaryModel) {
+      throw new Error(localText("主模型不能为空，至少填写一个模型名称。", "Primary Model is required — at least one model name is needed."));
+    }
+    if (!isEdit && !secret.trim()) {
+      throw new Error(localText("新建 Provider 时 API Key 不能为空。", "API Key is required when creating a new provider."));
+    }
 
-    const isEdit = Boolean(state.launcherProviderEditor?.id);
     const url = isEdit
       ? `/api/provider-profiles/${encodeURIComponent(state.launcherProviderEditor.id)}`
       : "/api/provider-profiles";
@@ -1851,10 +1918,23 @@ export function createLauncherModule(deps) {
     toast.className = `preflight-toast ${status}`;
     const icon = status === "ready" ? "✓" : status === "unverified" ? "?" : "✗";
     const labelKey = `testConnection${status.charAt(0).toUpperCase() + status.slice(1)}`;
-    toast.textContent = `${icon} ${t(labelKey)}`;
-    if (summary) toast.title = summary;
+
+    // 显示状态和具体原因
+    const statusText = t(labelKey);
+    if (summary && status !== "ready") {
+      // 截断过长的 summary，保留关键信息
+      const shortSummary = summary.length > 80 ? summary.substring(0, 80) + "..." : summary;
+      toast.textContent = `${icon} ${statusText}: ${shortSummary}`;
+      toast.title = summary; // 完整信息在 hover 时显示
+    } else {
+      toast.textContent = `${icon} ${statusText}`;
+      if (summary) toast.title = summary;
+    }
+
     buttonEl.parentElement?.appendChild(toast);
-    setTimeout(() => toast.remove(), 5000);
+    // 错误信息显示更久
+    const duration = status === "ready" ? 3000 : 8000;
+    setTimeout(() => toast.remove(), duration);
   }
 
   async function handleTestConnection(buttonEl) {
@@ -1890,6 +1970,51 @@ export function createLauncherModule(deps) {
   }
 
   // -----------------------------------------------------------------------
+  // Quick preflight — fast CLI + auth check (2s instead of 60s)
+  // -----------------------------------------------------------------------
+
+  async function runQuickPreflight(agentId, agentConfig) {
+    try {
+      const response = await apiFetch("/api/quick-preflight", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ baseAgentId: agentId, ...agentConfig }),
+      });
+      if (!response.ok) return null;
+      return await response.json();
+    } catch {
+      return null;
+    }
+  }
+
+  function updateAgentCardPreflightStatus(cardEl, result) {
+    let indicator = cardEl.querySelector(".preflight-indicator");
+    if (!indicator) {
+      indicator = document.createElement("span");
+      indicator.className = "preflight-indicator";
+      cardEl.querySelector(".agent-card-header")?.appendChild(indicator);
+    }
+    if (!result) {
+      indicator.className = "preflight-indicator unknown";
+      indicator.textContent = "";
+      indicator.title = "";
+      return;
+    }
+    const { overallStatus, cliExists, cliVersion, authConfigured, authHint } = result;
+    indicator.className = `preflight-indicator ${overallStatus}`;
+    if (overallStatus === "ready") {
+      indicator.textContent = "✓";
+      indicator.title = `CLI ${cliVersion || "found"} · Auth configured`;
+    } else if (overallStatus === "warning") {
+      indicator.textContent = "⚠";
+      indicator.title = authHint || "Auth may not be configured";
+    } else {
+      indicator.textContent = "✗";
+      indicator.title = cliExists ? (authHint || "Auth not configured") : "CLI not found";
+    }
+  }
+
+  // -----------------------------------------------------------------------
   // Public API
   // -----------------------------------------------------------------------
 
@@ -1918,6 +2043,8 @@ export function createLauncherModule(deps) {
     handleLauncherRun,
     openProviderEditor,
     saveProviderProfileFromEditor,
-    deleteProviderProfileById
+    deleteProviderProfileById,
+    runQuickPreflight,
+    updateAgentCardPreflightStatus
   };
 }

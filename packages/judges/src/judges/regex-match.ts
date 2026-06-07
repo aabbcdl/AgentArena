@@ -57,7 +57,14 @@ export async function runRegexMatchJudge(
       }
       matchCount = count;
     } else {
-      matchCount = regex.test(content) ? 1 : 0;
+      // Wrap in timeout to guard against ReDoS on non-global patterns
+      const REGEX_TEST_TIMEOUT_MS = 5_000;
+      matchCount = await Promise.race([
+        Promise.resolve().then(() => regex.test(content) ? 1 : 0),
+        new Promise<number>((_, reject) =>
+          setTimeout(() => reject(new Error(`Regex test timed out after ${REGEX_TEST_TIMEOUT_MS}ms — possible ReDoS pattern: /${judge.pattern}/`)), REGEX_TEST_TIMEOUT_MS)
+        ),
+      ]);
     }
     const minMatches = judge.minMatches ?? 1;
     const shouldNotMatch = judge.shouldNotMatch ?? false;

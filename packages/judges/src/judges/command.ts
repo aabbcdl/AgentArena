@@ -17,7 +17,7 @@ export async function runCommandJudge(
   const cwd = await resolveJudgeWorkingDirectory(workspacePath, judge);
   const environment = buildStepEnvironment(baseAllowedNames, judge);
 
-  const result = await executeCommand(judge.command, cwd, environment, timeoutMs, "Judge", options.signal);
+  const result = await executeCommand(judge.command, cwd, environment, timeoutMs, "Judge", options.signal, undefined, { allowEval: true });
 
   return {
     judgeId: judge.id,

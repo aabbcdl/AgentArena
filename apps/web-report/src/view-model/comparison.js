@@ -6,6 +6,8 @@ import {
   resultQualitySort
 } from "./scoring.js";
 
+// NOTE: summarizeRun is also defined in packages/report/src/report-helpers.ts
+// (returns a slightly different shape: knownCostUsd vs knownCost).
 export function summarizeRun(run) {
   const successCount = run.results.filter((result) => result.status === "success").length;
   const failedCount = run.results.filter((result) => result.status === "failed").length;

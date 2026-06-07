@@ -25,6 +25,7 @@ import {
   metrics,
   validateTaskPackId,
 } from "@agentarena/core";
+import { checkTaskCompatibility } from "@agentarena/runner";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { jsonResponse } from "../server.js";
 
@@ -46,7 +47,18 @@ export async function withErrorHandling(promise: Promise<ApiResponse>): Promise<
 
     // Validation-shaped errors thrown by handlers (these throw plain Error
     // with a user-facing message). Surface them as 400 so the SPA can render.
-    if (error instanceof Error && error.name === "ValidationError") {
+    // Catches both explicit ValidationError and task pack validation errors
+    // which use plain Error with descriptive messages.
+    const isValidationError =
+      (error instanceof Error && error.name === "ValidationError") ||
+      rawMessage.includes("Unsupported task pack schema") ||
+      rawMessage.includes("Unsupported judge type") ||
+      rawMessage.includes("Unrecognized judge field") ||
+      rawMessage.includes("Task pack ID must") ||
+      rawMessage.includes("must be a string") ||
+      rawMessage.includes("must be an array") ||
+      rawMessage.includes("must be a positive integer");
+    if (isValidationError) {
       logger.warn("server", "api.validation_failed", `Validation failed: ${rawMessage}`);
       return jsonResponse({ error: rawMessage }, 400);
     }
@@ -193,11 +205,65 @@ export async function handlePreflight(rawBody: string): Promise<ApiResponse> {
     return jsonResponse(result);
   } catch (err: unknown) {
     metrics.preflightTotal.inc({ status: "error", agentId: body.baseAgentId });
+    const errorMessage = err instanceof Error ? err.message : String(err);
     logger.error("server", "preflight.error", "Preflight check failed", {
       metadata: { agentId: body.baseAgentId },
       error: err
     });
-    return jsonResponse({ error: "Internal server error" }, 500);
+    return jsonResponse({ status: "error", error: errorMessage }, 500);
+  }
+}
+
+/**
+ * Quick preflight — fast CLI + auth config check without network calls.
+ * Returns in ~2 seconds instead of ~60 seconds.
+ */
+export async function handleQuickPreflight(rawBody: string): Promise<ApiResponse> {
+  let body: { baseAgentId?: string; displayLabel?: string; config?: { model?: string; reasoningEffort?: string; providerProfileId?: string } };
+  try {
+    body = JSON.parse(rawBody);
+  } catch {
+    return jsonResponse({ error: "Invalid JSON." }, 400);
+  }
+  if (!body.baseAgentId) {
+    return jsonResponse({ error: "Missing baseAgentId." }, 400);
+  }
+  try {
+    // Quick CLI existence check
+    const { probeCliExists, probeAuthConfig } = await import("@agentarena/adapters");
+    const cwd = process.cwd();
+    const command = body.baseAgentId;
+    const [cliResult, authResult] = await Promise.all([
+      probeCliExists({ command, argsPrefix: [], displayCommand: command }, cwd),
+      probeAuthConfig({ command, argsPrefix: [], displayCommand: command })
+    ]);
+
+    let overallStatus: "ready" | "warning" | "blocked" = "ready";
+    if (!cliResult.found) {
+      overallStatus = "blocked";
+    } else if (!authResult.configured) {
+      overallStatus = "warning";
+    }
+
+    const result = {
+      cliExists: cliResult.found,
+      cliVersion: cliResult.version,
+      authConfigured: authResult.configured,
+      authHint: authResult.hint,
+      overallStatus
+    };
+
+    logger.info("server", "quick-preflight.check", `Quick preflight for ${body.baseAgentId}`, {
+      metadata: { ...result, agentId: body.baseAgentId }
+    });
+    return jsonResponse(result);
+  } catch (err: unknown) {
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    logger.error("server", "quick-preflight.error", "Quick preflight failed", {
+      metadata: { agentId: body.baseAgentId },
+      error: err
+    });
+    return jsonResponse({ error: errorMessage }, 500);
   }
 }
 
@@ -315,6 +381,7 @@ export async function handleCreateAdhocTaskpack(rawBody: string): Promise<ApiRes
   }
   // Strip control characters (except newline, carriage return, tab) to prevent
   // YAML injection and terminal escape sequence attacks
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional control character filtering for security
   const sanitizedPrompt = body.prompt.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
   if (body.title && body.title.length > 500) {
     return jsonResponse({ error: "title must be less than 500 characters." }, 400);
@@ -344,7 +411,7 @@ export async function handleCreateAdhocTaskpack(rawBody: string): Promise<ApiRes
         await fs.access(path.join(cwd, file));
         detectedLang = detector.lang;
         break;
-      } catch {}
+      } catch { /* intentional: file may not exist — skip detector */ }
     }
     if (detectedLang !== "generic") break;
   }
@@ -500,4 +567,36 @@ export async function handleAgentDetection(): Promise<ApiResponse> {
  */
 export async function handleInstallGuides(): Promise<ApiResponse> {
   return jsonResponse(listInstallGuides());
+}
+
+/**
+ * POST /api/check-compatibility
+ *
+ * Checks whether a task pack is compatible with the given repository.
+ * Returns compatibility status and individual check results.
+ */
+export async function handleCheckCompatibility(rawBody: string): Promise<ApiResponse> {
+  let body: { taskPath: string; repoPath: string };
+  try {
+    body = JSON.parse(rawBody) as { taskPath: string; repoPath: string };
+  } catch {
+    return jsonResponse({ error: "Invalid JSON in request body." }, 400);
+  }
+  if (!body.taskPath?.trim()) {
+    return jsonResponse({ error: "taskPath is required." }, 400);
+  }
+  if (!body.repoPath?.trim()) {
+    return jsonResponse({ error: "repoPath is required." }, 400);
+  }
+
+  try {
+    const { loadTaskPack } = await import("@agentarena/taskpacks");
+    const taskPack = await loadTaskPack(body.taskPath);
+    const result = await checkTaskCompatibility(taskPack, body.repoPath);
+    return jsonResponse(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.warn("server", "compatibility.check_failed", `Compatibility check failed: ${message}`);
+    return jsonResponse({ error: message }, 400);
+  }
 }

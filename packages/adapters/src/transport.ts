@@ -1,8 +1,8 @@
+import type { InvocationSpec } from "./adapter-capabilities.js";
+import { adapterWarn } from "./adapter-diagnostics.js";
+import { parseClaudeEvents } from "./event-parsers.js";
 import type { ProcessResult } from "./process-utils.js";
 import { runProcess } from "./process-utils.js";
-import type { InvocationSpec } from "./adapter-capabilities.js";
-import { parseClaudeEvents } from "./event-parsers.js";
-import { adapterWarn } from "./adapter-diagnostics.js";
 
 /**
  * Transport abstraction for different communication modes with AI agent CLIs.
@@ -78,14 +78,13 @@ export class StreamJsonTransport implements Transport {
     const args = [
       ...this.invocation.argsPrefix,
       ...this.extraArgs,
-      "-p",
+      "-p",                        // Read prompt from stdin
       "--output-format",
-      "stream-json",
-      "--verbose",
+      "stream-json",               // Structured JSON events (one per line)
+      "--verbose",                 // Required for full structured output (undocumented requirement)
       "--permission-mode",
-      "bypassPermissions",
-      "--no-session-persistence",
-      prompt,
+      "bypassPermissions",         // Skip interactive permission prompts (internal flag)
+      "--no-session-persistence",  // Don't save session state between runs
     ];
 
     const processResult = await runProcess(
@@ -93,7 +92,9 @@ export class StreamJsonTransport implements Transport {
       args,
       cwd,
       timeoutMs,
-      environment
+      environment,
+      undefined,
+      prompt
     );
 
     const parsed = parseClaudeEvents(processResult.stdout);
@@ -120,19 +121,33 @@ export class StreamJsonTransport implements Transport {
     };
   }
 
+  /**
+   * Determine if this transport's output indicates a fundamental failure
+   * that warrants falling back to TextTransport.
+   *
+   * FALLBACK THRESHOLDS (empirical, based on observed Claude Code behavior):
+   * - Timeout + <100 bytes stdout → likely provider incompatibility or hanging
+   * - Process error (spawn failure, command not found) → cannot proceed
+   * - Exit code other than 0 or 1 → unexpected failure mode (0 = success, 1 = task failure)
+   * - Non-zero exit + no parsed content → stream-json mode produced nothing useful
+   *
+   * These thresholds are NOT documented by the CLI tools. They are reverse-engineered
+   * from how Claude Code behaves with third-party providers.
+   */
   private shouldFallback(
     result: ProcessResult,
     parsed: ReturnType<typeof parseClaudeEvents>
   ): boolean {
-    // Timeout with no output - likely hanging
+    // Timeout with very little output — likely provider incompatibility
     if (result.timedOut && result.stdout.length < 100) {
       return true;
     }
-    // Process error - command not found or similar
+    // Process error — command not found or similar
     if (result.error && result.exitCode !== 0) {
       return true;
     }
     // Exit code indicates fundamental failure (not just task failure)
+    // 0 = success, 1 = task failure (normal). Anything else = transport issue.
     if (result.exitCode !== 0 && result.exitCode !== 1) {
       return true;
     }
@@ -193,7 +208,6 @@ export class TextTransport implements Transport {
       "--permission-mode",
       "bypassPermissions",
       "--no-session-persistence",
-      prompt,
     ];
 
     const processResult = await runProcess(
@@ -201,7 +215,9 @@ export class TextTransport implements Transport {
       args,
       cwd,
       timeoutMs,
-      environment
+      environment,
+      undefined,
+      prompt
     );
 
     // Parse text output - extract summary from last non-empty line
@@ -240,7 +256,7 @@ export class RawTransport implements Transport {
   constructor(private readonly invocation: InvocationSpec) {}
 
   async send(
-    prompt: string,
+    _prompt: string,
     cwd: string,
     environment?: NodeJS.ProcessEnv,
     timeoutMs?: number

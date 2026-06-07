@@ -10,7 +10,7 @@ import {
 } from "@agentarena/core";
 import { CODEX_CAPABILITY, type InvocationSpec } from "./adapter-capabilities.js";
 import { formatAdapterError } from "./adapter-diagnostics.js";
-import { buildAgentPrompt, createPreflightResult } from "./adapter-helpers.js";
+import { buildAgentPrompt, createPreflightResult, savePromptArtifact } from "./adapter-helpers.js";
 import { parseCodexEvents } from "./event-parsers.js";
 import { probeHelp, probeInvocationVersion } from "./invocation-probes.js";
 import { agentTimeoutMs, runProcess } from "./process-utils.js";
@@ -163,6 +163,7 @@ export class CodexCliAdapter implements AgentAdapter {
     await ensureDirectory(metadataDir);
 
     const prompt = buildAgentPrompt(context);
+    await savePromptArtifact(prompt, context.workspacePath, context);
     const invocation = await resolveCodexInvocation();
     const args = [
       ...invocation.argsPrefix,
@@ -176,7 +177,6 @@ export class CodexCliAdapter implements AgentAdapter {
       "--output-last-message",
       outputLastMessagePath,
       "--json",
-      prompt
     ];
     const resolvedRuntime = await resolveCodexRuntime({
       requestedConfig: context.selection.config,
@@ -218,7 +218,8 @@ export class CodexCliAdapter implements AgentAdapter {
         context.workspacePath,
         agentTimeoutMs(),
         context.environment,
-        context.signal
+        context.signal,
+        prompt
       );
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
