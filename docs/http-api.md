@@ -18,7 +18,7 @@ All mutating (non-GET) API requests and all sensitive endpoints require a Bearer
 Authorization: Bearer <token>
 ```
 
-The token is printed to stdout on server start and saved to `.agentarena/last-auth-token`.
+For safety, the token itself is not printed to stdout. The server prints `auth_token_file=...`; read that file to retrieve the token. It is saved at `.agentarena/last-auth-token` by default.
 
 On localhost, read-only GET requests to non-sensitive paths are allowed without authentication.
 

@@ -191,12 +191,12 @@ agentarena ui --host 0.0.0.0 --auth-token my-secret-password
 
 The UI requires an auth token for non-localhost access.
 
-**Fix:** Check the terminal output for the auto-generated token, or set your own:
+**Fix:** Check the terminal output for `auth_token_file=...`, read that file, or set your own:
 ```bash
 agentarena ui --auth-token my-secret
 ```
 
-Then open `http://127.0.0.1:4320?token=my-secret`.
+Then open `http://127.0.0.1:4320` and paste the token if the UI asks for it.
 
 ## Scoring
 

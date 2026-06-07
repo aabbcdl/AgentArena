@@ -54,6 +54,15 @@ export function sendApiResponse(
   response.end(apiResponse.body);
 }
 
+function escapeHtmlAttribute(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("\"", "&quot;")
+    .replaceAll("'", "&#39;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
 export interface ActiveUiRun {
   promise: Promise<unknown>;
   cancel: () => void;
@@ -536,7 +545,7 @@ export function createRequestHandler(ctx: RequestContext) {
           // - The token is NOT persisted in saved pages, screenshots, or printouts
           if (ctx.isLocalhost && filePath.endsWith("index.html") && ctx.authToken) {
             let html = body.toString("utf8");
-            const metaTag = `<meta name="agentarena-auth-token" content="${ctx.authToken}">`;
+            const metaTag = `<meta name="agentarena-auth-token" content="${escapeHtmlAttribute(ctx.authToken)}">`;
             const cleanupScript = `<script>(function(){var m=document.querySelector('meta[name="agentarena-auth-token"]');if(m){try{sessionStorage.setItem('agentarena-auth-token',m.getAttribute('content'))}catch(e){/* ignore: sessionStorage may be unavailable */}m.remove()}})();</script>`;
             const injection = `  ${metaTag}\n  ${cleanupScript}\n`;
             if (html.includes("</head>")) {

@@ -70,11 +70,11 @@ function waitForServer(port, timeoutMs = 30000) {
   });
 }
 
-async function startServer(port) {
+async function startServer(port, authTokenOverride) {
   // Pre-generate an explicit auth token to avoid token-file race conditions across
   // parallel test runs. The CLI masks tokens in stdout for security, so parsing
   // from stdout no longer works.
-  const authToken = `test-token-${Date.now()}-${port}-${Math.random().toString(36).slice(2, 10)}`;
+  const authToken = authTokenOverride ?? `test-token-${Date.now()}-${port}-${Math.random().toString(36).slice(2, 10)}`;
   const child = spawn(process.execPath, [CLI_ENTRY, "ui", "--port", String(port), "--no-open", "--auth-token", authToken], {
     cwd: REPO_ROOT,
     stdio: ["ignore", "pipe", "pipe"],
@@ -110,6 +110,21 @@ test("GET /api/ui-info returns correct structure", { timeout: 60_000 }, async ()
     assert.ok(typeof res.body.repoPath === "string");
     assert.ok(typeof res.body.defaultTaskPath === "string");
     assert.ok(Array.isArray(res.body.claudeProviderProfiles));
+  } finally {
+    child.kill("SIGTERM");
+  }
+});
+
+test("GET / escapes localhost auth token before injecting it into index.html", { timeout: 60_000 }, async () => {
+  const port = BASE_PORT + 50;
+  const unsafeToken = 'unsafe"><script>window.__agentarenaXss = true</script>';
+  const { child } = await startServer(port, unsafeToken);
+  try {
+    const res = await request(port, "GET", "/");
+    assert.equal(res.statusCode, 200);
+    assert.match(res.body, /meta name="agentarena-auth-token"/);
+    assert.match(res.body, /unsafe&quot;&gt;&lt;script&gt;window\.__agentarenaXss = true&lt;\/script&gt;/);
+    assert.doesNotMatch(res.body, /<script>window\.__agentarenaXss = true<\/script>/);
   } finally {
     child.kill("SIGTERM");
   }
