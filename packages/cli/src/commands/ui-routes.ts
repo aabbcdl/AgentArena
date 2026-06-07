@@ -361,7 +361,7 @@ export function createRequestHandler(ctx: RequestContext) {
           try {
             const uiRunId = createRunId();
             const outputPath = runPayload.outputPath
-              ? path.join(path.resolve(runPayload.outputPath), uiRunId)
+              ? path.resolve(runPayload.outputPath)
               : undefined;
             const benchmark = await runBenchmark({
               runId: uiRunId,

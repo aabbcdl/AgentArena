@@ -934,7 +934,8 @@ test("agentarena init-ci supports nightly templates and custom output directorie
 });
 
 test("agentarena ui exposes metadata and adapter APIs", { timeout: 60_000 }, async () => {
-  const server = await startUiServer(path.resolve("."));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-ui-meta-"));
+  const server = await startUiServer(tempDir);
 
   try {
     const infoResponse = await fetch(`http://127.0.0.1:${server.port}/api/ui-info`);
@@ -964,6 +965,7 @@ test("agentarena ui exposes metadata and adapter APIs", { timeout: 60_000 }, asy
     assert.equal(runStatus.phase, "idle");
   } finally {
     await server.stop();
+    await rm(tempDir, { recursive: true, force: true });
   }
 });
 
@@ -1324,6 +1326,13 @@ test("agentarena ui can execute a benchmark via API", { timeout: 60_000 }, async
     assert.equal(payload.run.results[0].displayLabel, "Demo Fast");
     assert.equal(typeof payload.markdown, "string");
     assert.match(payload.report.htmlPath, /report\.html$/);
+
+    const outputEntries = await readdir(outputPath, { withFileTypes: true });
+    const runDirs = outputEntries.filter((entry) => entry.isDirectory());
+    assert.equal(runDirs.length, 1);
+    const expectedSummaryPath = path.join(outputPath, runDirs[0].name, "summary.json");
+    assert.ok(await readFile(expectedSummaryPath, "utf8"));
+    assert.equal(path.basename(path.dirname(payload.report.jsonPath)), runDirs[0].name);
   } finally {
     await server.stop();
     await rm(tempDir, { recursive: true, force: true });
