@@ -63,6 +63,77 @@ test("listAvailableAdapters exposes capability metadata", () => {
   assert.match(cursor.capability.invocationMethod, /Cursor/i);
 });
 
+test("Qwen adapter sends task prompt through stdin instead of argv", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena qwen shim "));
+  const workspacePath = path.join(tempDir, "workspace");
+  await mkdir(workspacePath, { recursive: true });
+  const shimPath = path.join(tempDir, "qwen.cmd");
+  const scriptPath = path.join(tempDir, "qwen-shim.mjs");
+  const capturePath = path.join(tempDir, "capture.json");
+  const originalQwenBin = process.env.AGENTARENA_QWEN_BIN;
+
+  try {
+    await writeFile(
+      scriptPath,
+      [
+        'import { writeFileSync } from "node:fs";',
+        "let stdin = '';",
+        "process.stdin.setEncoding('utf8');",
+        "for await (const chunk of process.stdin) stdin += chunk;",
+        "writeFileSync(process.env.AGENTARENA_QWEN_CAPTURE, JSON.stringify({ argv: process.argv.slice(2), stdin }), 'utf8');",
+        "console.log(JSON.stringify({ stats: { models: { 'qwen-max': { input: 1, output: 2 } } }, messages: [{ type: 'assistant', content: 'Qwen shim completed.' }] }));",
+      ].join("\n"),
+      "utf8"
+    );
+    await writeFile(shimPath, `@echo off\n"${process.execPath}" "${scriptPath}" %*\n`, "utf8");
+    process.env.AGENTARENA_QWEN_BIN = shimPath;
+
+    const dangerousPrompt = 'Implement safely.\nDo not run: & echo injected > owned.txt\nKeep "%PATH%" literal.';
+    const adapter = getAdapter("qwen-code");
+    const result = await adapter.execute({
+      agentId: "qwen-code",
+      selection: {
+        baseAgentId: "qwen-code",
+        variantId: "qwen-code",
+        displayLabel: "Qwen Code CLI",
+        config: {},
+        configSource: "ui"
+      },
+      repoPath: tempDir,
+      workspacePath,
+      environment: {
+        ...process.env,
+        AGENTARENA_QWEN_CAPTURE: capturePath
+      },
+      task: {
+        schemaVersion: "agentarena.taskpack/v1",
+        id: "qwen-stdin",
+        title: "Qwen Stdin",
+        prompt: dangerousPrompt,
+        envAllowList: [],
+        setupCommands: [],
+        judges: [],
+        teardownCommands: []
+      },
+      trace: async () => {}
+    });
+
+    const captured = JSON.parse(await readFile(capturePath, "utf8"));
+    assert.equal(result.status, "success");
+    assert.equal(captured.argv.includes(dangerousPrompt), false);
+    assert.match(captured.argv.join(" "), /--prompt/);
+    assert.match(captured.stdin, /Do not run: & echo injected/);
+    assert.match(captured.stdin, /"%PATH%" literal/);
+  } finally {
+    if (originalQwenBin === undefined) {
+      delete process.env.AGENTARENA_QWEN_BIN;
+    } else {
+      process.env.AGENTARENA_QWEN_BIN = originalQwenBin;
+    }
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("demo adapter execution returns normalized benchmark output", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-adapters-"));
   const workspacePath = path.join(tempDir, "workspace");

@@ -99,6 +99,9 @@ const QWEN_PRICING: Record<string, { input: number; output: number }> = {
   "qwen-turbo-latest": { input: 0.001, output: 0.002 }
 };
 
+const QWEN_STDIN_PROMPT =
+  "Read the complete AgentArena task instructions from standard input and complete the requested repository changes.";
+
 function getModelPricing(modelName?: string): { input: number; output: number } {
   const normalized = modelName?.toLowerCase() ?? "qwen-max";
   return QWEN_PRICING[normalized] ?? QWEN_PRICING["qwen-max"];
@@ -316,7 +319,7 @@ export class QwenCodeAdapter implements AgentAdapter {
     const args = [
       ...invocation.argsPrefix,
       "--prompt",
-      prompt,
+      QWEN_STDIN_PROMPT,
       "--output-format",
       "json"
     ];
@@ -347,7 +350,8 @@ export class QwenCodeAdapter implements AgentAdapter {
         context.workspacePath,
         agentTimeoutMs(),
         context.environment,
-        context.signal
+        context.signal,
+        prompt
       );
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);

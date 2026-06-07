@@ -24,6 +24,12 @@ interface ProcessError extends Error {
   exitCode?: number | null;
 }
 
+interface ProcessSpawnSpec {
+  command: string;
+  args: string[];
+  windowsVerbatimArguments?: boolean;
+}
+
 /**
  * Default agent execution timeout: 15 minutes.
  *
@@ -84,6 +90,30 @@ export function formatTimeoutMessage(timeoutMs: number): string {
 
 export function safeNumber(value: number | undefined): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+const WINDOWS_BATCH_COMMAND = /\.(?:cmd|bat)$/i;
+
+function quoteWindowsCmdArgument(value: string): string {
+  if (/[%"\r\n]/.test(value)) {
+    throw new Error(
+      "Unsupported Windows cmd.exe argument: values passed through .cmd/.bat shims cannot contain %, double quotes, or newlines."
+    );
+  }
+  return `"${value.replace(/\\+$/u, (slashes) => `${slashes}${slashes}`)}"`;
+}
+
+function resolveProcessSpawnSpec(command: string, args: string[]): ProcessSpawnSpec {
+  if (process.platform === "win32" && WINDOWS_BATCH_COMMAND.test(command)) {
+    const commandLine = `"${[command, ...args].map(quoteWindowsCmdArgument).join(" ")}"`;
+    return {
+      command: process.env.ComSpec || "cmd.exe",
+      args: ["/d", "/s", "/v:off", "/c", commandLine],
+      windowsVerbatimArguments: true,
+    };
+  }
+
+  return { command, args };
 }
 
 export async function sleep(durationMs: number, signal?: AbortSignal): Promise<void> {
@@ -267,20 +297,19 @@ export async function runProcess(
     };
 
     try {
-      child = spawn(command, args, {
+      const spawnSpec = resolveProcessSpawnSpec(command, args);
+      child = spawn(spawnSpec.command, spawnSpec.args, {
         cwd,
         env: environment,
         stdio: [stdinInput !== undefined ? "pipe" : "ignore", "pipe", "pipe"],
-        shell: process.platform === "win32",
+        shell: false,
         windowsHide: true,
-        windowsVerbatimArguments: false,
+        windowsVerbatimArguments: spawnSpec.windowsVerbatimArguments ?? false,
         ...(process.platform !== "win32" ? { detached: true } : {})
       });
 
-      // Feed stdin input (e.g. prompt text) then close the stream.
-      // This avoids shell escaping issues on Windows where special
-      // characters in the prompt (quotes, backticks, etc.) would break
-      // argument parsing under shell: true.
+      // Feed stdin input (e.g. prompt text) then close the stream. Keeping
+      // prompts out of argv avoids quoting and command-line length issues.
       if (stdinInput !== undefined && child.stdin) {
         child.stdin.write(stdinInput);
         child.stdin.end();

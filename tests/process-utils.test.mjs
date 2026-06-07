@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -12,6 +12,15 @@ import {
   safeNumber,
   sleep,
 } from "../packages/adapters/dist/process-utils.js";
+
+async function fileExists(filePath) {
+  try {
+    await access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 test("DEFAULT_AGENT_TIMEOUT_MS is 15 minutes", () => {
   assert.equal(DEFAULT_AGENT_TIMEOUT_MS, 15 * 60 * 1_000);
@@ -94,10 +103,8 @@ test("runProcess reports non-zero exit code", async () => {
 });
 
 test("runProcess times out for long-running process", async () => {
-  // Use a temp script file, not `node -e "setTimeout(() => {}, 60000)"`:
-  // runProcess spawns with `shell: true` on Windows, where cmd.exe splits the
-  // `-e` argument on the spaces, node sees only `setTimeout(()` and dies with a
-  // SyntaxError in ~150ms — so the timeout never fires and this test flakes.
+  // Use a temp script file so the test exercises normal script invocation
+  // instead of depending on platform-specific `node -e` quoting.
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-timeout-"));
   try {
     const scriptPath = path.join(tempDir, "sleep.js");
@@ -140,6 +147,70 @@ test("runProcess handles command not found", async () => {
   assert.ok(result.exitCode !== 0 || result.error);
 });
 
+test("runProcess does not execute shell metacharacters from arguments", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-shell-args-"));
+  try {
+    const scriptPath = path.join(tempDir, "argv.js");
+    const markerPath = path.join(tempDir, "injected.txt");
+    await writeFile(scriptPath, "console.log(JSON.stringify(process.argv.slice(2)));\n", "utf8");
+
+    const dangerousArg = `safe&echo injected>${markerPath}`;
+    const result = await runProcess(process.execPath, [scriptPath, dangerousArg], process.cwd(), 5000);
+
+    assert.equal(result.exitCode, 0);
+    assert.deepEqual(JSON.parse(result.stdout), [dangerousArg]);
+    assert.equal(await fileExists(markerPath), false);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test(
+  "runProcess invokes Windows batch shims without shell injection",
+  { skip: process.platform !== "win32" ? "Windows-specific batch shim behavior" : false },
+  async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena cmd shim "));
+    try {
+      const scriptPath = path.join(tempDir, "argv.js");
+      const shimPath = path.join(tempDir, "runner.cmd");
+      const markerPath = path.join(tempDir, "injected.txt");
+      await writeFile(scriptPath, "console.log(JSON.stringify(process.argv.slice(2)));\n", "utf8");
+      await writeFile(shimPath, `@echo off\n"${process.execPath}" "${scriptPath}" %*\n`, "utf8");
+
+      const dangerousArg = `safe&echo injected>${markerPath}`;
+      const trailingSlashArg = "C:\\work dir\\";
+      const result = await runProcess(shimPath, [dangerousArg, trailingSlashArg], process.cwd(), 5000);
+
+      assert.equal(result.exitCode, 0);
+      assert.deepEqual(JSON.parse(result.stdout), [dangerousArg, trailingSlashArg]);
+      assert.equal(await fileExists(markerPath), false);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  }
+);
+
+test(
+  "runProcess rejects Windows batch arguments that cmd.exe would expand",
+  { skip: process.platform !== "win32" ? "Windows-specific batch shim behavior" : false },
+  async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-cmd-expand-"));
+    try {
+      const scriptPath = path.join(tempDir, "argv.js");
+      const shimPath = path.join(tempDir, "runner.cmd");
+      await writeFile(scriptPath, "console.log(JSON.stringify(process.argv.slice(2)));\n", "utf8");
+      await writeFile(shimPath, `@echo off\n"${process.execPath}" "${scriptPath}" %*\n`, "utf8");
+
+      const result = await runProcess(shimPath, ["a%PATH%b"], process.cwd(), 5000);
+
+      assert.notEqual(result.exitCode, 0);
+      assert.match(`${result.error}\n${result.stderr}`, /unsupported.*cmd\.exe/i);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  }
+);
+
 // --- Output truncation (previously had NO coverage) ---
 //
 // MAX_PROCESS_OUTPUT_BYTES is 50 MB. To verify the truncation cap actually
@@ -155,11 +226,8 @@ test("runProcess truncates stdout that exceeds MAX_PROCESS_OUTPUT_BYTES", async 
   // the captured output and append a truncation marker so benchmark agents
   // producing huge logs can't OOM the parent.
   //
-  // The generator is written to a temp .js file and run as `node <file>`
-  // rather than `node -e "<script>"`. runProcess spawns with `shell: true` on
-  // Windows, where cmd.exe splits a multi-line `-e` argument on whitespace and
-  // node then sees `-e` with no argument (exit code 9, empty output). A single
-  // file-path argument survives the shell unchanged on every platform.
+  // The generator is written to a temp .js file and run as `node <file>` so
+  // the test does not depend on platform-specific `node -e` quoting.
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-trunc-"));
   try {
     const scriptPath = path.join(tempDir, "gen-stdout.js");
