@@ -1086,8 +1086,9 @@ function renderCompareTableV2(run) {
 
     // Score with grade
     let scoreCell = "—";
-    if (typeof result.compositeScore === "number") {
-      const grade = scoreGrade(result.compositeScore, result.status);
+    const displayScore = Number(formatCompositeScore(result, run, state.scoreWeights));
+    if (Number.isFinite(displayScore)) {
+      const grade = scoreGrade(displayScore, result.status);
       const gradeLabel = localText(grade.labelZh, grade.label);
       const isFailedBand = result.status === "failed" || result.status === "cancelled";
       const scoreTooltip = isFailedBand
@@ -1099,7 +1100,7 @@ function renderCompareTableV2(run) {
       const scoreSuffix = isFailedBand
         ? ` <small class="score-grade-label score-baseline-label">${localText("失败基线", "baseline")}</small>`
         : ` <small class="score-grade-label">${escapeHtml(gradeLabel)}</small>`;
-      scoreCell = `<span class="score-cell ${grade.cssClass}" title="${escapeHtml(scoreTooltip)}">${escapeHtml(result.compositeScore.toFixed(1))}${scoreSuffix}</span>`;
+      scoreCell = `<span class="score-cell ${grade.cssClass}" title="${escapeHtml(scoreTooltip)}">${escapeHtml(displayScore.toFixed(1))}${scoreSuffix}</span>`;
     }
 
     // Status icon
@@ -1244,7 +1245,8 @@ function renderSelectedAgentV2() {
   const passedJudges = result.judgeResults.filter(j => j.success).length;
   const totalJudges = result.judgeResults.length;
   const scoreVal = formatCompositeScore(result, state.run, state.scoreWeights);
-  const gradeInfo = typeof result.compositeScore === "number" ? scoreGrade(result.compositeScore, result.status) : null;
+  const scoreNumber = Number(scoreVal);
+  const gradeInfo = Number.isFinite(scoreNumber) ? scoreGrade(scoreNumber, result.status) : null;
   const gradeLabel = gradeInfo ? localText(gradeInfo.labelZh, gradeInfo.label) : "";
 
   elements.resultSummary.innerHTML = `
@@ -1614,8 +1616,9 @@ function renderSummaryCard(run) {
   // ── Compute score for the best agent ──
   let scoreHtml = "";
   let gradeInfo = null;
-  if (best && typeof best.compositeScore === "number") {
-    gradeInfo = scoreGrade(best.compositeScore, best.status);
+  const bestScore = best ? Number(formatCompositeScore(best, run, state.scoreWeights)) : null;
+  if (best && bestScore !== null && Number.isFinite(bestScore)) {
+    gradeInfo = scoreGrade(bestScore, best.status);
     const gradeLabel = localText(gradeInfo.labelZh, gradeInfo.label);
 
     // Score attribution — explain why score is not 100 when judges all pass
@@ -1623,7 +1626,7 @@ function renderSummaryCard(run) {
     const totalJudges = best.judgeResults?.length ?? 0;
     const allJudgesPassed = totalJudges > 0 && passedJudges === totalJudges;
     let attributionHtml = "";
-    if (allJudgesPassed && best.compositeScore < 90) {
+    if (allJudgesPassed && bestScore < 90) {
       const reasons = [];
       const hasTestJudge = best.judgeResults?.some(j => j.type === "test-result");
       const hasLintJudge = best.judgeResults?.some(j => j.type === "lint-check");
@@ -1643,7 +1646,7 @@ function renderSummaryCard(run) {
 
     scoreHtml = `
       <div class="summary-score-block">
-        <div class="summary-score-value ${gradeInfo.cssClass}">${escapeHtml(best.compositeScore.toFixed(1))}</div>
+        <div class="summary-score-value ${gradeInfo.cssClass}">${escapeHtml(bestScore.toFixed(1))}</div>
         <span class="summary-score-grade ${gradeInfo.cssClass}">${escapeHtml(gradeLabel)}</span>
         <span class="muted" style="font-size:0.75rem">${escapeHtml(localText("/ 100 分", "/ 100 pts"))}</span>
         ${attributionHtml}

@@ -518,6 +518,19 @@ export function getCompositeScoreDetails(result, run, weights = DEFAULT_SCORE_WE
   };
 }
 
+function weightsMatchArchivedRun(weights, run) {
+  const archivedWeights = run?.scoreWeights ?? DEFAULT_SCORE_WEIGHTS;
+  const normalizedCurrent = normalizeScoreWeights(weights);
+  const normalizedArchived = normalizeScoreWeights(archivedWeights);
+  const keys = new Set([...Object.keys(normalizedCurrent), ...Object.keys(normalizedArchived)]);
+  for (const key of keys) {
+    if (Math.abs((normalizedCurrent[key] ?? 0) - (normalizedArchived[key] ?? 0)) > 0.0001) {
+      return false;
+    }
+  }
+  return true;
+}
+
 /**
  * Format composite score as a single decimal string.
  * Prefers pre-computed `result.compositeScore` when available.
@@ -527,8 +540,10 @@ export function getCompositeScoreDetails(result, run, weights = DEFAULT_SCORE_WE
  * @returns {string}
  */
 export function formatCompositeScore(result, run, weights = DEFAULT_SCORE_WEIGHTS) {
-  // Use pre-computed score if available and weights match the run's stored weights
-  if (typeof result.compositeScore === "number" && getMatchingScorePresetId(weights)) {
+  // Use the archived score only when the active weights match the run's stored
+  // scoring weights. Preset identity alone is not enough: switching presets in
+  // the UI must re-score the visible report.
+  if (typeof result.compositeScore === "number" && weightsMatchArchivedRun(weights, run)) {
     return result.compositeScore.toFixed(1);
   }
   return `${getCompositeScoreDetails(result, run, weights).total.toFixed(1)}`;
@@ -544,7 +559,7 @@ export function formatCompositeScore(result, run, weights = DEFAULT_SCORE_WEIGHT
  */
 export function getCompositeScoreReasons(result, run, weights = DEFAULT_SCORE_WEIGHTS) {
   // Use pre-computed reasons if available and weights match
-  if (Array.isArray(result.scoreReasons) && getMatchingScorePresetId(weights)) {
+  if (Array.isArray(result.scoreReasons) && weightsMatchArchivedRun(weights, run)) {
     return result.scoreReasons;
   }
 

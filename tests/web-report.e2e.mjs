@@ -472,6 +472,91 @@ test("score weight preset buttons update active state", {
   }
 });
 
+test("custom score weight sliders re-score the compare table", {
+  concurrency: false,
+  timeout: 120000
+}, async (t) => {
+  const chromium = await loadChromiumOrSkip(t);
+  if (!chromium) return;
+
+  const root = path.resolve(import.meta.dirname, "..");
+  const uiServer = await startUiServer(root);
+  const browser = await chromium.launch({ headless: true });
+
+  try {
+    const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
+    await page.goto(`http://127.0.0.1:${uiServer.port}`);
+    await injectTestRun(page);
+
+    const scoreCell = page.locator("[data-compare-agent-id^='agent-a@@'] .compare-score .score-cell");
+    const before = (await scoreCell.textContent())?.trim() ?? "";
+    assert.ok(before, "agent score should be rendered before changing weights");
+
+    await page.locator("#weight-sliders input[data-weight='status']").evaluate((input) => {
+      input.value = "0";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    await page.waitForFunction((previousScore) => {
+      const current = document
+        .querySelector("[data-compare-agent-id^='agent-a@@'] .compare-score .score-cell")
+        ?.textContent
+        ?.trim();
+      return Boolean(current && current !== previousScore);
+    }, before);
+
+    const after = (await scoreCell.textContent())?.trim() ?? "";
+    assert.notEqual(after, before, "dragging a custom weight slider should change the rendered score");
+  } finally {
+    await browser.close();
+    await uiServer.stop();
+  }
+});
+
+test("trace replay toggle opens and renders trace events", {
+  concurrency: false,
+  timeout: 120000
+}, async (t) => {
+  const chromium = await loadChromiumOrSkip(t);
+  if (!chromium) return;
+
+  const root = path.resolve(import.meta.dirname, "..");
+  const uiServer = await startUiServer(root);
+  const browser = await chromium.launch({ headless: true });
+
+  try {
+    const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
+    await page.goto(`http://127.0.0.1:${uiServer.port}`);
+    await injectTestRun(page);
+
+    await page.evaluate(() => {
+      const events = [
+        { timestamp: "2026-03-14T00:00:00.000Z", agentId: "agent-a", runId: "test-run-001", type: "setup:start", message: "workspace ready" },
+        { timestamp: "2026-03-14T00:00:00.250Z", agentId: "agent-a", runId: "test-run-001", type: "adapter:execute", message: "agent edited files" },
+        { timestamp: "2026-03-14T00:00:00.500Z", agentId: "agent-a", runId: "test-run-001", type: "judge:result", message: "judge finished" }
+      ];
+      const jsonl = events.map((event) => JSON.stringify(event)).join("\n");
+      window.state.run.results[0].traceFile = new Blob([jsonl], { type: "application/jsonl" });
+    });
+
+    const toggle = page.locator("#trace-replay-toggle");
+    await toggle.waitFor({ state: "visible", timeout: 10000 });
+    await toggle.click();
+
+    await page.waitForFunction(() => {
+      const panel = document.getElementById("trace-replay-section");
+      const step = document.querySelector(".trace-step-card");
+      return Boolean(panel && !panel.classList.contains("hidden") && step?.textContent?.includes("workspace ready"));
+    });
+
+    assert.equal(await toggle.getAttribute("aria-expanded"), "true");
+    assert.equal((await page.locator("#trace-total-events").textContent())?.trim(), "3");
+  } finally {
+    await browser.close();
+    await uiServer.stop();
+  }
+});
+
 test("run list delete button removes run", {
   concurrency: false,
   timeout: 30000
