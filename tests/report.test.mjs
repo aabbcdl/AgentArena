@@ -224,11 +224,79 @@ test("writeReport includes a failure summary section for failed agents", async (
 
   assert.match(markdown, /## Failures/);
   assert.match(markdown, /`demo-fail`: Judge failures detected/);
+  assert.match(markdown, /Cause: Validation failed after the agent ran: 1 judge\(s\) failed\./);
+  assert.match(markdown, /Fix: Fix the code or task pack until every failed judge passes when run manually\./);
+  assert.match(markdown, /Failure Diagnosis/);
   assert.match(markdown, /judge `Snapshot Check` \(snapshot\) target=fixtures\/actual\.txt expect=matches fixtures\/expected\.txt/);
   assert.match(prComment, /### Review Focus/);
   assert.match(prComment, /- result `demo-fail`: Judge failures detected/);
+  assert.match(prComment, /cause: Validation failed after the agent ran: 1 judge\(s\) failed\./);
+  assert.match(prComment, /fix: Fix the code or task pack until every failed judge passes when run manually\./);
   assert.match(prComment, /judge `Snapshot Check` \(snapshot\) target=fixtures\/actual\.txt expect=matches fixtures\/expected\.txt/);
   assert.match(prComment, /\| fail \| Demo Fail \| demo-fail \| official \|.*?\|.*?\| default \|.*?\|.*?\/.*?\| supported \| failed \| failed \| \d+\.\d \| 1\.00s \| 50 \| n\/a \| 0\/1 \| n\/a \| n\/a \| n\/a \| 0 \| Judge failures detected \|/);
+
+  await rm(tempDir, { recursive: true, force: true });
+});
+
+test("writeReport diagnoses setup failures with task pack commands", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-report-setup-"));
+  const outputPath = path.join(tempDir, "run-output");
+
+  const benchmarkRun = {
+    runId: "run-setup",
+    createdAt: "2026-03-13T00:00:00.000Z",
+    repoPath: "D:\\project\\AgentArena",
+    outputPath,
+    task: {
+      schemaVersion: "agentarena.taskpack/v1",
+      id: "python-api",
+      title: "Python API",
+      prompt: "Prompt",
+      envAllowList: [],
+      setupCommands: [
+        {
+          id: "install-deps",
+          label: "Install dependencies",
+          command: "pip install -r requirements.txt",
+          timeoutMs: 120000,
+          envAllowList: []
+        }
+      ],
+      judges: [],
+      teardownCommands: []
+    },
+    preflights: [],
+    results: [
+      createResult(outputPath, {
+        agentId: "demo-setup-fail",
+        displayLabel: "Demo Setup Fail",
+        status: "failed",
+        summary: "setup command \"Install dependencies\" failed with exit code 1.",
+        setupResults: [
+          {
+            stepId: "install-deps",
+            label: "Install dependencies",
+            command: "[redacted]",
+            exitCode: 1,
+            success: false,
+            stdout: "[redacted]",
+            stderr: "[redacted]",
+            durationMs: 10,
+            cwd: "workspace/demo-setup-fail"
+          }
+        ]
+      })
+    ]
+  };
+
+  const { markdownPath, prCommentPath } = await writeReport(benchmarkRun);
+  const markdown = await readFile(markdownPath, "utf8");
+  const prComment = await readFile(prCommentPath, "utf8");
+
+  assert.match(markdown, /Cause: Setup failed before the agent started: Install dependencies\./);
+  assert.match(markdown, /Evidence: Setup command: pip install -r requirements\.txt/);
+  assert.match(markdown, /Fix: Use a repository that matches the task pack/);
+  assert.match(prComment, /fix: Use a repository that matches the task pack/);
 
   await rm(tempDir, { recursive: true, force: true });
 });

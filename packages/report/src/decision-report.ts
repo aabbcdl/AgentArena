@@ -1,4 +1,5 @@
 import type { AgentRunResult, BenchmarkRun } from "@agentarena/core";
+import { diagnoseResultFailure, type FailureDiagnostic } from "./report-helpers.js";
 
 export interface DecisionRecommendation {
   rank: number;
@@ -30,6 +31,11 @@ export interface DecisionReport {
   teamEstimates: TeamCostEstimate[];
   keyInsights: string[];
   warnings: string[];
+  failureDiagnostics: Array<{
+    agentId: string;
+    displayLabel: string;
+    diagnostic: FailureDiagnostic;
+  }>;
   reproduceCommand: string;
 }
 
@@ -60,6 +66,12 @@ export function generateDecisionReport(
   const teamEstimates = computeTeamCostEstimates(run.results, teamSize, dailyRuns);
   const keyInsights = extractKeyInsights(run.results);
   const warnings = extractWarnings(run.results);
+  const failureDiagnostics = run.results
+    .map((result) => {
+      const diagnostic = diagnoseResultFailure(result, run.task);
+      return diagnostic ? { agentId: result.agentId, displayLabel: result.displayLabel, diagnostic } : undefined;
+    })
+    .filter((item): item is NonNullable<typeof item> => item !== undefined);
 
   return {
     generatedAt: new Date().toISOString(),
@@ -68,6 +80,7 @@ export function generateDecisionReport(
     teamEstimates,
     keyInsights,
     warnings,
+    failureDiagnostics,
     reproduceCommand: `agentarena run --repo ${shellEscape(run.repoPath)} --task ${shellEscape(run.task.id)} --agents ${run.results.map((r) => shellEscape(r.agentId)).join(",")}`
   };
 }
@@ -430,6 +443,21 @@ export function formatDecisionReport(report: DecisionReport, locale?: string): s
   lines.push(`## 🔄 复现命令`);
   lines.push(``);
   lines.push(`\`\`\`bash`);
+  if ((report.failureDiagnostics?.length ?? 0) > 0) {
+    lines.splice(lines.length - 3, 0, `## Failure diagnosis`, ``);
+    for (const item of report.failureDiagnostics) {
+      lines.splice(lines.length - 3, 0, `### ${item.displayLabel}`, ``);
+      lines.splice(lines.length - 3, 0, `- Cause: ${item.diagnostic.cause}`);
+      for (const evidence of item.diagnostic.evidence) {
+        lines.splice(lines.length - 3, 0, `- Evidence: ${evidence}`);
+      }
+      for (const fix of item.diagnostic.fixes) {
+        lines.splice(lines.length - 3, 0, `- Fix: ${fix}`);
+      }
+      lines.splice(lines.length - 3, 0, ``);
+    }
+  }
+
   lines.push(report.reproduceCommand);
   lines.push(`\`\`\``);
   lines.push(``);

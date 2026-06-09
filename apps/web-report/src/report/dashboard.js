@@ -955,7 +955,7 @@ function renderComparisonBars(run) {
  * Map a failure summary string to a user-friendly suggestion.
  * Pattern-matches on keywords from adapter/runtime error messages.
  */
-function getFailureSuggestion(summary) {
+function _getFailureSuggestion(summary) {
   const text = (summary || "").toLowerCase();
   if (/probe.*timed?\s*out|timed?\s*out.*probe|preflight.*timed?\s*out/i.test(text)) {
     return localText(
@@ -987,6 +987,96 @@ function getFailureSuggestion(summary) {
   );
 }
 
+function firstNonEmptyLine(value) {
+  return String(value || "")
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .find(Boolean);
+}
+
+function mentionsMissingPath(value) {
+  return /enoent|no such file|cannot find path|requirements\.txt|package\.json|not found/i.test(value || "");
+}
+
+function getFailureDiagnostic(result, task) {
+  const setupFailure = (result.setupResults || []).find((step) => !step.success);
+  const failedJudges = (result.judgeResults || []).filter((judge) => !judge.success);
+  const setupCommand = setupFailure?.command && setupFailure.command !== "[redacted]"
+    ? setupFailure.command
+    : (task?.setupCommands || []).find((step) => step.id === setupFailure?.stepId)?.command;
+  const combinedText = [
+    result.summary,
+    setupCommand,
+    setupFailure?.stderr,
+    setupFailure?.stdout,
+    ...failedJudges.flatMap((judge) => [judge.stderr, judge.stdout])
+  ].filter(Boolean).join("\n");
+  const evidence = [];
+  const fixes = [];
+  let cause = "Run failed before AgentArena could confirm success.";
+
+  if (setupFailure) {
+    cause = `Setup failed before the agent started: ${setupFailure.label}.`;
+    evidence.push(`Setup command exit code: ${setupFailure.exitCode ?? "unknown"}.`);
+    if (setupCommand) {
+      evidence.push(`Setup command: ${setupCommand}`);
+    }
+    const setupLine = firstNonEmptyLine(setupFailure.stderr) || firstNonEmptyLine(setupFailure.stdout);
+    if (setupLine) evidence.push(setupLine);
+    if (mentionsMissingPath(combinedText)) {
+      fixes.push("Use a repository that matches the task pack, or update the setup command to point at the real dependency file.");
+    } else {
+      fixes.push("Run the setup command manually and fix the dependency or environment issue it reports.");
+    }
+    fixes.push("If setup only needs more time, raise the setup command timeout in the task pack.");
+  } else if (/timed?\s*out|timeout/i.test(result.summary || "")) {
+    cause = "The agent timed out before producing a final answer.";
+    evidence.push(`Duration: ${result.durationMs ? formatDuration(result.durationMs) : "unknown"}.`);
+    fixes.push("Increase --agent-timeout and keep AGENTARENA_AGENT_EXECUTE_TIMEOUT_MS above it.");
+    fixes.push("Reduce the task scope or use a faster model/provider for this task pack.");
+    if (result.resolvedRuntime?.providerKind && result.resolvedRuntime.providerKind !== "official") {
+      fixes.push("For third-party provider profiles, also raise AGENTARENA_TRANSPORT_TIMEOUT_MS and verify provider latency/quota.");
+    }
+  } else if (/failed with exit code|process error|execution failed/i.test(result.summary || "")) {
+    cause = "The agent CLI exited with an error before validation completed.";
+    evidence.push(result.summary || "Agent CLI exited with an error.");
+    fixes.push("Open the trace file and inspect the adapter result stderr for the exact CLI error.");
+    fixes.push("Check local CLI authentication, disabled/broken MCP servers, and provider/model compatibility.");
+  } else if (failedJudges.length > 0) {
+    cause = `Validation failed after the agent ran: ${failedJudges.length} judge(s) failed.`;
+    for (const judge of failedJudges.slice(0, 3)) {
+      evidence.push(`${judge.label}: ${firstNonEmptyLine(judge.stderr) || firstNonEmptyLine(judge.stdout) || "failed"}`);
+    }
+    if (mentionsMissingPath(combinedText)) {
+      fixes.push("Check whether the task pack expects files that this repo does not contain, then use a matching repo or adjust the task pack paths.");
+    }
+    fixes.push("Fix the code or task pack until every failed judge passes when run manually.");
+  } else if (result.preflight?.status && result.preflight.status !== "ready") {
+    cause = `Adapter preflight is ${result.preflight.status}.`;
+    evidence.push(result.preflight.summary || "Preflight did not pass.");
+    fixes.push("Run doctor with auth probing for this adapter and fix the reported CLI/API key/profile issue.");
+  } else {
+    evidence.push(result.summary || "No failure summary was provided.");
+    fixes.push("Inspect the trace file, setup output, and failed judges to identify the exact failing step.");
+  }
+
+  if ((result.changedFiles || []).length > 20) {
+    evidence.push(`Changed files: ${result.changedFiles.length}.`);
+    fixes.push("Review the diff for unrelated churn; tighten the prompt or expectedChangedPaths if the task should be narrow.");
+  }
+
+  if (result.resolvedRuntime?.providerKind && result.resolvedRuntime.providerKind !== "official") {
+    evidence.push(`Provider profile: ${result.resolvedRuntime.providerProfileName || result.resolvedRuntime.providerKind}.`);
+    fixes.push("Compare with the official provider once to separate task-pack issues from provider compatibility issues.");
+  }
+
+  return {
+    cause,
+    evidence: [...new Set(evidence.filter(Boolean))],
+    fixes: [...new Set(fixes.filter(Boolean))]
+  };
+}
+
 function renderFailures(run) {
   const failed = run.results.filter((r) => r.status === "failed");
   if (failed.length === 0) {
@@ -1002,13 +1092,23 @@ function renderFailures(run) {
     const judgeHtml = failedJudges.length > 0
       ? `<div class="failure-judges">${failedJudges.map((j) => `<span class="failure-judge">${escapeHtml(j.label || j.id)}</span>`).join("")}</div>`
       : "";
-    const suggestion = getFailureSuggestion(r.summary);
+    const diagnostic = getFailureDiagnostic(r, run.task);
+    const evidenceHtml = diagnostic.evidence.length > 0
+      ? `<ul>${diagnostic.evidence.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`
+      : "";
+    const fixesHtml = diagnostic.fixes.length > 0
+      ? `<ul>${diagnostic.fixes.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`
+      : "";
     return `
       <div class="failure-item">
         <div class="failure-agent">${escapeHtml(resultLabel(r))}</div>
         <div class="failure-reason">${escapeHtml(r.summary || localText("未知原因", "Unknown reason"))}</div>
         ${judgeHtml}
-        <div class="failure-suggestion">${escapeHtml(suggestion)}</div>
+        <div class="failure-suggestion">
+          <div><strong>Cause:</strong> ${escapeHtml(diagnostic.cause)}</div>
+          ${evidenceHtml ? `<div><strong>Evidence:</strong>${evidenceHtml}</div>` : ""}
+          ${fixesHtml ? `<div><strong>Fixes:</strong>${fixesHtml}</div>` : ""}
+        </div>
       </div>
     `;
   }).join("");

@@ -1,6 +1,7 @@
 import { type AdapterPreflightResult, type BenchmarkRun, formatDuration } from "@agentarena/core";
 import type { LeaderboardData } from "./leaderboard.js";
 import {
+  diagnoseResultFailure,
   escapeMdCell,
   formatDiffPrecisionMetric,
   formatLintMetric,
@@ -139,6 +140,16 @@ export function renderMarkdown(run: BenchmarkRun, locale: Locale, leaderboard?: 
     lines.push("", `## ${copy.failuresTitle}`, "");
     for (const result of failedResults) {
       lines.push(`- \`${result.agentId}\`: ${result.summary}`);
+      const diagnostic = diagnoseResultFailure(result, run.task);
+      if (diagnostic) {
+        lines.push(`  - Cause: ${diagnostic.cause}`);
+        for (const item of diagnostic.evidence) {
+          lines.push(`  - Evidence: ${item}`);
+        }
+        for (const fix of diagnostic.fixes) {
+          lines.push(`  - Fix: ${fix}`);
+        }
+      }
       const failedJudges = result.judgeResults.filter((judge) => !judge.success);
       for (const judge of failedJudges) {
         lines.push(
@@ -180,6 +191,18 @@ export function renderMarkdown(run: BenchmarkRun, locale: Locale, leaderboard?: 
     lines.push(`- Composite Score: ${(result.compositeScore ?? 0).toFixed(1)}`);
     if ((result.scoreReasons?.length ?? 0) > 0) {
       lines.push(`- Score Reasons: ${result.scoreReasons?.join(", ")}`);
+    }
+
+    const diagnostic = diagnoseResultFailure(result, run.task);
+    if (diagnostic) {
+      lines.push("- Failure Diagnosis:");
+      lines.push(`  - Cause: ${diagnostic.cause}`);
+      for (const item of diagnostic.evidence) {
+        lines.push(`  - Evidence: ${item}`);
+      }
+      for (const fix of diagnostic.fixes) {
+        lines.push(`  - Fix: ${fix}`);
+      }
     }
 
     if (result.judgeResults.length > 0) {
@@ -271,6 +294,13 @@ export function renderPrComment(run: BenchmarkRun, locale: Locale, leaderboard?:
 
     for (const result of failedResults) {
       reviewFocus.push(`- result \`${result.agentId}\`: ${result.summary}`);
+      const diagnostic = diagnoseResultFailure(result, run.task);
+      if (diagnostic) {
+        reviewFocus.push(`  - cause: ${diagnostic.cause}`);
+        for (const fix of diagnostic.fixes) {
+          reviewFocus.push(`  - fix: ${fix}`);
+        }
+      }
       const failedJudges = result.judgeResults.filter((judge) => !judge.success);
       for (const judge of failedJudges) {
         reviewFocus.push(

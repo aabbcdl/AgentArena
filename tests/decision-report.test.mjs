@@ -7,6 +7,7 @@ function createResult(agentId, overrides = {}) {
     agentId,
     displayLabel: overrides.displayLabel ?? agentId,
     status: overrides.status ?? "success",
+    summary: overrides.summary ?? "",
     compositeScore: overrides.compositeScore,
     durationMs: overrides.durationMs ?? 1000,
     tokenUsage: overrides.tokenUsage ?? 100,
@@ -54,13 +55,32 @@ test("generateDecisionReport recommends highest scoring agent", () => {
 test("generateDecisionReport handles all failures", () => {
   const run = createRun({
     results: [
-      createResult("agent-a", { status: "failed", compositeScore: 0 }),
+      createResult("agent-a", { status: "failed", compositeScore: 0, summary: "Agent timed out before producing a final message." }),
       createResult("agent-b", { status: "failed", compositeScore: 0 })
     ]
   });
   const report = generateDecisionReport(run);
   assert.ok(report.recommendations.every(r => r.recommendation !== "recommended"));
   assert.ok(report.warnings.length > 0);
+  assert.equal(report.failureDiagnostics.length, 2);
+  assert.match(report.failureDiagnostics[0].diagnostic.cause, /timed out/);
+});
+
+test("formatDecisionReport includes failure diagnosis fixes", () => {
+  const run = createRun({
+    results: [
+      createResult("agent-a", {
+        status: "failed",
+        compositeScore: 0,
+        summary: "Agent timed out before producing a final message."
+      })
+    ]
+  });
+  const report = generateDecisionReport(run);
+  const md = formatDecisionReport(report, "en");
+  assert.match(md, /## Failure diagnosis/);
+  assert.match(md, /Cause: The agent timed out before producing a final answer\./);
+  assert.match(md, /Fix: Increase --agent-timeout/);
 });
 
 test("formatDecisionReport produces valid markdown", () => {
