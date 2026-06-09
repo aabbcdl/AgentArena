@@ -25,6 +25,41 @@ test("runProcess keeps working when taskkill fallback has no child handle", () =
   assert.equal(typeof __testUtils.agentTimeoutMs, "function");
 });
 
+test("Claude Code resolves the npm Windows shim from PATH", async () => {
+  if (process.platform !== "win32") {
+    assert.ok(true, "Windows-only command resolution behavior");
+    return;
+  }
+
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-claude-path-"));
+  const shimPath = path.join(tempDir, "claude.cmd");
+  const originalPath = process.env.PATH;
+  const originalClaudeBin = process.env.AGENTARENA_CLAUDE_BIN;
+
+  try {
+    await writeFile(shimPath, "@echo off\necho claude shim\n", "utf8");
+    delete process.env.AGENTARENA_CLAUDE_BIN;
+    process.env.PATH = [tempDir, originalPath].filter(Boolean).join(path.delimiter);
+
+    const invocation = await __testUtils.resolveClaudeInvocation();
+
+    assert.equal(invocation.command, shimPath);
+    assert.equal(invocation.displayCommand, shimPath);
+  } finally {
+    if (originalPath === undefined) {
+      delete process.env.PATH;
+    } else {
+      process.env.PATH = originalPath;
+    }
+    if (originalClaudeBin === undefined) {
+      delete process.env.AGENTARENA_CLAUDE_BIN;
+    } else {
+      process.env.AGENTARENA_CLAUDE_BIN = originalClaudeBin;
+    }
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("listAvailableAdapters includes new agents", () => {
   const adapters = listAvailableAdapters();
   const gemini = adapters.find((adapter) => adapter.id === "gemini-cli");

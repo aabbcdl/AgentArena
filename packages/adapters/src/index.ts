@@ -23,6 +23,7 @@ export type { Transport, TransportChainOptions, TransportChainResult, TransportR
 export { createClaudeTransportChain, RawTransport, StreamJsonTransport, TextTransport, TransportChain } from "./transport.js";
 
 import { getChangedFilesFromGit } from "./adapter-helpers.js";
+import { resolveClaudeInvocation } from "./claude-adapter.js";
 import { resolveCodexSandboxMode } from "./codex-adapter.js";
 import { parseClaudeEvents, parseCodexEvents, parseGeminiEvents } from "./event-parsers.js";
 import { agentTimeoutMs, formatTimeoutMessage, runProcess, terminateProcessTree } from "./process-utils.js";
@@ -35,6 +36,7 @@ export const __testUtils = {
   resolveCodexRuntime,
   resolveCodexSandboxMode,
   readCodexConfigDefaults,
+  resolveClaudeInvocation,
   resolveClaudeRuntime,
   runProcessForTest: runProcess,
   terminateProcessTree,

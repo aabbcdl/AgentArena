@@ -14,12 +14,17 @@ import { formatAdapterError } from "./adapter-diagnostics.js";
 import { buildAgentPrompt, createPreflightResult, getChangedFilesFromGit, savePromptArtifact } from "./adapter-helpers.js";
 import { getClaudeProviderProfileSecret, writeClaudeWorkspaceSettings } from "./claude-provider-profiles.js";
 import { probeClaudeLikeAuth, probeClaudeLikeAuthFast, probeHelp, probeInvocationVersion } from "./invocation-probes.js";
-import { preflightTimeoutMs, transportTimeoutMs } from "./process-utils.js";
+import { findExecutableOnPath, preflightTimeoutMs, transportTimeoutMs } from "./process-utils.js";
 import { resolveClaudeRuntime } from "./runtime-resolution.js";
 import { createClaudeTransportChain, type TransportChainResult } from "./transport.js";
 
 async function resolveClaudeInvocation(): Promise<InvocationSpec> {
-  const command = process.env.AGENTARENA_CLAUDE_BIN?.trim() || "claude";
+  const configuredCommand = process.env.AGENTARENA_CLAUDE_BIN?.trim();
+  const command =
+    configuredCommand ||
+    (process.platform === "win32"
+      ? (await findExecutableOnPath(["claude.cmd", "claude.exe", "claude"])) ?? "claude"
+      : "claude");
   return {
     command,
     argsPrefix: [],

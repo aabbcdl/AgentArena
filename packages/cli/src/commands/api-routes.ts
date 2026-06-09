@@ -15,6 +15,7 @@ import {
   listClaudeProviderProfiles,
   listInstallGuides,
   preflightAdapters,
+  probeAuthConfig,
   saveClaudeProviderProfile,
   setClaudeProviderProfileSecret,
 } from "@agentarena/adapters";
@@ -230,28 +231,35 @@ export async function handleQuickPreflight(rawBody: string): Promise<ApiResponse
     return jsonResponse({ error: "Missing baseAgentId." }, 400);
   }
   try {
-    // Quick CLI existence check
-    const { probeCliExists, probeAuthConfig } = await import("@agentarena/adapters");
-    const cwd = process.cwd();
-    const command = body.baseAgentId;
-    const [cliResult, authResult] = await Promise.all([
-      probeCliExists({ command, argsPrefix: [], displayCommand: command }, cwd),
-      probeAuthConfig({ command, argsPrefix: [], displayCommand: command })
-    ]);
+    const selection = createAgentSelection({
+      baseAgentId: body.baseAgentId,
+      displayLabel: body.displayLabel,
+      config: body.config,
+      configSource: "ui"
+    });
+    const [preflight] = await preflightAdapters([selection], { probeAuth: false });
+    const command = preflight?.command ?? body.baseAgentId;
+    const authResult = await probeAuthConfig({
+      command,
+      argsPrefix: [],
+      displayCommand: command
+    });
 
     let overallStatus: "ready" | "warning" | "blocked" = "ready";
-    if (!cliResult.found) {
+    if (!preflight || preflight.status === "missing") {
       overallStatus = "blocked";
     } else if (!authResult.configured) {
       overallStatus = "warning";
     }
 
     const result = {
-      cliExists: cliResult.found,
-      cliVersion: cliResult.version,
+      cliExists: !!preflight && preflight.status !== "missing",
+      cliVersion: preflight?.resolvedRuntime?.effectiveAgentVersion,
       authConfigured: authResult.configured,
       authHint: authResult.hint,
-      overallStatus
+      overallStatus,
+      command,
+      summary: preflight?.summary
     };
 
     logger.info("server", "quick-preflight.check", `Quick preflight for ${body.baseAgentId}`, {

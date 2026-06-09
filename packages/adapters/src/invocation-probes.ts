@@ -190,15 +190,26 @@ export async function probeAuthConfig(
   if (command.includes("claude")) {
     const hasKey = !!(env.ANTHROPIC_API_KEY || env.CLAUDE_API_KEY);
     if (hasKey) return { configured: true };
-    // Check if there's a stored credential file
+    // Check if there's a stored credential/config file. Claude Code has used
+    // more than one local layout across releases.
     const homeDir = os.homedir();
-    const claudeConfigPath = path.join(homeDir, ".claude", "credentials.json");
-    try {
-      await fs.access(claudeConfigPath);
-      return { configured: true };
-    } catch {
-      return { configured: false, hint: "No ANTHROPIC_API_KEY set and no ~/.claude/credentials.json found" };
+    const claudeConfigPaths = [
+      path.join(homeDir, ".claude", ".credentials.json"),
+      path.join(homeDir, ".claude", "credentials.json"),
+      path.join(homeDir, ".claude.json"),
+    ];
+    for (const configPath of claudeConfigPaths) {
+      try {
+        await fs.access(configPath);
+        return { configured: true };
+      } catch {
+        // Try the next known Claude Code config location.
+      }
     }
+    return {
+      configured: false,
+      hint: "No ANTHROPIC_API_KEY set and no Claude Code credential/config file found"
+    };
   }
 
   // Codex: check OPENAI_API_KEY
