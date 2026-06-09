@@ -6,6 +6,7 @@ import {
   aggregateMultiRuns,
   computeVarianceAnalysis,
   enrichRunWithScores,
+  formatCompositeScoreValue,
   formatDecisionReport,
   formatMultiRunReport,
   formatVarianceReport,
@@ -403,6 +404,20 @@ export async function runBenchmarkCommand(
     console.log(
       `Score note: ${scoredBenchmark.scoreValidityNote ?? "Scores only compare variants inside this run."}`,
     );
+    if (scoredBenchmark.taskCompatibility && scoredBenchmark.taskCompatibility.status !== "compatible") {
+      console.log(
+        `Task compatibility: ${scoredBenchmark.taskCompatibility.status} - ${scoredBenchmark.taskCompatibility.summary}`,
+      );
+      const visibleChecks = scoredBenchmark.taskCompatibility.checks
+        .filter((check) => check.status !== "pass")
+        .slice(0, 5);
+      for (const check of visibleChecks) {
+        console.log(`  - ${check.label}: ${check.message}`);
+        if (check.fix) {
+          console.log(`    Fix: ${check.fix}`);
+        }
+      }
+    }
     console.log(`\nPreflight Results:`);
     for (const preflight of scoredBenchmark.preflights) {
       const statusIcon =
@@ -431,7 +446,16 @@ export async function runBenchmarkCommand(
         `  ${statusIcon} ${result.displayLabel}: ${result.status} (${formatDuration(result.durationMs)})`,
       );
       console.log(`    status=${result.status}`);
-      console.log(`    Score: ${(result.compositeScore ?? 0).toFixed(1)}`);
+      console.log(`    Score: ${formatCompositeScoreValue(result)}`);
+      if (result.scoreExcluded) {
+        console.log(`    Not scored: ${result.scoreExclusionReason ?? result.summary}`);
+        const fix = scoredBenchmark.taskCompatibility?.checks.find(
+          (check) => check.status !== "pass" && check.fix,
+        )?.fix;
+        if (fix) {
+          console.log(`    Fix: ${fix}`);
+        }
+      }
       if (result.resolvedRuntime?.effectiveModel) {
         console.log(`    Model: ${result.resolvedRuntime.effectiveModel}`);
       }

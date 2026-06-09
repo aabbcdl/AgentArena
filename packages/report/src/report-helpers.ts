@@ -163,6 +163,16 @@ export type ScoredRun = BenchmarkRun & {
   results: ScoredResult[];
 };
 
+export function isResultScoreExcluded(result: BenchmarkRun["results"][number]): boolean {
+  return result.scoreExcluded === true;
+}
+
+export function formatCompositeScoreValue(result: BenchmarkRun["results"][number]): string {
+  return isResultScoreExcluded(result)
+    ? "n/a"
+    : (result.compositeScore ?? 0).toFixed(1);
+}
+
 export function hasScoreMetadata(run: BenchmarkRun): run is BenchmarkRun & { scoreMode?: ScoreMode; scoreWeights?: Record<string, number> } {
   return "scoreMode" in run || "scoreWeights" in run;
 }
@@ -224,6 +234,16 @@ function sanitizeWorkspaceScopedPath(value: string, workspacePath: string, agent
   return portableBasename(value);
 }
 
+function sanitizeCommandForDiagnostics(command: string | undefined): string | undefined {
+  if (!command) {
+    return undefined;
+  }
+  if (/\bnpx\s+--no-install\b|\bpnpx\s+--no-install\b/u.test(command)) {
+    return "[redacted: npx --no-install]";
+  }
+  return "[redacted]";
+}
+
 export function sanitizeRun(run: BenchmarkRun): BenchmarkRun {
   return {
     ...run,
@@ -247,7 +267,7 @@ export function sanitizeRun(run: BenchmarkRun): BenchmarkRun {
       })),
       judgeResults: result.judgeResults.map((judge) => ({
         ...judge,
-        command: judge.command ? "[redacted]" : undefined,
+        command: sanitizeCommandForDiagnostics(judge.command),
         stdout: "[redacted]",
         stderr: "[redacted]",
         cwd: judge.cwd
@@ -275,11 +295,13 @@ export function summarizeRun(run: BenchmarkRun): {
   totalAgents: number;
   successCount: number;
   failedCount: number;
+  scoreExcludedCount: number;
   totalTokens: number;
   knownCostUsd: number;
 } {
   const successCount = run.results.filter((result) => result.status === "success").length;
   const failedCount = run.results.filter((result) => result.status === "failed").length;
+  const scoreExcludedCount = run.results.filter((result) => isResultScoreExcluded(result)).length;
   const totalTokens = run.results.reduce((total, result) => total + result.tokenUsage, 0);
   const knownCostUsd = run.results
     .filter((result) => result.costKnown)
@@ -289,6 +311,7 @@ export function summarizeRun(run: BenchmarkRun): {
     totalAgents: run.results.length,
     successCount,
     failedCount,
+    scoreExcludedCount,
     totalTokens,
     knownCostUsd
   };
@@ -311,6 +334,10 @@ function mentionsMissingPath(value: string): boolean {
   return /enoent|no such file|cannot find path|requirements\.txt|package\.json|not found/i.test(value);
 }
 
+function mentionsMissingLocalNodeTool(value: string): boolean {
+  return /npx\s+--no-install|could not determine executable|local tool|node_modules|command not found|is not recognized/i.test(value);
+}
+
 export function diagnoseResultFailure(
   result: BenchmarkRun["results"][number],
   task?: BenchmarkRun["task"]
@@ -322,6 +349,31 @@ export function diagnoseResultFailure(
   const evidence: string[] = [];
   const fixes: string[] = [];
   const setupFailure = (result.setupResults ?? []).find((step) => !step.success);
+
+  if (isResultScoreExcluded(result) && !setupFailure) {
+    const cause =
+      result.failureCategory === "task-pack"
+        ? "The task did not run because the task pack or setup does not match this repository."
+        : result.failureCategory === "environment"
+          ? "The task did not run because the local environment or adapter preflight was not ready."
+          : "The task did not produce a comparable agent score.";
+    evidence.push(result.scoreExclusionReason ?? result.summary);
+    if (result.summary) {
+      evidence.push(result.summary);
+    }
+    if (result.failureCategory === "task-pack") {
+      fixes.push("Use a repository that matches the task pack, or choose a task pack that matches this repository.");
+      fixes.push("If this task pack is custom, update its setup commands and judges to match the repository.");
+    } else {
+      fixes.push("Run doctor/preflight for the adapter and fix the reported local setup or authentication issue.");
+    }
+    return {
+      cause,
+      evidence: Array.from(new Set(evidence.filter(Boolean))),
+      fixes: Array.from(new Set(fixes.filter(Boolean)))
+    };
+  }
+
   const failedJudges = (result.judgeResults ?? []).filter((judge) => !judge.success);
   const setupCommand =
     setupFailure?.command && setupFailure.command !== "[redacted]"
@@ -332,7 +384,7 @@ export function diagnoseResultFailure(
     setupCommand,
     setupFailure?.stderr,
     setupFailure?.stdout,
-    ...failedJudges.flatMap((judge) => [judge.stderr, judge.stdout])
+    ...failedJudges.flatMap((judge) => [judge.command, judge.stderr, judge.stdout])
   ].filter(Boolean).join("\n");
   const lowerText = combinedText.toLowerCase();
   let cause = "Run failed before AgentArena could confirm success.";
@@ -366,6 +418,13 @@ export function diagnoseResultFailure(
     evidence.push(result.summary);
     fixes.push("Open the trace file and inspect the adapter result stderr for the exact CLI error.");
     fixes.push("Check local CLI authentication, disabled/broken MCP servers, and provider/model compatibility.");
+  } else if (failedJudges.length > 0 && mentionsMissingLocalNodeTool(combinedText)) {
+    cause = "Validation could not run because the task pack depends on local project tools that are not available in the workspace.";
+    for (const judge of failedJudges.slice(0, 3)) {
+      evidence.push(`${judge.label}: ${firstNonEmptyLine(judge.stderr) ?? firstNonEmptyLine(judge.stdout) ?? "missing local tool"}`);
+    }
+    fixes.push("Prepare dependencies before benchmarking, or add a repository-specific setup step that does not count as agent work.");
+    fixes.push("If the task pack is generic, replace local-tool judges with checks that work in a fresh workspace.");
   } else if (failedJudges.length > 0) {
     cause = `Validation failed after the agent ran: ${failedJudges.length} judge(s) failed.`;
     for (const judge of failedJudges.slice(0, 3)) {

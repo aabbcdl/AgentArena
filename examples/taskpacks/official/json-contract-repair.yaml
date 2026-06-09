@@ -61,8 +61,3 @@ judges:
     path: fixtures/response.json
     pointer: /status
     expected: ready
-  - id: payload-valid
-    type: command
-    label: Response is valid JSON
-    command: node -e "const r = require('./fixtures/response.json'); console.log('Valid JSON')"
-    timeoutMs: 5000

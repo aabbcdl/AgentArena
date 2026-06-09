@@ -156,6 +156,26 @@ export interface LiveBenchMetrics {
   difficultyGeneration?: number;
 }
 
+export interface TaskCompatibilityCheck {
+  /** What was checked */
+  label: string;
+  /** Check result */
+  status: "pass" | "warn" | "fail";
+  /** Human-readable message */
+  message: string;
+  /** Optional fix shown in reports when the check does not pass */
+  fix?: string;
+}
+
+export interface TaskCompatibilityResult {
+  /** Overall compatibility status */
+  status: "compatible" | "warning" | "incompatible";
+  /** Human-readable summary */
+  summary: string;
+  /** Individual check results */
+  checks: TaskCompatibilityCheck[];
+}
+
 export interface AgentRunResult {
   agentId: string;
   baseAgentId: string;
@@ -190,6 +210,16 @@ export interface AgentRunResult {
   diffPrecision?: DiffPrecisionSummary;
   compositeScore?: number;
   scoreReasons?: string[];
+  /**
+   * True when this row should not be used as evidence of agent/model quality.
+   * Examples: task pack does not match the repository, setup failed before the
+   * agent started, or adapter preflight blocked execution.
+   */
+  scoreExcluded?: boolean;
+  /** Human-readable reason shown next to n/a scores. */
+  scoreExclusionReason?: string;
+  /** Coarse failure bucket for user-facing diagnostics. */
+  failureCategory?: "task-pack" | "environment" | "agent" | "model" | "validation" | "cancelled" | "unknown";
 
   tokenUsageBreakdown?: {
     inputTokens: number;
@@ -228,6 +258,7 @@ export interface BenchmarkRun {
   scoreValidityNote?: string;
   fairComparison?: FairComparisonMetadata;
   task: TaskPack;
+  taskCompatibility?: TaskCompatibilityResult;
   preflights: AdapterPreflightResult[];
   results: AgentRunResult[];
 }

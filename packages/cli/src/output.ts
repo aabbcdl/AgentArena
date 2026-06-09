@@ -66,6 +66,7 @@ export function buildBenchmarkOutputSummary(
       schemaVersion: scoredBenchmark.task.schemaVersion,
       metadata: scoredBenchmark.task.metadata
     },
+    taskCompatibility: scoredBenchmark.taskCompatibility,
     preflights: scoredBenchmark.preflights,
     results: scoredBenchmark.results.map((result) => ({
       agentId: result.agentId,
@@ -80,6 +81,9 @@ export function buildBenchmarkOutputSummary(
       summary: result.summary,
       compositeScore: result.compositeScore,
       scoreReasons: result.scoreReasons,
+      scoreExcluded: result.scoreExcluded,
+      scoreExclusionReason: result.scoreExclusionReason,
+      failureCategory: result.failureCategory,
       durationMs: result.durationMs,
       tokenUsage: result.tokenUsage,
       estimatedCostUsd: result.estimatedCostUsd,

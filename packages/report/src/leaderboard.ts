@@ -1,6 +1,6 @@
 import type { BenchmarkRun } from "@agentarena/core";
 import { median } from "@agentarena/core";
-import { formatRuntimeIdentity, getRunScoreMode } from "./report-helpers.js";
+import { formatRuntimeIdentity, getRunScoreMode, isResultScoreExcluded } from "./report-helpers.js";
 
 /**
  * 历史排行榜的身份键
@@ -158,6 +158,9 @@ export function buildLeaderboard(
 
   for (const run of comparableRuns) {
     for (const result of run.results) {
+      if (isResultScoreExcluded(result)) {
+        continue;
+      }
       const identity = getLeaderboardIdentity(run, result);
       const key = serializeLeaderboardIdentity(identity);
 
@@ -179,8 +182,9 @@ export function buildLeaderboard(
 
   for (const run of comparableRuns) {
     // 找出这个 run 里的 winner
-    const successfulResults = run.results.filter((r) => r.status === "success");
-    const candidates = successfulResults.length > 0 ? successfulResults : run.results;
+    const comparableResults = run.results.filter((r) => !isResultScoreExcluded(r));
+    const successfulResults = comparableResults.filter((r) => r.status === "success");
+    const candidates = successfulResults.length > 0 ? successfulResults : comparableResults;
 
     // 按综合分排序
     const sorted = [...candidates].sort((a, b) => {
@@ -198,7 +202,7 @@ export function buildLeaderboard(
     }
 
     // 记录所有参与对比的身份
-    for (const result of run.results) {
+    for (const result of comparableResults) {
       const identity = getLeaderboardIdentity(run, result);
       const key = serializeLeaderboardIdentity(identity);
       comparisonMap.set(key, (comparisonMap.get(key) ?? 0) + 1);

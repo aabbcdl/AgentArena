@@ -27,16 +27,12 @@ prompt: |
 
   Focus on testing the most critical business logic first.
 envAllowList: []
-setupCommands:
-  - id: install-deps
-    label: Install dependencies
-    command: npm install
-    timeoutMs: 120000
+setupCommands: []
 judges:
   - id: tests-pass
     type: test-result
     label: All tests pass
-    command: npx jest --json --outputFile=.agentarena/test-results.json
+    command: npx --no-install jest --json --outputFile=.agentarena/test-results.json
     format: jest
     reportFile: .agentarena/test-results.json
     timeoutMs: 120000
@@ -44,7 +40,7 @@ judges:
   - id: lint-clean
     type: lint-check
     label: Lint passes
-    command: npx eslint . --format json --output-file .agentarena/lint-results.json
+    command: npx --no-install eslint . --format json --output-file .agentarena/lint-results.json
     format: eslint
     reportFile: .agentarena/lint-results.json
     timeoutMs: 60000

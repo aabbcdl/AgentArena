@@ -1,5 +1,5 @@
 import type { BenchmarkRun } from "@agentarena/core";
-import type { ScoredRun } from "./report-helpers.js";
+import { formatCompositeScoreValue, type ScoredRun } from "./report-helpers.js";
 
 function escapeCsvField(value: unknown): string {
   const str = String(value ?? "");
@@ -47,7 +47,7 @@ export function generateCsv(run: BenchmarkRun): string {
       result.baseAgentId,
       result.variantId,
       result.status,
-      (result.compositeScore ?? 0).toFixed(1),
+      formatCompositeScoreValue(result),
       result.durationMs,
       result.tokenUsage,
       result.costKnown ? result.estimatedCostUsd.toFixed(4) : "n/a",

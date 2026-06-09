@@ -1,5 +1,5 @@
 import type { AgentRunResult, BenchmarkRun } from "@agentarena/core";
-import { escapeMdCell } from "./report-helpers.js";
+import { escapeMdCell, isResultScoreExcluded } from "./report-helpers.js";
 
 export interface AggregatedAgentStats {
   agentId: string;
@@ -26,6 +26,9 @@ export function aggregateMultiRuns(runs: BenchmarkRun[]): MultiRunComparison {
   const agentRuns = new Map<string, AgentRunResult[]>();
   for (const run of runs) {
     for (const result of run.results) {
+      if (isResultScoreExcluded(result)) {
+        continue;
+      }
       const existing = agentRuns.get(result.agentId) ?? [];
       existing.push(result);
       agentRuns.set(result.agentId, existing);

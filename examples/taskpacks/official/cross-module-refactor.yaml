@@ -59,7 +59,7 @@ prompt: |
   1. Check for any remaining duplicate loggers
   2. Verify all packages compile
   3. Run all tests
-  4. Check for circular dependencies with `npx madge --circular`
+  4. Check for circular dependencies with `npx --no-install madge --circular`
   
   ## Common Pitfalls | 常见陷阱
   
@@ -91,7 +91,7 @@ judges:
   - id: no-circular-deps
     type: command
     label: No circular dependencies
-    command: npx madge --circular packages/
+    command: npx --no-install madge --circular packages/
     timeoutMs: 30000
   - id: all-tests-pass
     type: test-result

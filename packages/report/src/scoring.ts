@@ -39,6 +39,10 @@ export { hasCriticalJudgeFailure } from "./score-metrics.js";
 // Re-export for backward compatibility
 export { normalizeApplicableWeights } from "./score-weights.js";
 
+export function isScoreExcluded(result: BenchmarkRun["results"][number]): boolean {
+  return result.scoreExcluded === true;
+}
+
 // ---------------------------------------------------------------------------
 // Score band constants (used by both backend and frontend)
 // ---------------------------------------------------------------------------
@@ -146,6 +150,10 @@ export function computeCompositeScore(
   scoreWeights?: Record<string, number>,
   scoreMode?: ScoreMode
 ): number {
+  if (isScoreExcluded(result)) {
+    return 0;
+  }
+
   const weights = scoreWeights ?? getDefaultWeights(scoreMode ?? "practical");
 
   // Rule 1: Failed run → failed band
@@ -211,6 +219,10 @@ export function computeCompositeScore(
 export function computeScoreReasons(result: BenchmarkRun["results"][number], run: BenchmarkRun): string[] {
   const reasons: string[] = [];
 
+  if (isScoreExcluded(result)) {
+    return [result.scoreExclusionReason ?? "not-comparable"];
+  }
+
   if (result.status !== "success") {
     reasons.push("failed");
     return reasons;
@@ -255,7 +267,9 @@ export function enrichRunWithScores(run: BenchmarkRun): ScoredRun {
       "Scores only compare variants inside this run. Treat them as local rankings for the current agent version, model, and provider settings.",
     results: run.results.map((result) => ({
       ...result,
-      compositeScore: computeCompositeScore(result, run, scoreWeights, scoreMode),
+      compositeScore: isScoreExcluded(result)
+        ? undefined
+        : computeCompositeScore(result, run, scoreWeights, scoreMode),
       scoreReasons: computeScoreReasons(result, run)
     }))
   };

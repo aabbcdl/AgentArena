@@ -91,6 +91,17 @@ test("formatCompositeScore handles null compositeScore", () => {
   assert.ok(!Number.isNaN(parseFloat(formatted)));
 });
 
+test("formatCompositeScore displays n/a for score-excluded results", () => {
+  const result = makeMockResult({
+    status: "failed",
+    scoreExcluded: true,
+    scoreExclusionReason: "Task pack does not match this repository."
+  });
+  const run = makeMockRun({ results: [result] });
+
+  assert.equal(formatCompositeScore(result, run), "n/a");
+});
+
 test("getRunVerdict handles run with all failed results", () => {
   const run = makeMockRun({
     results: [

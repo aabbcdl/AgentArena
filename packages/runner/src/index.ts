@@ -11,6 +11,7 @@ import {
   isAbortError,
   logger,
   type ScoreMode,
+  type TaskCompatibilityResult,
   throwIfAborted,
 } from "@agentarena/core";
 import { runAgent } from "./agent-lifecycle.js";
@@ -177,6 +178,28 @@ async function loadResumeState(
   return { taskId, results };
 }
 
+function createTaskIncompatibleResult(
+  preflight: Awaited<ReturnType<typeof preflightAdapters>>[number],
+  outputPath: string,
+  workspaceRootPath: string,
+  compatibility: TaskCompatibilityResult
+): AgentRunResult {
+  const failedChecks = compatibility.checks.filter((check) => check.status === "fail");
+  const reason = failedChecks[0]?.message ?? compatibility.summary;
+  const result = createSkippedRunResult(
+    preflight,
+    path.join(outputPath, "agents", preflight.variantId, "trace.jsonl"),
+    path.join(workspaceRootPath, preflight.variantId)
+  );
+  return {
+    ...result,
+    summary: `Task pack is not runnable with this repository: ${reason}`,
+    scoreExcluded: true,
+    scoreExclusionReason: "Task pack does not match this repository, so the agent was not run.",
+    failureCategory: "task-pack"
+  };
+}
+
 export async function runBenchmark(options: BenchmarkOptions): Promise<BenchmarkRun> {
   const cancellation = options.cancellation;
   const safeProgress = async (event: BenchmarkProgressEvent): Promise<void> => {
@@ -246,6 +269,7 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
 
   throwIfAborted(cancellation?.signal, createCancellationSummary("startup"));
 
+  let taskCompatibility: TaskCompatibilityResult | undefined;
   let completedNormally = false;
   try {
   await safeProgress({
@@ -261,10 +285,11 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
   // is exposed via the progress event metadata so the UI/CLI can show it.
   try {
     const compatibility = await checkTaskCompatibility(task, repoPath);
+    taskCompatibility = compatibility;
     if (compatibility.status !== "compatible") {
       const failedChecks = compatibility.checks
         .filter((check) => check.status !== "pass")
-        .map((check) => `${check.label}: ${check.message}`);
+        .map((check) => `${check.label}: ${check.message}${check.fix ? ` Fix: ${check.fix}` : ""}`);
       await safeProgress({
         phase: "preflight",
         message: `Task compatibility warning: ${compatibility.summary}`,
@@ -333,6 +358,50 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
       ready: preflights.filter((value) => value.status === "ready").length
     }
   });
+
+  const incompatibleCompatibility = taskCompatibility;
+  if (incompatibleCompatibility?.status === "incompatible") {
+    const results = preflights.map((preflight) =>
+      createTaskIncompatibleResult(preflight, outputPath, workspaceRootPath, incompatibleCompatibility)
+    );
+
+    await Promise.all(results.map((result) => writeAgentResult(outputPath, result)));
+
+    await safeProgress({
+      phase: "complete",
+      message: `Benchmark did not run agents because the task pack is incompatible with this repository: ${incompatibleCompatibility.summary}`,
+      metadata: {
+        total: results.length,
+        success: 0,
+        cancelled: 0,
+        scoreExcluded: results.length
+      }
+    });
+
+    completedNormally = true;
+    await writeRunMarker(outputPath, "complete", {
+      runId,
+      taskId: task.id,
+      taskTitle: task.title,
+      totalResults: results.length,
+      successResults: 0,
+      cancelledResults: 0,
+      taskCompatibility: incompatibleCompatibility
+    });
+
+    return {
+      runId,
+      createdAt: new Date().toISOString(),
+      repoPath,
+      outputPath,
+      scoreMode: options.scoreMode ?? "practical",
+      scoreWeights: getDefaultWeights(options.scoreMode ?? "practical"),
+      task,
+      taskCompatibility: incompatibleCompatibility,
+      preflights,
+      results
+    };
+  }
 
   // Step 4: Execute agents concurrently
   const { results: rawResults, aborted } = await mapWithConcurrency(
@@ -474,6 +543,7 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
     scoreMode: options.scoreMode ?? "practical",
     scoreWeights: getDefaultWeights(options.scoreMode ?? "practical"),
     task,
+    taskCompatibility,
     preflights,
     results
   };

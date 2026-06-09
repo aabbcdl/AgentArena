@@ -62,8 +62,3 @@ judges:
     path: fixtures/config.json
     pointer: /mode
     expected: production
-  - id: config-valid-json
-    type: command
-    label: Config is valid JSON
-    command: node -e "JSON.parse(require('fs').readFileSync('fixtures/config.json'))"
-    timeoutMs: 5000

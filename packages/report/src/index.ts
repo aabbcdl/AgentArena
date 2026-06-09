@@ -48,7 +48,7 @@ export {
 export type { AggregatedAgentStats, MultiRunComparison } from "./multi-run.js";
 export { aggregateMultiRuns, formatMultiRunReport } from "./multi-run.js";
 export type { Locale, ReportCopy, ScoredResult, ScoredRun } from "./report-helpers.js";
-export { getReportCopy, sanitizeRun } from "./report-helpers.js";
+export { formatCompositeScoreValue, getReportCopy, isResultScoreExcluded, sanitizeRun } from "./report-helpers.js";
 export {
   CRITICAL_FAIL_SCORE_BAND,
   computeCompositeScore,
@@ -56,6 +56,7 @@ export {
   computeScoreReasons,
   enrichRunWithScores,
   FAILED_SCORE_BAND,
+  isScoreExcluded,
   normalizeApplicableWeights
 } from "./scoring.js";
 export {

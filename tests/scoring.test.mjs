@@ -628,6 +628,18 @@ test("enrichRunWithScores computes compositeScore for each result", () => {
   assert.ok(!Number.isNaN(enriched.results[0].compositeScore));
 });
 
+test("enrichRunWithScores excludes non-comparable setup/task-pack results", () => {
+  const result = createResult({
+    status: "failed",
+    scoreExcluded: true,
+    scoreExclusionReason: "Task pack does not match this repository."
+  });
+  const run = createRun({ results: [result] });
+  const enriched = enrichRunWithScores(run);
+  assert.equal(enriched.results[0].compositeScore, undefined);
+  assert.deepEqual(enriched.results[0].scoreReasons, ["Task pack does not match this repository."]);
+});
+
 test("enrichRunWithScores computes scoreReasons for each result", () => {
   const result = createResult();
   const run = createRun({ results: [result] });

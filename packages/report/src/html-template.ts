@@ -3,6 +3,7 @@ import { type BenchmarkRun, formatDuration } from "@agentarena/core";
 import type { LeaderboardData } from "./leaderboard.js";
 import {
   escapeHtml,
+  formatCompositeScoreValue,
   formatDiffPrecisionMetric,
   formatLintMetric,
   formatRuntimeIdentity,
@@ -166,7 +167,7 @@ function renderAgentCards(run: BenchmarkRun): string {
           )} | Version: ${escapeHtml(runtime.version)} | Verification: ${escapeHtml(runtime.verification)} | Source: ${escapeHtml(runtime.source)}</p>
           <div class="stats">
             <div><strong>Status</strong><span>${escapeHtml(result.status)}</span></div>
-            <div><strong>Composite Score</strong><span>${escapeHtml(String((result.compositeScore ?? 0).toFixed(1)))}</span></div>
+            <div><strong>Composite Score</strong><span>${escapeHtml(formatCompositeScoreValue(result))}</span></div>
             <div><strong>Duration</strong><span>${escapeHtml(formatDuration(result.durationMs))}</span></div>
             <div><strong>Tokens</strong><span>${escapeHtml(String(result.tokenUsage ?? "N/A"))}</span></div>
             <div><strong>Cost</strong><span>${escapeHtml(result.costKnown ? `$${result.estimatedCostUsd.toFixed(4)}` : "n/a")}</span></div>
@@ -488,6 +489,11 @@ export function renderHtml(run: BenchmarkRun, locale: Locale, leaderboard?: Lead
         )} ${escapeHtml(copy.runIdLabel)} ${escapeHtml(run.runId)}.</p>
         <p class="lede">${escapeHtml(locale === "zh-CN" ? "评分模式" : "Score mode")}: ${escapeHtml(getRunScoreMode(run))} | ${escapeHtml(locale === "zh-CN" ? "评分权重" : "Score weights")}: ${escapeHtml(JSON.stringify((run as ScoredRun).scoreWeights ?? {}))}</p>
         <p class="lede">${escapeHtml(locale === "zh-CN" ? "评分范围" : "Score scope")}: ${escapeHtml(run.scoreScope ?? "run-local")} | ${escapeHtml(run.scoreValidityNote ?? "Scores only compare variants inside this run.")}</p>
+        ${
+          run.taskCompatibility
+            ? `<p class="lede">${escapeHtml(locale === "zh-CN" ? "任务兼容性" : "Task compatibility")}: ${escapeHtml(run.taskCompatibility.status)} - ${escapeHtml(run.taskCompatibility.summary)}</p>`
+            : ""
+        }
         ${
           run.task.metadata
             ? `<p class="lede">${escapeHtml(copy.objectiveLabel)}: ${escapeHtml(run.task.metadata.objective ?? "n/a")} | ${escapeHtml(copy.judgeRationaleLabel)}: ${escapeHtml(

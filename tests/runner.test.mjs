@@ -1277,6 +1277,141 @@ test("runBenchmark surfaces a non-fatal task compatibility warning without throw
   await rm(tempDir, { recursive: true, force: true });
 });
 
+test("runBenchmark skips incompatible task packs without scoring agents", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-runner-"));
+  const repoPath = path.join(tempDir, "repo");
+  const outputPath = path.join(tempDir, "output");
+
+  await mkdir(repoPath, { recursive: true });
+  await writeFile(path.join(repoPath, "README.md"), "# Node Repo\n", "utf8");
+  await writeJson(path.join(repoPath, "package.json"), { name: "node-repo", version: "0.0.0" });
+
+  const events = [];
+  const benchmark = await runBenchmark({
+    repoPath,
+    taskPath: path.resolve("examples/taskpacks/official/python-api.yaml"),
+    agentIds: ["demo-fast"],
+    outputPath,
+    onProgress: (event) => {
+      events.push(event);
+    }
+  });
+
+  assert.equal(benchmark.taskCompatibility?.status, "incompatible");
+  assert.equal(benchmark.results.length, 1);
+  assert.equal(benchmark.results[0].status, "failed");
+  assert.equal(benchmark.results[0].scoreExcluded, true);
+  assert.equal(benchmark.results[0].failureCategory, "task-pack");
+  assert.match(benchmark.results[0].summary, /not runnable/i);
+  assert.ok(
+    !events.some((event) => event.phase === "agent-start"),
+    "incompatible task should stop before agent execution"
+  );
+
+  await rm(tempDir, { recursive: true, force: true });
+});
+
+test("runBenchmark skips no-install node tool checks that would force dependency installs", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-runner-"));
+  const repoPath = path.join(tempDir, "repo");
+  const outputPath = path.join(tempDir, "output");
+  const taskPath = path.join(tempDir, "task-no-install.json");
+
+  await mkdir(repoPath, { recursive: true });
+  await writeFile(path.join(repoPath, "README.md"), "# Node Repo\n", "utf8");
+  await writeJson(path.join(repoPath, "package.json"), { name: "node-repo", version: "0.0.0" });
+
+  await writeJson(taskPath, {
+    schemaVersion: "agentarena.taskpack/v1",
+    id: "needs-local-jest",
+    title: "Needs Local Jest",
+    prompt: "Fix a test.",
+    metadata: {
+      source: "official",
+      owner: "test",
+      repoTypes: ["node"],
+      tags: ["test"],
+      dependencies: ["npm"]
+    },
+    judges: [
+      {
+        id: "tests-pass",
+        type: "test-result",
+        label: "All tests pass",
+        command: "npx --no-install jest --json --outputFile=.agentarena/test-results.json",
+        reportFile: ".agentarena/test-results.json"
+      }
+    ]
+  });
+
+  const events = [];
+  const benchmark = await runBenchmark({
+    repoPath,
+    taskPath,
+    agentIds: ["demo-fast"],
+    outputPath,
+    onProgress: (event) => {
+      events.push(event);
+    }
+  });
+
+  assert.equal(benchmark.taskCompatibility?.status, "incompatible");
+  assert.match(benchmark.taskCompatibility.checks.find((check) => check.status === "fail")?.message ?? "", /force the agent to install dependencies/i);
+  assert.equal(benchmark.results[0].scoreExcluded, true);
+  assert.equal(benchmark.results[0].failureCategory, "task-pack");
+  assert.ok(
+    !events.some((event) => event.phase === "agent-start"),
+    "no-install local tool mismatch should stop before agent execution"
+  );
+
+  await rm(tempDir, { recursive: true, force: true });
+});
+
+test("runBenchmark treats multiple repoTypes as alternatives", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-runner-"));
+  const repoPath = path.join(tempDir, "repo");
+  const outputPath = path.join(tempDir, "output");
+  const taskPath = path.join(tempDir, "task-multi-repotypes.json");
+
+  await mkdir(repoPath, { recursive: true });
+  await writeFile(path.join(repoPath, "README.md"), "# Node Repo\n", "utf8");
+  await writeJson(path.join(repoPath, "package.json"), { name: "node-repo", version: "0.0.0" });
+
+  await writeJson(taskPath, {
+    schemaVersion: "agentarena.taskpack/v1",
+    id: "multi-repotypes",
+    title: "Multi Repo Types",
+    prompt: "Make a small docs improvement.",
+    metadata: {
+      source: "official",
+      owner: "test",
+      repoTypes: ["node-js", "python", "go", "java"],
+      tags: ["docs"],
+      dependencies: []
+    },
+    judges: [
+      {
+        id: "readme-exists",
+        type: "file-exists",
+        label: "README exists",
+        path: "README.md"
+      }
+    ]
+  });
+
+  const benchmark = await runBenchmark({
+    repoPath,
+    taskPath,
+    agentIds: ["demo-fast"],
+    outputPath
+  });
+
+  assert.notEqual(benchmark.taskCompatibility?.status, "incompatible");
+  assert.equal(benchmark.results[0].scoreExcluded, undefined);
+
+  await rm(tempDir, { recursive: true, force: true });
+});
+
 test("runBenchmark reports a passing compatibility check for a compatible task", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-runner-"));
   const repoPath = path.join(tempDir, "repo");

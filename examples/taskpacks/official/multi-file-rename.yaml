@@ -80,7 +80,7 @@ judges:
   - id: typescript-compiles
     type: command
     label: TypeScript compiles without errors
-    command: npx tsc --noEmit
+    command: npx --no-install tsc --noEmit
     timeoutMs: 60000
   - id: tests-pass
     type: test-result

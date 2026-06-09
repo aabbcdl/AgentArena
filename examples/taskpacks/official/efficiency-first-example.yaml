@@ -49,10 +49,5 @@ judges:
 envAllowList:
   - NODE_ENV
   - CI
-setupCommands:
-  - id: install-deps
-    label: "Install dependencies"
-    command: "npm install"
-    timeoutMs: 60000
-    envAllowList: [NODE_ENV, CI]
+setupCommands: []
 teardownCommands: []

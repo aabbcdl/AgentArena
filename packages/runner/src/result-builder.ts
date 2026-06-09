@@ -42,6 +42,9 @@ interface BaseResultOptions {
   cursorBench?: AgentRunResult["cursorBench"];
   liveBench?: AgentRunResult["liveBench"];
   assembledPrompt?: string;
+  scoreExcluded?: boolean;
+  scoreExclusionReason?: string;
+  failureCategory?: AgentRunResult["failureCategory"];
 }
 
 /**
@@ -77,6 +80,9 @@ export function createBaseResult(options: BaseResultOptions): AgentRunResult {
     workspacePath,
     diff: options.diff ?? { added: [], changed: [], removed: [], skippedLargeFiles: [] },
     diffPrecision: options.diffPrecision,
+    scoreExcluded: options.scoreExcluded,
+    scoreExclusionReason: options.scoreExclusionReason,
+    failureCategory: options.failureCategory,
     tokenUsageBreakdown: options.tokenUsageBreakdown,
     tokenEfficiencyScore: options.tokenEfficiencyScore,
     sweBench: options.sweBench,
@@ -134,7 +140,10 @@ export function createSkippedRunResult(
     tracePath,
     workspacePath,
     status: "failed",
-    summary: preflight.summary
+    summary: preflight.summary,
+    scoreExcluded: true,
+    scoreExclusionReason: "Agent did not run because adapter preflight was not ready.",
+    failureCategory: "environment"
   });
 }
 

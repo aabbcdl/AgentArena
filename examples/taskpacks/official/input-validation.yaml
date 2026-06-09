@@ -27,16 +27,12 @@ prompt: |
 
   Focus on API endpoints and user-facing input first.
 envAllowList: []
-setupCommands:
-  - id: install-deps
-    label: Install dependencies
-    command: npm install
-    timeoutMs: 120000
+setupCommands: []
 judges:
   - id: tests-pass
     type: test-result
     label: All tests pass
-    command: npx jest --json --outputFile=.agentarena/test-results.json
+    command: npx --no-install jest --json --outputFile=.agentarena/test-results.json
     format: jest
     reportFile: .agentarena/test-results.json
     timeoutMs: 120000

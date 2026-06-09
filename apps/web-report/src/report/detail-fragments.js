@@ -69,6 +69,20 @@ function renderScoreBreakdown(result, run, localText, escapeHtml) {
  */
 function renderFailureAnalysis(result, localText, escapeHtml) {
   if (result.status === "success") return "";
+  if (result.scoreExcluded) {
+    const reason = result.scoreExclusionReason || result.summary || "Result is not comparable.";
+    return `
+    <div class="failure-analysis">
+      <div class="failure-analysis-header">
+        <strong>${escapeHtml(localText("未参与评分", "Not Scored"))}</strong>
+      </div>
+      <div class="failure-analysis-rows">
+        <div class="failure-judge-row">
+          <div class="failure-judge-label">${escapeHtml(reason)}</div>
+        </div>
+      </div>
+    </div>`;
+  }
   const failedJudges = (result.judgeResults || []).filter((j) => !j.success);
   if (failedJudges.length === 0) return "";
 
@@ -111,7 +125,7 @@ function renderErrorBadge(result, localText, escapeHtml) {
   let hint = "";
   let cssClass = "error-badge";
 
-  if (summary.includes("setup commands failed") || summary.includes("task pack setup failed")) {
+  if (result.scoreExcluded || summary.includes("task pack is not runnable") || summary.includes("setup commands failed") || summary.includes("task pack setup failed")) {
     source = localText("📦 任务包配置问题", "📦 Task Pack Issue");
     hint = localText(
       "任务包的 setup 命令执行失败，这不是 Agent 或模型的问题。请检查任务包的 setupCommands 配置。",

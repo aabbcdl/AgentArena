@@ -1,5 +1,5 @@
 import type { AgentRunResult, BenchmarkRun } from "@agentarena/core";
-import { diagnoseResultFailure, type FailureDiagnostic } from "./report-helpers.js";
+import { diagnoseResultFailure, type FailureDiagnostic, isResultScoreExcluded } from "./report-helpers.js";
 
 export interface DecisionRecommendation {
   rank: number;
@@ -117,10 +117,26 @@ function inferScenario(run: BenchmarkRun): string {
 function computeRecommendations(results: AgentRunResult[]): DecisionRecommendation[] {
   // Sort by composite score (descending)
   const sorted = [...results].sort(
-    (a, b) => (b.compositeScore ?? 0) - (a.compositeScore ?? 0)
+    (a, b) => Number(isResultScoreExcluded(a)) - Number(isResultScoreExcluded(b)) || (b.compositeScore ?? 0) - (a.compositeScore ?? 0)
   );
 
   return sorted.map((result, index) => {
+    if (isResultScoreExcluded(result)) {
+      return {
+        rank: index + 1,
+        agentId: result.agentId,
+        displayLabel: result.displayLabel,
+        recommendation: "not-recommended",
+        successRate: 0,
+        avgCostPerRun: result.estimatedCostUsd,
+        avgDurationMs: result.durationMs,
+        strengths: [],
+        weaknesses: [result.scoreExclusionReason ?? "Result was not scored because it is not comparable."],
+        riskFactors: ["Do not use this result to compare agent or model quality."],
+        confidence: "low"
+      };
+    }
+
     const recommendation: DecisionRecommendation["recommendation"] =
       index === 0 && result.compositeScore != null && result.compositeScore >= 50
         ? "recommended"
@@ -226,12 +242,14 @@ function computeTeamCostEstimates(
   const monthlyMultiplier = teamSize * dailyRuns * workingDays;
 
   const successfulResults = results
+    .filter((r) => !isResultScoreExcluded(r))
     .filter((r) => r.costKnown && r.estimatedCostUsd > 0)
     .sort((a, b) => a.estimatedCostUsd - b.estimatedCostUsd);
 
   const cheapest = successfulResults[0]?.estimatedCostUsd ?? 0;
 
   return results
+    .filter((result) => !isResultScoreExcluded(result))
     .map((result) => {
       const monthlyCost = result.costKnown
         ? result.estimatedCostUsd * monthlyMultiplier
@@ -260,8 +278,14 @@ function computeTeamCostEstimates(
  */
 function extractKeyInsights(results: AgentRunResult[]): string[] {
   const insights: string[] = [];
-  const successful = results.filter((r) => r.status === "success");
-  const failed = results.filter((r) => r.status !== "success");
+  const comparable = results.filter((r) => !isResultScoreExcluded(r));
+  const excluded = results.length - comparable.length;
+  const successful = comparable.filter((r) => r.status === "success");
+  const failed = comparable.filter((r) => r.status !== "success");
+
+  if (excluded > 0) {
+    insights.push(`${excluded} result(s) were not scored because the task pack, repository, or local setup was not comparable`);
+  }
 
   if (successful.length > 0) {
     const best = successful.reduce((a, b) =>
@@ -276,7 +300,7 @@ function extractKeyInsights(results: AgentRunResult[]): string[] {
     insights.push(`${failed.length} agent(s) failed to complete the task`);
   }
 
-  const costKnown = results.filter((r) => r.costKnown);
+  const costKnown = comparable.filter((r) => r.costKnown);
   if (costKnown.length > 1) {
     const cheapest = costKnown.reduce((a, b) =>
       a.estimatedCostUsd < b.estimatedCostUsd ? a : b
@@ -308,23 +332,29 @@ function extractKeyInsights(results: AgentRunResult[]): string[] {
  */
 function extractWarnings(results: AgentRunResult[]): string[] {
   const warnings: string[] = [];
+  const comparable = results.filter((r) => !isResultScoreExcluded(r));
 
-  const unknownCost = results.filter((r) => !r.costKnown);
+  const unknownCost = comparable.filter((r) => !r.costKnown);
   if (unknownCost.length > 0) {
     warnings.push(
       `${unknownCost.length} agent(s) have unknown costs - actual costs may be higher than expected`
     );
   }
 
-  const manyChanges = results.filter((r) => r.changedFiles.length > 10);
+  const manyChanges = comparable.filter((r) => r.changedFiles.length > 10);
   if (manyChanges.length > 0) {
     warnings.push(
       `${manyChanges.length} agent(s) modified many files - review changes carefully`
     );
   }
 
-  const allFailed = results.every((r) => r.status !== "success");
-  if (allFailed) {
+  const allFailed = comparable.length > 0 && comparable.every((r) => r.status !== "success");
+  const allExcluded = results.length > 0 && results.every((r) => isResultScoreExcluded(r));
+  if (allExcluded) {
+    warnings.push(
+      "No agents were run because the task pack, repository, or local setup was not comparable"
+    );
+  } else if (allFailed) {
     warnings.push(
       "All agents failed - task may be too difficult or task pack needs adjustment"
     );

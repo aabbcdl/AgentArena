@@ -3,6 +3,7 @@ import type { LeaderboardData } from "./leaderboard.js";
 import {
   diagnoseResultFailure,
   escapeMdCell,
+  formatCompositeScoreValue,
   formatDiffPrecisionMetric,
   formatLintMetric,
   formatRuntimeIdentity,
@@ -51,12 +52,23 @@ export function renderMarkdown(run: BenchmarkRun, locale: Locale, leaderboard?: 
       : []),
     `- ${copy.successRateLabel}: \`${summary.successCount}/${summary.totalAgents}\``,
     `- ${copy.failedLabel}: \`${summary.failedCount}\``,
+    `- ${locale === "zh-CN" ? "未评分" : "Not Scored"}: \`${summary.scoreExcludedCount}\``,
     `- ${copy.totalTokensLabel}: \`${summary.totalTokens}\` | ${copy.knownCostLabel}: \`$${summary.knownCostUsd.toFixed(2)}\``,
     `- ${copy.badgeEndpointLabel}: \`badge.json\``,
     `- ${copy.noteLabel}: ${copy.comparesModelConfigurations} ${copy.baselineRepoHealthNote}`,
     `- ${locale === "zh-CN" ? "分数说明" : "Score Note"}: ${run.scoreValidityNote ?? "Scores only compare variants inside this run."}`,
     ""
   ];
+
+  if (run.taskCompatibility) {
+    lines.push(
+      `- ${locale === "zh-CN" ? "任务兼容性" : "Task Compatibility"}: \`${run.taskCompatibility.status}\` - ${run.taskCompatibility.summary}`
+    );
+    for (const check of run.taskCompatibility.checks.filter((item) => item.status !== "pass").slice(0, 5)) {
+      lines.push(`  - ${check.label}: ${check.message}${check.fix ? ` Fix: ${check.fix}` : ""}`);
+    }
+    lines.push("");
+  }
 
   // 添加历史排行榜摘要
   if (leaderboard && leaderboard.rows.length > 0) {
@@ -130,7 +142,7 @@ export function renderMarkdown(run: BenchmarkRun, locale: Locale, leaderboard?: 
     const runtime = formatRuntimeIdentity(result);
     const passedJudgeCount = result.judgeResults.filter((judge) => judge.success).length;
     lines.push(
-      `| ${escapeMdCell(result.displayLabel ?? result.agentId)} | ${escapeMdCell(result.baseAgentId)} | ${escapeMdCell(runtime.provider)} | ${escapeMdCell(runtime.providerKind)} | ${escapeMdCell(runtime.model)} | ${escapeMdCell(runtime.reasoning)} | ${escapeMdCell(runtime.version)} | ${escapeMdCell(runtime.verification)}/${escapeMdCell(runtime.source)} | ${result.status} | ${(result.compositeScore ?? 0).toFixed(1)} | ${formatDuration(result.durationMs)} | ${result.tokenUsage} | ${
+      `| ${escapeMdCell(result.displayLabel ?? result.agentId)} | ${escapeMdCell(result.baseAgentId)} | ${escapeMdCell(runtime.provider)} | ${escapeMdCell(runtime.providerKind)} | ${escapeMdCell(runtime.model)} | ${escapeMdCell(runtime.reasoning)} | ${escapeMdCell(runtime.version)} | ${escapeMdCell(runtime.verification)}/${escapeMdCell(runtime.source)} | ${result.status} | ${formatCompositeScoreValue(result)} | ${formatDuration(result.durationMs)} | ${result.tokenUsage} | ${
         result.costKnown ? `$${result.estimatedCostUsd.toFixed(2)}` : "n/a"
       } | ${result.changedFiles.length} | ${passedJudgeCount}/${result.judgeResults.length} | ${escapeMdCell(formatTestMetric(result))} | ${escapeMdCell(formatLintMetric(result))} | ${escapeMdCell(formatDiffPrecisionMetric(result))} |`
     );
@@ -188,7 +200,7 @@ export function renderMarkdown(run: BenchmarkRun, locale: Locale, leaderboard?: 
     lines.push(`- Test Result: ${formatTestMetric(result)}`);
     lines.push(`- Lint Result: ${formatLintMetric(result)}`);
     lines.push(`- Diff Precision: ${formatDiffPrecisionMetric(result)}`);
-    lines.push(`- Composite Score: ${(result.compositeScore ?? 0).toFixed(1)}`);
+    lines.push(`- Composite Score: ${formatCompositeScoreValue(result)}`);
     if ((result.scoreReasons?.length ?? 0) > 0) {
       lines.push(`- Score Reasons: ${result.scoreReasons?.join(", ")}`);
     }
@@ -249,6 +261,16 @@ export function renderPrComment(run: BenchmarkRun, locale: Locale, leaderboard?:
     }
   }
 
+  if (run.taskCompatibility) {
+    header.push(
+      "",
+      `${locale === "zh-CN" ? "任务兼容性" : "Task compatibility"}: \`${run.taskCompatibility.status}\` - ${run.taskCompatibility.summary}`
+    );
+    for (const check of run.taskCompatibility.checks.filter((item) => item.status !== "pass").slice(0, 3)) {
+      header.push(`- ${check.label}: ${check.message}${check.fix ? ` Fix: ${check.fix}` : ""}`);
+    }
+  }
+
   const table = [
     "",
     `### ${copy.reviewTableTitle}`,
@@ -276,7 +298,7 @@ export function renderPrComment(run: BenchmarkRun, locale: Locale, leaderboard?:
             ? result.preflight.summary
             : "ready";
     table.push(
-      `| ${attention} | ${escapeMdCell(result.displayLabel ?? result.agentId)} | ${escapeMdCell(result.baseAgentId)} | ${escapeMdCell(runtime.provider)} | ${escapeMdCell(runtime.providerKind)} | ${escapeMdCell(runtime.model)} | ${escapeMdCell(runtime.reasoning)} | ${escapeMdCell(runtime.version)} | ${escapeMdCell(runtime.verification)}/${escapeMdCell(runtime.source)} | ${formatSupportTier(result.preflight.capability.supportTier)} | ${result.preflight.status} | ${result.status} | ${(result.compositeScore ?? 0).toFixed(1)} | ${formatDuration(result.durationMs)} | ${result.tokenUsage} | ${
+      `| ${attention} | ${escapeMdCell(result.displayLabel ?? result.agentId)} | ${escapeMdCell(result.baseAgentId)} | ${escapeMdCell(runtime.provider)} | ${escapeMdCell(runtime.providerKind)} | ${escapeMdCell(runtime.model)} | ${escapeMdCell(runtime.reasoning)} | ${escapeMdCell(runtime.version)} | ${escapeMdCell(runtime.verification)}/${escapeMdCell(runtime.source)} | ${formatSupportTier(result.preflight.capability.supportTier)} | ${result.preflight.status} | ${result.status} | ${formatCompositeScoreValue(result)} | ${formatDuration(result.durationMs)} | ${result.tokenUsage} | ${
         result.costKnown ? `$${result.estimatedCostUsd.toFixed(2)}` : "n/a"
       } | ${passedJudgeCount}/${result.judgeResults.length} | ${escapeMdCell(formatTestMetric(result))} | ${escapeMdCell(formatLintMetric(result))} | ${escapeMdCell(formatDiffPrecisionMetric(result))} | ${result.changedFiles.length} | ${escapeMdCell(note)} |`
     );

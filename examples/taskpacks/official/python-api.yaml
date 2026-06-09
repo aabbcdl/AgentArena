@@ -27,11 +27,7 @@ prompt: |
 
   Look at existing endpoints for the pattern to follow.
 envAllowList: []
-setupCommands:
-  - id: install-deps
-    label: Install dependencies
-    command: pip install -r requirements.txt
-    timeoutMs: 120000
+setupCommands: []
 judges:
   - id: tests-pass
     type: test-result

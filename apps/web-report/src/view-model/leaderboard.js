@@ -2,6 +2,7 @@ import {
   getComparableRuns,
   runtimeIdentity
 } from "./comparison.js";
+import { isScoreExcluded } from "./scoring.js";
 
 /**
  * Build the identity tuple for a leaderboard entry.
@@ -69,6 +70,9 @@ export function buildLeaderboard(runs, currentRun) {
 
   for (const run of comparableRuns) {
     for (const result of run.results) {
+      if (isScoreExcluded(result)) {
+        continue;
+      }
       const identity = getLeaderboardIdentity(run, result);
       const key = serializeLeaderboardIdentity(identity);
 
@@ -87,8 +91,9 @@ export function buildLeaderboard(runs, currentRun) {
   const comparisonMap = new Map();
 
   for (const run of comparableRuns) {
-    const successfulResults = run.results.filter((r) => r.status === "success");
-    const candidates = successfulResults.length > 0 ? successfulResults : run.results;
+    const comparableResults = run.results.filter((r) => !isScoreExcluded(r));
+    const successfulResults = comparableResults.filter((r) => r.status === "success");
+    const candidates = successfulResults.length > 0 ? successfulResults : comparableResults;
 
     const sorted = [...candidates].sort((a, b) => {
       const scoreA = a.compositeScore ?? 0;
@@ -104,7 +109,7 @@ export function buildLeaderboard(runs, currentRun) {
       winMap.set(winnerKey, (winMap.get(winnerKey) ?? 0) + 1);
     }
 
-    for (const result of run.results) {
+    for (const result of comparableResults) {
       const identity = getLeaderboardIdentity(run, result);
       const key = serializeLeaderboardIdentity(identity);
       comparisonMap.set(key, (comparisonMap.get(key) ?? 0) + 1);

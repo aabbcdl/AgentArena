@@ -66,7 +66,10 @@ function createResult(outputPath, overrides = {}) {
       added: [],
       changed: [],
       removed: []
-    }
+    },
+    scoreExcluded: overrides.scoreExcluded,
+    scoreExclusionReason: overrides.scoreExclusionReason,
+    failureCategory: overrides.failureCategory
   };
 }
 
@@ -272,6 +275,9 @@ test("writeReport diagnoses setup failures with task pack commands", async () =>
         displayLabel: "Demo Setup Fail",
         status: "failed",
         summary: "setup command \"Install dependencies\" failed with exit code 1.",
+        scoreExcluded: true,
+        scoreExclusionReason: "Task setup failed before the agent started.",
+        failureCategory: "task-pack",
         setupResults: [
           {
             stepId: "install-deps",
@@ -296,7 +302,62 @@ test("writeReport diagnoses setup failures with task pack commands", async () =>
   assert.match(markdown, /Cause: Setup failed before the agent started: Install dependencies\./);
   assert.match(markdown, /Evidence: Setup command: pip install -r requirements\.txt/);
   assert.match(markdown, /Fix: Use a repository that matches the task pack/);
+  assert.match(markdown, /Composite Score: n\/a/);
+  assert.match(prComment, /\| fail \| Demo Setup Fail .*?\| failed \| failed \| n\/a \|/);
   assert.match(prComment, /fix: Use a repository that matches the task pack/);
+
+  await rm(tempDir, { recursive: true, force: true });
+});
+
+test("writeReport explains missing local node tools as task-pack environment issues", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-report-local-tool-"));
+  const outputPath = path.join(tempDir, "run-output");
+
+  const benchmarkRun = {
+    runId: "run-local-tool",
+    createdAt: "2026-03-13T00:00:00.000Z",
+    repoPath: "D:\\project\\AgentArena",
+    outputPath,
+    task: {
+      schemaVersion: "agentarena.taskpack/v1",
+      id: "react-bugfix",
+      title: "React Bugfix",
+      prompt: "Prompt",
+      envAllowList: [],
+      setupCommands: [],
+      judges: [],
+      teardownCommands: []
+    },
+    preflights: [],
+    results: [
+      createResult(outputPath, {
+        agentId: "demo-local-tool",
+        displayLabel: "Demo Local Tool",
+        status: "failed",
+        summary: "Done",
+        judgeResults: [
+          {
+            judgeId: "tests-pass",
+            label: "All tests pass",
+            type: "test-result",
+            exitCode: 1,
+            success: false,
+            stdout: "",
+            stderr: "npm ERR! could not determine executable to run\ncommand: npx --no-install jest",
+            durationMs: 10,
+            command: "npx --no-install jest --json",
+            cwd: "workspace/demo-local-tool"
+          }
+        ]
+      })
+    ]
+  };
+
+  const { markdownPath } = await writeReport(benchmarkRun);
+  const markdown = await readFile(markdownPath, "utf8");
+
+  assert.match(markdown, /Validation could not run because the task pack depends on local project tools/);
+  assert.match(markdown, /Prepare dependencies before benchmarking/);
 
   await rm(tempDir, { recursive: true, force: true });
 });

@@ -128,7 +128,9 @@ export async function runSetupCommands(
       setupResults: [],
       earlyResult: {
         ...createSkippedRunResult(preflight, context.tracePath, workspacePath),
-        summary: `⚠️ Task pack setup failed (not an agent/model issue): ${errorDetails.message}`,
+        summary: `Task pack setup failed before the agent started: ${errorDetails.message}`,
+        scoreExclusionReason: "Task setup failed before the agent started.",
+        failureCategory: "task-pack",
         setupResults: []
       }
     };
@@ -166,7 +168,10 @@ export async function runSetupCommands(
         summary: failedStep
           ? summarizeCommandStepFailure("setup", failedStep)
           : "Setup command failed but no result was captured.",
-        setupResults
+        setupResults,
+        scoreExcluded: true,
+        scoreExclusionReason: "Task setup failed before the agent started.",
+        failureCategory: "task-pack"
       })
     };
   }

@@ -269,6 +269,10 @@ export function formatDiffPrecisionMetric(result) {
 const FAILED_SCORE_BAND = { min: 10, max: 40 };
 const CRITICAL_FAIL_SCORE_BAND = { min: 50, max: 70 };
 
+export function isScoreExcluded(result) {
+  return result?.scoreExcluded === true;
+}
+
 /**
  * Weighted pass ratio for a set of judges: Σ(weightᵢ·passedᵢ) / Σ(weightᵢ),
  * using `weight ?? 1`. Returns 1 for an empty set (vacuously true).
@@ -453,6 +457,13 @@ export function normalizeApplicableWeights(weights, result, run) {
  */
 export function getCompositeScoreDetails(result, run, weights = DEFAULT_SCORE_WEIGHTS) {
   const components = computeScoreComponents(result, run);
+  if (isScoreExcluded(result)) {
+    return {
+      total: 0,
+      weights: normalizeScoreWeights(weights),
+      components
+    };
+  }
 
   // Rule 1: Failed run → failed band
   if (result.status !== "success") {
@@ -540,6 +551,9 @@ function weightsMatchArchivedRun(weights, run) {
  * @returns {string}
  */
 export function formatCompositeScore(result, run, weights = DEFAULT_SCORE_WEIGHTS) {
+  if (isScoreExcluded(result)) {
+    return "n/a";
+  }
   // Use the archived score only when the active weights match the run's stored
   // scoring weights. Preset identity alone is not enough: switching presets in
   // the UI must re-score the visible report.
@@ -558,6 +572,10 @@ export function formatCompositeScore(result, run, weights = DEFAULT_SCORE_WEIGHT
  * @returns {string[]}
  */
 export function getCompositeScoreReasons(result, run, weights = DEFAULT_SCORE_WEIGHTS) {
+  if (isScoreExcluded(result)) {
+    return [result.scoreExclusionReason ?? "not-comparable"];
+  }
+
   // Use pre-computed reasons if available and weights match
   if (Array.isArray(result.scoreReasons) && weightsMatchArchivedRun(weights, run)) {
     return result.scoreReasons;

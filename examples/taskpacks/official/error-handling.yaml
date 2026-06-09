@@ -27,11 +27,7 @@ prompt: |
 
   Focus on the most critical error paths first (API endpoints, file operations, external service calls).
 envAllowList: []
-setupCommands:
-  - id: install-deps
-    label: Install dependencies
-    command: npm install
-    timeoutMs: 120000
+setupCommands: []
 judges:
   - id: build-passes
     type: compilation
@@ -41,7 +37,7 @@ judges:
   - id: tests-pass
     type: test-result
     label: All tests pass
-    command: npx jest --json --outputFile=.agentarena/test-results.json
+    command: npx --no-install jest --json --outputFile=.agentarena/test-results.json
     format: jest
     reportFile: .agentarena/test-results.json
     timeoutMs: 120000
