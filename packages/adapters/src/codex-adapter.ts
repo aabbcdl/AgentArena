@@ -58,6 +58,22 @@ async function resolveCodexInvocation(): Promise<InvocationSpec> {
 
 export { resolveCodexInvocation };
 
+const CODEX_SANDBOX_MODES = ["read-only", "workspace-write", "danger-full-access"] as const;
+type CodexSandboxMode = typeof CODEX_SANDBOX_MODES[number];
+
+function isCodexSandboxMode(value: string): value is CodexSandboxMode {
+  return CODEX_SANDBOX_MODES.includes(value as CodexSandboxMode);
+}
+
+export function resolveCodexSandboxMode(environment: NodeJS.ProcessEnv = process.env): CodexSandboxMode {
+  const configured = environment.AGENTARENA_CODEX_SANDBOX?.trim();
+  if (configured && isCodexSandboxMode(configured)) {
+    return configured;
+  }
+
+  return process.platform === "win32" ? "danger-full-access" : "workspace-write";
+}
+
 export class CodexCliAdapter implements AgentAdapter {
   readonly kind = "external" as const;
   readonly id = "codex";
@@ -165,13 +181,14 @@ export class CodexCliAdapter implements AgentAdapter {
     const prompt = buildAgentPrompt(context);
     await savePromptArtifact(prompt, context.workspacePath, context);
     const invocation = await resolveCodexInvocation();
+    const sandboxMode = resolveCodexSandboxMode(context.environment);
     const args = [
       ...invocation.argsPrefix,
       "exec",
       "--skip-git-repo-check",
       "--ephemeral",
       "--sandbox",
-      "workspace-write",
+      sandboxMode,
       "--cd",
       context.workspacePath,
       "--output-last-message",
@@ -205,6 +222,7 @@ export class CodexCliAdapter implements AgentAdapter {
       metadata: {
         command: invocation.displayCommand,
         args,
+        sandboxMode,
         requestedConfig: context.selection.config,
         resolvedRuntime: runtimeWithVersion
       }

@@ -49,6 +49,12 @@ Default values are in parentheses. All are optional.
 | `AGENTARENA_OPENCODE_MODEL` | _(adapter default)_ | `packages/adapters/src/base-cli-adapter.ts` | OpenCode model override |
 | `QWEN_CODE_MODEL` | _(adapter default)_ | `packages/adapters/src/qwen-adapter.ts` | Qwen model override (note: different prefix) |
 
+## Adapter Execution Control
+
+| Variable | Default | File | Description |
+|----------|---------|------|-------------|
+| `AGENTARENA_CODEX_SANDBOX` | `danger-full-access` on Windows, `workspace-write` elsewhere | `packages/adapters/src/codex-adapter.ts` | Codex CLI sandbox mode (`read-only`, `workspace-write`, or `danger-full-access`) |
+
 ## Claude Provider Profile Storage
 
 | Variable | Default | File | Description |

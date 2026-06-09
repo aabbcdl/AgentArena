@@ -358,6 +358,141 @@ test("resolveCodexRuntime falls back from env to ~/.codex/config.toml", async ()
   }
 });
 
+test("resolveCodexSandboxMode defaults to non-prompting mode on Windows", () => {
+  const expectedDefault = process.platform === "win32" ? "danger-full-access" : "workspace-write";
+
+  assert.equal(__testUtils.resolveCodexSandboxMode({}), expectedDefault);
+  assert.equal(
+    __testUtils.resolveCodexSandboxMode({ AGENTARENA_CODEX_SANDBOX: "read-only" }),
+    "read-only"
+  );
+  assert.equal(
+    __testUtils.resolveCodexSandboxMode({ AGENTARENA_CODEX_SANDBOX: "workspace-write" }),
+    "workspace-write"
+  );
+  assert.equal(
+    __testUtils.resolveCodexSandboxMode({ AGENTARENA_CODEX_SANDBOX: "danger-full-access" }),
+    "danger-full-access"
+  );
+  assert.equal(
+    __testUtils.resolveCodexSandboxMode({ AGENTARENA_CODEX_SANDBOX: "invalid-mode" }),
+    expectedDefault
+  );
+});
+
+test("Codex adapter passes configured sandbox mode to the CLI", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-codex-shim-"));
+  const workspacePath = path.join(tempDir, "workspace");
+  const homeDir = path.join(tempDir, "home");
+  const shimPath = path.join(tempDir, "codex.cmd");
+  const scriptPath = path.join(tempDir, "codex-shim.mjs");
+  const capturePath = path.join(tempDir, "capture.json");
+  const originalCodexBin = process.env.AGENTARENA_CODEX_BIN;
+  const originalCodexSandbox = process.env.AGENTARENA_CODEX_SANDBOX;
+  const originalCodexModel = process.env.AGENTARENA_CODEX_MODEL;
+  const originalCodexReasoning = process.env.AGENTARENA_CODEX_REASONING_EFFORT;
+  const originalUserProfile = process.env.USERPROFILE;
+
+  try {
+    await mkdir(workspacePath, { recursive: true });
+    await mkdir(homeDir, { recursive: true });
+    await writeFile(
+      scriptPath,
+      [
+        'import { mkdirSync, writeFileSync } from "node:fs";',
+        'import path from "node:path";',
+        "const args = process.argv.slice(2);",
+        'if (args.includes("--version")) { console.log("codex 0.0.0"); process.exit(0); }',
+        "writeFileSync(process.env.AGENTARENA_CODEX_CAPTURE, JSON.stringify({ argv: args }), 'utf8');",
+        'const outputIndex = args.indexOf("--output-last-message");',
+        "if (outputIndex >= 0) {",
+        "  const outputPath = args[outputIndex + 1];",
+        "  mkdirSync(path.dirname(outputPath), { recursive: true });",
+        "  writeFileSync(outputPath, 'Codex shim completed.', 'utf8');",
+        "}",
+        'console.log(JSON.stringify({ type: "thread.started", thread_id: "shim-thread" }));',
+      ].join("\n"),
+      "utf8"
+    );
+    await writeFile(shimPath, `@echo off\n"${process.execPath}" "${scriptPath}" %*\n`, "utf8");
+
+    process.env.AGENTARENA_CODEX_BIN = shimPath;
+    process.env.AGENTARENA_CODEX_SANDBOX = "danger-full-access";
+    delete process.env.AGENTARENA_CODEX_MODEL;
+    delete process.env.AGENTARENA_CODEX_REASONING_EFFORT;
+    process.env.USERPROFILE = homeDir;
+
+    const adapter = getAdapter("codex");
+    const traceEvents = [];
+    const result = await adapter.execute({
+      agentId: "codex",
+      selection: {
+        baseAgentId: "codex",
+        variantId: "codex",
+        displayLabel: "Codex CLI",
+        config: {},
+        configSource: "test"
+      },
+      repoPath: tempDir,
+      workspacePath,
+      environment: {
+        ...process.env,
+        AGENTARENA_CODEX_CAPTURE: capturePath
+      },
+      task: {
+        schemaVersion: "agentarena.taskpack/v1",
+        id: "codex-sandbox",
+        title: "Codex Sandbox",
+        prompt: "No-op.",
+        envAllowList: [],
+        setupCommands: [],
+        judges: [],
+        teardownCommands: []
+      },
+      trace: async (event) => {
+        traceEvents.push(event);
+      }
+    });
+
+    const captured = JSON.parse(await readFile(capturePath, "utf8"));
+    const sandboxIndex = captured.argv.indexOf("--sandbox");
+    const startEvent = traceEvents.find((event) => event.type === "adapter.start");
+
+    assert.equal(result.status, "success");
+    assert.notEqual(sandboxIndex, -1);
+    assert.equal(captured.argv[sandboxIndex + 1], "danger-full-access");
+    assert.equal(captured.argv.includes("workspace-write"), false);
+    assert.equal(startEvent?.metadata?.sandboxMode, "danger-full-access");
+  } finally {
+    if (originalCodexBin === undefined) {
+      delete process.env.AGENTARENA_CODEX_BIN;
+    } else {
+      process.env.AGENTARENA_CODEX_BIN = originalCodexBin;
+    }
+    if (originalCodexSandbox === undefined) {
+      delete process.env.AGENTARENA_CODEX_SANDBOX;
+    } else {
+      process.env.AGENTARENA_CODEX_SANDBOX = originalCodexSandbox;
+    }
+    if (originalCodexModel === undefined) {
+      delete process.env.AGENTARENA_CODEX_MODEL;
+    } else {
+      process.env.AGENTARENA_CODEX_MODEL = originalCodexModel;
+    }
+    if (originalCodexReasoning === undefined) {
+      delete process.env.AGENTARENA_CODEX_REASONING_EFFORT;
+    } else {
+      process.env.AGENTARENA_CODEX_REASONING_EFFORT = originalCodexReasoning;
+    }
+    if (originalUserProfile === undefined) {
+      delete process.env.USERPROFILE;
+    } else {
+      process.env.USERPROFILE = originalUserProfile;
+    }
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("parseClaudeEvents normalizes token, cost, and error data", () => {
   const stdout = [
     JSON.stringify({
