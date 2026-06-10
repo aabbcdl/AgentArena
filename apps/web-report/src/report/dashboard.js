@@ -620,7 +620,7 @@ function renderAgentListItemNode(result) {
     button,
     "div",
     "meta",
-    `${runtime.provider} | ${runtime.model} | ${runtime.version} | ${formatDuration(result.durationMs)} | ${formatCost(result)}`
+    `${[runtime.provider, runtime.model, runtime.version, formatDuration(result.durationMs), formatCost(result)].filter(Boolean).map(escapeHtml).join(" | ")}`
   );
 
   return button;
@@ -658,7 +658,7 @@ function renderAgentList(run) {
               <span class="status-badge ${statusClass(result.status)}">${escapeHtml(translateStatus(result.status, t))}</span>
             </div>
             <div class="meta">
-              ${escapeHtml(runtime.provider)} | ${escapeHtml(runtime.model)} | ${escapeHtml(runtime.version)} | ${escapeHtml(formatDuration(result.durationMs))} | ${escapeHtml(formatCost(result))}
+              ${[runtime.provider, runtime.model, runtime.version, formatDuration(result.durationMs), formatCost(result)].filter(Boolean).map(escapeHtml).join(" | ")}
             </div>
           </button>
         `;
@@ -868,10 +868,10 @@ function renderComparisonBars(run) {
         <div class="bar-chart-title">${escapeHtml(localText("成本", "Cost"))}</div>
         ${costRows}
       </div>
-      <div class="bar-chart">
+      ${maxPrecision > 0.01 ? `<div class="bar-chart">
         <div class="bar-chart-title">${escapeHtml(localText("Diff 精准度", "Diff Precision"))}</div>
         ${precisionRows}
-      </div>
+      </div>` : ""}
       <div id="score-bar-chart" class="score-chart-container"></div>
       <div id="score-comparison-chart" class="score-chart-container"></div>
       <div id="score-radar-chart" class="score-chart-container"></div>

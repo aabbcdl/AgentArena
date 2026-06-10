@@ -104,7 +104,7 @@ export function getFairComparisonExclusionReasons(candidateRun, anchorRun) {
 }
 
 export function resultLabel(result) {
-  return result.displayLabel ?? result.agentTitle ?? result.variantId ?? result.agentId;
+  return result.displayLabel ?? result.agentTitle ?? result.variantId ?? result.agentId ?? "unknown";
 }
 
 export function baseAgentLabel(result) {

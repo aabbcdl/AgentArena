@@ -312,6 +312,7 @@ const detailFragments = createDetailFragments({
   state,
   judgeFilters,
   localText,
+  t,
   escapeHtml,
   formatDuration,
   statusClass,
@@ -1643,8 +1644,13 @@ elements.compareTable.addEventListener("click", (event) => {
 elements.comparisonBars.addEventListener("click", (event) => {
   const barRow = event.target.closest("[data-bar-agent-id]");
   if (!barRow || !state.run) return;
+  const agentId = barRow.getAttribute("data-bar-agent-id");
   state.expandedCompareAgentId = null;
-  selectAgent(barRow.getAttribute("data-bar-agent-id"), state, selectionDeps);
+  if (state.selectedAgentId === agentId) {
+    selectAgent(null, state, selectionDeps);
+  } else {
+    selectAgent(agentId, state, selectionDeps);
+  }
 });
 
 elements.compareTable.addEventListener("keydown", (event) => {
@@ -1791,6 +1797,24 @@ elements.runCompareSort.addEventListener("change", (event) => {
 elements.runCompareScope.addEventListener("change", (event) => {
   runCompareFilters.scope = String(event.target.value ?? "current-task");
   renderRunCompareTable();
+});
+
+// Share menu dropdown toggle logic
+document.querySelectorAll(".share-menu-toggle").forEach((btn) => {
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const menu = btn.closest(".share-menu");
+    document.querySelectorAll(".share-menu.open").forEach((m) => {
+      if (m !== menu) m.classList.remove("open");
+    });
+    menu.classList.toggle("open");
+  });
+});
+
+document.addEventListener("click", () => {
+  for (const m of document.querySelectorAll(".share-menu.open")) {
+    m.classList.remove("open");
+  }
 });
 
 elements.copyShareCard.addEventListener("click", async () => {

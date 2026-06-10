@@ -177,6 +177,7 @@ export function createDetailFragments({
   state,
   judgeFilters,
   localText,
+  t,
   escapeHtml,
   formatDuration,
   statusClass,
@@ -315,9 +316,11 @@ export function createDetailFragments({
             .join("")}</div>`;
 
     return `<section class="detail-card"><h3>${escapeHtml(localText("Judge 检查项", "Judges"))}</h3>${overview}${
-      filteredJudges.length === 0 && judges.length > 0
-        ? `<p class="empty-state">${escapeHtml(localText("当前筛选下没有匹配的 Judge。", "No judges match the current filters."))}</p>`
-        : content
+      judges.length === 0
+        ? `<div class="empty-state-message">${escapeHtml(localText("没有执行任何 Judge，可能是任务在 Judge 执行前就已中止。", "No judges were executed. The task may have been aborted before judge validation."))}</div>`
+        : filteredJudges.length === 0
+          ? `<div class="empty-state-message">${escapeHtml(t("judgeFilterEmpty"))}</div>`
+          : content
     }</section>`;
   }
 
@@ -427,6 +430,19 @@ export function createDetailFragments({
     const diffViewer = container.querySelector("#code-review-diff-viewer");
     if (!content || !selector || !compareBtn || !diffViewer) return;
 
+    // Wire up toggle handler before any early returns so the section
+    // can always be expanded/collapsed even when no agents are available.
+    const toggle = section.querySelector(".section-toggle");
+    if (toggle) {
+      toggle.replaceWith(toggle.cloneNode(true));
+      const newToggle = section.querySelector(".section-toggle");
+      newToggle?.addEventListener("click", () => {
+        const isVisible = content.style.display !== "none";
+        content.style.display = isVisible ? "none" : "block";
+        newToggle.setAttribute("aria-expanded", String(!isVisible));
+      });
+    }
+
     selector.innerHTML = "";
     const successfulAgents = run.results.filter((r) => r.status === "success");
     if (successfulAgents.length === 0) {
@@ -459,18 +475,6 @@ export function createDetailFragments({
       const selectedResults = run.results.filter((r) => selectedAgentIds.includes(r.agentId));
       renderSideBySideDiff(diffViewer, selectedResults, run);
     });
-
-    const toggle = section.querySelector(".section-toggle");
-    if (toggle) {
-      toggle.replaceWith(toggle.cloneNode(true));
-      const newToggle = section.querySelector(".section-toggle");
-      newToggle?.addEventListener("click", () => {
-        const isVisible = content.style.display !== "none";
-        content.style.display = isVisible ? "none" : "block";
-        // Keep aria-expanded in sync so screen readers announce open/closed state.
-        newToggle.setAttribute("aria-expanded", String(!isVisible));
-      });
-    }
   }
 
   function renderSideBySideDiff(container, results, _run) {

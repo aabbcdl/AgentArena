@@ -109,12 +109,15 @@ export function translateDifficulty(d, t) {
 export function translateStatus(s, t) {
   if (s === "success") return t("compareStatusSuccess");
   if (s === "failed") return t("compareStatusFailed");
-  return s;
+  if (s === "timeout") return t("compareStatusTimeout");
+  if (s === "error") return t("compareStatusError");
+  if (s === "skipped") return t("compareStatusSkipped");
+  return s || t("compareStatusUnknown");
 }
 
 /**
  * Get CSS class for a status value.
  */
 export function statusClass(status) {
-  return `status-${status}`;
+  return `status-${status || "unknown"}`;
 }

@@ -408,40 +408,50 @@
           </div>
           <div class="share-actions" id="share-actions" role="toolbar" aria-label="Share and export">
             <div class="share-actions-group">
-              <button id="copy-share-card" type="button" class="btn btn-sm">
-                <svg class="icon"><use href="#icon-copy"/></svg>
-                <span data-i18n="copyVerdictCard">Copy Verdict Card</span>
-              </button>
-              <button id="share-copy-summary-btn" type="button" class="btn btn-sm">
-                <svg class="icon"><use href="#icon-copy"/></svg>
-                <span data-i18n="copySummary">Copy Summary</span>
-              </button>
-              <button id="copy-pr-table" type="button" class="btn btn-sm">
-                <svg class="icon"><use href="#icon-copy"/></svg>
-                <span data-i18n="copyPrTable">Copy PR Table</span>
-              </button>
               <button id="share-copy-link-btn" type="button" class="btn btn-sm">
                 <svg class="icon"><use href="#icon-copy"/></svg>
                 <span data-i18n="copyLink">Copy Link</span>
               </button>
+              <div class="share-menu">
+                <button type="button" class="share-menu-toggle btn btn-sm" data-i18n="shareMenuLabel">More...</button>
+                <div class="share-menu-content">
+                  <button id="copy-share-card" type="button" class="btn btn-sm">
+                    <svg class="icon"><use href="#icon-copy"/></svg>
+                    <span data-i18n="copyVerdictCard">Copy Verdict Card</span>
+                  </button>
+                  <button id="share-copy-summary-btn" type="button" class="btn btn-sm">
+                    <svg class="icon"><use href="#icon-copy"/></svg>
+                    <span data-i18n="copySummary">Copy Summary</span>
+                  </button>
+                  <button id="copy-pr-table" type="button" class="btn btn-sm">
+                    <svg class="icon"><use href="#icon-copy"/></svg>
+                    <span data-i18n="copyPrTable">Copy PR Table</span>
+                  </button>
+                </div>
+              </div>
             </div>
             <div class="share-actions-group">
-              <button id="download-share-svg" type="button" class="btn btn-sm">
-                <svg class="icon"><use href="#icon-export"/></svg>
-                <span data-i18n="downloadShareSvg">Download Share SVG</span>
-              </button>
-              <button id="share-export-md-btn" type="button" class="btn btn-sm">
-                <svg class="icon"><use href="#icon-export"/></svg>
-                <span data-i18n="exportMarkdown">Export Markdown</span>
-              </button>
-              <button id="share-export-html-btn" type="button" class="btn btn-sm">
-                <svg class="icon"><use href="#icon-export"/></svg>
-                <span data-i18n="exportHtml">Export HTML</span>
-              </button>
               <button id="share-export-json-btn" type="button" class="btn btn-sm">
                 <svg class="icon"><use href="#icon-export"/></svg>
                 <span data-i18n="exportJson">Export JSON</span>
               </button>
+              <div class="share-menu">
+                <button type="button" class="share-menu-toggle btn btn-sm" data-i18n="shareMenuLabel">More...</button>
+                <div class="share-menu-content">
+                  <button id="download-share-svg" type="button" class="btn btn-sm">
+                    <svg class="icon"><use href="#icon-export"/></svg>
+                    <span data-i18n="downloadShareSvg">Download Share SVG</span>
+                  </button>
+                  <button id="share-export-md-btn" type="button" class="btn btn-sm">
+                    <svg class="icon"><use href="#icon-export"/></svg>
+                    <span data-i18n="exportMarkdown">Export Markdown</span>
+                  </button>
+                  <button id="share-export-html-btn" type="button" class="btn btn-sm">
+                    <svg class="icon"><use href="#icon-export"/></svg>
+                    <span data-i18n="exportHtml">Export HTML</span>
+                  </button>
+                </div>
+              </div>
             </div>
             <div class="share-actions-group">
               <button id="share-import-json-btn" type="button" class="btn btn-sm">
