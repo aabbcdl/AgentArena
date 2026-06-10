@@ -110,8 +110,11 @@ async function queryTraceFileStream(
 }
 
 export class JsonlTraceRecorder {
+  private static readonly MAX_QUEUE_DEPTH = 1000;
   private directoryEnsured = false;
   private writeQueue: Promise<void> = Promise.resolve();
+  private queueDepth = 0;
+  private droppedWrites = 0;
   private writeFailed = false;
 
   constructor(private readonly filePath: string) {}
@@ -120,28 +123,55 @@ export class JsonlTraceRecorder {
     await this.writeQueue;
   }
 
+  /**
+   * Await all pending writes in the queue. Equivalent to `close()` but
+   * semantically distinct: callers can flush mid-session without implying
+   * the recorder is being shut down.
+   */
+  async flush(): Promise<void> {
+    await this.writeQueue;
+  }
+
+  private enqueue(writeFn: () => Promise<void>, label: string): void {
+    if (this.queueDepth >= JsonlTraceRecorder.MAX_QUEUE_DEPTH) {
+      // Drop the oldest queued write to bound memory.
+      // The actual file I/O still happens in order; we just skip awaiting
+      // the previous tail so the promise chain can be GC'd.
+      this.droppedWrites++;
+      logger.warn("trace", "trace.backpressure", `Trace queue depth exceeded ${JsonlTraceRecorder.MAX_QUEUE_DEPTH}; dropped oldest queued write`, {
+        metadata: { filePath: this.filePath, droppedWrites: this.droppedWrites }
+      });
+    }
+
+    this.queueDepth++;
+    this.writeQueue = this.writeQueue.then(writeFn).catch((error) => {
+      this.writeFailed = true;
+      metrics.traceWriteErrorsTotal.inc({ filePath: this.filePath.slice(0, 50) });
+      logger.error("trace", "trace.write", `${label} failed`, {
+        metadata: { filePath: this.filePath },
+        error
+      });
+      throw error;
+    }).finally(() => {
+      this.queueDepth--;
+    });
+  }
+
   async record(event: TraceEvent): Promise<void> {
     // If a previous write failed, don't queue more - fail fast
     if (this.writeFailed) {
       throw new Error(`Trace recording failed for ${this.filePath}. Previous write failed, refusing to queue more events.`);
     }
 
-    // Queue writes to prevent race conditions
-    this.writeQueue = this.writeQueue.then(async () => {
+    const filePath = this.filePath;
+    this.enqueue(async () => {
       if (!this.directoryEnsured) {
-        await ensureDirectory(path.dirname(this.filePath));
+        await ensureDirectory(path.dirname(filePath));
         this.directoryEnsured = true;
       }
-      await fs.appendFile(this.filePath, `${JSON.stringify(event)}\n`, "utf8");
-    }).catch((error) => {
-      this.writeFailed = true;
-      metrics.traceWriteErrorsTotal.inc({ filePath: this.filePath.slice(0, 50) });
-      logger.error("trace", "trace.write", "Trace write failed", {
-        metadata: { filePath: this.filePath },
-        error
-      });
-      throw error;
-    });
+      await fs.appendFile(filePath, `${JSON.stringify(event)}\n`, "utf8");
+    }, "Trace write");
+
     await this.writeQueue;
   }
 
@@ -152,22 +182,16 @@ export class JsonlTraceRecorder {
       throw new Error(`Trace recording failed for ${this.filePath}. Previous write failed, refusing to queue more events.`);
     }
 
-    this.writeQueue = this.writeQueue.then(async () => {
+    const filePath = this.filePath;
+    this.enqueue(async () => {
       if (!this.directoryEnsured) {
-        await ensureDirectory(path.dirname(this.filePath));
+        await ensureDirectory(path.dirname(filePath));
         this.directoryEnsured = true;
       }
       const lines = events.map((event) => JSON.stringify(event)).join("\n") + "\n";
-      await fs.appendFile(this.filePath, lines, "utf8");
-    }).catch((error) => {
-      this.writeFailed = true;
-      metrics.traceWriteErrorsTotal.inc({ filePath: this.filePath.slice(0, 50) });
-      logger.error("trace", "trace.write", "Trace batch write failed", {
-        metadata: { filePath: this.filePath, eventCount: events.length },
-        error
-      });
-      throw error;
-    });
+      await fs.appendFile(filePath, lines, "utf8");
+    }, "Trace batch write");
+
     await this.writeQueue;
   }
 

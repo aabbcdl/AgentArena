@@ -24,6 +24,7 @@ export function portableBasename(inputPath: string): string {
 /**
  * Check if targetPath is inside workspacePath.
  *
+ * @security
  * SECURITY NOTE (TOCTOU): This function uses fs.realpath to resolve symlinks,
  * but the target path could be modified between the realpath check and actual
  * file access. For critical security boundaries, use fs.open() + fstat()

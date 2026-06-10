@@ -88,6 +88,39 @@ const SAFE_COMMANDS = new Set([
   // Task packs that need shell scripts must use a specific interpreter (e.g., node, python).
 ]);
 
+/**
+ * Commands that carry elevated risk even though they are on the SAFE_COMMANDS
+ * allowlist.  These are blocked by default in judge steps and require explicit
+ * opt-in via the {@link CommandSecurityOptions.allowRiskyCommands} flag or the
+ * `AGENTARENA_ALLOW_RISKY_COMMANDS_IN_JUDGES=1` environment variable.
+ *
+ * **Blocked commands and their risks:**
+ *
+ * | Command | Risk |
+ * |---------|------|
+ * | `curl`  | Network access — can POST data to external servers, download payloads, or exfiltrate files via `-d @file`. |
+ * | `wget`  | Network access — can download arbitrary content or exfiltrate data. |
+ * | `sed`   | File write — the `-i` flag performs in-place file modification. |
+ * | `awk`   | File write — can write files via shell redirection (`> file`). |
+ * | `tee`   | File write — writes stdin to files, can overwrite or append. |
+ *
+ * **Security implications:**
+ * - **File write**: `sed -i`, `awk >`, and `tee` can corrupt repository state or
+ *   plant backdoors in source files.
+ * - **Network access**: `curl` and `wget` can reach arbitrary endpoints, enabling
+ *   data exfiltration of source code, secrets, or environment variables.
+ * - **Data exfiltration**: A malicious task pack could combine network + file-read
+ *   commands to leak sensitive data without writing any files.
+ *
+ * **How to enable:** Set `AGENTARENA_ALLOW_RISKY_COMMANDS_IN_JUDGES=1` in the
+ * environment, or pass `{ allowRiskyCommands: true }` in
+ * {@link CommandSecurityOptions}.  Only do this for task packs you trust
+ * completely — community or unverified packs should never be granted these
+ * capabilities.
+ *
+ * @see SAFE_COMMANDS — the broader allowlist these commands belong to
+ * @see CommandSecurityOptions.allowRiskyCommands — the programmatic toggle
+ */
 const RISKY_COMMANDS = new Set(["curl", "wget", "sed", "awk", "tee"]);
 const COMMANDS_USING_E_FLAG = new Set(["echo", "printf", "type", "which", "where"]);
 const WINDOWS_BATCH_COMMAND = /\.(?:cmd|bat)$/i;

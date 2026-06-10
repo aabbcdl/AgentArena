@@ -89,7 +89,7 @@ async function writeRunMarker(
       "utf8"
     );
   } catch (error) {
-    console.warn(`[agentarena] Failed to write run marker for ${outputPath}: ${error instanceof Error ? error.message : String(error)}`);
+    logger.warn("runner", "run_marker.write_failed", `Failed to write run marker for ${outputPath}: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
@@ -206,7 +206,7 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
     try {
       await options.onProgress?.(event);
     } catch (progressError) {
-      console.warn(`[agentarena] onProgress callback threw for phase "${event.phase}": ${progressError instanceof Error ? progressError.message : String(progressError)}`);
+      logger.warn("runner", "progress.callback_error", `onProgress callback threw for phase "${event.phase}": ${progressError instanceof Error ? progressError.message : String(progressError)}`);
     }
   };
 
@@ -503,13 +503,13 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
     for (const result of cleanupR) {
       cleanupResults.push(result);
       if (!result.success) {
-        console.warn(`Warning: Failed to cleanup workspace ${result.path}: ${result.error}`);
+        logger.warn("runner", "cleanup.failed", `Failed to cleanup workspace ${result.path}: ${result.error}`);
       }
     }
     const rootCleanupResult = await cleanupWorkspace(workspaceRootPath, 1);
     cleanupResults.push(rootCleanupResult);
     if (!rootCleanupResult.success) {
-      console.warn(`Warning: Failed to cleanup workspace root ${workspaceRootPath}: ${rootCleanupResult.error}`);
+      logger.warn("runner", "cleanup.root_failed", `Failed to cleanup workspace root ${workspaceRootPath}: ${rootCleanupResult.error}`);
     }
   }
 

@@ -3,9 +3,15 @@
  *
  * Global application state for the AgentArena web-report SPA.
  *
- * IMPORTANT: This is the single source of truth for the state shape.
+ * IMPORTANT: This is the **single source of truth** for the state shape.
  * Every module that needs shared state imports this object and reads/writes
- * its properties. No module should create its own parallel state.
+ * its properties directly. No module should create its own parallel state
+ * objects, local caches of the same data, or independent reactive stores.
+ *
+ * Anti-patterns to avoid:
+ *   - Creating a second object that shadows `state` fields
+ *   - Caching a snapshot of state in module-level variables
+ *   - Using separate event buses for state changes that belong here
  *
  * When adding a new state field:
  * 1. Add it here with a sensible default
@@ -17,6 +23,8 @@ import { DEFAULT_SCORE_WEIGHTS } from "./view-model/scoring.js";
 
 /**
  * @type {Object} state
+ *
+ * Run data:
  *
  * Run data:
  * @property {Array} runs - All loaded benchmark runs
@@ -121,4 +129,50 @@ const state = {
   _launcherConfigRestored: false
 };
 
-export { state };
+/**
+ * Return the canonical state object.
+ *
+ * Provided as a named accessor so callers that prefer a functional API
+ * do not need to import the raw object. Identical to importing `state`
+ * directly -- returns the same reference every time.
+ *
+ * @returns {typeof state} The shared state object.
+ */
+function getState() {
+  if (typeof process !== "undefined" && process.env?.NODE_ENV === "development") {
+    // In development, log a subtle hint if getState() is called
+    // from a pattern that looks like it might be creating parallel state.
+    // This is intentionally lenient -- it is a dev-only guard rail.
+    if (new Error().stack?.includes("snapshot") || new Error().stack?.includes("cache")) {
+      console.warn(
+        "[app-state] getState() called from a context that references 'snapshot' or 'cache'. " +
+        "Ensure you are not storing a copy of state -- always read from the live object."
+      );
+    }
+  }
+  return state;
+}
+
+/**
+ * Merge a partial update into the canonical state object.
+ *
+ * Only properties present in `patch` are overwritten. This is a shallow
+ * merge -- nested objects are replaced, not deep-merged.
+ *
+ * @param {Partial<typeof state>} patch - Fields to update.
+ */
+function setState(patch) {
+  if (typeof process !== "undefined" && process.env?.NODE_ENV === "development") {
+    for (const key of Object.keys(patch)) {
+      if (!(key in state)) {
+        console.warn(
+          `[app-state] setState() setting unknown key "${key}". ` +
+          "Add it to the state definition in app-state.js first."
+        );
+      }
+    }
+  }
+  Object.assign(state, patch);
+}
+
+export { getState, setState, state };

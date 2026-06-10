@@ -59,6 +59,7 @@ function escapeHtmlAttribute(value: string): string {
     .replaceAll("&", "&amp;")
     .replaceAll("\"", "&quot;")
     .replaceAll("'", "&#39;")
+    .replaceAll("`", "&#96;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;");
 }
@@ -543,10 +544,17 @@ export function createRequestHandler(ctx: RequestContext) {
           // - Risk: if an attacker can inject content before this script runs, they could
           //   exfiltrate the token. Mitigated by localhost-only + CORS + CSP headers.
           // - The token is NOT persisted in saved pages, screenshots, or printouts
+          //
+          // SECURITY: The cleanup script MUST appear before any other <script> tags so
+          // it executes synchronously before third-party or app scripts can read the
+          // meta tag. We inject both the meta tag and its cleanup script immediately
+          // before </head> to guarantee this ordering.
           if (ctx.isLocalhost && filePath.endsWith("index.html") && ctx.authToken) {
             let html = body.toString("utf8");
             const metaTag = `<meta name="agentarena-auth-token" content="${escapeHtmlAttribute(ctx.authToken)}">`;
             const cleanupScript = `<script>(function(){var m=document.querySelector('meta[name="agentarena-auth-token"]');if(m){try{sessionStorage.setItem('agentarena-auth-token',m.getAttribute('content'))}catch(e){/* ignore: sessionStorage may be unavailable */}m.remove()}})();</script>`;
+            // Place cleanup script immediately after meta tag, before any other scripts,
+            // to ensure synchronous removal before other JS can access the token.
             const injection = `  ${metaTag}\n  ${cleanupScript}\n`;
             if (html.includes("</head>")) {
               html = html.replace("</head>", `${injection}</head>`);
@@ -559,9 +567,11 @@ export function createRequestHandler(ctx: RequestContext) {
           response.writeHead(200, {
             "Content-Type": detectContentType(filePath),
             "Cache-Control": "no-store",
+            "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://raw.githubusercontent.com",
             "X-Frame-Options": "DENY",
             "X-Content-Type-Options": "nosniff",
-            "Referrer-Policy": "strict-origin-when-cross-origin"
+            "Referrer-Policy": "strict-origin-when-cross-origin",
+            "Permissions-Policy": "camera=(), microphone=(), geolocation=()"
           });
           response.end(body);
           return;

@@ -752,6 +752,16 @@ export function createLauncherModule(deps) {
     const desc = taskPackI18n(taskPack, "description") || taskPack.description || taskPack.objective || "";
     const diff = taskPackI18n(taskPack, "differentiator") || taskPack.differentiator;
 
+    const isCommunity = taskPack.repoSource && !taskPack.repoSource.startsWith("builtin://") && !taskPack.repoSource.startsWith("local://");
+    const communityWarning = isCommunity
+      ? `<div class="validation-msg validation-warning" style="margin-top:8px;padding:8px 12px;border-radius:4px;background:var(--warning-soft, rgba(245, 158, 11, 0.12));border:1px solid var(--warning, #f59e0b);color:var(--warning-light, #fbbf24);font-size:0.9em;">
+          ⚠️ ${escapeHtml(localText(
+            "社区任务包可能包含任意命令。请仅运行来自可信来源的任务包。",
+            "Community task packs may contain arbitrary commands. Only run packs from trusted sources."
+          ))}
+        </div>`
+      : "";
+
     elements.taskPackDetail.innerHTML = `
       <div class="task-pack-header">
         <strong>${escapeHtml(title)}</strong>
@@ -763,6 +773,7 @@ export function createLauncherModule(deps) {
         <span>${escapeHtml(localText("适用", "Repo"))}: ${escapeHtml(repoTypes)}</span>
         <span>${escapeHtml(localText("检查项", "Judges"))}: ${judgeCount}</span>
       </div>
+      ${communityWarning}
     `;
     setHidden(elements.taskPackDetail, false);
   }

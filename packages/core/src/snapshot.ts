@@ -99,41 +99,48 @@ export async function snapshotDirectory(rootPath: string): Promise<Map<string, F
   let seenBytes = 0;
   let truncated = false;
 
-  // Phase 1: Walk directory and collect file metadata
-  async function walk(currentPath: string, depth = 0): Promise<void> {
-    if (truncated) {
-      return;
-    }
+  // Phase 1: Walk directory and collect file metadata using a single
+  // work-queue instead of recursive mapWithConcurrency at each level.
+  interface DirTask {
+    dirPath: string;
+    depth: number;
+  }
+
+  const queue: DirTask[] = [{ dirPath: rootPath, depth: 0 }];
+
+  async function processDir(task: DirTask): Promise<DirTask[]> {
+    const { dirPath, depth } = task;
+    if (truncated) return [];
+
     if (depth > maxDepth) {
       truncated = true;
-      logger.warn("core", "snapshot.max_depth", `Snapshot: max depth ${maxDepth} reached at ${currentPath}; remaining files skipped.`);
-      return;
+      logger.warn("core", "snapshot.max_depth", `Snapshot: max depth ${maxDepth} reached at ${dirPath}; remaining files skipped.`);
+      return [];
     }
+
     let entries: import("node:fs").Dirent[];
     try {
-      entries = await fs.readdir(currentPath, { withFileTypes: true });
+      entries = await fs.readdir(dirPath, { withFileTypes: true });
     } catch (_error) {
-      logger.warn("core", "snapshot.skip_dir", `Snapshot: skipped directory due to error: ${currentPath}`, { error: _error });
-      return;
+      logger.warn("core", "snapshot.skip_dir", `Snapshot: skipped directory due to error: ${dirPath}`, { error: _error });
+      return [];
     }
 
-    const subdirs: string[] = [];
+    const childDirs: DirTask[] = [];
 
     for (const entry of entries) {
-      const absolutePath = path.join(currentPath, entry.name);
+      if (truncated) break;
+
+      const absolutePath = path.join(dirPath, entry.name);
       const relativePath = normalizePath(path.relative(rootPath, absolutePath));
 
       if (entry.isDirectory()) {
-        if (INTERNAL_IGNORED_NAMES.has(entry.name)) {
-          continue;
-        }
-        subdirs.push(absolutePath);
+        if (INTERNAL_IGNORED_NAMES.has(entry.name)) continue;
+        childDirs.push({ dirPath: absolutePath, depth: depth + 1 });
         continue;
       }
 
-      if (!entry.isFile()) {
-        continue;
-      }
+      if (!entry.isFile()) continue;
 
       try {
         const stat = await fs.stat(absolutePath);
@@ -142,7 +149,7 @@ export async function snapshotDirectory(rootPath: string): Promise<Map<string, F
         if (seenFiles > maxFiles || seenBytes > maxTotalBytes) {
           truncated = true;
           logger.warn("core", "snapshot.budget_exceeded", `Snapshot: scan budget exceeded (${seenFiles} files, ${seenBytes} bytes); remaining files skipped.`);
-          return;
+          break;
         }
         if (stat.size > maxFileSize) {
           const hexDigest = createHash("sha256")
@@ -158,15 +165,22 @@ export async function snapshotDirectory(rootPath: string): Promise<Map<string, F
       }
     }
 
-    if (subdirs.length > 0 && !truncated) {
-      await mapWithConcurrency(subdirs, Math.max(1, cpus().length), (dir) => walk(dir, depth + 1));
+    return childDirs;
+  }
+
+  const concurrency = Math.max(1, cpus().length);
+
+  // Process directories level by level with a single concurrency pool.
+  // Each batch of results feeds the next iteration until the queue is empty.
+  while (queue.length > 0 && !truncated) {
+    const batch = queue.splice(0);
+    const childResults = await mapWithConcurrency(batch, concurrency, processDir);
+    for (const children of childResults) {
+      queue.push(...children);
     }
   }
 
-  await walk(rootPath);
-
   // Phase 2: Hash files in parallel with concurrency limit
-  const concurrency = Math.max(1, cpus().length);
   const hashes = await mapWithConcurrency(filesToHash, concurrency, async (file) => {
     try {
       const hash = await hashFileStream(file.absolutePath);

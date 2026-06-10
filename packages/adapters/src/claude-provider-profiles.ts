@@ -31,43 +31,14 @@ import os from "node:os";
 import path from "node:path";
 import type { ClaudeProviderProfile, ClaudeProviderRiskFlag } from "@agentarena/core";
 import { getHealthCache, hasInternalDnsResolution, isInternalUrl, logger } from "@agentarena/core";
+import {
+  BUILT_IN_OFFICIAL_PROFILE,
+  type ClaudeProviderProfileInput,
+  defaultRiskFlags,
+  type ProfileRegistryFile,
+} from "./claude-provider-profiles-data.js";
 
-interface ProfileRegistryFile {
-  schemaVersion: 1;
-  profiles: ClaudeProviderProfile[];
-}
-
-export interface ClaudeProviderProfileInput {
-  id?: string;
-  name: string;
-  kind: ClaudeProviderProfile["kind"];
-  homepage?: string;
-  baseUrl?: string;
-  apiFormat: ClaudeProviderProfile["apiFormat"];
-  primaryModel?: string;
-  thinkingModel?: string;
-  defaultHaikuModel?: string;
-  defaultSonnetModel?: string;
-  defaultOpusModel?: string;
-  extraEnv?: Record<string, string>;
-  writeCommonConfig?: boolean;
-  notes?: string;
-  _confirmBaseUrlRisk?: boolean;
-  riskFlags?: ClaudeProviderRiskFlag[];
-}
-
-const BUILT_IN_OFFICIAL_PROFILE: ClaudeProviderProfile = {
-  id: "claude-official",
-  name: "Official",
-  kind: "official",
-  homepage: "https://www.anthropic.com/claude-code",
-  apiFormat: "anthropic-messages",
-  extraEnv: {},
-  writeCommonConfig: true,
-  riskFlags: [],
-  isBuiltIn: true,
-  secretStored: false
-};
+export type { ClaudeProviderProfileInput } from "./claude-provider-profiles-data.js";
 
 function appDataRoot(): string {
   if (process.env.AGENTARENA_CLAUDE_PROFILE_ROOT?.trim()) {
@@ -123,13 +94,6 @@ function slugify(value: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
-function defaultRiskFlags(kind: ClaudeProviderProfile["kind"]): ClaudeProviderRiskFlag[] {
-  if (kind === "official") {
-    return [];
-  }
-
-  return ["third-party-provider", "compatibility-mode", "user-managed-secret"];
-}
 
 function normalizeProfile(profile: ClaudeProviderProfile): ClaudeProviderProfile {
   return {

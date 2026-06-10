@@ -149,15 +149,18 @@ export function startRateLimitCleanup(): NodeJS.Timeout {
     }
     // Evict oldest entries if store exceeds max size
     if (rateLimitStore.size > RATE_LIMIT_MAX_STORE_SIZE) {
-      const entries = [...rateLimitStore.entries()]
-        .sort((a, b) => {
-          const aLast = a[1].timestamps[a[1].timestamps.length - 1] ?? 0;
-          const bLast = b[1].timestamps[b[1].timestamps.length - 1] ?? 0;
-          return aLast - bLast;
-        });
-      const toEvict = entries.slice(0, entries.length - RATE_LIMIT_MAX_STORE_SIZE);
-      for (const [ip] of toEvict) {
-        rateLimitStore.delete(ip);
+      const excess = rateLimitStore.size - RATE_LIMIT_MAX_STORE_SIZE;
+      // Collect candidates with their oldest timestamp, then evict the N oldest
+      const candidates: Array<{ ip: string; lastTs: number }> = [];
+      for (const [ip, entry] of rateLimitStore) {
+        const lastTs = entry.timestamps[entry.timestamps.length - 1] ?? 0;
+        candidates.push({ ip, lastTs });
+      }
+      // Partial sort: only need the `excess` smallest elements, but a full sort
+      // on the compact candidate array is still cheaper than sorting spread Map entries.
+      candidates.sort((a, b) => a.lastTs - b.lastTs);
+      for (let i = 0; i < excess; i++) {
+        rateLimitStore.delete(candidates[i].ip);
       }
     }
   }, RATE_LIMIT_WINDOW_MS);
@@ -304,7 +307,7 @@ export function jsonResponse(data: unknown, statusCode = 200): { statusCode: num
       "X-Frame-Options": "DENY",
       "X-Content-Type-Options": "nosniff",
       "Referrer-Policy": "strict-origin-when-cross-origin",
-      "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'self'; form-action 'self'",
+      "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'self'; form-action 'self'",
       // Prevent caching of API responses that may contain sensitive data
       "Pragma": "no-cache"
     }

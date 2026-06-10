@@ -32,6 +32,48 @@ import { jsonResponse } from "../server.js";
 import { validateRunPayload } from "./run-payload-validator.js";
 
 /**
+ * Classify an error into a known category based on its `code` property
+ * (errno-style) first, then fall back to string matching on the message.
+ *
+ * Returns `{ category, status }` where category is a stable label and
+ * status is the HTTP status code to use.
+ */
+function classifyError(error: unknown): { category: string; status: number } {
+  const errnoCode = (error as NodeJS.ErrnoException | undefined)?.code;
+  const rawMessage = error instanceof Error ? error.message : String(error);
+
+  // 1. Check errno codes first — these are structurally reliable.
+  if (errnoCode === "ENOENT") return { category: "not_found", status: 404 };
+  if (errnoCode === "EACCES" || errnoCode === "EPERM") return { category: "permission_denied", status: 403 };
+  if (errnoCode === "EEXIST") return { category: "conflict", status: 409 };
+  if (errnoCode === "ENOTDIR" || errnoCode === "EISDIR") return { category: "not_found", status: 404 };
+
+  // 2. Check for explicit ValidationError instances.
+  if (error instanceof Error && error.name === "ValidationError") {
+    return { category: "validation", status: 400 };
+  }
+
+  // 3. Fall back to string matching for validation-shaped messages.
+  const validationPatterns = [
+    "Unsupported task pack schema",
+    "Unsupported judge type",
+    "Unrecognized judge field",
+    "Task pack ID must",
+    "must be a string",
+    "must be an array",
+    "must be a positive integer",
+  ];
+  for (const pattern of validationPatterns) {
+    if (rawMessage.includes(pattern)) {
+      return { category: "validation", status: 400 };
+    }
+  }
+
+  // 4. Unknown — caller should log and return a generic envelope.
+  return { category: "unknown", status: 500 };
+}
+
+/**
  * Wrap an API handler with structured error logging and a safe error envelope.
  *
  * The envelope distinguishes:
@@ -44,42 +86,32 @@ export async function withErrorHandling(promise: Promise<ApiResponse>): Promise<
   try {
     return await promise;
   } catch (error) {
-    const errnoCode = (error as NodeJS.ErrnoException | undefined)?.code;
     const rawMessage = error instanceof Error ? error.message : String(error);
+    const { category, status } = classifyError(error);
 
-    // Validation-shaped errors thrown by handlers (these throw plain Error
-    // with a user-facing message). Surface them as 400 so the SPA can render.
-    // Catches both explicit ValidationError and task pack validation errors
-    // which use plain Error with descriptive messages.
-    const isValidationError =
-      (error instanceof Error && error.name === "ValidationError") ||
-      rawMessage.includes("Unsupported task pack schema") ||
-      rawMessage.includes("Unsupported judge type") ||
-      rawMessage.includes("Unrecognized judge field") ||
-      rawMessage.includes("Task pack ID must") ||
-      rawMessage.includes("must be a string") ||
-      rawMessage.includes("must be an array") ||
-      rawMessage.includes("must be a positive integer");
-    if (isValidationError) {
+    if (category === "validation") {
       logger.warn("server", "api.validation_failed", `Validation failed: ${rawMessage}`);
-      return jsonResponse({ error: rawMessage }, 400);
+      return jsonResponse({ error: rawMessage }, status);
     }
 
-    // Not-found errors from file lookups (taskpack file, profile, etc).
-    if (errnoCode === "ENOENT") {
+    if (category === "not_found") {
       logger.info("server", "api.not_found", `Resource not found: ${rawMessage}`);
-      return jsonResponse({ error: rawMessage }, 404);
+      return jsonResponse({ error: rawMessage }, status);
     }
 
-    // Permission / unreadable resource — operator-actionable.
-    if (errnoCode === "EACCES" || errnoCode === "EPERM") {
+    if (category === "permission_denied") {
       logger.warn("server", "api.permission_denied", `Permission denied: ${rawMessage}`, { error });
-      return jsonResponse({ error: rawMessage }, 403);
+      return jsonResponse({ error: rawMessage }, status);
+    }
+
+    if (category === "conflict") {
+      logger.warn("server", "api.conflict", `Resource conflict: ${rawMessage}`);
+      return jsonResponse({ error: rawMessage }, status);
     }
 
     // Truly unexpected — log full error context, return a sanitized envelope.
     logger.error("server", "api.unexpected_error", `Unhandled API error: ${rawMessage}`, { error });
-    return jsonResponse({ error: "Internal server error" }, 500);
+    return jsonResponse({ error: "Internal server error" }, status);
   }
 }
 
@@ -519,7 +551,7 @@ export async function handleAdhocTaskpacksList(): Promise<ApiResponse> {
     );
     return jsonResponse(items);
   } catch (listError) {
-    console.warn(`[agentarena] Failed to list adhoc taskpacks: ${listError instanceof Error ? listError.message : String(listError)}`);
+    logger.warn("server", "adhoc.list_failed", `Failed to list adhoc taskpacks: ${listError instanceof Error ? listError.message : String(listError)}`);
     return jsonResponse([]);
   }
 }

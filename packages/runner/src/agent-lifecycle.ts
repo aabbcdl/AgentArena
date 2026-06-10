@@ -53,10 +53,12 @@ export async function createAgentRunContext(
   outputPath: string,
   workspaceRootPath: string,
   task: Awaited<ReturnType<typeof loadTaskPack>>,
-  preflight: AdapterPreflightResult,
+  preflight: AdapterPreflightResult & { adapter?: AgentRunContext["adapter"] },
   options: { updateSnapshots?: boolean; cancellation?: BenchmarkCancellation; debug?: boolean }
 ): Promise<AgentRunContext> {
-  const adapter = getAdapter(preflight.baseAgentId);
+  // Prefer an already-resolved adapter injected via preflight (M12),
+  // falling back to the registry lookup for backward compatibility.
+  const adapter = preflight.adapter ?? getAdapter(preflight.baseAgentId);
   const agentOutputPath = path.join(outputPath, "agents", preflight.variantId);
   const workspacePath = path.join(workspaceRootPath, preflight.variantId);
   const tracePath = path.join(agentOutputPath, "trace.jsonl");

@@ -439,6 +439,8 @@ export function parseBiomeSummary(payload: unknown): ParsedLintSummary | null {
     return null;
   }
 
+  // Mutation inside reduce is intentional here — biome's noAccumulatingSpread
+  // rule flags spread in accumulators as O(n²). Direct mutation is O(1) per step.
   const totals = payload.diagnostics.reduce(
     (summary, entry) => {
       if (!isObjectRecord(entry)) {
@@ -448,10 +450,13 @@ export function parseBiomeSummary(payload: unknown): ParsedLintSummary | null {
       const severity = entry.severity;
       if (severity === "error" || severity === "critical" || severity === "fatal") {
         summary.errorCount += 1;
+        summary.totalCount += 1;
       } else if (severity === "warning") {
         summary.warningCount += 1;
+        summary.totalCount += 1;
+      } else {
+        summary.totalCount += 1;
       }
-      summary.totalCount += 1;
       return summary;
     },
     { errorCount: 0, warningCount: 0, totalCount: 0 }

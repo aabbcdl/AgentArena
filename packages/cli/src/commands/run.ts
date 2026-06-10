@@ -12,6 +12,7 @@ import {
   formatVarianceReport,
   generateDecisionReport,
   getReportCopy,
+  type ScoredRun,
   writeReport,
 } from "@agentarena/report";
 import { type BenchmarkProgressEvent, runBenchmark } from "@agentarena/runner";
@@ -76,6 +77,93 @@ async function loadHistoricalRuns(
   }
 
   return runs;
+}
+
+function printBenchmarkOutput(
+  scoredBenchmark: ScoredRun,
+  report: { jsonPath: string; markdownPath: string; htmlPath: string; badgePath: string; prCommentPath: string },
+  decisionReport: { recommendations: Array<{ recommendation: string; displayLabel: string; successRate: number; avgCostPerRun: number; confidence: string }> },
+  decisionReportPath: string,
+  csvPath: string,
+  trendReportPath: string | null | undefined,
+  varianceReportText: string | null | undefined,
+  reportLocale: "en" | "zh-CN",
+): void {
+  console.log(`\nAgentArena run complete: ${scoredBenchmark.runId}`);
+  console.log(`Score scope: ${scoredBenchmark.scoreScope ?? "run-local"}`);
+  console.log(`Score note: ${scoredBenchmark.scoreValidityNote ?? "Scores only compare variants inside this run."}`);
+
+  if (scoredBenchmark.taskCompatibility && scoredBenchmark.taskCompatibility.status !== "compatible") {
+    console.log(`Task compatibility: ${scoredBenchmark.taskCompatibility.status} - ${scoredBenchmark.taskCompatibility.summary}`);
+    const visibleChecks = scoredBenchmark.taskCompatibility.checks.filter((check: { status: string }) => check.status !== "pass").slice(0, 5);
+    for (const check of visibleChecks) {
+      console.log(`  - ${check.label}: ${check.message}`);
+      if (check.fix) console.log(`    Fix: ${check.fix}`);
+    }
+  }
+
+  console.log(`\nPreflight Results:`);
+  for (const preflight of scoredBenchmark.preflights) {
+    const statusIcon = preflight.status === "ready" ? "✓" : preflight.status === "unverified" ? "?" : "✗";
+    console.log(`  ${statusIcon} ${preflight.displayLabel}: ${preflight.status} - ${preflight.summary}`);
+    if (preflight.resolvedRuntime?.effectiveModel) console.log(`    Model: ${preflight.resolvedRuntime.effectiveModel}`);
+    if (preflight.resolvedRuntime?.effectiveAgentVersion) console.log(`    Version: ${preflight.resolvedRuntime.effectiveAgentVersion}`);
+  }
+
+  console.log(`\nBenchmark Results:`);
+  for (const result of scoredBenchmark.results) {
+    const statusIcon = result.status === "success" ? "✓" : "✗";
+    console.log(`  ${statusIcon} ${result.displayLabel}: ${result.status} (${formatDuration(result.durationMs)})`);
+    console.log(`    status=${result.status}`);
+    console.log(`    Score: ${formatCompositeScoreValue(result)}`);
+    if (result.scoreExcluded) {
+      console.log(`    Not scored: ${result.scoreExclusionReason ?? result.summary}`);
+      const fix = scoredBenchmark.taskCompatibility?.checks.find((check: { status: string; fix?: string }) => check.status !== "pass" && check.fix)?.fix;
+      if (fix) console.log(`    Fix: ${fix}`);
+    }
+    if (result.resolvedRuntime?.effectiveModel) console.log(`    Model: ${result.resolvedRuntime.effectiveModel}`);
+    if (result.resolvedRuntime?.effectiveReasoningEffort) console.log(`    Reasoning: ${result.resolvedRuntime.effectiveReasoningEffort}`);
+    if (result.resolvedRuntime?.effectiveAgentVersion) console.log(`    Version: ${result.resolvedRuntime.effectiveAgentVersion}`);
+    console.log(`    Tokens: ${result.tokenUsage} | Cost: ${result.costKnown ? `$${result.estimatedCostUsd.toFixed(2)}` : "n/a"} | Files changed: ${result.changedFiles.length}`);
+    const passedJudges = result.judgeResults.filter((j: { success: boolean }) => j.success).length;
+    const totalJudges = result.judgeResults.length;
+    if (totalJudges > 0) console.log(`    Judges: ${passedJudges}/${totalJudges} passed`);
+  }
+
+  const successCount = scoredBenchmark.results.filter((r: { status: string }) => r.status === "success").length;
+  const totalCount = scoredBenchmark.results.length;
+  console.log(`\nSummary: ${successCount}/${totalCount} agents succeeded`);
+
+  const totalTokens = scoredBenchmark.results.reduce((sum: number, r: { tokenUsage?: number }) => sum + (r.tokenUsage ?? 0), 0);
+  const costResults = scoredBenchmark.results.filter((r: { costKnown: boolean }) => r.costKnown);
+  const totalCost = costResults.reduce((sum: number, r: { estimatedCostUsd?: number }) => sum + (r.estimatedCostUsd ?? 0), 0);
+  const costCoverage = costResults.length === totalCount ? "" : ` (cost known for ${costResults.length}/${totalCount})`;
+  console.log(`Total: ${totalTokens} tokens | $${totalCost.toFixed(2)}${costCoverage}`);
+
+  const topRec = decisionReport.recommendations.find((r) => r.recommendation === "recommended");
+  if (topRec) {
+    const copy = getReportCopy(reportLocale);
+    console.log(`\n${"═".repeat(60)}`);
+    console.log(`📋 ${copy.decisionReportTitle}`);
+    console.log(`${"═".repeat(60)}`);
+    console.log(`\n🏆 ${copy.recommendationLabel}: ${topRec.displayLabel}`);
+    console.log(`   - ${copy.successRateLabel}: ${(topRec.successRate * 100).toFixed(0)}%`);
+    console.log(`   - ${copy.averageCostLabel}: $${topRec.avgCostPerRun.toFixed(2)}/${copy.perRun}`);
+    console.log(`   - ${copy.confidenceLabel}: ${topRec.confidence}`);
+    console.log(`\n📄 ${copy.fullReportLabel}: ${decisionReportPath}`);
+    console.log(`${"═".repeat(60)}`);
+  }
+
+  console.log(`\nOutput Files:`);
+  console.log(`  JSON summary:       ${report.jsonPath}`);
+  console.log(`  Markdown:           ${report.markdownPath}`);
+  console.log(`  HTML report:        ${report.htmlPath}`);
+  console.log(`  Badge:              ${report.badgePath}`);
+  console.log(`  PR comment:         ${report.prCommentPath}`);
+  console.log(`  Decision report:    ${decisionReportPath}`);
+  console.log(`  CSV export:         ${csvPath}`);
+  if (trendReportPath) console.log(`  Trend report:       ${trendReportPath}`);
+  if (varianceReportText) console.log(`\n${varianceReportText}`);
 }
 
 export async function runBenchmarkCommand(
@@ -397,149 +485,7 @@ export async function runBenchmarkCommand(
   if (parsed.format === "json") {
     jsonSummaries.push(outputSummary);
   } else {
-    console.log(`\nAgentArena run complete: ${scoredBenchmark.runId}`);
-    console.log(
-      `Score scope: ${scoredBenchmark.scoreScope ?? "run-local"}`,
-    );
-    console.log(
-      `Score note: ${scoredBenchmark.scoreValidityNote ?? "Scores only compare variants inside this run."}`,
-    );
-    if (scoredBenchmark.taskCompatibility && scoredBenchmark.taskCompatibility.status !== "compatible") {
-      console.log(
-        `Task compatibility: ${scoredBenchmark.taskCompatibility.status} - ${scoredBenchmark.taskCompatibility.summary}`,
-      );
-      const visibleChecks = scoredBenchmark.taskCompatibility.checks
-        .filter((check) => check.status !== "pass")
-        .slice(0, 5);
-      for (const check of visibleChecks) {
-        console.log(`  - ${check.label}: ${check.message}`);
-        if (check.fix) {
-          console.log(`    Fix: ${check.fix}`);
-        }
-      }
-    }
-    console.log(`\nPreflight Results:`);
-    for (const preflight of scoredBenchmark.preflights) {
-      const statusIcon =
-        preflight.status === "ready"
-          ? "✓"
-          : preflight.status === "unverified"
-            ? "?"
-            : "✗";
-      console.log(
-        `  ${statusIcon} ${preflight.displayLabel}: ${preflight.status} - ${preflight.summary}`,
-      );
-      if (preflight.resolvedRuntime?.effectiveModel) {
-        console.log(`    Model: ${preflight.resolvedRuntime.effectiveModel}`);
-      }
-      if (preflight.resolvedRuntime?.effectiveAgentVersion) {
-        console.log(
-          `    Version: ${preflight.resolvedRuntime.effectiveAgentVersion}`,
-        );
-      }
-    }
-
-    console.log(`\nBenchmark Results:`);
-    for (const result of scoredBenchmark.results) {
-      const statusIcon = result.status === "success" ? "✓" : "✗";
-      console.log(
-        `  ${statusIcon} ${result.displayLabel}: ${result.status} (${formatDuration(result.durationMs)})`,
-      );
-      console.log(`    status=${result.status}`);
-      console.log(`    Score: ${formatCompositeScoreValue(result)}`);
-      if (result.scoreExcluded) {
-        console.log(`    Not scored: ${result.scoreExclusionReason ?? result.summary}`);
-        const fix = scoredBenchmark.taskCompatibility?.checks.find(
-          (check) => check.status !== "pass" && check.fix,
-        )?.fix;
-        if (fix) {
-          console.log(`    Fix: ${fix}`);
-        }
-      }
-      if (result.resolvedRuntime?.effectiveModel) {
-        console.log(`    Model: ${result.resolvedRuntime.effectiveModel}`);
-      }
-      if (result.resolvedRuntime?.effectiveReasoningEffort) {
-        console.log(
-          `    Reasoning: ${result.resolvedRuntime.effectiveReasoningEffort}`,
-        );
-      }
-      if (result.resolvedRuntime?.effectiveAgentVersion) {
-        console.log(
-          `    Version: ${result.resolvedRuntime.effectiveAgentVersion}`,
-        );
-      }
-      console.log(
-        `    Tokens: ${result.tokenUsage} | Cost: ${result.costKnown ? `$${result.estimatedCostUsd.toFixed(2)}` : "n/a"} | Files changed: ${result.changedFiles.length}`,
-      );
-
-      const passedJudges = result.judgeResults.filter(
-        (j) => j.success,
-      ).length;
-      const totalJudges = result.judgeResults.length;
-      if (totalJudges > 0) {
-        console.log(`    Judges: ${passedJudges}/${totalJudges} passed`);
-      }
-    }
-
-    const successCount = scoredBenchmark.results.filter(
-      (r) => r.status === "success",
-    ).length;
-    const totalCount = scoredBenchmark.results.length;
-    console.log(`\nSummary: ${successCount}/${totalCount} agents succeeded`);
-
-    // Run-level totals so the first question after a run ("what did this cost
-    // me?") is answered without mentally summing per-agent lines.
-    const totalTokens = scoredBenchmark.results.reduce(
-      (sum, r) => sum + (r.tokenUsage ?? 0),
-      0,
-    );
-    const costResults = scoredBenchmark.results.filter((r) => r.costKnown);
-    const totalCost = costResults.reduce(
-      (sum, r) => sum + (r.estimatedCostUsd ?? 0),
-      0,
-    );
-    const costCoverage =
-      costResults.length === totalCount
-        ? ""
-        : ` (cost known for ${costResults.length}/${totalCount})`;
-    console.log(
-      `Total: ${totalTokens} tokens | $${totalCost.toFixed(2)}${costCoverage}`,
-    );
-
-    const topRec = decisionReport.recommendations.find(
-      (r) => r.recommendation === "recommended",
-    );
-    if (topRec) {
-      const copy = getReportCopy(reportLocale);
-      console.log(`\n${"═".repeat(60)}`);
-      console.log(`📋 ${copy.decisionReportTitle}`);
-      console.log(`${"═".repeat(60)}`);
-      console.log(``);
-      console.log(`🏆 ${copy.recommendationLabel}: ${topRec.displayLabel}`);
-      console.log(`   - ${copy.successRateLabel}: ${(topRec.successRate * 100).toFixed(0)}%`);
-      console.log(`   - ${copy.averageCostLabel}: $${topRec.avgCostPerRun.toFixed(2)}/${copy.perRun}`);
-      console.log(`   - ${copy.confidenceLabel}: ${topRec.confidence}`);
-      console.log(``);
-      console.log(`📄 ${copy.fullReportLabel}: ${decisionReportPath}`);
-      console.log(`${"═".repeat(60)}`);
-    }
-
-    console.log(`\nOutput Files:`);
-    console.log(`  JSON summary:       ${report.jsonPath}`);
-    console.log(`  Markdown:           ${report.markdownPath}`);
-    console.log(`  HTML report:        ${report.htmlPath}`);
-    console.log(`  Badge:              ${report.badgePath}`);
-    console.log(`  PR comment:         ${report.prCommentPath}`);
-    console.log(`  Decision report:    ${decisionReportPath}`);
-    console.log(`  CSV export:         ${csvPath}`);
-    if (trendReportPath) {
-      console.log(`  Trend report:       ${trendReportPath}`);
-    }
-
-    if (varianceReportText) {
-      console.log(`\n${varianceReportText}`);
-    }
+    printBenchmarkOutput(scoredBenchmark, report, decisionReport, decisionReportPath, csvPath, trendReportPath, varianceReportText, reportLocale);
   }
 
   if (benchmark.results.some((result) => result.status !== "success")) {

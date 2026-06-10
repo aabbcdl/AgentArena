@@ -1,4 +1,4 @@
-import { execFileSync, spawn } from "node:child_process";
+import { execFile, execFileSync, spawn } from "node:child_process";
 import { access, constants as fsConstants } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -266,12 +266,12 @@ export async function runProcess(
             }, SIGKILL_GRACE_MS);
           } else {
             if (pid === undefined) return;
-            try {
-              execFileSync("taskkill", ["/F", "/T", "/PID", String(pid)], { stdio: "ignore" });
-            } catch (e) {
-              adapterWarn("taskkill failed, falling back to child.kill", { pid, error: e instanceof Error ? e.message : String(e) });
-              if (child) child.kill("SIGTERM");
-            }
+            execFile("taskkill", ["/F", "/T", "/PID", String(pid)], { windowsHide: true }, (err) => {
+              if (err) {
+                adapterWarn("taskkill failed, falling back to child.kill", { pid, error: err instanceof Error ? err.message : String(err) });
+                if (child && !child.killed) child.kill("SIGTERM");
+              }
+            });
           }
         } catch (e) {
           adapterWarn("all process kill attempts failed — possible orphan", { pid, error: e instanceof Error ? e.message : String(e) });

@@ -533,20 +533,20 @@ export function renderRadarChart(canvas, data, options = {}) {
     ctx.stroke();
   });
 
-  // 响应 resize
-  if (!canvas._radarResizeBound) {
-    canvas._radarResizeBound = true;
-    const parent = canvas.parentElement;
-    if (parent) {
-      const ro = new ResizeObserver(() => {
-        const w = parent.clientWidth;
-        if (w > 0 && w !== width) {
-          renderRadarChart(canvas, data, { ...options, width: Math.min(w, 500), height: Math.min(w, 500) });
-        }
-      });
-      ro.observe(parent);
-      canvas._chartResizeObserver = ro;
-    }
+  // 响应 resize (disconnect previous observer to avoid leaks)
+  if (canvas._resizeObserver) {
+    canvas._resizeObserver.disconnect();
+  }
+  const parent = canvas.parentElement;
+  if (parent) {
+    const ro = new ResizeObserver(() => {
+      const w = parent.clientWidth;
+      if (w > 0 && w !== width) {
+        renderRadarChart(canvas, data, { ...options, width: Math.min(w, 500), height: Math.min(w, 500) });
+      }
+    });
+    ro.observe(parent);
+    canvas._resizeObserver = ro;
   }
 }
 
@@ -676,20 +676,20 @@ export function renderMultiRadarChart(canvas, datasets, options = {}) {
     ctx.fillText(dataset.name, x + 12, legendY + 4);
   });
 
-  // 响应 resize
-  if (!canvas._multiRadarResizeBound) {
-    canvas._multiRadarResizeBound = true;
-    const parent = canvas.parentElement;
-    if (parent) {
-      const ro = new ResizeObserver(() => {
-        const w = parent.clientWidth;
-        if (w > 0 && w !== width) {
-          renderMultiRadarChart(canvas, datasets, { ...options, width: Math.min(w, 600), height: Math.min(w, 600) });
-        }
-      });
-      ro.observe(parent);
-      canvas._chartResizeObserver = ro;
-    }
+  // 响应 resize (disconnect previous observer to avoid leaks)
+  if (canvas._resizeObserver) {
+    canvas._resizeObserver.disconnect();
+  }
+  const parent = canvas.parentElement;
+  if (parent) {
+    const ro = new ResizeObserver(() => {
+      const w = parent.clientWidth;
+      if (w > 0 && w !== width) {
+        renderMultiRadarChart(canvas, datasets, { ...options, width: Math.min(w, 600), height: Math.min(w, 600) });
+      }
+    });
+    ro.observe(parent);
+    canvas._resizeObserver = ro;
   }
 }
 
