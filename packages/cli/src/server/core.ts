@@ -1,8 +1,8 @@
 /**
- * UI HTTP server module.
+ * Core HTTP server utilities.
  *
- * Extracted from cli/index.ts to separate server logic from CLI entry point.
- * Handles: rate limiting, CORS, token auth, API routing, static file serving.
+ * Rate limiting, CORS, token auth, response helpers, and content-type detection.
+ * Extracted from the original server.ts into a dedicated server/ module.
  */
 
 import { randomBytes, timingSafeEqual } from "node:crypto";

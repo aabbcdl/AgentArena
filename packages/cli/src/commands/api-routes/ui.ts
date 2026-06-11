@@ -13,7 +13,7 @@ import {
   logger,
   metrics,
 } from "@agentarena/core";
-import { jsonResponse } from "../../server.js";
+import { jsonResponse } from "../../server/index.js";
 import { OFFICIAL_TASKPACK_ROOT } from "../shared.js";
 import type { ApiResponse } from "./types.js";
 

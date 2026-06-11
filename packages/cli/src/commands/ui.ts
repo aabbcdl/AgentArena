@@ -14,7 +14,7 @@ import {
   generateAuthToken,
   setTrustProxy,
   startRateLimitCleanup,
-} from "../server.js";
+} from "../server/index.js";
 import {
   fromUiRunState,
   toUiRunState,

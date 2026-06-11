@@ -7,7 +7,7 @@ import path from "node:path";
 import { logger, validateTaskPackId } from "@agentarena/core";
 import { checkTaskCompatibility } from "@agentarena/runner";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import { jsonResponse } from "../../server.js";
+import { jsonResponse } from "../../server/index.js";
 import {
   createAdhocLintCommand,
   createAdhocTestCommand,

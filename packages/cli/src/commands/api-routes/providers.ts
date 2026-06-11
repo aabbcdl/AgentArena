@@ -8,7 +8,7 @@ import {
   saveClaudeProviderProfile,
   setClaudeProviderProfileSecret,
 } from "@agentarena/adapters";
-import { jsonResponse } from "../../server.js";
+import { jsonResponse } from "../../server/index.js";
 import type { ApiResponse, ProviderProfilePayload } from "./types.js";
 import {
   maskProfileExtraEnv,

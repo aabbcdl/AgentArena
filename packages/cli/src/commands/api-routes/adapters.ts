@@ -8,7 +8,7 @@ import {
   listInstallGuides,
 } from "@agentarena/adapters";
 import { logger } from "@agentarena/core";
-import { jsonResponse } from "../../server.js";
+import { jsonResponse } from "../../server/index.js";
 import type { ApiResponse } from "./types.js";
 
 export async function handleAdaptersList(): Promise<ApiResponse> {

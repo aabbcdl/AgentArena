@@ -10,7 +10,7 @@
  */
 
 import { logger } from "@agentarena/core";
-import { jsonResponse } from "../server.js";
+import { jsonResponse } from "../server/index.js";
 import type { ApiResponse } from "./api-routes/types.js";
 
 // ─── Re-export everything from sub-modules ───

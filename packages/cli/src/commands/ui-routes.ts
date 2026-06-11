@@ -16,7 +16,7 @@ import {
   jsonResponse,
   readRequestBody,
   textResponse,
-} from "../server.js";
+} from "../server/index.js";
 import {
   handleAdaptersList,
   handleAdhocTaskpackDelete,

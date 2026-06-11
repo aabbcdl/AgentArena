@@ -14,7 +14,7 @@ import {
   setTrustProxy,
   startRateLimitCleanup,
   textResponse,
-} from "../packages/cli/dist/server.js";
+} from "../packages/cli/dist/server/index.js";
 
 // ─── checkAuthHeader tests ───
 
