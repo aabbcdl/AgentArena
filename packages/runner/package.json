@@ -30,6 +30,6 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {
-    "@types/picomatch": "4.0.2"
+    "@types/picomatch": "4.0.3"
   }
 }
