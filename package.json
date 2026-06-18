@@ -41,10 +41,10 @@
     "typecheck": "pnpm -r --if-present typecheck"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.4.8",
+    "@biomejs/biome": "2.4.16",
     "@changesets/cli": "2.31.0",
-    "@types/node": "24.12.0",
-    "playwright": "1.58.2",
-    "typescript": "5.9.3"
+    "@types/node": "25.9.3",
+    "playwright": "1.60.0",
+    "typescript": "6.0.3"
   }
 }
