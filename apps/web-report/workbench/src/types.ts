@@ -31,6 +31,22 @@ export interface ProviderProfile {
   isBuiltIn?: boolean;
 }
 
+export interface InstallGuide {
+  id: string;
+  displayName: string;
+  homepage?: string;
+  docs?: string;
+  github?: string;
+  install: {
+    windows?: Record<string, string>;
+    macos?: Record<string, string>;
+    linux?: Record<string, string>;
+    all?: Record<string, string>;
+  };
+  warnings?: string[];
+  postInstall?: string[];
+}
+
 export interface UiInfo {
   mode?: string;
   repoPath?: string;
@@ -78,6 +94,7 @@ export interface EnvironmentState {
   taskPacks: TaskPackInfo[];
   providers: ProviderProfile[];
   detectedAgents: Array<Record<string, unknown>>;
+  installGuides: InstallGuide[];
   checkedAt: string | null;
 }
 
@@ -108,6 +125,8 @@ export interface WorkbenchContextValue {
   loadDemo: () => void;
   environment: EnvironmentState;
   refreshEnvironment: () => Promise<void>;
+  saveProviderProfile: (payload: Record<string, unknown>) => Promise<void>;
+  deleteProviderProfile: (id: string) => Promise<void>;
   plan: RunPlan;
   updatePlan: (patch: Partial<RunPlan>) => void;
   preflight: Record<string, unknown>[];
@@ -116,5 +135,6 @@ export interface WorkbenchContextValue {
   startRun: () => Promise<void>;
   cancelRun: () => Promise<void>;
   clearNotice: () => void;
+  setNotice: (notice: { kind: "info" | "success" | "warning" | "danger"; message: string }) => void;
   notice: { kind: "info" | "success" | "warning" | "danger"; message: string } | null;
 }

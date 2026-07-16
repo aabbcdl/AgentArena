@@ -3,12 +3,12 @@ import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "p
 import { apiFetch, eventStreamUrl } from "../api/client";
 import { demoRun } from "../data/demo";
 import { type NormalizedRun, normalizeRun } from "../domain/run";
-import type { AdapterInfo, Density, EnvironmentState, Locale, PageId, ProviderProfile, RunPlan, TaskPackInfo, Theme, UiInfo, UiRunStatus, WorkbenchContextValue } from "../types";
+import type { AdapterInfo, Density, EnvironmentState, InstallGuide, Locale, PageId, ProviderProfile, RunPlan, TaskPackInfo, Theme, UiInfo, UiRunStatus, WorkbenchContextValue } from "../types";
 
 const RUNS_KEY = "agentarena-workbench-runs-v1";
 const PREFS_KEY = "agentarena-workbench-preferences-v1";
 const idleStatus: UiRunStatus = { state: "idle", phase: "idle", logs: [], updatedAt: new Date(0).toISOString() };
-const emptyEnvironment: EnvironmentState = { loading: true, error: null, uiInfo: null, adapters: [], taskPacks: [], providers: [], detectedAgents: [], checkedAt: null };
+const emptyEnvironment: EnvironmentState = { loading: true, error: null, uiInfo: null, adapters: [], taskPacks: [], providers: [], detectedAgents: [], installGuides: [], checkedAt: null };
 const WorkbenchContext = createContext<WorkbenchContextValue | null>(null);
 
 function readJson<T>(key: string, fallback: T): T {
@@ -69,18 +69,20 @@ export function WorkbenchProvider({ children }: { children: preact.ComponentChil
 
   const refreshEnvironment = useCallback(async () => {
     setEnvironment((previous) => ({ ...previous, loading: true, error: null }));
-    const [uiInfoResult, adaptersResult, tasksResult, providersResult, detectionResult, statusResult] = await Promise.allSettled([
+    const [uiInfoResult, adaptersResult, tasksResult, providersResult, detectionResult, statusResult, guidesResult] = await Promise.allSettled([
       apiFetch<UiInfo>("/api/ui-info"), apiFetch<AdapterInfo[]>("/api/adapters"),
       apiFetch<TaskPackInfo[]>(`/api/taskpacks${plan.repoPath ? `?repoPath=${encodeURIComponent(plan.repoPath)}` : ""}`),
-      apiFetch<ProviderProfile[]>("/api/provider-profiles"), apiFetch<Array<Record<string, unknown>>>("/api/agent-detection"), apiFetch<UiRunStatus>("/api/run-status")
+      apiFetch<ProviderProfile[]>("/api/provider-profiles"), apiFetch<Array<Record<string, unknown>>>("/api/agent-detection"), apiFetch<UiRunStatus>("/api/run-status"),
+      apiFetch<InstallGuide[]>("/api/install-guides")
     ]);
     const uiInfo = uiInfoResult.status === "fulfilled" ? uiInfoResult.value : null;
     const adapters = adaptersResult.status === "fulfilled" ? adaptersResult.value : [];
     const taskPacks = tasksResult.status === "fulfilled" ? tasksResult.value : [];
     const providers = providersResult.status === "fulfilled" ? providersResult.value : [];
     const detectedAgents = detectionResult.status === "fulfilled" ? detectionResult.value : [];
+    const installGuides = guidesResult.status === "fulfilled" ? guidesResult.value : [];
     const failures = [uiInfoResult, adaptersResult, tasksResult, providersResult, detectionResult].filter((item) => item.status === "rejected");
-    setEnvironment({ loading: false, error: failures.length === 5 ? String((failures[0] as PromiseRejectedResult).reason) : null, uiInfo, adapters, taskPacks, providers, detectedAgents, checkedAt: new Date().toISOString() });
+    setEnvironment({ loading: false, error: failures.length === 5 ? String((failures[0] as PromiseRejectedResult).reason) : null, uiInfo, adapters, taskPacks, providers, detectedAgents, installGuides, checkedAt: new Date().toISOString() });
     if (statusResult.status === "fulfilled") absorbStatus(statusResult.value);
     setPlan((current) => ({ ...current, repoPath: current.repoPath || uiInfo?.repoPath || "", taskPath: current.taskPath || uiInfo?.defaultTaskPath || taskPacks[0]?.path || "", agentIds: current.agentIds.length > 0 ? current.agentIds : adapters.filter((item) => item.kind === "demo").slice(0, 3).map((item) => item.id) }));
   }, [absorbStatus, plan.repoPath]);
@@ -112,6 +114,19 @@ export function WorkbenchProvider({ children }: { children: preact.ComponentChil
   }, [absorbStatus, runStatus.state]);
 
   const updatePlan = useCallback((patch: Partial<RunPlan>) => setPlan((current) => ({ ...current, ...patch })), []);
+
+  const saveProviderProfile = useCallback(async (payload: Record<string, unknown>): Promise<void> => {
+    const id = typeof payload.id === "string" && payload.id ? payload.id : undefined;
+    const url = id ? `/api/provider-profiles/${encodeURIComponent(id)}` : "/api/provider-profiles";
+    const method = id ? "PUT" : "POST";
+    await apiFetch(url, { method, body: JSON.stringify(payload) });
+    await refreshEnvironment();
+  }, [refreshEnvironment]);
+
+  const deleteProviderProfile = useCallback(async (id: string): Promise<void> => {
+    await apiFetch(`/api/provider-profiles/${encodeURIComponent(id)}`, { method: "DELETE" });
+    await refreshEnvironment();
+  }, [refreshEnvironment]);
   const runPreflight = useCallback(async () => {
     if (plan.agentIds.length === 0) { setNotice({ kind: "warning", message: locale === "zh-CN" ? "请至少选择一个 Agent。" : "Select at least one agent." }); return; }
     const results = await Promise.all(plan.agentIds.map(async (agentId) => {
@@ -154,7 +169,7 @@ export function WorkbenchProvider({ children }: { children: preact.ComponentChil
   }, [setPage]);
 
   const setSelectedRunId = useCallback((runId: string) => { const next = runs.find((item) => item.runId === runId) ?? null; setSelectedRunIdState(runId); setSelectedAgentIdState(next?.results[0]?.variantId ?? null); }, [runs]);
-  const value: WorkbenchContextValue = { locale, theme, density, page, setPage, setLocale, setTheme, setDensity, runs, selectedRun, selectedAgentId, setSelectedRunId, setSelectedAgentId: setSelectedAgentIdState, importRuns, loadDemo, environment, refreshEnvironment, plan, updatePlan, preflight, runPreflight, runStatus, startRun, cancelRun, notice, clearNotice: () => setNotice(null) };
+  const value: WorkbenchContextValue = { locale, theme, density, page, setPage, setLocale, setTheme, setDensity, runs, selectedRun, selectedAgentId, setSelectedRunId, setSelectedAgentId: setSelectedAgentIdState, importRuns, loadDemo, environment, refreshEnvironment, saveProviderProfile, deleteProviderProfile, plan, updatePlan, preflight, runPreflight, runStatus, startRun, cancelRun, notice, setNotice, clearNotice: () => setNotice(null) };
   return <WorkbenchContext.Provider value={value}>{children}</WorkbenchContext.Provider>;
 }
 
