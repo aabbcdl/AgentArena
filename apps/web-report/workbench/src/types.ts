@@ -3,6 +3,7 @@ import type { NormalizedRun } from "./domain/run";
 export type Locale = "zh-CN" | "en";
 export type Theme = "system" | "light" | "dark";
 export type Density = "comfortable" | "compact";
+export type CostQuality = "known" | "estimated" | "unavailable";
 export type PageId = "runs" | "plan" | "live" | "outcome" | "evidence" | "compare" | "library" | "environment" | "settings";
 
 export interface AdapterInfo {
@@ -19,6 +20,9 @@ export interface TaskPackInfo {
   description?: string;
   source?: string;
   compatibility?: { status?: string; summary?: string; failedChecks?: Array<Record<string, unknown>> };
+  objective?: string;
+  judgeRationale?: string;
+  i18n?: Partial<Record<Locale, { title?: string; description?: string; objective?: string; judgeRationale?: string }>>;
 }
 
 export interface ProviderProfile {
@@ -27,6 +31,12 @@ export interface ProviderProfile {
   kind?: string;
   apiFormat?: string;
   primaryModel?: string;
+  baseUrl?: string;
+  thinkingModel?: string;
+  defaultHaikuModel?: string;
+  defaultSonnetModel?: string;
+  defaultOpusModel?: string;
+  notes?: string;
   secretStored?: boolean;
   isBuiltIn?: boolean;
 }
@@ -57,6 +67,20 @@ export interface UiInfo {
   host?: string;
   port?: number;
   authRequired?: boolean;
+  telemetryEnabled?: boolean;
+  demoTaskPath?: string;
+}
+
+export interface TelemetrySummary {
+  enabled: boolean;
+  totalEvents: number;
+  events: Record<
+    "app_opened" | "run_started" | "run_completed" | "result_viewed" | "preflight_completed" | "evidence_opened",
+    number
+  >;
+  entryPoints: Record<string, number>;
+  resultIntegrity: Record<string, number>;
+  outcomes: Record<string, number>;
 }
 
 export interface RunLogEntry {
@@ -95,7 +119,11 @@ export interface EnvironmentState {
   providers: ProviderProfile[];
   detectedAgents: Array<Record<string, unknown>>;
   installGuides: InstallGuide[];
+  telemetrySummary: TelemetrySummary | null;
   checkedAt: string | null;
+  /** Per-section fetch failures so the UI can distinguish "load failed" from a
+   *  genuine empty result, instead of rendering a failure as zero. */
+  failed: { adapters: boolean; taskPacks: boolean; providers: boolean; telemetry: boolean };
 }
 
 export interface RunPlan {
@@ -137,4 +165,9 @@ export interface WorkbenchContextValue {
   clearNotice: () => void;
   setNotice: (notice: { kind: "info" | "success" | "warning" | "danger"; message: string }) => void;
   notice: { kind: "info" | "success" | "warning" | "danger"; message: string } | null;
+}
+
+export function localizeTaskPack(task: TaskPackInfo, locale: Locale): TaskPackInfo {
+  const localized = task.i18n?.[locale];
+  return localized ? { ...task, ...localized } : task;
 }

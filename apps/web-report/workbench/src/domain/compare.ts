@@ -1,4 +1,5 @@
 import type { NormalizedAgentResult, NormalizedRun } from "./run";
+import { normalizeScoreMode } from "./score-mode.ts";
 
 export type TrustLevel = "strong" | "caution";
 
@@ -28,11 +29,11 @@ function runtimeVersion(result: NormalizedAgentResult): string {
  */
 export function getComparableRuns(runs: NormalizedRun[], currentRun: NormalizedRun): NormalizedRun[] {
   const currentTaskId = currentRun.task?.id || currentRun.task?.title;
-  const currentScoreMode = currentRun.scoreMode || "practical";
+  const currentScoreMode = normalizeScoreMode(currentRun.scoreMode);
 
   return runs.filter((run) => {
     const taskId = run.task?.id || run.task?.title;
-    const scoreMode = run.scoreMode || "practical";
+    const scoreMode = normalizeScoreMode(run.scoreMode);
     return taskId === currentTaskId && scoreMode === currentScoreMode;
   });
 }

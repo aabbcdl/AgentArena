@@ -22,7 +22,7 @@ function installCommandsFor(guide: InstallGuide, platform: "windows" | "macos" |
 }
 
 export function EnvironmentPage() {
-  const { locale, environment, refreshEnvironment } = useWorkbench();
+  const { locale, environment, refreshEnvironment, setNotice } = useWorkbench();
   const [editing, setEditing] = useState<ProviderProfile | "new" | null>(null);
   const platform = currentPlatform();
   const connected = !environment.error && environment.uiInfo !== null;
@@ -33,13 +33,27 @@ export function EnvironmentPage() {
   const guideFor = (id: string): InstallGuide | undefined => environment.installGuides.find((guide) => guide.id === id);
 
   const copyCommand = async (command: string) => {
-    try { await navigator.clipboard?.writeText(command); } catch { /* clipboard unavailable */ }
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error("clipboard unavailable");
+      await navigator.clipboard.writeText(command);
+      setNotice({ kind: "success", message: t(locale, "copied") });
+    } catch {
+      setNotice({ kind: "danger", message: t(locale, "loadFailed") });
+    }
   };
 
   return <>
     <PageHeader eyebrow="ENVIRONMENT" title={locale === "zh-CN" ? "环境健康中心" : "Environment health"} description={locale === "zh-CN" ? "集中查看服务、安装、登录、Provider、隔离和存储状态，并补全未安装的 Agent。" : "Inspect service, installation, authentication, provider, isolation, and storage state, and install missing agents."} actions={<button class="button secondary" type="button" onClick={() => void refreshEnvironment()} disabled={environment.loading}><Icon name="refresh"/>{t(locale, "refresh")}</button>}/>
     {environment.loading && <div class="skeleton-lines large"><span/><span/><span/><span/></div>}
-    {environment.error && <Notice kind="danger"><strong>{t(locale, "environmentProblem")}</strong><span>{environment.error}</span></Notice>}
+    {environment.error && (
+      <Notice kind="danger">
+        <strong>{t(locale, "environmentProblem")}</strong>
+        <span>{environment.error}</span>
+        <button class="button secondary compact-button" type="button" onClick={() => void refreshEnvironment()} disabled={environment.loading}>
+          <Icon name="refresh"/>{t(locale, "offlineRetry")}
+        </button>
+      </Notice>
+    )}
     {!environment.loading && <>
       <div class="health-hero"><div class={`health-symbol ${connected ? "healthy" : "unhealthy"}`}><Icon name={connected ? "check" : "danger"} size={30}/></div><div><div class="eyebrow">{t(locale, "status")}</div><h2>{connected ? t(locale, "environmentHealthy") : t(locale, "environmentProblem")}</h2><p>{connected ? `${environment.uiInfo?.host ?? "127.0.0.1"}:${environment.uiInfo?.port ?? ""}` : t(locale, "offline")}</p></div><StatusPill tone={connected ? "success" : "danger"}>{connected ? t(locale, "ready") : t(locale, "blocked")}</StatusPill></div>
       {environment.uiInfo?.riskNotice && <Notice kind="warning">{environment.uiInfo.riskNotice}</Notice>}

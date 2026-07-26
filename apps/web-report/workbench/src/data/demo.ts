@@ -20,7 +20,8 @@ export const demoRun = {
       durationMs: 84200,
       tokenUsage: 12840,
       estimatedCostUsd: 0.42,
-      costKnown: true,
+      costKnown: false,
+        costQuality: "estimated",
       changedFiles: ["src/validation.ts", "tests/validation.test.ts"],
       judgeResults: [
         { judgeId: "tests", label: "Tests", type: "test-result", success: true, message: "All tests passed." },
@@ -41,7 +42,8 @@ export const demoRun = {
       durationMs: 32100,
       tokenUsage: 6040,
       estimatedCostUsd: 0.17,
-      costKnown: true,
+      costKnown: false,
+        costQuality: "estimated",
       changedFiles: ["src/validation.ts"],
       judgeResults: [
         { judgeId: "tests", label: "Tests", type: "test-result", success: true },

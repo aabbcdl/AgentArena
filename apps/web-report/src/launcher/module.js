@@ -1910,14 +1910,14 @@ export function createLauncherModule(deps) {
   // -----------------------------------------------------------------------
 
   async function handleQuickStart() {
-    if (state.runInProgress || !state.serviceInfo) return;
+    if (state.runInProgress || !state.serviceInfo) return false;
 
     const repoPath = elements.launcherRepoPath.value.trim() || state.serviceInfo.repoPath || ".";
-    const taskPath = elements.launcherTaskPath.value.trim() || state.serviceInfo.defaultTaskPath || "";
+    const taskPath = state.serviceInfo.demoTaskPath || "";
     if (!taskPath) {
       state.notice = localText("没有找到默认任务包，请手动选择。", "No default task pack found. Please select manually.");
       render();
-      return;
+      return false;
     }
 
     let agents = selectedLauncherVariants();
@@ -1940,7 +1940,7 @@ export function createLauncherModule(deps) {
       const response = await apiFetch("/api/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ repoPath, taskPath, agents, probeAuth: false, scoreMode: state.launcherScoreMode })
+        body: JSON.stringify({ repoPath, taskPath, agents, probeAuth: false, scoreMode: state.launcherScoreMode, entryPoint: "legacy-quick-demo" })
       });
       const result = await response.json();
       if (!response.ok && response.status !== 202) {
@@ -1948,12 +1948,14 @@ export function createLauncherModule(deps) {
       }
       startRunStatusPolling();
       render();
+      return true;
     } catch (error) {
       stopRunStatusPolling();
       state.runStatus = null;
       state.runInProgress = false;
       state.notice = localText(`快速体验失败: ${error.message}`, `Quick start failed: ${error.message}`);
       render();
+      return false;
     }
   }
 
@@ -2018,7 +2020,8 @@ export function createLauncherModule(deps) {
       agents,
       probeAuth: elements.launcherProbeAuth.checked,
       maxConcurrency,
-      scoreMode: state.launcherScoreMode
+      scoreMode: state.launcherScoreMode,
+      entryPoint: "legacy-launcher"
     };
 
     elements.launcherValidation.innerHTML = "";

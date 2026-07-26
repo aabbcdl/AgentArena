@@ -26,7 +26,7 @@ function agentKeyFor(run: NormalizedRun, variantId: string): string {
 }
 
 export function ComparePage() {
-  const { locale, runs, selectedRun, setSelectedRunId, setPage } = useWorkbench();
+  const { locale, runs, selectedRun, setSelectedRunId, setPage, setNotice } = useWorkbench();
   const session = useCompareSession(runs);
   const [sessionPage, setSessionPage] = useState(0);
   const SESSION_PAGE_SIZE = 50;
@@ -152,8 +152,9 @@ export function ComparePage() {
       {crossData.rows.length > 0 && (
         <div class="results-table compare-table">
           <table>
+            <caption class="visually-hidden">{t(locale, "compare")}</caption>
             <thead><tr class="results-head">
-              <th>Agent</th><th>{t(locale, "crossSuccessRate")}</th><th>{t(locale, "crossAvgDuration")}</th><th>{t(locale, "crossAvgTokens")}</th><th>{t(locale, "crossAvgCost")}</th><th>{t(locale, "trendVersion")}</th>
+              <th scope="col">{t(locale, "agent")}</th><th scope="col">{t(locale, "crossSuccessRate")}</th><th scope="col">{t(locale, "crossAvgDuration")}</th><th scope="col">{t(locale, "crossAvgTokens")}</th><th scope="col">{t(locale, "crossAvgCost")}</th><th scope="col">{t(locale, "trendVersion")}</th>
             </tr></thead>
             <tbody>
               {crossData.rows.map((row) => <tr class={`results-row static ${recommendation?.recordKey === row.recordKey ? "recommended" : ""}`}>
@@ -174,9 +175,18 @@ export function ComparePage() {
         : crossData.rows.length > 0 && <p class="muted-line">{t(locale, "crossNone")}</p>}
 
       <div class="session-bar">
-        <button class="button secondary" type="button" onClick={() => { session.saveSession(); }}>{t(locale, "sessionSave")}</button>
-        <button class="button ghost" type="button" onClick={() => { void navigator.clipboard?.writeText(session.shareText()); }}>{t(locale, "sessionShare")}</button>
-        <button class="button ghost" type="button" onClick={() => { downloadJson(session.exportJson(), `agentarena-compare-${Date.now()}.json`); }}>{t(locale, "sessionExport")}</button>
+        <button class="button secondary" type="button" onClick={() => { session.saveSession(); setNotice({ kind: "success", message: t(locale, "sessionSaved") }); }}>{t(locale, "sessionSave")}</button>
+        <button class="button ghost" type="button" onClick={() => {
+          const text = session.shareText();
+          if (navigator.clipboard?.writeText) {
+            void navigator.clipboard.writeText(text)
+              .then(() => setNotice({ kind: "success", message: t(locale, "copied") }))
+              .catch(() => setNotice({ kind: "danger", message: t(locale, "loadFailed") }));
+          } else {
+            setNotice({ kind: "danger", message: t(locale, "loadFailed") });
+          }
+        }}>{t(locale, "sessionShare")}</button>
+        <button class="button ghost" type="button" onClick={() => { downloadJson(session.exportJson(), `agentarena-compare-${Date.now()}.json`); setNotice({ kind: "success", message: t(locale, "exported") }); }}>{t(locale, "sessionExport")}</button>
       </div>
     </Section>
   </>;

@@ -2,7 +2,7 @@ import { type ComponentChildren, cloneElement, isValidElement, type VNode } from
 import { useId } from "preact/hooks";
 import type { CopyKey } from "../i18n";
 import { copy } from "../i18n";
-import type { Locale } from "../types";
+import type { CostQuality, Locale } from "../types";
 
 export type IconName = "runs" | "plus" | "compare" | "library" | "environment" | "settings" | "plan" | "live" | "outcome" | "evidence" | "check" | "warning" | "danger" | "info" | "refresh" | "cancel" | "upload" | "clock" | "repo" | "agent" | "trace" | "file" | "cost" | "menu" | "chevron" | "external";
 
@@ -36,10 +36,18 @@ export function StatusPill({ tone = "neutral", children }: { tone?: "success" | 
   return <span class={`status-pill status-${tone}`}>{icon && <Icon name={icon}/>}<span>{children}</span></span>;
 }
 
-export function Notice({ kind, children, onClose }: { kind: "info" | "success" | "warning" | "danger"; children: ComponentChildren; onClose?: () => void }) {
+export function Notice({ kind, children, onClose, closeLabel = "Dismiss" }: { kind: "info" | "success" | "warning" | "danger"; children: ComponentChildren; onClose?: () => void; closeLabel?: string }) {
   return <div class={`notice notice-${kind}`} role={kind === "danger" ? "alert" : "status"}>
     <Icon name={kind === "success" ? "check" : kind}/><div class="notice-body">{children}</div>
-    {onClose && <button class="icon-button" type="button" onClick={onClose} aria-label="Dismiss"><Icon name="cancel"/></button>}
+    {onClose && <button class="icon-button" type="button" onClick={onClose} aria-label={closeLabel}><Icon name="cancel"/></button>}
+  </div>;
+}
+
+/** Loading placeholder that is announced to assistive tech (role=status + aria-busy).
+ *  Callers pass a localized `label` so screen readers hear "Loading" in the active locale. */
+export function Skeleton({ lines = 3, large = false, label }: { lines?: number; large?: boolean; label?: string }) {
+  return <div class={`skeleton-lines ${large ? "large" : ""}`} role="status" aria-busy="true" aria-label={label ?? "Loading"}>
+    {Array.from({ length: lines }, (_, index) => <span key={index}/>)}
   </div>;
 }
 
@@ -89,7 +97,7 @@ export function formatDuration(value: number | null, locale: Locale): string {
   return `${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s`;
 }
 
-export function formatCost(value: number | null, locale: Locale): string { return value === null ? t(locale, "unknown") : `$${value.toFixed(2)}`; }
+export function formatCost(value: number | null, locale: Locale, quality: CostQuality = "known"): string { return value === null || quality === "unavailable" ? t(locale, "unknown") : `${quality === "estimated" ? "\u2248" : ""}$${value.toFixed(2)}`; }
 export function formatTime(value: string | null | undefined, locale: Locale): string {
   if (!value) return t(locale, "unknown");
   const date = new Date(value); return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(date);

@@ -1,5 +1,6 @@
 import {
   getComparableRuns,
+  getCostQuality,
   runtimeIdentity
 } from "./comparison.js";
 import { isScoreExcluded } from "./scoring.js";
@@ -125,7 +126,7 @@ export function buildLeaderboard(runs, currentRun) {
     const scores = results.map((r) => r.compositeScore ?? 0).filter((s) => s > 0);
     const durations = results.map((r) => r.durationMs).filter((d) => d > 0);
     const costs = results
-      .filter((r) => r.costKnown && r.estimatedCostUsd > 0)
+      .filter((r) => getCostQuality(r) === "known" && r.estimatedCostUsd > 0)
       .map((r) => r.estimatedCostUsd);
     const successCount = results.filter((r) => r.status === "success").length;
 

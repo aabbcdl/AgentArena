@@ -73,3 +73,10 @@ Then open `apps/web-report/dist/index.html` and either:
 - load the whole `.agentarena/runs/` folder to browse multiple runs
 
 Direct file loading is mainly a fallback path for browsing results that already exist.
+
+
+## Legacy Page Freeze Policy
+
+The classic page under `apps/web-report/src/` is now a compatibility surface. New workflow and presentation work belongs in the Workbench. The classic page may still change for security fixes, correctness fixes, current artifact compatibility, accessibility regressions, or failures that block existing users.
+
+Decision rules that affect whether a result can be ranked must live in a shared contract and be exercised against both pages. The classic page must not gain a separate scoring rule, result-qualification rule, or trust interpretation. It remains supported for existing report files, but it is not a second product roadmap.

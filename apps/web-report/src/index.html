@@ -370,7 +370,7 @@
                 <div id="launcher-log-list" class="launcher-log-list" role="log" aria-label="Benchmark log entries"></div>
               </section>
             </section>
-            <details id="result-loader-panel" class="detail-card workspace-card workspace-card-secondary workspace-loader" open>
+            <details id="result-loader-panel" class="detail-card workspace-card workspace-card-secondary workspace-loader">
               <summary id="result-loader-summary" data-i18n="loadHistoryTitle">加载历史报告</summary>
               <div id="loading-indicator" class="loading-indicator hidden" role="status" aria-live="polite" aria-label="Loading">
                 <div class="loading-spinner" aria-hidden="true"></div>
@@ -844,10 +844,17 @@
           });
         }).catch(() => {});
 
-        // Handle skipped waiting activation
+        // Handle skipped-waiting activation. Only reload when the user has
+        // consented to an update via the banner (which sets the pending flag).
+        // The very first install also fires controllerchange (skipWaiting +
+        // clients.claim), but reloading then aborts in-flight /api/* requests
+        // and flashes first paint — the page is already controlled, so skip it.
+        if (typeof window.__agentarenaPendingSwSkip !== "boolean") {
+          window.__agentarenaPendingSwSkip = false;
+        }
         let refreshing = false;
         navigator.serviceWorker.addEventListener("controllerchange", () => {
-          if (refreshing) {
+          if (!window.__agentarenaPendingSwSkip || refreshing) {
             return;
           }
           refreshing = true;

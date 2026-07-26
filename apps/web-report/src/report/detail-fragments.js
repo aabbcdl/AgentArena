@@ -1,5 +1,6 @@
 
 import { resultStore } from "../utils/storage.js";
+import { getCostQuality } from "../view-model/comparison.js";
 import { DEFAULT_SCORE_WEIGHTS, formatDiffPrecisionMetric, formatLintMetric, formatTestMetric, getCompositeScoreDetails } from "../view-model/scoring.js";
 
 /**
@@ -713,7 +714,7 @@ export function createDetailFragments({
     const best = successful.reduce((a, b) => ((a.compositeScore ?? 0) > (b.compositeScore ?? 0) ? a : b));
     return localText(
       `${best.displayLabel} 在 "${run.task.title}" 中得分最高：${best.compositeScore?.toFixed(0)}/100，成本 ${best.costKnown ? "$" + best.estimatedCostUsd.toFixed(2) : "未知"}，耗时 ${(best.durationMs / 1000).toFixed(0)} 秒。`,
-      `${best.displayLabel} won with score ${best.compositeScore?.toFixed(0)}/100 on "${run.task.title}". Cost: ${best.costKnown ? "$" + best.estimatedCostUsd.toFixed(2) : "unknown"}, Duration: ${(best.durationMs / 1000).toFixed(0)}s.`
+      `${best.displayLabel} won with score ${best.compositeScore?.toFixed(0)}/100 on "${run.task.title}". Cost: ${getCostQuality(best) === "unavailable" ? "unknown" : `${getCostQuality(best) === "estimated" ? "\u2248" : ""}$${best.estimatedCostUsd.toFixed(2)}`}, Duration: ${(best.durationMs / 1000).toFixed(0)}s.`
     );
   }
 

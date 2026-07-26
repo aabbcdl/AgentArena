@@ -2,18 +2,28 @@ import { createContext } from "preact";
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { apiFetch, eventStreamUrl } from "../api/client";
 import { demoRun } from "../data/demo";
+import { formatUserError } from "../domain/errors";
 import { type NormalizedRun, normalizeRun } from "../domain/run";
-import type { AdapterInfo, Density, EnvironmentState, InstallGuide, Locale, PageId, ProviderProfile, RunPlan, TaskPackInfo, Theme, UiInfo, UiRunStatus, WorkbenchContextValue } from "../types";
+import { DEFAULT_SCORE_MODE, normalizeScoreMode } from "../domain/score-mode.ts";
+import { createViewTelemetryDeduper } from "../domain/telemetry";
+import type { AdapterInfo, Density, EnvironmentState, InstallGuide, Locale, PageId, ProviderProfile, RunPlan, TaskPackInfo, TelemetrySummary, Theme, UiInfo, UiRunStatus, WorkbenchContextValue } from "../types";
 
 const RUNS_KEY = "agentarena-workbench-runs-v1";
 const PREFS_KEY = "agentarena-workbench-preferences-v1";
+const PLAN_KEY = "agentarena-workbench-plan-v1";
+const defaultPlan: RunPlan = { repoPath: "", taskPath: "", agentIds: [], scoreMode: DEFAULT_SCORE_MODE, probeAuth: true, maxConcurrency: 1 };
 const idleStatus: UiRunStatus = { state: "idle", phase: "idle", logs: [], updatedAt: new Date(0).toISOString() };
-const emptyEnvironment: EnvironmentState = { loading: true, error: null, uiInfo: null, adapters: [], taskPacks: [], providers: [], detectedAgents: [], installGuides: [], checkedAt: null };
+const emptyEnvironment: EnvironmentState = { loading: true, error: null, uiInfo: null, adapters: [], taskPacks: [], providers: [], detectedAgents: [], installGuides: [], telemetrySummary: null, checkedAt: null, failed: { adapters: false, taskPacks: false, providers: false, telemetry: false } };
 const WorkbenchContext = createContext<WorkbenchContextValue | null>(null);
 
 function readJson<T>(key: string, fallback: T): T {
   try { const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) as T : fallback; }
   catch { return fallback; }
+}
+
+function initialLocale(preferred?: Locale): Locale {
+  const requested = new URLSearchParams(window.location.search).get("lang");
+  return requested === "en" || requested === "zh-CN" ? requested : preferred ?? "zh-CN";
 }
 
 function initialPage(): PageId {
@@ -31,7 +41,7 @@ function upsertRun(items: NormalizedRun[], run: NormalizedRun): NormalizedRun[] 
 export function WorkbenchProvider({ children }: { children: preact.ComponentChildren }) {
   const preferences = readJson<{ locale?: Locale; theme?: Theme; density?: Density }>(PREFS_KEY, {});
   const initialRuns = useMemo(persistedRuns, []);
-  const [locale, setLocaleState] = useState<Locale>(preferences.locale ?? "zh-CN");
+  const [locale, setLocaleState] = useState<Locale>(() => initialLocale(preferences.locale));
   const [theme, setThemeState] = useState<Theme>(preferences.theme ?? "system");
   const [density, setDensityState] = useState<Density>(preferences.density ?? "comfortable");
   const [page, setPageState] = useState<PageId>(initialPage);
@@ -39,11 +49,12 @@ export function WorkbenchProvider({ children }: { children: preact.ComponentChil
   const [selectedRunId, setSelectedRunIdState] = useState<string | null>(initialRuns[0]?.runId ?? null);
   const [selectedAgentId, setSelectedAgentIdState] = useState<string | null>(null);
   const [environment, setEnvironment] = useState<EnvironmentState>(emptyEnvironment);
-  const [plan, setPlan] = useState<RunPlan>({ repoPath: "", taskPath: "", agentIds: [], scoreMode: "practical", probeAuth: true, maxConcurrency: 1 });
+  const [plan, setPlan] = useState<RunPlan>(() => ({ ...defaultPlan, ...readJson<Partial<RunPlan>>(PLAN_KEY, {}) }));
   const [preflight, setPreflight] = useState<Record<string, unknown>[]>([]);
   const [runStatus, setRunStatus] = useState<UiRunStatus>(idleStatus);
   const [notice, setNotice] = useState<WorkbenchContextValue["notice"]>(null);
   const activeRunId = useRef<string | null>(null);
+  const telemetryDeduper = useRef(createViewTelemetryDeduper());
 
   const selectedRun = useMemo(() => runs.find((item) => item.runId === selectedRunId) ?? runs[0] ?? null, [runs, selectedRunId]);
   const persistPreferences = useCallback((next: { locale: Locale; theme: Theme; density: Density }) => { try { localStorage.setItem(PREFS_KEY, JSON.stringify(next)); } catch { /* private mode */ } }, []);
@@ -51,10 +62,18 @@ export function WorkbenchProvider({ children }: { children: preact.ComponentChil
   const setTheme = useCallback((next: Theme) => { setThemeState(next); persistPreferences({ locale, theme: next, density }); }, [density, locale, persistPreferences]);
   const setDensity = useCallback((next: Density) => { setDensityState(next); persistPreferences({ locale, theme, density: next }); }, [locale, persistPreferences, theme]);
   const setPage = useCallback((next: PageId) => { window.location.hash = `/${next}`; setPageState(next); }, []);
+  const trackTelemetry = useCallback((
+    event: "app_opened" | "result_viewed" | "preflight_completed" | "evidence_opened",
+    props: Record<string, unknown>
+  ) => {
+    if (!environment.uiInfo?.telemetryEnabled) return;
+    void apiFetch("/api/telemetry", { method: "POST", body: JSON.stringify({ event, props }) }).catch(() => undefined);
+  }, [environment.uiInfo?.telemetryEnabled]);
 
   useEffect(() => { const handler = () => setPageState(initialPage()); window.addEventListener("hashchange", handler); return () => window.removeEventListener("hashchange", handler); }, []);
   useEffect(() => { document.documentElement.lang = locale; document.documentElement.dataset.theme = theme; document.documentElement.dataset.density = density; }, [density, locale, theme]);
   useEffect(() => { try { localStorage.setItem(RUNS_KEY, JSON.stringify(runs.map((item) => item.raw))); } catch { /* unavailable */ } }, [runs]);
+  useEffect(() => { try { localStorage.setItem(PLAN_KEY, JSON.stringify(plan)); } catch { /* unavailable */ } }, [plan]);
 
   const absorbStatus = useCallback((incoming: UiRunStatus) => {
     setRunStatus((previous) => mergeStatus(previous, incoming));
@@ -69,11 +88,11 @@ export function WorkbenchProvider({ children }: { children: preact.ComponentChil
 
   const refreshEnvironment = useCallback(async () => {
     setEnvironment((previous) => ({ ...previous, loading: true, error: null }));
-    const [uiInfoResult, adaptersResult, tasksResult, providersResult, detectionResult, statusResult, guidesResult] = await Promise.allSettled([
+    const [uiInfoResult, adaptersResult, tasksResult, providersResult, detectionResult, statusResult, guidesResult, telemetryResult] = await Promise.allSettled([
       apiFetch<UiInfo>("/api/ui-info"), apiFetch<AdapterInfo[]>("/api/adapters"),
       apiFetch<TaskPackInfo[]>(`/api/taskpacks${plan.repoPath ? `?repoPath=${encodeURIComponent(plan.repoPath)}` : ""}`),
       apiFetch<ProviderProfile[]>("/api/provider-profiles"), apiFetch<Array<Record<string, unknown>>>("/api/agent-detection"), apiFetch<UiRunStatus>("/api/run-status"),
-      apiFetch<InstallGuide[]>("/api/install-guides")
+      apiFetch<InstallGuide[]>("/api/install-guides"), apiFetch<TelemetrySummary>("/api/telemetry-summary")
     ]);
     const uiInfo = uiInfoResult.status === "fulfilled" ? uiInfoResult.value : null;
     const adapters = adaptersResult.status === "fulfilled" ? adaptersResult.value : [];
@@ -81,13 +100,51 @@ export function WorkbenchProvider({ children }: { children: preact.ComponentChil
     const providers = providersResult.status === "fulfilled" ? providersResult.value : [];
     const detectedAgents = detectionResult.status === "fulfilled" ? detectionResult.value : [];
     const installGuides = guidesResult.status === "fulfilled" ? guidesResult.value : [];
+    const telemetrySummary = telemetryResult.status === "fulfilled" ? telemetryResult.value : null;
     const failures = [uiInfoResult, adaptersResult, tasksResult, providersResult, detectionResult].filter((item) => item.status === "rejected");
-    setEnvironment({ loading: false, error: failures.length === 5 ? String((failures[0] as PromiseRejectedResult).reason) : null, uiInfo, adapters, taskPacks, providers, detectedAgents, installGuides, checkedAt: new Date().toISOString() });
+    const offlineError = failures.length === 5
+      ? formatUserError((failures[0] as PromiseRejectedResult).reason, locale)
+      : null;
+    // Track per-section failures so consumers can show "load failed / retry"
+    // instead of an empty list that reads as a genuine zero.
+    const failed = {
+      adapters: adaptersResult.status === "rejected",
+      taskPacks: tasksResult.status === "rejected",
+      providers: providersResult.status === "rejected",
+      telemetry: telemetryResult.status === "rejected"
+    };
+    setEnvironment({ loading: false, error: offlineError, uiInfo, adapters, taskPacks, providers, detectedAgents, installGuides, telemetrySummary, checkedAt: new Date().toISOString(), failed });
     if (statusResult.status === "fulfilled") absorbStatus(statusResult.value);
     setPlan((current) => ({ ...current, repoPath: current.repoPath || uiInfo?.repoPath || "", taskPath: current.taskPath || uiInfo?.defaultTaskPath || taskPacks[0]?.path || "", agentIds: current.agentIds.length > 0 ? current.agentIds : adapters.filter((item) => item.kind === "demo").slice(0, 3).map((item) => item.id) }));
-  }, [absorbStatus, plan.repoPath]);
+  }, [absorbStatus, locale, plan.repoPath]);
 
   useEffect(() => { void refreshEnvironment(); }, []);
+  useEffect(() => {
+    if (!environment.uiInfo?.telemetryEnabled || !telemetryDeduper.current.markAppOpened()) return;
+    trackTelemetry("app_opened", { entryPoint: "workbench", language: locale, hasRuns: runs.length > 0 });
+  }, [environment.uiInfo?.telemetryEnabled, locale, runs.length, trackTelemetry]);
+  useEffect(() => {
+    if (!environment.uiInfo?.telemetryEnabled || !selectedRun || !telemetryDeduper.current.markResultViewed(selectedRun.runId)) return;
+    const hasInlineDiff = selectedRun.results.some((item) => Array.isArray(item.fileDiffs) && item.fileDiffs.length > 0);
+    trackTelemetry("result_viewed", {
+      entryPoint: "workbench",
+      resultIntegrity: selectedRun.integrity,
+      sourceKind: selectedRun.source.kind,
+      agentCount: selectedRun.results.length,
+      scoreMode: normalizeScoreMode(selectedRun.scoreMode),
+      hasInlineDiff
+    });
+  }, [environment.uiInfo?.telemetryEnabled, selectedRun, trackTelemetry]);
+  useEffect(() => {
+    if (!environment.uiInfo?.telemetryEnabled || page !== "evidence" || !selectedRun) return;
+    if (!telemetryDeduper.current.markEvidenceOpened(selectedRun.runId)) return;
+    const hasInlineDiff = selectedRun.results.some((item) => Array.isArray(item.fileDiffs) && item.fileDiffs.length > 0);
+    trackTelemetry("evidence_opened", {
+      entryPoint: "workbench",
+      resultIntegrity: selectedRun.integrity,
+      hasInlineDiff
+    });
+  }, [environment.uiInfo?.telemetryEnabled, page, selectedRun, trackTelemetry]);
   useEffect(() => {
     if (runStatus.state !== "running" && runStatus.state !== "cancelling") return;
     const poll = window.setInterval(() => { void apiFetch<UiRunStatus>("/api/run-status").then(absorbStatus).catch(() => undefined); }, 1000);
@@ -113,7 +170,16 @@ export function WorkbenchProvider({ children }: { children: preact.ComponentChil
     return () => source?.close();
   }, [absorbStatus, runStatus.state]);
 
-  const updatePlan = useCallback((patch: Partial<RunPlan>) => setPlan((current) => ({ ...current, ...patch })), []);
+  const updatePlan = useCallback((patch: Partial<RunPlan>) => {
+    setPlan((current) => {
+      const next = { ...current, ...patch };
+      if (patch.scoreMode !== undefined) next.scoreMode = normalizeScoreMode(patch.scoreMode);
+      return next;
+    });
+    if (patch.agentIds !== undefined || patch.repoPath !== undefined || patch.taskPath !== undefined) {
+      setPreflight([]);
+    }
+  }, []);
 
   const saveProviderProfile = useCallback(async (payload: Record<string, unknown>): Promise<void> => {
     const id = typeof payload.id === "string" && payload.id ? payload.id : undefined;
@@ -131,24 +197,30 @@ export function WorkbenchProvider({ children }: { children: preact.ComponentChil
     if (plan.agentIds.length === 0) { setNotice({ kind: "warning", message: locale === "zh-CN" ? "请至少选择一个 Agent。" : "Select at least one agent." }); return; }
     const results = await Promise.all(plan.agentIds.map(async (agentId) => {
       try { const result = await apiFetch<Record<string, unknown>>("/api/quick-preflight", { method: "POST", body: JSON.stringify({ baseAgentId: agentId, displayLabel: environment.adapters.find((item) => item.id === agentId)?.title ?? agentId }) }); return { ...result, agentId }; }
-      catch (error) { return { agentId, status: "error", error: error instanceof Error ? error.message : String(error) }; }
+      catch (error) { return { agentId, status: "error", error: formatUserError(error, locale) }; }
     }));
     setPreflight(results);
     const blocked = results.some((item) => ["blocked", "missing", "error"].includes(String(item.status)));
+    trackTelemetry("preflight_completed", {
+      entryPoint: "workbench-plan",
+      blocked,
+      selectedCount: plan.agentIds.length
+    });
     setNotice({ kind: blocked ? "warning" : "success", message: blocked ? (locale === "zh-CN" ? "运行前检查发现需要处理的问题。" : "Preflight found issues that need attention.") : (locale === "zh-CN" ? "运行前检查通过。" : "Preflight passed.") });
-  }, [environment.adapters, locale, plan.agentIds]);
+  }, [environment.adapters, locale, plan.agentIds, trackTelemetry]);
 
   const startRun = useCallback(async () => {
     if (!plan.repoPath || !plan.taskPath || plan.agentIds.length === 0) { setNotice({ kind: "warning", message: locale === "zh-CN" ? "请补全仓库、任务和 Agent。" : "Complete repository, task, and agent selections." }); return; }
     try {
-      const response = await apiFetch<UiRunStatus>("/api/run", { method: "POST", body: JSON.stringify({ repoPath: plan.repoPath, taskPath: plan.taskPath, agentIds: plan.agentIds, probeAuth: plan.probeAuth, scoreMode: plan.scoreMode, maxConcurrency: plan.maxConcurrency }) });
+      const scoreMode = normalizeScoreMode(plan.scoreMode);
+      const response = await apiFetch<UiRunStatus>("/api/run", { method: "POST", body: JSON.stringify({ repoPath: plan.repoPath, taskPath: plan.taskPath, agentIds: plan.agentIds, probeAuth: plan.probeAuth, scoreMode, maxConcurrency: plan.maxConcurrency, entryPoint: "workbench-plan" }) });
       absorbStatus(response); setNotice({ kind: "success", message: locale === "zh-CN" ? "评测已经启动。" : "Evaluation started." }); setPage("live");
-    } catch (error) { setNotice({ kind: "danger", message: error instanceof Error ? error.message : String(error) }); }
+    } catch (error) { setNotice({ kind: "danger", message: formatUserError(error, locale) }); }
   }, [absorbStatus, locale, plan, setPage]);
 
   const cancelRun = useCallback(async () => {
     try { const response = await apiFetch<UiRunStatus>("/api/run/cancel", { method: "POST", body: "{}" }); absorbStatus(response); setNotice({ kind: "warning", message: locale === "zh-CN" ? "取消请求已发送。" : "Cancellation requested." }); }
-    catch (error) { setNotice({ kind: "danger", message: error instanceof Error ? error.message : String(error) }); }
+    catch (error) { setNotice({ kind: "danger", message: formatUserError(error, locale) }); }
   }, [absorbStatus, locale]);
 
   const loadDemo = useCallback(() => {

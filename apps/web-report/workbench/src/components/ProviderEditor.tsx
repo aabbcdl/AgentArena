@@ -1,4 +1,4 @@
-import { useState } from "preact/hooks";
+import { useEffect, useId, useRef, useState } from "preact/hooks";
 import { useWorkbench } from "../hooks/useWorkbench";
 import type { CopyKey } from "../i18n";
 import type { Locale, ProviderProfile } from "../types";
@@ -40,21 +40,49 @@ const FIELDS: FieldDef[] = [
 export function ProviderEditor({ locale, editing, onClose }: ProviderEditorProps) {
   const { saveProviderProfile, deleteProviderProfile, setNotice } = useWorkbench();
   const isEditing = Boolean(editing);
+  // Backfill every editable field from the profile being edited. Previously
+  // baseUrl / thinkingModel / default*Model / notes were hardcoded to "", so
+  // opening a saved provider showed them blank and saving overwrote the stored
+  // values with undefined — silent data loss. The API returns these fields.
   const [form, setForm] = useState<Record<string, string>>({
     name: editing?.name ?? "",
     kind: editing?.kind ?? "openai-proxy",
-    baseUrl: "",
+    baseUrl: editing?.baseUrl ?? "",
     apiFormat: editing?.apiFormat ?? "",
     primaryModel: editing?.primaryModel ?? "",
-    thinkingModel: "",
-    defaultHaikuModel: "",
-    defaultSonnetModel: "",
-    defaultOpusModel: "",
-    notes: "",
+    thinkingModel: editing?.thinkingModel ?? "",
+    defaultHaikuModel: editing?.defaultHaikuModel ?? "",
+    defaultSonnetModel: editing?.defaultSonnetModel ?? "",
+    defaultOpusModel: editing?.defaultOpusModel ?? "",
+    notes: editing?.notes ?? "",
   });
   const [secret, setSecret] = useState("");
   const [confirmRisk, setConfirmRisk] = useState(false);
   const [busy, setBusy] = useState(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const headingId = useId();
+
+  // Dialog behavior: focus first field on open, trap Tab within the dialog,
+  // close on Escape, and restore focus to the previously-focused element.
+  useEffect(() => {
+    const previous = document.activeElement as HTMLElement | null;
+    const node = dialogRef.current;
+    node?.querySelector<HTMLElement>("input, select, textarea, button")?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") { event.stopPropagation(); onClose(); return; }
+      if (event.key !== "Tab" || !node) return;
+      const focusable = Array.from(node.querySelectorAll<HTMLElement>(
+        'input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      )).filter((el) => el.offsetParent !== null || el === document.activeElement);
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    node?.addEventListener("keydown", onKeyDown);
+    return () => { node?.removeEventListener("keydown", onKeyDown); previous?.focus?.(); };
+  }, [onClose]);
 
   const nonOfficialBaseUrl = form.baseUrl.trim() !== "" && form.kind !== "official";
 
@@ -115,9 +143,9 @@ export function ProviderEditor({ locale, editing, onClose }: ProviderEditorProps
   };
 
   return (
-    <div class="provider-editor" data-provider-editor="true">
+    <div class="provider-editor" data-provider-editor="true" role="dialog" aria-modal="true" aria-labelledby={headingId} ref={dialogRef}>
       <div class="provider-editor-head">
-        <strong>{isEditing ? t(locale, "providerEdit") : t(locale, "providerAdd")}</strong>
+        <strong id={headingId}>{isEditing ? t(locale, "providerEdit") : t(locale, "providerAdd")}</strong>
         <button type="button" class="icon-button" onClick={onClose} aria-label={t(locale, "providerCancel")}><span aria-hidden="true">×</span></button>
       </div>
 

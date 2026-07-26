@@ -13,6 +13,7 @@ export {
   getAgentTrendRows,
   getComparableRuns,
   getCompareResults,
+  getCostQuality,
   getCrossRunCompareRows,
   getCrossRunRecommendation,
   getFairComparisonExclusionReasons,

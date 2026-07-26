@@ -88,53 +88,101 @@ import { DEFAULT_SCORE_WEIGHTS } from "./view-model/scoring.js";
  * @property {boolean} _launcherConfigRestored - Whether saved config has been loaded
  */
 const state = {
+  // @owner app.js (run loading), result-loader.js (file upload)
   runs: [],
+  // @owner app.js (run selection), run-nav.js (click handler)
   run: null,
+  // @owner run-nav.js (click), app.js (load)
   selectedRunId: null,
+  // @owner agent-list.js (click), app.js (load)
   selectedAgentId: null,
+  // @owner app.js (run load)
   markdownByRunId: new Map(),
+  // @owner result-loader.js (file upload)
   standaloneMarkdown: null,
+  // @owner language-switch.js
   language: "zh-CN",
+  // @owner toast.js
   notice: null,
+  // @owner toast.js
   noticeKind: null,
+  // @owner toast.js (internal)
   _toastSeq: 0,
+  // @owner toast.js (internal)
   _lastToastSeq: 0,
+  // @owner app.js (fetch on init)
   serviceInfo: null,
+  // @owner launcher.js (fetch on expand), app.js (init)
   availableAdapters: [],
+  // @owner launcher.js (fetch on expand), app.js (init)
   availableTaskPacks: [],
+  // @owner launcher.js (fetch on expand), provider-editor.js
   availableProviderProfiles: [],
+  // @owner launcher.js (run), app.js (poll)
   runInProgress: false,
+  // @owner app.js (poll), launcher.js (start)
   runStatus: null,
+  // @owner app.js (poll timer)
   runStatusPollTimer: null,
+  // @owner app.js (poll)
   runStatusRequestSeq: 0,
+  // @owner app.js (stream), launcher.js (log)
   agentLogs: {},
+  // @owner app.js (stream)
   agentActivity: {},
+  // @owner app.js (stream init)
   streamClient: null,
+  // @owner launcher.js (checkbox)
   launcherSelectedAgentIds: [],
+  // @owner launcher.js (variant form)
   launcherCodexVariants: [],
+  // @owner launcher.js (variant form), provider-editor.js
   launcherClaudeVariants: [],
+  // @owner launcher.js (variant form)
   launcherGeminiVariants: [],
+  // @owner launcher.js (variant form)
   launcherAiderVariants: [],
+  // @owner launcher.js (variant form)
   launcherKiloVariants: [],
+  // @owner launcher.js (variant form)
   launcherOpencodeVariants: [],
+  // @owner provider-editor.js
   launcherProviderEditor: null,
+  // @owner launcher.js (toggle)
   launcherExpanded: false,
+  // @owner launcher.js (select)
   launcherScoreMode: "practical",
+  // @owner launcher.js (input)
   launcherGlobalModelOverride: "",
+  // @owner launcher.js (checkbox)
   launcherGlobalModelEnabled: false,
+  // @owner launcher.js (checkbox)
   launcherGlobalModelAgentIds: [],
+  // @owner cross-run-compare.js (toggle)
   crossRunSelectMode: false,
+  // @owner cross-run-compare.js (select)
   crossRunSelectedIds: new Set(),
+  // @owner cross-run-compare.js (compute)
   crossRunCompareData: null,
+  // @owner cross-run-compare.js (expand)
   expandedCompareAgentId: null,
+  // @owner community.js (select)
   communityTaskPackId: null,
+  // @owner community.js (fetch)
   communityData: null,
+  // @owner community.js (fetch)
   communityLoading: false,
+  // @owner community.js (fetch)
   communityError: null,
+  // @owner community.js (internal)
   _communityRequestId: 0,
+  // @owner sidebar.js (toggle)
   sidebarOpen: false,
+  // @owner scoring.js (weight change), launcher.js (reset)
   scoreWeights: /** @type {Record<string, number>} */ ({ ...DEFAULT_SCORE_WEIGHTS }),
+  // @owner run-nav.js (input)
   runSearchQuery: "",
+  // @owner launcher.js (internal)
   _launcherConfigRestored: false
 };
 
@@ -179,6 +227,10 @@ function setState(patch) {
           "Add it to the state definition in app-state.js first."
         );
       }
+    }
+    if (typeof console.trace === "function") {
+      const changedKeys = Object.keys(patch).join(", ");
+      console.trace(`[app-state] setState(${changedKeys})`);
     }
   }
   Object.assign(state, patch);

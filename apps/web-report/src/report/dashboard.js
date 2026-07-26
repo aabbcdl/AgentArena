@@ -560,7 +560,7 @@ function renderAgentTrendTableV2(run) {
             <td><span class="status-badge ${row.result.status === "success" ? "status-success" : "status-failed"}">${escapeHtml(translateStatus(row.result.status, t))}</span></td>
             <td>${escapeHtml(formatDuration(row.result.durationMs))}</td>
             <td>${typeof row.result.tokenUsage === "number" && !Number.isNaN(row.result.tokenUsage) ? row.result.tokenUsage.toLocaleString() : "—"}</td>
-            <td>${row.result.costKnown ? "$" + row.result.estimatedCostUsd.toFixed(4) : "n/a"}</td>
+            <td>${formatCost(row.result)}</td>
             <td>${row.judgeDelta !== null ? escapeHtml(formatDelta(row.judgeDelta)) : "-"}</td>
           </tr>
         `).join("")}
@@ -1179,6 +1179,8 @@ function renderCompareTableV2(run) {
   const fastestKey = verdict.fastest ? recordKey(verdict.fastest) : null;
   const cheapestKey = verdict.lowestKnownCost ? recordKey(verdict.lowestKnownCost) : null;
   const medals = ["🥇", "🥈", "🥉"];
+  const rankedResults = results.filter((result) => result.status === "success" && result.scoreExcluded !== true);
+  const rankByKey = new Map(rankedResults.map((result, index) => [recordKey(result), index + 1]));
 
   // Pagination: show first 25 rows, then "show all" button
   const COMPARE_PAGE_SIZE = 25;
@@ -1198,9 +1200,10 @@ function renderCompareTableV2(run) {
     const isActive = recordKey(result) === state.selectedAgentId ? "active" : "";
     const key = recordKey(result);
     const runtime = runtimeIdentity(result);
+    const rank = rankByKey.get(key) ?? null;
     const isBest = key === bestKey;
-    const rowClass = [isActive, isBest ? "compare-row-best" : "", result.status === "failed" ? "compare-row-failed" : ""].filter(Boolean).join(" ");
-    const medal = index < 3 && allResults.length > 1 ? medals[index] : "";
+    const rowClass = [isActive, isBest ? "compare-row-best" : "", result.status !== "success" ? "compare-row-failed" : ""].filter(Boolean).join(" ");
+    const medal = rank !== null && rank <= 3 && rankedResults.length > 1 ? medals[rank - 1] : "";
 
     // Score with grade
     let scoreCell = "—";
@@ -1235,7 +1238,7 @@ function renderCompareTableV2(run) {
 
     return `
       <tr class="compare-row ${rowClass}" data-compare-agent-id="${escapeHtml(key)}" tabindex="0" role="button" aria-label="${escapeHtml(localText("展开详情", "Expand details") + " " + resultLabel(result))}">
-        <td class="compare-rank">${medal || index + 1}</td>
+        <td class="compare-rank">${medal || rank || "\u2014"}</td>
         <td class="compare-variant">
           <strong>${escapeHtml(resultLabel(result))}</strong>
           ${tags.length > 0 ? `<div class="compare-tags-inline">${tags.join("")}</div>` : ""}

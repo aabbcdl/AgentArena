@@ -5,6 +5,18 @@ import { EmptyState, Icon, Notice, PageHeader, Section, StatusPill, t } from "..
 import { runIdentityKey } from "../domain/run";
 import { useTrace } from "../hooks/useTrace";
 import { useWorkbench } from "../hooks/useWorkbench";
+import type { Locale } from "../types";
+
+/** Render an object as readable "key: value" chips instead of raw JSON, so the
+ *  execution summary does not leak `{"providerKind":"official"}` into the UI. */
+function KeyValues({ data, locale }: { data: unknown; locale: Locale }) {
+  if (!data || typeof data !== "object") return <span>{t(locale, "unknown")}</span>;
+  const entries = Object.entries(data as Record<string, unknown>).filter(([, value]) => value !== undefined && value !== null && value !== "");
+  if (entries.length === 0) return <span>{t(locale, "unknown")}</span>;
+  return <span class="kv-inline">{entries.map(([key, value]) => (
+    <span class="kv-pair" key={key}><span class="kv-key">{key}</span><code>{typeof value === "object" ? JSON.stringify(value) : String(value)}</code></span>
+  ))}</span>;
+}
 
 export function EvidencePage() {
   const { locale, selectedRun, selectedAgentId, setSelectedAgentId, setPage } = useWorkbench();
@@ -88,8 +100,8 @@ export function EvidencePage() {
             <p>{selected.summary || t(locale, "missing")}</p>
             <dl>
               <div><dt>{t(locale, "source")}</dt><dd>{selectedRun.source.label}</dd></div>
-              <div><dt>{t(locale, "config")}</dt><dd><code>{JSON.stringify(selected.requestedConfig)}</code></dd></div>
-              <div><dt>{t(locale, "runtime")}</dt><dd><code>{selected.resolvedRuntime ? JSON.stringify(selected.resolvedRuntime) : t(locale, "unknown")}</code></dd></div>
+              <div><dt>{t(locale, "config")}</dt><dd><KeyValues data={selected.requestedConfig} locale={locale} /></dd></div>
+              <div><dt>{t(locale, "runtime")}</dt><dd><KeyValues data={selected.resolvedRuntime} locale={locale} /></dd></div>
             </dl>
           </div>
         </Section>

@@ -1,5 +1,6 @@
 import {
   baseAgentLabel,
+  getCostQuality,
   getRunVerdict,
   resultLabel,
   runtimeIdentity,
@@ -14,6 +15,17 @@ import {
 } from "./scoring.js";
 
 export { summarizeRun };
+
+function shareCostText(run) {
+  if (!Array.isArray(run.results) || run.results.length === 0) return "n/a";
+  const qualities = run.results.map((result) => getCostQuality(result));
+  if (qualities.includes("unavailable")) return "n/a";
+  const total = run.results.reduce(
+    (sum, result) => sum + (Number.isFinite(result.estimatedCostUsd) ? result.estimatedCostUsd : 0),
+    0
+  );
+  return `${qualities.includes("estimated") ? "\u2248" : ""}$${total.toFixed(2)}`;
+}
 
 /**
  * Build a plain-text share card for a run.
@@ -33,7 +45,7 @@ export function buildShareCard(run, options = {}) {
     `${summary.successCount}/${summary.totalAgents} agents passed`,
     `Failed: ${summary.failedCount}`,
     `Tokens: ${summary.totalTokens}`,
-    `Known cost: $${summary.knownCost.toFixed(2)}`
+    `Cost: ${shareCostText(run)}`
   ];
 
   if (scoreModeLabel) {
@@ -167,7 +179,7 @@ export function buildShareCardSvg(run, options = {}) {
 
   <rect x="852" y="160" width="180" height="80" rx="12" fill="#1a1a2e" stroke="#2d2d44" />
   <text x="942" y="192" fill="#94a3b8" font-family="${font}" font-size="13" text-anchor="middle">Cost</text>
-  <text x="942" y="226" fill="#e2e8f0" font-family="${font}" font-size="28" font-weight="700" text-anchor="middle">$${esc(summary.knownCost.toFixed(2))}</text>
+  <text x="942" y="226" fill="#e2e8f0" font-family="${font}" font-size="28" font-weight="700" text-anchor="middle">${esc(shareCostText(run))}</text>
 
   <rect x="68" y="260" width="1064" height="1" fill="#2d2d44" />
 
@@ -205,7 +217,7 @@ export function buildPrTable(run, options = {}) {
     const runtime = runtimeIdentity(result);
     const passedJudges = result.judgeResults.filter((judge) => judge.success).length;
     return `| ${resultLabel(result)} | ${baseAgentLabel(result)} | ${runtime.provider} | ${runtime.providerKind} | ${runtime.model} | ${runtime.reasoning} | ${runtime.version} | ${runtime.verification}/${runtime.source} | ${result.status} | ${formatCompositeScore(result, run, scoreWeights)} | ${result.durationMs}ms | ${result.tokenUsage} | ${
-      result.costKnown ? `$${result.estimatedCostUsd.toFixed(2)}` : "n/a"
+      getCostQuality(result) === "unavailable" ? "n/a" : `${getCostQuality(result) === "estimated" ? "\u2248" : ""}$${result.estimatedCostUsd.toFixed(2)}`
     } | ${passedJudges}/${result.judgeResults.length} | ${formatTestMetric(result)} | ${formatLintMetric(result)} | ${formatDiffPrecisionMetric(result)} | ${result.changedFiles.length} |`;
   });
 

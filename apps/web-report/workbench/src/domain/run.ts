@@ -1,6 +1,10 @@
+import { validateSummaryArtifact } from "../../../../../packages/core/src/artifact-contract.ts";
+import { deriveEvaluationStatus, getQualifiedResults } from "../../../src/core/result-contract.js";
+import { normalizeScoreMode } from "./score-mode.ts";
 export type RunSourceKind = "generated" | "imported" | "demo" | "legacy" | "unknown";
 export type IntegrityLevel = "complete" | "partial" | "degraded" | "damaged";
 export type EvaluationStatus = "pass" | "partial" | "fail" | "incomplete";
+export type CostQuality = "known" | "estimated" | "unavailable";
 export type ExecutionStatus = "completed" | "cancelled" | "interrupted" | "running" | "unknown";
 
 export interface NormalizedJudgeResult {
@@ -28,7 +32,9 @@ export interface NormalizedAgentResult {
   tokenUsage: number | null;
   estimatedCostUsd: number | null;
   costKnown: boolean;
+  costQuality: CostQuality;
   compositeScore: number | null;
+  scoreExcluded: boolean;
   changedFiles: string[];
   /** Line-level diffs, when the runner persisted them. Undefined today — the
    * runner only stores file names, so the UI degrades to a file list. */
@@ -109,7 +115,11 @@ function normalizeResult(value: unknown, index: number): NormalizedAgentResult {
   const agentId = text(item.agentId) ?? text(item.baseAgentId) ?? `agent-${index + 1}`;
   const variantId = text(item.variantId) ?? agentId;
   const tracePath = text(item.tracePath);
-  const costKnown = item.costKnown === true || finiteNumber(item.estimatedCostUsd) !== null;
+  const declaredCostQuality = text(item.costQuality);
+  const costQuality: CostQuality = declaredCostQuality === "known" || declaredCostQuality === "estimated" || declaredCostQuality === "unavailable"
+    ? declaredCostQuality
+    : item.costKnown === true ? "known" : "unavailable";
+  const costKnown = costQuality === "known";
   const fileDiffs = Array.isArray(item.fileDiffs)
     ? item.fileDiffs.map((entry) => normalizeFileDiff(entry)).filter((entry): entry is FileDiff => entry !== null)
     : [];
@@ -120,9 +130,11 @@ function normalizeResult(value: unknown, index: number): NormalizedAgentResult {
     status: text(item.status) ?? "unknown",
     durationMs: finiteNumber(item.durationMs),
     tokenUsage: finiteNumber(item.tokenUsage),
-    estimatedCostUsd: costKnown ? finiteNumber(item.estimatedCostUsd) : null,
+    estimatedCostUsd: costQuality !== "unavailable" ? finiteNumber(item.estimatedCostUsd) : null,
     costKnown,
+    costQuality,
     compositeScore: finiteNumber(item.compositeScore) ?? finiteNumber(item.score),
+    scoreExcluded: item.scoreExcluded === true,
     changedFiles: stringList(item.changedFiles),
     fileDiffs: fileDiffs.length > 0 ? fileDiffs : undefined,
     judgeResults: Array.isArray(item.judgeResults)
@@ -152,6 +164,7 @@ function inferSource(raw: Record<string, unknown>): { kind: RunSourceKind; label
 
 export function normalizeRun(value: unknown): NormalizedRun {
   const raw = record(value);
+  const artifactValidation = validateSummaryArtifact(value);
   const repository = record(raw.repository);
   const fairComparison = record(raw.fairComparison);
   const task = record(raw.task);
@@ -163,13 +176,28 @@ export function normalizeRun(value: unknown): NormalizedRun {
 
   if (!resultsValid) integrityReasons.push("results-invalid");
   if (results.length === 0) integrityReasons.push("results-missing");
+  if (!artifactValidation.ok) integrityReasons.push("artifact-invalid");
+  if (artifactValidation.legacy) integrityReasons.push("legacy-artifact");
   if (source.kind === "legacy") integrityReasons.push("legacy-source");
-  if (results.some((item) => !item.costKnown)) integrityReasons.push("cost-unknown");
+  if (results.some((item) => item.costQuality === "unavailable")) integrityReasons.push("cost-unknown");
+  if (results.some((item) => item.costQuality === "estimated")) integrityReasons.push("cost-estimated");
   if (results.some((item) => item.traceAvailability === "missing")) integrityReasons.push("trace-missing");
+  if (results.some((item) => item.raw.tokenUsageReliable === false)) {
+    integrityReasons.push("token-unreliable");
+  }
+  if (results.some((item) => typeof item.raw.dataQualityWarning === "string" && item.raw.dataQualityWarning.trim())) {
+    integrityReasons.push("data-quality-warning");
+  }
+  if (results.some((item) => {
+    const dropped = item.raw.traceDroppedWrites;
+    return item.raw.traceWriteFailed === true || (typeof dropped === "number" && dropped > 0);
+  })) {
+    integrityReasons.push("trace-incomplete");
+  }
 
   let integrity: IntegrityLevel = "complete";
-  if (!resultsValid) integrity = "damaged";
-  else if (source.kind === "legacy") integrity = "degraded";
+  if (!resultsValid || !artifactValidation.ok) integrity = "damaged";
+  else if (source.kind === "legacy" || artifactValidation.legacy) integrity = "degraded";
   else if (integrityReasons.length > 0) integrity = "partial";
 
   return {
@@ -184,7 +212,7 @@ export function normalizeRun(value: unknown): NormalizedRun {
       title: text(task.title) ?? text(raw.taskTitle) ?? "Untitled task",
       schemaVersion: text(task.schemaVersion) ?? text(fairComparison.taskSchemaVersion)
     },
-    scoreMode: text(raw.scoreMode) ?? "practical",
+    scoreMode: normalizeScoreMode(text(raw.scoreMode) ?? "practical"),
     source,
     results,
     integrity,
@@ -197,12 +225,6 @@ function isTerminalFailure(status: string): boolean {
   return ["failed", "error", "cancelled", "skipped", "blocked"].includes(status);
 }
 
-function isQualified(result: NormalizedAgentResult): boolean {
-  if (result.status !== "success") return false;
-  if (result.judgeResults.length === 0) return true;
-  return result.judgeResults.every((judge) => judge.success);
-}
-
 function rankValue(result: NormalizedAgentResult): number {
   if (result.compositeScore !== null) return result.compositeScore;
   const passed = result.judgeResults.filter((judge) => judge.success).length;
@@ -212,8 +234,10 @@ function rankValue(result: NormalizedAgentResult): number {
 }
 
 export function deriveRunOutcome(run: NormalizedRun): RunOutcome {
-  const qualifiedResults = run.results.filter(isQualified);
-  const failedResults = run.results.filter((item) => !isQualified(item));
+  const structurallyQualifiedResults = getQualifiedResults(run.results);
+  const qualifiedResults = run.integrity === "damaged" ? [] : structurallyQualifiedResults;
+  const qualifiedIds = new Set(qualifiedResults.map((item) => item.variantId));
+  const failedResults = run.results.filter((item) => !qualifiedIds.has(item.variantId));
   const rawRunStatus = text(run.raw.status) ?? text(run.raw.state);
 
   let execution: ExecutionStatus = "completed";
@@ -222,11 +246,11 @@ export function deriveRunOutcome(run: NormalizedRun): RunOutcome {
   else if (rawRunStatus === "interrupted" || rawRunStatus === "error") execution = "interrupted";
   else if (run.results.length === 0) execution = "unknown";
 
-  let evaluation: EvaluationStatus;
-  if (run.integrity === "damaged" || run.results.length === 0) evaluation = "incomplete";
-  else if (qualifiedResults.length === run.results.length) evaluation = "pass";
-  else if (qualifiedResults.length > 0) evaluation = "partial";
-  else evaluation = "fail";
+  const evaluation: EvaluationStatus = deriveEvaluationStatus(
+    run.results.length,
+    qualifiedResults.length,
+    { damaged: run.integrity === "damaged" }
+  );
 
   const winner = qualifiedResults.length === 0
     ? null
@@ -255,7 +279,9 @@ export function comparisonExclusionReasons(base: NormalizedRun, candidate: Norma
     reasons.push("different-task");
   }
   if (base.repository.revision !== candidate.repository.revision) reasons.push("different-revision");
-  if (base.scoreMode !== candidate.scoreMode) reasons.push("different-score-mode");
+  if (normalizeScoreMode(base.scoreMode) !== normalizeScoreMode(candidate.scoreMode)) {
+    reasons.push("different-score-mode");
+  }
   if (candidate.integrity === "damaged") reasons.push("damaged-result");
   return reasons;
 }
