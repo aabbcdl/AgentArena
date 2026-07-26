@@ -139,3 +139,27 @@ test("TraceReplayer buildTimeline with empty trace", async () => {
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("TraceReplayer.compare matches steps by content despite different timestamps", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "trace-compare-"));
+  const firstPath = path.join(dir, "first.jsonl");
+  const secondPath = path.join(dir, "second.jsonl");
+  try {
+    const first = new JsonlTraceRecorder(firstPath);
+    await first.record({ type: "adapter.start", timestamp: "2026-01-01T00:00:00.000Z", message: "prepare workspace", agentId: "a1" });
+    await first.close();
+    // Same content, a day later — two independent runs never share timestamps.
+    const second = new JsonlTraceRecorder(secondPath);
+    await second.record({ type: "adapter.start", timestamp: "2026-06-15T09:30:00.000Z", message: "prepare workspace", agentId: "a2" });
+    await second.close();
+
+    const diff = await TraceReplayer.compare(firstPath, secondPath);
+    // Before the fix, the timestamp was part of the signature so inBoth was
+    // always empty; the shared step must now be recognized.
+    assert.ok(diff.inBoth.length >= 1, "identical-content steps should be inBoth");
+    assert.equal(diff.onlyInFirst.length, 0);
+    assert.equal(diff.onlyInSecond.length, 0);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

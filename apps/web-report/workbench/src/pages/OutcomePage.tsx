@@ -149,11 +149,11 @@ export function OutcomePage() {
                         <span><strong>{item.displayLabel}</strong><small>{item.variantId}</small></span>
                       </button>
                     </td>
-                    <td><StatusPill tone={qualified ? "success" : "danger"}>{qualified ? t(locale, "pass") : t(locale, "fail")}</StatusPill></td>
-                    <td class="number-cell">{qualified && item.compositeScore !== null ? item.compositeScore.toFixed(1) : "—"}</td>
-                    <td class="number-cell">{formatDuration(item.durationMs, locale)}</td>
-                    <td class="number-cell">{formatCost(item.estimatedCostUsd, locale, item.costQuality)}</td>
-                    <td class="number-cell">{passed}/{item.judgeResults.length || "—"}</td>
+                    <td data-label={t(locale, "status")}><StatusPill tone={qualified ? "success" : "danger"}>{qualified ? t(locale, "pass") : t(locale, "fail")}</StatusPill></td>
+                    <td class="number-cell" data-label={t(locale, "score")}>{qualified && item.compositeScore !== null ? item.compositeScore.toFixed(1) : "—"}</td>
+                    <td class="number-cell" data-label={t(locale, "duration")}>{formatDuration(item.durationMs, locale)}</td>
+                    <td class="number-cell" data-label={t(locale, "cost")}>{formatCost(item.estimatedCostUsd, locale, item.costQuality)}</td>
+                    <td class="number-cell" data-label={t(locale, "judges")}>{passed}/{item.judgeResults.length || "—"}</td>
                   </tr>
                 );
               })}

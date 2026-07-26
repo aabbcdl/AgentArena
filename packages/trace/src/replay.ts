@@ -310,9 +310,11 @@ export class TraceReplayer {
       secondReplayer.buildTimeline(options)
     ]);
 
-    // Create signatures for steps to compare by actual content, not just category
+    // Compare by content, not wall-clock time: two independent runs never share
+    // exact timestamps, so including the timestamp made every step read as
+    // "only in one side" and left `inBoth` permanently empty.
     const getStepSignature = (step: TraceStep) =>
-      `${step.category}:${step.timestamp}:${step.summary}`;
+      `${step.category}:${step.summary}`;
 
     const firstSignatures = new Set(firstTimeline.steps.map(getStepSignature));
     const secondSignatures = new Set(secondTimeline.steps.map(getStepSignature));

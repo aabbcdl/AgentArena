@@ -159,11 +159,11 @@ export function ComparePage() {
             <tbody>
               {crossData.rows.map((row) => <tr class={`results-row static ${recommendation?.recordKey === row.recordKey ? "recommended" : ""}`}>
                 <td><span class="identity-cell"><span class="agent-avatar"><Icon name="agent"/></span><strong>{row.displayLabel}</strong></span></td>
-                <td class="number-cell">{Math.round((row.stats.successCount / row.stats.totalRuns) * 100)}%</td>
-                <td>{formatDuration(row.stats.totalDurationMs / row.stats.totalRuns, locale)}</td>
-                <td class="number-cell">{Math.round(row.stats.totalTokens / row.stats.totalRuns)}</td>
-                <td>{row.stats.costKnownCount > 0 ? formatCost(row.stats.totalCost / row.stats.costKnownCount, locale) : t(locale, "unknown")}</td>
-                <td>{row.version || t(locale, "unknown")}</td>
+                <td class="number-cell" data-label={t(locale, "crossSuccessRate")}>{Math.round((row.stats.successCount / row.stats.totalRuns) * 100)}%</td>
+                <td data-label={t(locale, "crossAvgDuration")}>{formatDuration(row.stats.totalDurationMs / row.stats.totalRuns, locale)}</td>
+                <td class="number-cell" data-label={t(locale, "crossAvgTokens")}>{Math.round(row.stats.totalTokens / row.stats.totalRuns)}</td>
+                <td data-label={t(locale, "crossAvgCost")}>{row.stats.costKnownCount > 0 ? formatCost(row.stats.totalCost / row.stats.costKnownCount, locale) : t(locale, "unknown")}</td>
+                <td data-label={t(locale, "trendVersion")}>{row.version || t(locale, "unknown")}</td>
               </tr>)}
             </tbody>
           </table>
