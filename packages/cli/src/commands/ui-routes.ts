@@ -6,7 +6,7 @@ import type { getCodexDefaultResolvedRuntime } from "@agentarena/adapters";
 import { isPathInsideWorkspace, metrics } from "@agentarena/core";
 import { formatLocalUiOrigin } from "../local-only.js";
 import { checkAuthHeader, checkCorsOrigin, checkRateLimit, detectContentType, getClientIp, HttpError, jsonResponse, readRequestBody, textResponse } from "../server/index.js";
-import { handleAdaptersList, handleAdhocTaskpackDelete, handleAdhocTaskpacksList, handleAgentDetection, handleCheckCompatibility, handleCreateAdhocTaskpack, handleInstallGuides, handlePreflight, handleProviderProfileCreate, handleProviderProfileDelete, handleProviderProfileSecret, handleProviderProfilesGet, handleProviderProfileUpdate, handleQuickPreflight, handleTaskpacksList, handleTraceGet, handleUiInfo, withErrorHandling } from "./api-routes.js";
+import { handleAdaptersList, handleAdhocTaskpackDelete, handleAdhocTaskpacksList, handleAgentDetection, handleCheckCompatibility, handleCreateAdhocTaskpack, handleInstallGuides, handlePreflight, handleProviderProfileCreate, handleProviderProfileDelete, handleProviderProfileSecret, handleProviderProfilesGet, handleProviderProfileUpdate, handleQuickPreflight, handleTaskpacksList, handleTelemetry, handleTelemetrySummary, handleTraceGet, handleUiInfo, withErrorHandling } from "./api-routes.js";
 import { WEB_REPORT_DIST_ROOT } from "./shared.js";
 import { sendApiResponse } from "./ui-http.js";
 import { handleUiRunRequest, isUiRunRoute } from "./ui-run-routes.js";
@@ -198,6 +198,22 @@ export function createRequestHandler(ctx: RequestContext) {
         return;
       }
 
+
+      // GET /api/telemetry-summary ? aggregate local funnel counts only.
+      if (request.method === "GET" && requestUrl.pathname === "/api/telemetry-summary") {
+        sendApiResponse(response, await withErrorHandling(handleTelemetrySummary()));
+        return;
+      }
+
+      // POST /api/telemetry — opt-in local product measurement events from the UI.
+      // recordTelemetryEvent no-ops when AGENTARENA_TELEMETRY is not enabled, so
+      // this endpoint is safe to call regardless of the server-side toggle.
+      if (request.method === "POST" && requestUrl.pathname === "/api/telemetry") {
+        const rawBody = await readRequestBody(request);
+        sendApiResponse(response, await withErrorHandling(handleTelemetry(rawBody)));
+        return;
+      }
+
       if (isUiRunRoute(request.method, requestUrl.pathname)) {
         await handleUiRunRequest(request, response, requestUrl, ctx);
         return;
@@ -217,14 +233,27 @@ export function createRequestHandler(ctx: RequestContext) {
       // ─── Static file serving ───
 
       if (request.method === "GET") {
+        if (requestUrl.pathname === "/") {
+          const isLegacyDeepLink = requestUrl.searchParams.has("run") || requestUrl.searchParams.has("agent");
+          const targetBase = isLegacyDeepLink ? "/legacy/" : "/workbench/";
+          response.writeHead(302, { Location: `${targetBase}${requestUrl.search}` });
+          response.end();
+          return;
+        }
+        if (requestUrl.pathname === "/legacy") {
+          response.writeHead(302, { Location: `/legacy/${requestUrl.search}` });
+          response.end();
+          return;
+        }
         // SECURITY: resolve the web root via realpath once so symlink / \\?\ long-path
         // forms cannot escape the containment check below.
         const rootReal = await fs.realpath(WEB_REPORT_DIST_ROOT).catch(() => WEB_REPORT_DIST_ROOT);
-        const relativePath = requestUrl.pathname === "/"
-          ? "index.html"
-          : requestUrl.pathname.endsWith("/")
-            ? `${requestUrl.pathname.replace(/^\/+/, "")}index.html`
-            : requestUrl.pathname.replace(/^\/+/, "");
+        const assetPath = requestUrl.pathname.startsWith("/legacy/")
+          ? requestUrl.pathname.slice("/legacy".length)
+          : requestUrl.pathname;
+        const relativePath = assetPath.endsWith("/")
+          ? `${assetPath.replace(/^\/+/, "")}index.html`
+          : assetPath.replace(/^\/+/, "");
         let filePath = path.join(WEB_REPORT_DIST_ROOT, relativePath);
         filePath = path.normalize(filePath);
         // Re-resolve the target via realpath (falls back to the normalized path if

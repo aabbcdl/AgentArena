@@ -9,6 +9,7 @@ import {
   normalizePath,
   portableBasename,
   portableRelativePath,
+  resolveCostQuality,
   type ScoreMode
 } from "@agentarena/core";
 
@@ -202,8 +203,10 @@ export function formatCompositeScoreValue(result: BenchmarkRun["results"][number
   return typeof score === "number" && Number.isFinite(score) ? score.toFixed(1) : "n/a";
 }
 
-export function formatCostUsd(value: number | undefined, known: boolean): string {
-  return known && typeof value === "number" && Number.isFinite(value) ? `$${value.toFixed(2)}` : "n/a";
+export function formatCostUsd(value: number | undefined, known: boolean, quality?: "known" | "estimated" | "unavailable"): string {
+  const resolved = quality ?? (known ? "known" : "unavailable");
+  if (resolved === "unavailable" || typeof value !== "number" || !Number.isFinite(value)) return "n/a";
+  return `${resolved === "estimated" ? "\u2248" : ""}$${value.toFixed(2)}`;
 }
 
 export function hasScoreMetadata(run: BenchmarkRun): run is BenchmarkRun & { scoreMode?: ScoreMode; scoreWeights?: Record<string, number> } {
@@ -213,13 +216,14 @@ export function hasScoreMetadata(run: BenchmarkRun): run is BenchmarkRun & { sco
 /**
  * Resolve a run's effective scoring mode.
  *
- * Historical runs may carry an arbitrary string in `scoreMode` (the field was
- * `string` before this branch); validate at runtime and fall back to a known
- * mode so downstream `getDefaultWeights(...)` calls are always type-safe.
+ * Historical runs may carry an arbitrary string in `scoreMode`. Invalid or
+ * missing values fall back to `practical` — the same default used by the
+ * runner and `enrichRunWithScores` — so leaderboard grouping, re-scoring, and
+ * UI compare never disagree about the fallback.
  */
 export function getRunScoreMode(run: BenchmarkRun): ScoreMode {
-  if (!hasScoreMetadata(run) || !run.scoreMode) return "balanced";
-  return isScoreMode(run.scoreMode) ? run.scoreMode : "balanced";
+  if (!hasScoreMetadata(run) || !run.scoreMode) return "practical";
+  return isScoreMode(run.scoreMode) ? run.scoreMode : "practical";
 }
 
 export { escapeHtml };
@@ -359,7 +363,7 @@ export function summarizeRun(run: BenchmarkRun): {
     0
   );
   const knownCostUsd = run.results
-    .filter((result) => result.costKnown)
+    .filter((result) => resolveCostQuality(result) === "known")
     .reduce((total, result) => total + (Number.isFinite(result.estimatedCostUsd) ? result.estimatedCostUsd : 0), 0);
 
   return {

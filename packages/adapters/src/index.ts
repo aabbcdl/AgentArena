@@ -29,8 +29,8 @@ export type { InstallGuide } from "./install-guides.js";
 export { getInstallGuide, INSTALL_GUIDES, listInstallGuides } from "./install-guides.js";
 export { probeAuthConfig, probeClaudeLikeAuthFast, probeCliExists, probeQuickPreflight } from "./invocation-probes.js";
 export { loadAdapterPlugins, registerExternalAdapters } from "./plugin-registry.js";
-export type { Transport, TransportChainOptions, TransportChainResult, TransportResult } from "./transport.js";
-export { createClaudeTransportChain, RawTransport, StreamJsonTransport, TextTransport, TransportChain } from "./transport.js";
+export type { Transport, TransportChainOptions, TransportChainResult, TransportFallbackThresholds, TransportResult } from "./transport.js";
+export { createClaudeTransportChain, DEFAULT_FALLBACK_THRESHOLDS, RawTransport, resolveFallbackThresholds, StreamJsonTransport, TextTransport, TransportChain } from "./transport.js";
 
 import { getChangedFilesFromGit } from "./adapter-helpers.js";
 import { resolveClaudeInvocation } from "./claude-adapter.js";

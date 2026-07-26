@@ -254,6 +254,21 @@ test("copyRepository does not copy ignored secret files into agent workspaces", 
   }
 });
 
+test("copyRepository preserves a packaged builtin repo ignored by its parent checkout", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-copy-ignored-parent-"));
+  const source = path.resolve("packages/cli/assets/taskpacks/repos/nodejs-app");
+  const destination = path.join(tempDir, "destination");
+
+  try {
+    await copyRepository(source, destination);
+
+    assert.equal(await exists(path.join(destination, "package.json")), true);
+    assert.equal(await exists(path.join(destination, "src", "utils.js")), true);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("snapshotDirectory excludes AgentArena runtime artifacts", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-snapshot-runtime-"));
 

@@ -1,5 +1,5 @@
 import type { BenchmarkRun } from "@agentarena/core";
-import { median } from "@agentarena/core";
+import { median, resolveCostQuality } from "@agentarena/core";
 import { formatRuntimeIdentity, getRunScoreMode, isResultScoreExcluded } from "./report-helpers.js";
 
 /**
@@ -183,8 +183,7 @@ export function buildLeaderboard(
   for (const run of comparableRuns) {
     // 找出这个 run 里的 winner
     const comparableResults = run.results.filter((r) => !isResultScoreExcluded(r));
-    const successfulResults = comparableResults.filter((r) => r.status === "success");
-    const candidates = successfulResults.length > 0 ? successfulResults : comparableResults;
+    const candidates = comparableResults.filter((r) => r.status === "success");
 
     // 按综合分排序
     const sorted = [...candidates].sort((a, b) => {
@@ -219,7 +218,7 @@ export function buildLeaderboard(
     const scores = results.map((r) => (r.compositeScore ?? 0)).filter((s) => s > 0);
     const durations = results.map((r) => r.durationMs).filter((d) => d > 0);
     const costs = results
-      .filter((r) => r.costKnown && r.estimatedCostUsd > 0)
+      .filter((r) => resolveCostQuality(r) === "known" && r.estimatedCostUsd > 0)
       .map((r) => r.estimatedCostUsd);
     const successCount = results.filter((r) => r.status === "success").length;
 

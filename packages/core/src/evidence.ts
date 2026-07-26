@@ -2,6 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { logger } from "./logging.js";
 import { ensureDirectory } from "./snapshot.js";
+import type { CostQuality } from "./types/agent.js";
 
 /**
  * Evidence directory name within workspace.
@@ -57,6 +58,7 @@ export interface ExecutionMeta {
   estimatedCostUsd?: number;
   /** Whether cost is known precisely */
   costKnown?: boolean;
+  costQuality?: CostQuality;
   /** Session ID (if available) */
   sessionId?: string;
   /** Transport used (if available) */

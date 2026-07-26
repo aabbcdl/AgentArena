@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -63,6 +63,9 @@ function createResult(outputPath, overrides = {}) {
     tokenUsage: overrides.tokenUsage ?? 100,
     estimatedCostUsd: overrides.estimatedCostUsd ?? 0,
     costKnown: overrides.costKnown ?? false,
+    costQuality: overrides.costQuality,
+    tokenUsageReliable: overrides.tokenUsageReliable,
+    dataQualityWarning: overrides.dataQualityWarning,
     changedFiles: overrides.changedFiles ?? [],
     changedFilesHint: overrides.changedFilesHint ?? overrides.changedFiles ?? [],
     setupResults: overrides.setupResults ?? [],
@@ -352,6 +355,36 @@ test("Markdown output has correct structure and content", async () => {
   await rm(tempDir, { recursive: true, force: true });
 });
 
+test("Markdown and HTML surface dataQualityWarning", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "report-quality-"));
+  const outputPath = path.join(tempDir, "output");
+  const warning = "Codex CLI reported turn completion with zero token usage — token counts may be inaccurate.";
+
+  const run = createRun(outputPath, {
+    preflights: [createPreflight({ agentId: "agent-a", agentTitle: "Agent A" })],
+    results: [
+      createResult(outputPath, {
+        agentId: "agent-a",
+        agentTitle: "Agent A",
+        displayLabel: "Agent A",
+        dataQualityWarning: warning,
+        tokenUsageReliable: false
+      })
+    ]
+  });
+  const { markdownPath, htmlPath } = await writeReport(run);
+  const md = await readFile(markdownPath, "utf8");
+  const html = await readFile(htmlPath, "utf8");
+
+  assert.match(md, /## Data Quality Warnings/);
+  assert.match(md, /Agent A/);
+  assert.ok(md.includes(warning));
+  assert.match(html, /Data quality:/);
+  assert.ok(html.includes(warning));
+
+  await rm(tempDir, { recursive: true, force: true });
+});
+
 test("Markdown output has no failures section when all agents pass", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "report-md-nofail-"));
   const outputPath = path.join(tempDir, "output");
@@ -425,6 +458,14 @@ test("JSON summary has correct schema and required fields", async () => {
   assert.equal(typeof summary.leaderboard.comparableRunCount, "number");
   assert.ok(Array.isArray(summary.leaderboard.rows));
   assert.ok(Array.isArray(summary.leaderboard.comparabilityRules));
+
+  // core writeAtomic must not leave fixed-name .tmp siblings
+  const outputEntries = await readdir(outputPath);
+  assert.equal(
+    outputEntries.filter((name) => name.includes(".tmp")).length,
+    0,
+    "writeReport must not leave temporary files next to artifacts"
+  );
 
   // Result schema
   const r1 = summary.results[0];
@@ -1233,6 +1274,28 @@ test("missing cost data renders n/a in all output formats", async () => {
   const badge = JSON.parse(await readFile(badgePath, "utf8"));
   assert.equal(badge.message, "1/1 passing");
 
+  await rm(tempDir, { recursive: true, force: true });
+});
+
+test("estimated cost is marked and excluded from known totals", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "report-edge-estimated-cost-"));
+  const outputPath = path.join(tempDir, "output");
+  const run = createRun(outputPath, {
+    preflights: [createPreflight()],
+    results: [createResult(outputPath, { costKnown: false, costQuality: "estimated", estimatedCostUsd: 0.08 })]
+  });
+  const reportHelpers = await import("../packages/report/dist/report-helpers.js");
+  assert.equal(reportHelpers.summarizeRun(run).knownCostUsd, 0);
+  const { markdownPath, htmlPath } = await writeReport(run);
+  const markdown = await readFile(markdownPath, "utf8");
+  const html = await readFile(htmlPath, "utf8");
+  assert.match(markdown, /\u2248\$0\.08/);
+  assert.match(html, /\u2248\$0\.08/);
+  const decision = generateDecisionReport(run, { teamSize: 3, dailyRuns: 7 });
+  const decisionMarkdown = formatDecisionReport(decision, "en");
+  assert.match(decisionMarkdown, /Avg cost.*\u2248\$0\.08\/run/);
+  assert.doesNotMatch(decisionMarkdown, /undefined\/100/);
+  assert.equal(decision.teamEstimates.length, 0);
   await rm(tempDir, { recursive: true, force: true });
 });
 

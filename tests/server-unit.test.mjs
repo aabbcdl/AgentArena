@@ -105,10 +105,12 @@ test("checkCorsOrigin: 127.0.0.1 origin passes for localhost host", () => {
   assert.equal(checkCorsOrigin("http://127.0.0.1:3000", "localhost", 3000), true);
 });
 
-test("checkCorsOrigin: 0.0.0.0 host allows localhost and 127.0.0.1", () => {
-  assert.equal(checkCorsOrigin("http://localhost:3000", "0.0.0.0", 3000), true);
-  assert.equal(checkCorsOrigin("http://127.0.0.1:3000", "0.0.0.0", 3000), true);
-  assert.equal(checkCorsOrigin("http://0.0.0.0:3000", "0.0.0.0", 3000), true);
+// 0.0.0.0 is not a supported UI bind host (rejected by validateUiCommand).
+// When host is 0.0.0.0, buildAllowedOrigins still includes localhost aliases
+// via the standard local origin set only when they match the normalized host
+// list — foreign origins remain rejected.
+test("checkCorsOrigin: non-local origin is rejected for 127.0.0.1 host", () => {
+  assert.equal(checkCorsOrigin("http://evil.com:3000", "127.0.0.1", 3000), false);
 });
 
 test("checkCorsOrigin: foreign origin is rejected", () => {
@@ -118,6 +120,18 @@ test("checkCorsOrigin: foreign origin is rejected", () => {
 
 test("checkCorsOrigin: wrong port is rejected", () => {
   assert.equal(checkCorsOrigin("http://localhost:8080", "localhost", 3000), false);
+});
+
+test("checkCorsOrigin: literal 'null' origin is rejected (file:// / sandboxed iframe / privacy redirect)", () => {
+  assert.equal(checkCorsOrigin("null", "localhost", 3000), false);
+  assert.equal(checkCorsOrigin("null", "127.0.0.1", 4320), false);
+});
+
+test("checkCorsOrigin: DNS-rebinding — a foreign Origin against a loopback host is rejected", () => {
+  // A page rebound to 127.0.0.1 still sends its real Origin header; it is not
+  // in the loopback allowlist, so state-changing cross-origin requests fail.
+  assert.equal(checkCorsOrigin("http://attacker.example", "127.0.0.1", 4320), false);
+  assert.equal(checkCorsOrigin("https://attacker.example:4320", "localhost", 4320), false);
 });
 
 // ─── Rate limit tests ───

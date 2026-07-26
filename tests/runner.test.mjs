@@ -1,4 +1,4 @@
-// Allow inline node -e in test fixture task packs. Production task packs
+﻿// Allow inline node -e in test fixture task packs. Production task packs
 // should use script files; tests use inline scripts for brevity.
 process.env.AGENTARENA_ALLOW_EVAL_IN_JUDGES = "1";
 
@@ -673,7 +673,7 @@ test("runBenchmark isolates failures so one failed agent does not affect others"
 
     assert.equal(benchmark.results.length, 2);
     const statuses = benchmark.results.map((r) => r.status);
-    assert.ok(statuses.includes("failed"), "至少有一个 agent 应该失败");
+    assert.ok(statuses.includes("failed"), "鑷冲皯鏈変竴涓?agent 搴旇澶辫触");
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
@@ -1375,7 +1375,7 @@ test("runBenchmark surfaces a non-fatal task compatibility warning without throw
   });
 
   const events = [];
-  // Must not throw despite the incompatibility — the run proceeds as before.
+  // Must not throw despite the incompatibility 鈥?the run proceeds as before.
   const benchmark = await runBenchmark({
     repoPath,
     taskPath,
@@ -1837,6 +1837,38 @@ test("runAgent captures activity lines in the log store and failure tail", async
       "[stdout] stdout line",
       "[stderr] stderr line"
     ]);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+
+test("runBenchmark rejects resume results when task inputs change despite matching task id", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-resume-fingerprint-"));
+  const repoPath = path.join(tempDir, "repo");
+  const firstOutput = path.join(tempDir, "first");
+  const secondOutput = path.join(tempDir, "second");
+  const taskPath = path.join(tempDir, "task.json");
+  await mkdir(repoPath, { recursive: true });
+  await writeJson(path.join(repoPath, "package.json"), { name: "resume-fingerprint", version: "1.0.0" });
+  const baseTask = {
+    schemaVersion: "agentarena.taskpack/v1",
+    id: "same-task-id",
+    title: "Fingerprint Demo",
+    prompt: "Original prompt",
+    envAllowList: [],
+    setupCommands: [],
+    judges: [],
+    teardownCommands: []
+  };
+  try {
+    await writeJson(taskPath, baseTask);
+    const first = await runBenchmark({ repoPath, taskPath, agentIds: ["demo-fast"], outputPath: firstOutput, cleanupWorkspaces: true });
+    await writeJson(taskPath, { ...baseTask, prompt: "Changed prompt", judges: [{ id: "must-fail", type: "command", label: "Must fail", command: "node -e \"process.exit(1)\"" }] });
+    const second = await runBenchmark({ repoPath, taskPath, agentIds: ["demo-fast"], outputPath: secondOutput, resumeFrom: first.outputPath, cleanupWorkspaces: true });
+    assert.equal(second.results[0].judgeResults.length, 1);
+    assert.equal(second.results[0].status, "failed");
+    assert.equal(second.results[0].judgeResults[0].success, false);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }

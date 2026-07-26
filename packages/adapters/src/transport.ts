@@ -18,6 +18,78 @@ export function shouldSkipClaudePermissions(): boolean {
 }
 
 /**
+ * Configurable thresholds that determine when StreamJsonTransport falls back
+ * to the next transport in the chain.
+ *
+ * These were previously hardcoded magic numbers. They are now exposed so that
+ * operators can tune fallback sensitivity without code changes — useful when a
+ * new CLI version behaves slightly differently or a third-party provider has
+ * different exit-code conventions.
+ *
+ * All thresholds can be overridden via environment variables, which take
+ * precedence over the programmatic values.
+ */
+export interface TransportFallbackThresholds {
+  /**
+   * When the transport times out, fall back only if stdout produced fewer
+   * than this many bytes. A timed-out run with substantial output likely
+   * made progress and shouldn't be retried. Default: 100.
+   */
+  timedOutMinStdoutBytes: number;
+  /**
+   * Exit codes that are considered acceptable (no fallback). 0 = success,
+   * 1 = normal task failure. Any code outside this set triggers fallback.
+   * Default: [0, 1].
+   */
+  acceptableExitCodes: readonly number[];
+}
+
+/** Default thresholds — reverse-engineered from observed Claude Code behavior. */
+export const DEFAULT_FALLBACK_THRESHOLDS: Readonly<TransportFallbackThresholds> = Object.freeze({
+  timedOutMinStdoutBytes: 100,
+  acceptableExitCodes: Object.freeze([0, 1]) as readonly number[],
+});
+
+/**
+ * Resolve fallback thresholds, applying environment-variable overrides on top
+ * of the provided (or default) base values.
+ *
+ * Supported env vars:
+ * - `AGENTARENA_FALLBACK_MIN_STDOUT_BYTES` — overrides timedOutMinStdoutBytes
+ * - `AGENTARENA_FALLBACK_ACCEPTABLE_EXIT_CODES` — comma-separated exit codes
+ */
+export function resolveFallbackThresholds(
+  base?: Partial<TransportFallbackThresholds>
+): TransportFallbackThresholds {
+  const timedOutMinStdoutBytes = (() => {
+    const env = process.env.AGENTARENA_FALLBACK_MIN_STDOUT_BYTES;
+    if (env !== undefined && env.trim() !== "") {
+      const parsed = Number.parseInt(env, 10);
+      if (Number.isFinite(parsed) && parsed >= 0) {
+        return parsed;
+      }
+    }
+    return base?.timedOutMinStdoutBytes ?? DEFAULT_FALLBACK_THRESHOLDS.timedOutMinStdoutBytes;
+  })();
+
+  const acceptableExitCodes = (() => {
+    const env = process.env.AGENTARENA_FALLBACK_ACCEPTABLE_EXIT_CODES;
+    if (env !== undefined && env.trim() !== "") {
+      const parsed = env
+        .split(",")
+        .map((s) => Number.parseInt(s.trim(), 10))
+        .filter((n) => Number.isFinite(n));
+      if (parsed.length > 0) {
+        return parsed;
+      }
+    }
+    return base?.acceptableExitCodes ?? DEFAULT_FALLBACK_THRESHOLDS.acceptableExitCodes;
+  })();
+
+  return { timedOutMinStdoutBytes, acceptableExitCodes };
+}
+
+/**
  * Transport abstraction for different communication modes with AI agent CLIs.
  * Allows fallback between different invocation strategies when one fails.
  */
@@ -65,6 +137,10 @@ export interface TransportResult {
     tokenCountSuspicious?: boolean;
     /** True when the authoritative cumulative "result" event was seen. */
     tokenUsageFromResultEvent?: boolean;
+    /** True when the parser detected a likely CLI output format mismatch. */
+    formatMismatch?: boolean;
+    /** Names of critical events expected but not seen (e.g. "result", "turn.completed"). */
+    missingCriticalEvents?: string[];
   };
   /** Which transport produced this result */
   transportId: string;
@@ -83,10 +159,15 @@ export class StreamJsonTransport implements Transport {
   readonly id = "stream-json";
   readonly description = "Stream JSON mode with structured output parsing";
 
+  private readonly thresholds: TransportFallbackThresholds;
+
   constructor(
     private readonly invocation: InvocationSpec,
-    private readonly extraArgs: string[] = []
-  ) {}
+    private readonly extraArgs: string[] = [],
+    thresholds?: Partial<TransportFallbackThresholds>
+  ) {
+    this.thresholds = resolveFallbackThresholds(thresholds);
+  }
 
   async send(
     prompt: string,
@@ -138,6 +219,8 @@ export class StreamJsonTransport implements Transport {
         error: parsed.error,
         tokenCountSuspicious: parsed.tokenCountSuspicious,
         tokenUsageFromResultEvent: parsed.tokenUsageFromResultEvent,
+        formatMismatch: parsed.formatMismatch,
+        missingCriticalEvents: parsed.missingCriticalEvents,
       },
       transportId: this.id,
       shouldFallback,
@@ -151,10 +234,10 @@ export class StreamJsonTransport implements Transport {
    * Determine if this transport's output indicates a fundamental failure
    * that warrants falling back to TextTransport.
    *
-   * FALLBACK THRESHOLDS (empirical, based on observed Claude Code behavior):
-   * - Timeout + <100 bytes stdout -> likely provider incompatibility or hanging
+   * FALLBACK THRESHOLDS (configurable via TransportFallbackThresholds):
+   * - Timeout + stdout < timedOutMinStdoutBytes -> likely provider incompatibility or hanging
    * - Process error (spawn failure, command not found) -> cannot proceed
-   * - Exit code other than 0 or 1 -> unexpected failure mode (0 = success, 1 = task failure)
+   * - Exit code outside acceptableExitCodes -> unexpected failure mode (0 = success, 1 = task failure)
    * - Non-zero exit + no parsed content -> stream-json mode produced nothing useful
    *
    * These thresholds are NOT documented by the CLI tools. They are reverse-engineered
@@ -165,7 +248,7 @@ export class StreamJsonTransport implements Transport {
     parsed: ReturnType<typeof parseClaudeEvents>
   ): boolean {
     // Timeout with very little output -> likely provider incompatibility
-    if (result.timedOut && result.stdout.length < 100) {
+    if (result.timedOut && result.stdout.length < this.thresholds.timedOutMinStdoutBytes) {
       return true;
     }
     // Process error -> command not found or similar
@@ -174,7 +257,7 @@ export class StreamJsonTransport implements Transport {
     }
     // Exit code indicates fundamental failure (not just task failure)
     // 0 = success, 1 = task failure (normal). Anything else = transport issue.
-    if (result.exitCode !== 0 && result.exitCode !== 1) {
+    if (!this.thresholds.acceptableExitCodes.includes(result.exitCode as number)) {
       return true;
     }
     // Stream parsing produced nothing useful and exit was non-zero
@@ -328,6 +411,11 @@ export interface TransportChainOptions {
   transportTimeoutMs?: number;
   /** Whether to log fallback attempts */
   logFallbacks?: boolean;
+  /**
+   * Fallback thresholds for StreamJsonTransport. When omitted, defaults from
+   * `DEFAULT_FALLBACK_THRESHOLDS` are used (with env-var overrides applied).
+   */
+  fallbackThresholds?: Partial<TransportFallbackThresholds>;
 }
 
 export interface TransportChainResult {
@@ -488,7 +576,7 @@ export function createClaudeTransportChain(
   options?: TransportChainOptions
 ): TransportChain {
   const transports: Transport[] = [
-    new StreamJsonTransport(invocation, extraArgs),
+    new StreamJsonTransport(invocation, extraArgs, options?.fallbackThresholds),
   ];
 
   // Add text transport as fallback for third-party providers

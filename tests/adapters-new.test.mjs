@@ -9,7 +9,7 @@ test("Qwen Code adapter is registered", () => {
   assert.equal(qwen.title, "Qwen Code CLI");
   assert.equal(qwen.capability.supportTier, "experimental");
   assert.equal(qwen.capability.tokenAvailability, "available");
-  assert.equal(qwen.capability.costAvailability, "available");
+  assert.equal(qwen.capability.costAvailability, "estimated");
 });
 
 test("GitHub Copilot adapter is registered", () => {

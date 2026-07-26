@@ -1,8 +1,36 @@
 import assert from "node:assert";
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
+import { reapStaleTempWorkspaces } from "../packages/cli/dist/commands/cleanup.js";
 import { cleanupWorkspace, debugLog, formatErrorDetails, formatErrorMessage } from "../packages/runner/dist/workspace.js";
+
+describe("reapStaleTempWorkspaces", () => {
+  it("removes stale temp workspaces but keeps recent ones", async () => {
+    const base = await fs.mkdtemp(path.join(os.tmpdir(), "agentarena-reap-base-"));
+    try {
+      const stale = path.join(base, "agentarena-workspaces-old-abc");
+      const recent = path.join(base, "agentarena-workspaces-new-xyz");
+      const unrelated = path.join(base, "some-other-dir");
+      await fs.mkdir(stale);
+      await fs.mkdir(recent);
+      await fs.mkdir(unrelated);
+      // Backdate the stale one well beyond the 24h reap threshold.
+      const old = new Date(Date.now() - 48 * 60 * 60 * 1000);
+      await fs.utimes(stale, old, old);
+
+      const removed = await reapStaleTempWorkspaces(Date.now(), base);
+
+      assert.equal(removed, 1);
+      await assert.rejects(() => fs.access(stale));
+      await fs.access(recent); // recent workspace preserved
+      await fs.access(unrelated); // non-workspace dir untouched
+    } finally {
+      await fs.rm(base, { recursive: true, force: true });
+    }
+  });
+});
 
 describe("workspace", () => {
   describe("formatErrorMessage", () => {

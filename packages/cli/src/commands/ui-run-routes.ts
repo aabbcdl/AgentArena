@@ -7,7 +7,7 @@ import { type BenchmarkProgressEvent, runBenchmark } from "@agentarena/runner";
 import { TraceTailer } from "@agentarena/trace";
 import { jsonResponse, readRequestBody } from "../server/index.js";
 import { validateRunPayload, validateRunPayloadPaths } from "./run-payload-validator.js";
-import { BUILTIN_REPOS_ROOT, normalizeUiSelections, OFFICIAL_TASKPACK_ROOT, resolveReportLocale, type UiRunPayload, type UiRunStatus } from "./shared.js";
+import { BUILTIN_REPOS_ROOT, isTrustedBuiltinTaskPack, normalizeUiSelections, OFFICIAL_TASKPACK_ROOT, resolveReportLocale, type UiRunPayload, type UiRunStatus } from "./shared.js";
 import { SseConnection } from "./sse.js";
 import { sendApiResponse } from "./ui-http.js";
 import type { UiRunRequestContext } from "./ui-run-types.js";
@@ -184,7 +184,10 @@ export async function handleUiRunRequest(
           cleanupWorkspaces: runPayload.cleanupWorkspaces,
           maxConcurrency: runPayload.maxConcurrency,
           scoreMode: runPayload.scoreMode,
+          entryPoint: runPayload.entryPoint ?? "legacy-launcher",
           tokenBudget: runPayload.tokenBudget ? (Number(runPayload.tokenBudget) || undefined) : undefined,
+          allowEvalInTaskCommands:
+            isTrustedBuiltinTaskPack(runPayload.taskPath) || process.env.AGENTARENA_ALLOW_EVAL_IN_JUDGES === "1",
           cancellation,
           enableActivityEvents: true,
           agentLogStore,

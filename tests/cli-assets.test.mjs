@@ -20,6 +20,7 @@ test("CLI package includes runtime assets needed after npm install", async () =>
   assert.ok(pkg.files.includes("assets"));
   assert.equal(await exists(path.join(CLI_ASSETS_ROOT, "web-report", "index.html")), true);
   assert.equal(await exists(path.join(CLI_ASSETS_ROOT, "taskpacks", "official", "repo-health.yaml")), true);
+  assert.equal(await exists(path.join(CLI_ASSETS_ROOT, "taskpacks", "demo", "demo-ui-tour.yaml")), true);
   assert.equal(await exists(path.join(CLI_ASSETS_ROOT, "taskpacks", "repos", "nodejs-monorepo", "package.json")), true);
 });
 
@@ -30,4 +31,26 @@ test("CLI runtime resolves UI and official task packs from packaged assets", asy
   assert.equal(shared.OFFICIAL_TASKPACK_ROOT, path.join(CLI_ASSETS_ROOT, "taskpacks", "official"));
   assert.equal(shared.BUILTIN_REPOS_ROOT, path.join(CLI_ASSETS_ROOT, "taskpacks", "repos"));
   assert.equal(uiRoutes.WEB_REPORT_DIST_ROOT, path.join(CLI_ASSETS_ROOT, "web-report"));
+});
+
+
+test("CLI trust check accepts workspace built-ins but rejects external task paths", async () => {
+  const shared = await import("../packages/cli/dist/commands/shared.js");
+
+  assert.equal(
+    shared.isTrustedBuiltinTaskPack(path.join(REPO_ROOT, "examples", "taskpacks", "official", "input-validation.yaml")),
+    true
+  );
+  assert.equal(
+    shared.isTrustedBuiltinTaskPack(path.join(REPO_ROOT, "examples", "taskpacks", "demo", "demo-ui-tour.yaml")),
+    true
+  );
+  assert.equal(
+    shared.isTrustedBuiltinTaskPack(path.join(REPO_ROOT, "examples", "taskpacks", "demo-repo-health.json")),
+    true
+  );
+  assert.equal(
+    shared.isTrustedBuiltinTaskPack(path.join(REPO_ROOT, ".agentarena", "external-task.json")),
+    false
+  );
 });

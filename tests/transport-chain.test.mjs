@@ -14,6 +14,8 @@ const {
   RawTransport,
   TransportChain,
   createClaudeTransportChain,
+  DEFAULT_FALLBACK_THRESHOLDS,
+  resolveFallbackThresholds,
 } = await import("../packages/adapters/dist/transport.js");
 
 describe("TransportChain", () => {
@@ -106,5 +108,94 @@ describe("RawTransport", () => {
     const transport = new RawTransport(mockInvocation);
     assert.equal(transport.id, "raw");
     assert.ok(transport.description.includes("Raw mode"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R-02: Fallback threshold parameterization
+// ---------------------------------------------------------------------------
+
+describe("TransportFallbackThresholds", () => {
+  it("DEFAULT_FALLBACK_THRESHOLDS has expected values", () => {
+    assert.equal(DEFAULT_FALLBACK_THRESHOLDS.timedOutMinStdoutBytes, 100);
+    assert.deepEqual([...DEFAULT_FALLBACK_THRESHOLDS.acceptableExitCodes], [0, 1]);
+  });
+
+  it("resolveFallbackThresholds returns defaults when no overrides given", () => {
+    const t = resolveFallbackThresholds();
+    assert.equal(t.timedOutMinStdoutBytes, 100);
+    assert.deepEqual([...t.acceptableExitCodes], [0, 1]);
+  });
+
+  it("resolveFallbackThresholds applies programmatic overrides", () => {
+    const t = resolveFallbackThresholds({
+      timedOutMinStdoutBytes: 500,
+      acceptableExitCodes: [0, 1, 2],
+    });
+    assert.equal(t.timedOutMinStdoutBytes, 500);
+    assert.deepEqual([...t.acceptableExitCodes], [0, 1, 2]);
+  });
+
+  it("resolveFallbackThresholds applies partial overrides", () => {
+    const t = resolveFallbackThresholds({ timedOutMinStdoutBytes: 200 });
+    assert.equal(t.timedOutMinStdoutBytes, 200);
+    assert.deepEqual([...t.acceptableExitCodes], [0, 1], "Unspecified fields keep defaults");
+  });
+
+  it("resolveFallbackThresholds prefers env var over programmatic override", () => {
+    const oldEnv = process.env.AGENTARENA_FALLBACK_MIN_STDOUT_BYTES;
+    process.env.AGENTARENA_FALLBACK_MIN_STDOUT_BYTES = "999";
+    try {
+      const t = resolveFallbackThresholds({ timedOutMinStdoutBytes: 200 });
+      assert.equal(t.timedOutMinStdoutBytes, 999, "Env var should win over programmatic value");
+    } finally {
+      if (oldEnv === undefined) delete process.env.AGENTARENA_FALLBACK_MIN_STDOUT_BYTES;
+      else process.env.AGENTARENA_FALLBACK_MIN_STDOUT_BYTES = oldEnv;
+    }
+  });
+
+  it("resolveFallbackThresholds parses comma-separated exit codes from env", () => {
+    const oldEnv = process.env.AGENTARENA_FALLBACK_ACCEPTABLE_EXIT_CODES;
+    process.env.AGENTARENA_FALLBACK_ACCEPTABLE_EXIT_CODES = "0,1,2,130";
+    try {
+      const t = resolveFallbackThresholds();
+      assert.deepEqual([...t.acceptableExitCodes], [0, 1, 2, 130]);
+    } finally {
+      if (oldEnv === undefined) delete process.env.AGENTARENA_FALLBACK_ACCEPTABLE_EXIT_CODES;
+      else process.env.AGENTARENA_FALLBACK_ACCEPTABLE_EXIT_CODES = oldEnv;
+    }
+  });
+
+  it("resolveFallbackThresholds ignores invalid env var values", () => {
+    const oldEnv = process.env.AGENTARENA_FALLBACK_MIN_STDOUT_BYTES;
+    process.env.AGENTARENA_FALLBACK_MIN_STDOUT_BYTES = "not-a-number";
+    try {
+      const t = resolveFallbackThresholds();
+      assert.equal(t.timedOutMinStdoutBytes, 100, "Invalid env should fall back to default");
+    } finally {
+      if (oldEnv === undefined) delete process.env.AGENTARENA_FALLBACK_MIN_STDOUT_BYTES;
+      else process.env.AGENTARENA_FALLBACK_MIN_STDOUT_BYTES = oldEnv;
+    }
+  });
+
+  it("StreamJsonTransport accepts custom thresholds in constructor", () => {
+    const mockInvocation = { command: "claude", argsPrefix: [], displayCommand: "claude" };
+    // Constructor should not throw with custom thresholds
+    const transport = new StreamJsonTransport(mockInvocation, [], {
+      timedOutMinStdoutBytes: 500,
+      acceptableExitCodes: [0, 1, 2],
+    });
+    assert.equal(transport.id, "stream-json");
+  });
+
+  it("createClaudeTransportChain passes fallbackThresholds to transports", () => {
+    const mockInvocation = { command: "claude", argsPrefix: [], displayCommand: "claude" };
+    // Should not throw — verifies the option is accepted and threaded through
+    const chain = createClaudeTransportChain(mockInvocation, true, [], {
+      transportTimeoutMs: 5000,
+      fallbackThresholds: { timedOutMinStdoutBytes: 250 },
+    });
+    assert.equal(chain.length, 2);
+    assert.deepEqual(chain.transportIds, ["stream-json", "text"]);
   });
 });

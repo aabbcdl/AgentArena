@@ -268,7 +268,7 @@ test("agentarena run --agent-timeout validates and is accepted", { timeout: 30_0
   }
 });
 
-test("agentarena run --team-size and --daily-runs affect the decision report", { timeout: 60_000 }, async () => {
+test("agentarena run validates team cost settings without projecting estimated charges", { timeout: 60_000 }, async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-cli-"));
   try {
     const repoPath = path.join(tempDir, "repo");
@@ -314,7 +314,9 @@ test("agentarena run --team-size and --daily-runs affect the decision report", {
     assert.ok(runDir, "Expected a run output subdirectory");
 
     const decisionReport = await readFile(path.join(outputPath, runDir.name, "decision-report.md"), "utf8");
-    assert.match(decisionReport, /Team cost estimate \(3 people .* 7 runs\/day\)/);
+    assert.doesNotMatch(decisionReport, /Team cost estimate/);
+    assert.match(decisionReport, /Avg cost.*\u2248\$0\.08\/run/);
+    assert.match(result.stdout, /Cost: \u2248\$0\.08/);
 
     const badTeamSize = await runCli(
       ["run", "--team-size", "0"],

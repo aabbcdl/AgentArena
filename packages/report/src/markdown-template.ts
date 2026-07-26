@@ -156,9 +156,21 @@ export function renderMarkdown(run: BenchmarkRun, locale: Locale, leaderboard?: 
     const passedJudgeCount = result.judgeResults.filter((judge) => judge.success).length;
     lines.push(
       `| ${escapeMdCell(result.displayLabel ?? result.agentId)} | ${escapeMdCell(result.baseAgentId)} | ${escapeMdCell(runtime.provider)} | ${escapeMdCell(runtime.providerKind)} | ${escapeMdCell(runtime.model)} | ${escapeMdCell(runtime.reasoning)} | ${escapeMdCell(runtime.version)} | ${escapeMdCell(runtime.verification)}/${escapeMdCell(runtime.source)} | ${result.status} | ${formatCompositeScoreValue(result)} | ${formatDuration(result.durationMs)} | ${result.tokenUsage} | ${
-        result.costKnown ? `$${result.estimatedCostUsd.toFixed(2)}` : "n/a"
+        formatCostUsd(result.estimatedCostUsd, result.costKnown, result.costQuality)
       } | ${result.changedFiles.length} | ${passedJudgeCount}/${result.judgeResults.length} | ${escapeMdCell(formatTestMetric(result))} | ${escapeMdCell(formatLintMetric(result))} | ${escapeMdCell(formatDiffPrecisionMetric(result))} |`
     );
+  }
+
+  const qualityWarnings = scoredResults.filter(
+    (result) => typeof result.dataQualityWarning === "string" && result.dataQualityWarning.trim()
+  );
+  if (qualityWarnings.length > 0) {
+    lines.push("", `## ${locale === "zh-CN" ? "数据质量警告" : "Data Quality Warnings"}`, "");
+    for (const result of qualityWarnings) {
+      lines.push(
+        `- \`${escapeMdInline(result.displayLabel ?? result.agentId)}\`: ${escapeMdCell(result.dataQualityWarning ?? "")}`
+      );
+    }
   }
 
   if (failedResults.length > 0) {
@@ -312,7 +324,7 @@ export function renderPrComment(run: BenchmarkRun, locale: Locale, leaderboard?:
             : "ready";
     table.push(
       `| ${attention} | ${escapeMdCell(result.displayLabel ?? result.agentId)} | ${escapeMdCell(result.baseAgentId)} | ${escapeMdCell(runtime.provider)} | ${escapeMdCell(runtime.providerKind)} | ${escapeMdCell(runtime.model)} | ${escapeMdCell(runtime.reasoning)} | ${escapeMdCell(runtime.version)} | ${escapeMdCell(runtime.verification)}/${escapeMdCell(runtime.source)} | ${escapeMdCell(result.preflight.capability.supportTier)} | ${escapeMdCell(result.preflight.status)} | ${escapeMdCell(result.status)} | ${formatCompositeScoreValue(result)} | ${formatDuration(result.durationMs)} | ${result.tokenUsage} | ${
-        formatCostUsd(result.estimatedCostUsd, result.costKnown)
+        formatCostUsd(result.estimatedCostUsd, result.costKnown, result.costQuality)
       } | ${passedJudgeCount}/${result.judgeResults.length} | ${escapeMdCell(formatTestMetric(result))} | ${escapeMdCell(formatLintMetric(result))} | ${escapeMdCell(formatDiffPrecisionMetric(result))} | ${result.changedFiles.length} | ${escapeMdCell(note)} |`
     );
   }

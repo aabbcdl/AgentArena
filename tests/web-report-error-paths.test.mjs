@@ -113,8 +113,10 @@ test("getRunVerdict handles run with all failed results", () => {
   const verdict = getRunVerdict(run);
   assert.ok(verdict);
   assert.equal(typeof verdict, "object");
-  // With all failed results, bestAgent should still be determined (least-bad)
-  assert.ok(verdict.bestAgent || verdict.fastest, "should identify a best agent or fastest even with all failed");
+  assert.equal(verdict.bestAgent, null);
+  assert.equal(verdict.fastest, null);
+  assert.equal(verdict.lowestKnownCost, null);
+  assert.equal(verdict.highestJudgePassRate, null);
 });
 
 test("getRunVerdict handles run with single result", () => {

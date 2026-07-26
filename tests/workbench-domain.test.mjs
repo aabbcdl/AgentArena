@@ -1,12 +1,27 @@
 ﻿import assert from "node:assert/strict";
 import test from "node:test";
+import { formatUserError, toUserError } from "../apps/web-report/workbench/src/domain/errors.ts";
+import {
+  isComingSoonAdapter,
+  labelExecution,
+  labelPhase,
+  labelRunState,
+  labelTrustReason
+} from "../apps/web-report/workbench/src/domain/labels.ts";
 import {
   comparisonExclusionReasons,
   deriveRunOutcome,
   normalizeRun,
   runIdentityKey
 } from "../apps/web-report/workbench/src/domain/run.ts";
+import {
+  DEFAULT_SCORE_MODE,
+  normalizeScoreMode,
+  SCORE_MODES
+} from "../apps/web-report/workbench/src/domain/score-mode.ts";
+import { createViewTelemetryDeduper } from "../apps/web-report/workbench/src/domain/telemetry.ts";
 import { buildTimeline, categorizeEvent, groupEventsIntoSteps, safeCategoryClass, summarizeEvent } from "../apps/web-report/workbench/src/domain/trace.ts";
+import { getRunScoreMode } from "../packages/report/dist/report-helpers.js";
 
 function result(overrides = {}) {
   return {
@@ -74,9 +89,17 @@ test("unknown cost and missing trace are explicit instead of zero", () => {
 
   assert.equal(normalized.results[0].estimatedCostUsd, null);
   assert.equal(normalized.results[0].traceAvailability, "missing");
-  assert.equal(outcome.trust.level, "partial");
+  assert.equal(outcome.trust.level, "degraded");
   assert.ok(outcome.trust.reasons.includes("cost-unknown"));
   assert.ok(outcome.trust.reasons.includes("trace-missing"));
+});
+
+test("estimated cost is explicit and does not become known billing", () => {
+  const normalized = normalizeRun(run({ results: [result({ costKnown: false, costQuality: "estimated", estimatedCostUsd: 0.08 })] }));
+  assert.equal(normalized.results[0].costQuality, "estimated");
+  assert.equal(normalized.results[0].costKnown, false);
+  assert.equal(normalized.results[0].estimatedCostUsd, 0.08);
+  assert.ok(normalized.integrityReasons.includes("cost-estimated"));
 });
 
 test("run identity key binds run, agent and source", () => {
@@ -90,7 +113,7 @@ test("comparison excludes different task, revision and score mode", () => {
     runId: "run-002",
     repository: { path: "D:/repo", revision: "def456" },
     task: { id: "task-2", title: "Other task", schemaVersion: "agentarena.taskpack/v1" },
-    scoreMode: "speed"
+    scoreMode: "efficiency-first"
   }));
 
   assert.deepEqual(comparisonExclusionReasons(base, candidate), [
@@ -198,4 +221,67 @@ test("normalizeRun degrades to file list when no diffs stored", () => {
   const normalized = normalizeRun(run({ results: [result({ changedFiles: ["src/a.ts"] })] }));
   assert.equal(normalized.results[0].fileDiffs, undefined);
   assert.deepEqual(normalized.results[0].changedFiles, ["src/a.ts"]);
+});
+
+
+test("workbench telemetry deduplicates page opens and result views", () => {
+  const tracker = createViewTelemetryDeduper();
+  assert.equal(tracker.markAppOpened(), true);
+  assert.equal(tracker.markAppOpened(), false);
+  assert.equal(tracker.markResultViewed("run-a"), true);
+  assert.equal(tracker.markResultViewed("run-a"), false);
+  assert.equal(tracker.markResultViewed("run-b"), true);
+});
+
+test("trust and execution labels are localized without raw codes", () => {
+  assert.equal(labelTrustReason("zh-CN", "legacy-artifact"), "结果使用兼容旧产物格式");
+  assert.equal(labelTrustReason("en", "cost-estimated"), "Some costs are estimated");
+  assert.equal(labelExecution("zh-CN", "completed"), "已完成");
+  assert.equal(labelRunState("zh-CN", "cancelling"), "正在取消");
+  assert.equal(labelPhase("en", "preflight"), "Preflight");
+  assert.equal(isComingSoonAdapter("Windsurf (Codeium) - Coming Soon"), true);
+  assert.equal(isComingSoonAdapter("Codex CLI"), false);
+});
+
+test("network failures map to user-facing offline copy", () => {
+  const zh = toUserError(new TypeError("Failed to fetch"), "zh-CN");
+  assert.match(zh.message, /本地服务不可用/);
+  assert.equal(zh.detail, "Failed to fetch");
+  assert.match(formatUserError(new Error("NetworkError when attempting to fetch resource."), "en"), /Local service is unavailable/);
+});
+
+test("repoPath cwd restriction maps to actionable user copy", () => {
+  const zh = toUserError(new Error("repoPath must be within the current working directory."), "zh-CN");
+  assert.match(zh.message, /工作目录/);
+  const en = toUserError(new Error("repoPath must be within the current working directory."), "en");
+  assert.match(en.message, /working directory/i);
+});
+
+test("normalizeScoreMode maps phantom Workbench modes to practical", () => {
+  assert.equal(normalizeScoreMode("speed"), DEFAULT_SCORE_MODE);
+  assert.equal(normalizeScoreMode("cost"), DEFAULT_SCORE_MODE);
+  assert.equal(normalizeScoreMode("correctness"), DEFAULT_SCORE_MODE);
+  assert.equal(normalizeScoreMode("practical"), "practical");
+  assert.equal(normalizeScoreMode("efficiency-first"), "efficiency-first");
+  assert.ok(SCORE_MODES.includes("balanced"));
+});
+
+test("normalizeRun and compare collapse dirty historical scoreMode labels", () => {
+  const base = normalizeRun(run({ scoreMode: "speed" }));
+  const peer = normalizeRun(run({ runId: "run-002", scoreMode: "practical" }));
+  assert.equal(base.scoreMode, "practical");
+  assert.deepEqual(comparisonExclusionReasons(base, peer), []);
+});
+
+test("getRunScoreMode falls back to practical for invalid modes", () => {
+  assert.equal(getRunScoreMode({ scoreMode: "speed" }), "practical");
+  assert.equal(getRunScoreMode({}), "practical");
+  assert.equal(getRunScoreMode({ scoreMode: "balanced" }), "balanced");
+});
+
+test("workbench telemetry deduplicates evidence opens", () => {
+  const tracker = createViewTelemetryDeduper();
+  assert.equal(tracker.markEvidenceOpened("run-a"), true);
+  assert.equal(tracker.markEvidenceOpened("run-a"), false);
+  assert.equal(tracker.markEvidenceOpened("run-b"), true);
 });

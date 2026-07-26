@@ -233,6 +233,15 @@ const DNS_CHECK_BYPASS_HOSTNAMES = new Set([
   "dashscope.aliyuncs.com",  // 通义千问
 ]);
 
+function getEffectiveBypassHostnames(): Set<string> {
+  const envValue = process.env.AGENTARENA_SSRF_BYPASS_HOSTNAMES?.trim();
+  if (!envValue) {
+    return DNS_CHECK_BYPASS_HOSTNAMES;
+  }
+  const extra = envValue.split(",").map((h) => h.trim().toLowerCase()).filter(Boolean);
+  return new Set([...DNS_CHECK_BYPASS_HOSTNAMES, ...extra]);
+}
+
 /**
  * Resolve a hostname to its IP addresses and check if any resolve to a
  * private/internal address. This guards against DNS rebinding attacks where
@@ -257,7 +266,8 @@ export async function hasInternalDnsResolution(urlString: string): Promise<boole
     }
 
     // Skip DNS check for known-safe public API hostnames
-    if (DNS_CHECK_BYPASS_HOSTNAMES.has(hostname)) {
+    const bypassHostnames = getEffectiveBypassHostnames();
+    if (bypassHostnames.has(hostname)) {
       return false;
     }
 

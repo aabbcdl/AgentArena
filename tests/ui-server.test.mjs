@@ -27,9 +27,9 @@ function request(port, method, pathname, body, token, hostname = "127.0.0.1") {
       res.on("data", (chunk) => { data += chunk; });
       res.on("end", () => {
         try {
-          resolve({ statusCode: res.statusCode, body: JSON.parse(data) });
+          resolve({ statusCode: res.statusCode, headers: res.headers, body: JSON.parse(data) });
         } catch {
-          resolve({ statusCode: res.statusCode, body: data });
+          resolve({ statusCode: res.statusCode, headers: res.headers, body: data });
         }
       });
     });
@@ -139,12 +139,12 @@ test("GET /api/ui-info returns correct structure", { timeout: 60_000 }, async ()
   }
 });
 
-test("GET / escapes localhost auth token before injecting it into index.html", { timeout: 60_000 }, async () => {
+test("GET /workbench/ escapes localhost auth token before injecting it into index.html", { timeout: 60_000 }, async () => {
   const port = await getAvailablePort();
   const unsafeToken = 'unsafe"><script>window.__agentarenaXss = true</script>';
   const { child } = await startServer(port, unsafeToken);
   try {
-    const res = await request(port, "GET", "/");
+    const res = await request(port, "GET", "/workbench/");
     assert.equal(res.statusCode, 200);
     assert.match(res.body, /meta name="agentarena-auth-token"/);
     assert.match(res.body, /unsafe&quot;&gt;&lt;script&gt;window\.__agentarenaXss = true&lt;\/script&gt;/);
@@ -428,6 +428,45 @@ test("GET /workbench/ serves the nested workbench index", { timeout: 60_000 }, a
     assert.equal(res.statusCode, 200);
     assert.match(String(res.body), /AgentArena Workbench/);
     assert.match(String(res.body), /agentarena-auth-token/);
+  } finally {
+    child.kill("SIGTERM");
+  }
+});
+
+
+test("GET / makes Workbench the default while legacy deep links remain available", { timeout: 60_000 }, async () => {
+  const port = await getAvailablePort();
+  const { child } = await startServer(port);
+  try {
+    const root = await request(port, "GET", "/");
+    assert.equal(root.statusCode, 302);
+    assert.equal(root.headers.location, "/workbench/");
+
+    const english = await request(port, "GET", "/?lang=en");
+    assert.equal(english.statusCode, 302);
+    assert.equal(english.headers.location, "/workbench/?lang=en");
+
+    const deepLink = await request(port, "GET", "/?run=run-1&agent=agent-a");
+    assert.equal(deepLink.statusCode, 302);
+    assert.equal(deepLink.headers.location, "/legacy/?run=run-1&agent=agent-a");
+
+    const legacy = await request(port, "GET", "/legacy/");
+    assert.equal(legacy.statusCode, 200);
+    assert.match(String(legacy.body), /AgentArena/);
+    assert.doesNotMatch(String(legacy.body), /AgentArena Workbench/);
+  } finally {
+    child.kill("SIGTERM");
+  }
+});
+
+test("GET /api/ui-info exposes the dedicated packaged demo task", { timeout: 60_000 }, async () => {
+  const port = await getAvailablePort();
+  const { child } = await startServer(port);
+  try {
+    const res = await request(port, "GET", "/api/ui-info");
+    assert.equal(res.statusCode, 200);
+    assert.match(res.body.demoTaskPath, /taskpacks[\\/]demo[\\/]demo-ui-tour\.yaml$/);
+    assert.notEqual(res.body.demoTaskPath, res.body.defaultTaskPath);
   } finally {
     child.kill("SIGTERM");
   }

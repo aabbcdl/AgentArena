@@ -41,6 +41,54 @@ judges:
   }
 });
 
+it("propagates judge weight from the taskpack through loadTaskPack", async () => {
+  // Regression: `weight` passed field validation but was dropped by the
+  // per-type normalizers, so every judge fell back to weight 1 and the
+  // weighted pass ratio was dead end-to-end.
+  const yaml = `
+schemaVersion: agentarena.taskpack/v1
+id: weight-task
+title: Weight Task
+prompt: Do the thing
+judges:
+  - type: file-exists
+    label: weighted judge
+    path: main.js
+    weight: 5
+  - type: file-exists
+    label: default weight judge
+    path: other.js
+`;
+  const filePath = createTempTaskpack(yaml);
+  try {
+    const task = await loadTaskPack(filePath);
+    assert.equal(task.judges[0].weight, 5);
+    assert.equal(task.judges[1].weight, undefined);
+  } finally {
+    cleanup();
+  }
+});
+
+it("rejects a non-positive judge weight", async () => {
+  const yaml = `
+schemaVersion: agentarena.taskpack/v1
+id: bad-weight-task
+title: Bad Weight Task
+prompt: Do the thing
+judges:
+  - type: file-exists
+    label: bad weight judge
+    path: main.js
+    weight: 0
+`;
+  const filePath = createTempTaskpack(yaml);
+  try {
+    await assert.rejects(() => loadTaskPack(filePath), /weight.*positive/i);
+  } finally {
+    cleanup();
+  }
+});
+
 it("rejects taskpack without id", async () => {
   const yaml = `
 schemaVersion: agentarena.taskpack/v1

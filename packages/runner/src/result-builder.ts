@@ -5,6 +5,7 @@ import type {
   CommandStepResult,
   DiffPrecisionSummary,
   DiffSummary,
+  FileDiffArtifact,
   JudgeResult
 } from "@agentarena/core";
 import { uniqueSorted } from "@agentarena/core";
@@ -27,14 +28,23 @@ interface BaseResultOptions {
   tokenUsage?: number;
   estimatedCostUsd?: number;
   costKnown?: boolean;
+  costQuality?: AgentRunResult["costQuality"];
   tokenUsageReliable?: boolean;
+  /** Propagated from AdapterExecutionResult.dataQualityWarning. */
+  dataQualityWarning?: string;
+  /** Propagated from AdapterExecutionResult.missingCriticalEvents. */
+  missingCriticalEvents?: string[];
+  traceWriteFailed?: boolean;
+  traceDroppedWrites?: number;
   changedFiles?: string[];
   changedFilesHint?: string[];
+  fileDiffs?: FileDiffArtifact[];
   setupResults?: CommandStepResult[];
   judgeResults?: JudgeResult[];
   teardownResults?: CommandStepResult[];
   diff?: DiffSummary;
   diffPrecision?: DiffPrecisionSummary;
+  diffReliable?: boolean;
   resolvedRuntime?: AgentResolvedRuntime;
   tokenUsageBreakdown?: AgentRunResult["tokenUsageBreakdown"];
   tokenEfficiencyScore?: number;
@@ -70,9 +80,15 @@ export function createBaseResult(options: BaseResultOptions): AgentRunResult {
     tokenUsage: options.tokenUsage ?? 0,
     estimatedCostUsd: options.estimatedCostUsd ?? 0,
     costKnown: options.costKnown ?? false,
+    costQuality: options.costQuality,
     tokenUsageReliable: options.tokenUsageReliable,
+    dataQualityWarning: options.dataQualityWarning,
+    missingCriticalEvents: options.missingCriticalEvents,
+    traceWriteFailed: options.traceWriteFailed,
+    traceDroppedWrites: options.traceDroppedWrites,
     changedFiles: options.changedFiles ?? [],
     changedFilesHint: options.changedFilesHint ?? [],
+    fileDiffs: options.fileDiffs,
     setupResults: options.setupResults ?? [],
     judgeResults: options.judgeResults ?? [],
     teardownResults: options.teardownResults ?? [],
@@ -80,6 +96,7 @@ export function createBaseResult(options: BaseResultOptions): AgentRunResult {
     workspacePath,
     diff: options.diff ?? { added: [], changed: [], removed: [], skippedLargeFiles: [] },
     diffPrecision: options.diffPrecision,
+    diffReliable: options.diffReliable,
     scoreExcluded: options.scoreExcluded,
     scoreExclusionReason: options.scoreExclusionReason,
     failureCategory: options.failureCategory,

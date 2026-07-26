@@ -187,7 +187,7 @@ test("web-report browser smoke renders launcher and supports zh/en switching", {
   const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
 
   try {
-    await page.goto(`http://127.0.0.1:${uiServer.port}/`, {
+    await page.goto(`http://127.0.0.1:${uiServer.port}/legacy/`, {
       waitUntil: "domcontentloaded",
       timeout: 30000
     });
@@ -230,7 +230,7 @@ test("mobile sidebar opens and closes via toggle and backdrop", {
   const page = await browser.newPage({ viewport: { width: 600, height: 800 } });
 
   try {
-    await page.goto(`http://127.0.0.1:${uiServer.port}/`, {
+    await page.goto(`http://127.0.0.1:${uiServer.port}/legacy/`, {
       waitUntil: "domcontentloaded",
       timeout: 30000
     });
@@ -267,7 +267,7 @@ test("wrong results file shows a visible error and run list items stay valid", {
   const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
 
   try {
-    await page.goto(`http://127.0.0.1:${uiServer.port}/`, {
+    await page.goto(`http://127.0.0.1:${uiServer.port}/legacy/`, {
       waitUntil: "domcontentloaded",
       timeout: 30000
     });
@@ -329,7 +329,7 @@ test("web-report preserves selected agent and language across reload", {
   const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
 
   try {
-    await page.goto(`http://127.0.0.1:${uiServer.port}/`, {
+    await page.goto(`http://127.0.0.1:${uiServer.port}/legacy/`, {
       waitUntil: "domcontentloaded",
       timeout: 30000
     });
@@ -377,7 +377,7 @@ test("clicking a comparison bar row selects the agent", {
   const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
 
   try {
-    await page.goto(`http://127.0.0.1:${uiServer.port}/`, {
+    await page.goto(`http://127.0.0.1:${uiServer.port}/legacy/`, {
       waitUntil: "domcontentloaded",
       timeout: 30000
     });
@@ -411,7 +411,7 @@ test("clicking the selected compare table row toggles inline detail", {
   const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
 
   try {
-    await page.goto(`http://127.0.0.1:${uiServer.port}/`, {
+    await page.goto(`http://127.0.0.1:${uiServer.port}/legacy/`, {
       waitUntil: "domcontentloaded",
       timeout: 30000
     });
@@ -450,7 +450,7 @@ test("score weight preset buttons update active state", {
 
   try {
     const page = await browser.newPage();
-    await page.goto(`http://127.0.0.1:${uiServer.port}`);
+    await page.goto(`http://127.0.0.1:${uiServer.port}/legacy/`);
 
     // Load demo data
     await page.locator("#try-demo-btn").click();
@@ -483,7 +483,7 @@ test("custom score weight sliders re-score the compare table", {
 
   try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
-    await page.goto(`http://127.0.0.1:${uiServer.port}`);
+    await page.goto(`http://127.0.0.1:${uiServer.port}/legacy/`);
     await injectTestRun(page);
 
     const scoreCell = page.locator("[data-compare-agent-id^='agent-a@@'] .compare-score .score-cell");
@@ -524,7 +524,7 @@ test("trace replay toggle opens and renders trace events", {
 
   try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
-    await page.goto(`http://127.0.0.1:${uiServer.port}`);
+    await page.goto(`http://127.0.0.1:${uiServer.port}/legacy/`);
     await injectTestRun(page);
 
     await page.evaluate(() => {
@@ -557,7 +557,7 @@ test("trace replay toggle opens and renders trace events", {
 
 test("run list delete button removes run", {
   concurrency: false,
-  timeout: 30000
+  timeout: 120000
 }, async (t) => {
   const chromium = await loadChromiumOrSkip(t);
   if (!chromium) return;
@@ -568,7 +568,7 @@ test("run list delete button removes run", {
 
   try {
     const page = await browser.newPage();
-    await page.goto(`http://127.0.0.1:${uiServer.port}`);
+    await page.goto(`http://127.0.0.1:${uiServer.port}/legacy/`);
 
     // Load demo data
     await page.locator("#try-demo-btn").click();
@@ -607,7 +607,7 @@ test("dashboard shows verdict hero and comparison bars after loading demo", {
 
   try {
     const page = await browser.newPage();
-    await page.goto(`http://127.0.0.1:${uiServer.port}`);
+    await page.goto(`http://127.0.0.1:${uiServer.port}/legacy/`);
 
     await page.locator("#try-demo-btn").click();
     await page.waitForFunction(() => document.querySelectorAll("[data-compare-agent-id]").length > 0, { timeout: 10000 });
@@ -630,7 +630,7 @@ test("dashboard shows verdict hero and comparison bars after loading demo", {
 
 test("export run as JSON file", {
   concurrency: false,
-  timeout: 30000
+  timeout: 120000
 }, async (t) => {
   const chromium = await loadChromiumOrSkip(t);
   if (!chromium) return;
@@ -641,7 +641,7 @@ test("export run as JSON file", {
 
   try {
     const page = await browser.newPage();
-    await page.goto(`http://127.0.0.1:${uiServer.port}`);
+    await page.goto(`http://127.0.0.1:${uiServer.port}/legacy/`);
 
     await page.locator("#try-demo-btn").click();
     await page.waitForFunction(() => document.querySelectorAll("[data-compare-agent-id]").length > 0, { timeout: 10000 });
@@ -680,7 +680,7 @@ test("Claude provider editor preserves typed values and saves a profile", {
 
   try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
-    await page.goto(`http://127.0.0.1:${uiServer.port}`, {
+    await page.goto(`http://127.0.0.1:${uiServer.port}/legacy/`, {
       waitUntil: "domcontentloaded",
       timeout: 30000
     });

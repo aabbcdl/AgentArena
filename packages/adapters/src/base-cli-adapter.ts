@@ -11,7 +11,7 @@ import type { InvocationSpec } from "./adapter-capabilities.js";
 import { formatAdapterError } from "./adapter-diagnostics.js";
 import { buildAgentPrompt, createPreflightResult, getChangedFilesFromGit, savePromptArtifact } from "./adapter-helpers.js";
 import { probeHelp, probeInvocationVersion } from "./invocation-probes.js";
-import { agentTimeoutMs, pathExists, runProcess } from "./process-utils.js";
+import { agentTimeoutMs, findExecutableOnPath, pathExists, runProcess } from "./process-utils.js";
 
 /**
  * Configuration for creating a CLI-based agent adapter.
@@ -33,6 +33,8 @@ export interface CliAdapterConfig {
   parseTokenUsage?: (stdout: string) => number;
   /** Extract summary from stdout */
   parseSummary?: (stdout: string, stderr: string, exitCode: number | null) => string;
+  /** Detect data quality issues from stdout (returns warning string or undefined) */
+  parseDataQualityWarning?: (stdout: string) => string | undefined;
   /** Additional args to append (e.g. model selection) */
   extraArgs?: (runtime: AgentResolvedRuntime) => string[];
   /** Optional hook to run before the CLI process starts (e.g. git init for aider). */
@@ -166,6 +168,22 @@ class BaseCliAdapterImpl implements AgentAdapter {
     const summary = this.config.parseSummary
       ? this.config.parseSummary(execution.stdout, execution.stderr, execution.exitCode)
       : execution.stdout.trim() || `${this.title} completed the task.`;
+    let dataQualityWarning = this.config.parseDataQualityWarning?.(execution.stdout);
+    // When a token parser is configured but yields 0 on a successful run that
+    // produced process output, the count is not authoritative (silent parse miss).
+    // Adapters without parseTokenUsage leave tokenUsage at 0 with no reliability claim.
+    const successfulWithOutput =
+      execution.exitCode === 0 &&
+      !execution.error &&
+      (execution.stdout.trim().length > 0 || execution.stderr.trim().length > 0);
+    if (
+      this.config.parseTokenUsage &&
+      tokenUsage === 0 &&
+      successfulWithOutput &&
+      !dataQualityWarning
+    ) {
+      dataQualityWarning = `${this.title} did not report parseable token usage — token metrics may be unavailable.`;
+    }
 
     const changedFilesHintResult = await getChangedFilesFromGit(context.workspacePath);
     const changedFilesHint = changedFilesHintResult.files;
@@ -183,6 +201,8 @@ class BaseCliAdapterImpl implements AgentAdapter {
       estimatedCostUsd: 0,
       costKnown: false,
       changedFilesHint,
+      dataQualityWarning,
+      tokenUsageReliable: dataQualityWarning ? false : undefined,
       resolvedRuntime: runtime
     };
   }
@@ -202,7 +222,13 @@ class BaseCliAdapterImpl implements AgentAdapter {
       return { command: cmd, argsPrefix: [], displayCommand: cmd };
     }
     if (process.platform === "win32") {
-      return { command: `${command}.cmd`, argsPrefix: [], displayCommand: `${command}.cmd` };
+      // A CLI may ship as a .cmd shim (npm), a native .exe, or an extensionless
+      // launcher. Blindly assuming .cmd reported installed tools as "missing".
+      // Resolve across suffixes; fall back to .cmd to preserve prior behavior
+      // when nothing is found on PATH.
+      const resolved = await findExecutableOnPath([`${command}.cmd`, `${command}.exe`, command]);
+      const winCommand = resolved ?? `${command}.cmd`;
+      return { command: winCommand, argsPrefix: [], displayCommand: winCommand };
     }
     return { command, argsPrefix: [], displayCommand: command };
   }

@@ -1,4 +1,5 @@
 import type { ScoreMode } from "../scoring-weights.js";
+import type { CostQuality } from "./agent.js";
 
 export interface LeaderboardEntry {
   agentId: string;
@@ -43,6 +44,7 @@ export interface CommunityAgentResult {
   tokenUsage: number;
   estimatedCostUsd: number;
   costKnown: boolean;
+  costQuality?: CostQuality;
   judgePassRate: number;
 }
 

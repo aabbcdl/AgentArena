@@ -65,6 +65,8 @@ describe("event-parser contracts", () => {
       const result = parseCodexEvents(brokenOutput, "/workspace");
       assert.equal(result.tokenUsage, 0, "Should be 0 because field names don't match");
       assert.equal(result.tokenCountSuspicious, true, "Should flag suspicious token count");
+      // Adapter consumers must treat this as tokenUsageReliable: false (codex-adapter).
+      assert.equal(result.formatMismatch, false, "field rename alone is not a majority schema mismatch");
     });
 
     it("handles empty stdout gracefully", () => {
@@ -78,6 +80,57 @@ describe("event-parser contracts", () => {
       const ansiLine = '\x1b[32m{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":0,"output_tokens":50}}\x1b[0m\n';
       const result = parseCodexEvents(ansiLine, "/workspace");
       assert.equal(result.tokenUsage, 150);
+    });
+
+    it("does NOT flag formatMismatch when all events are recognized", () => {
+      const stdout = loadFixture("codex-sample.jsonl");
+      const result = parseCodexEvents(stdout, "/workspace");
+      assert.equal(result.formatMismatch, false, "Recognized events should not trigger formatMismatch");
+    });
+
+    it("flags formatMismatch when majority of typed events are unrecognized", () => {
+      // Simulate a CLI that renamed its event types.
+      // 3 unrecognized typed events + 0 recognized → ratio = 1.0 ≥ 0.5
+      const changedSchema = [
+        '{"type":"thread.begin","thread_id":"t1"}',
+        '{"type":"item.finished","item":{"type":"message","text":"hi"}}',
+        '{"type":"turn.done","usage":{"in_tokens":100,"out_tokens":50}}',
+      ].join("\n") + "\n";
+      const result = parseCodexEvents(changedSchema, "/workspace");
+      assert.equal(result.formatMismatch, true, "Unrecognized event types should trigger formatMismatch");
+    });
+
+    it("does NOT flag formatMismatch when unrecognized events are the minority", () => {
+      // 2 recognized (thread.started, turn.completed) + 1 unrecognized → ratio = 1/3 < 0.5
+      const mixed = [
+        '{"type":"thread.started","thread_id":"t1"}',
+        '{"type":"unknown.event","foo":"bar"}',
+        '{"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":5}}',
+      ].join("\n") + "\n";
+      const result = parseCodexEvents(mixed, "/workspace");
+      assert.equal(result.formatMismatch, false, "Minority unrecognized events should not trigger formatMismatch");
+    });
+
+    it("treats normal Codex lifecycle events as compatible", () => {
+      const stdout = [
+        '{"type":"thread.started","thread_id":"t1"}',
+        '{"type":"turn.started"}',
+        '{"type":"item.started","item":{"type":"agent_message"}}',
+        '{"type":"item.completed","item":{"type":"agent_message","text":"done"}}',
+        '{"type":"item.completed","item":{"type":"reasoning","text":"internal"}}',
+        '{"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":2,"output_tokens":3}}'
+      ].join("\n") + "\n";
+      const result = parseCodexEvents(stdout, "/workspace");
+      assert.equal(result.formatMismatch, false);
+      assert.equal(result.tokenUsage, 15);
+      assert.equal(result.summaryFromEvents, "done");
+    });
+
+    it("does NOT flag formatMismatch when no typed events are present", () => {
+      // JSON lines without a `type` field should not count toward the ratio.
+      const noTypes = '{"foo":"bar","usage":{"input_tokens":10}}\n';
+      const result = parseCodexEvents(noTypes, "/workspace");
+      assert.equal(result.formatMismatch, false, "No typed events → no formatMismatch");
     });
   });
 
@@ -144,6 +197,37 @@ describe("event-parser contracts", () => {
       assert.equal(result.tokenUsage, 0);
       assert.equal(result.estimatedCostUsd, 0);
       assert.equal(result.sessionId, undefined);
+    });
+
+    it("does NOT flag formatMismatch when all events are recognized", () => {
+      const stdout = loadFixture("claude-sample.jsonl");
+      const result = parseStreamJsonEvents(stdout, "test");
+      assert.equal(result.formatMismatch, false, "Recognized events should not trigger formatMismatch");
+    });
+
+    it("flags formatMismatch when majority of typed events are unrecognized", () => {
+      // Simulate a Claude CLI that renamed its event types.
+      // 3 unrecognized typed events + 0 recognized → ratio = 1.0 ≥ 0.5
+      const changedSchema = [
+        '{"type":"assistant_message","content":"hi"}',
+        '{"type":"final_result","cost_usd":0.01}',
+        '{"type":"tool_invocation","name":"Edit"}',
+      ].join("\n") + "\n";
+      const result = parseStreamJsonEvents(changedSchema, "test");
+      assert.equal(result.formatMismatch, true, "Unrecognized event types should trigger formatMismatch");
+    });
+
+    it("does NOT flag formatMismatch when unrecognized events are the minority", () => {
+      // 2 recognized (type:"result") + 1 unrecognized → ratio = 1/3 < 0.5
+      // Note: lines without a `type` field don't count toward totalTypedEvents,
+      // so we use two result events to ensure the ratio stays below threshold.
+      const mixed = [
+        '{"type":"result","result":"done","total_cost_usd":0,"usage":{"input_tokens":0,"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}',
+        '{"type":"result","result":"done2","total_cost_usd":0,"usage":{"input_tokens":0,"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}',
+        '{"type":"unknown.event","foo":"bar"}',
+      ].join("\n") + "\n";
+      const result = parseStreamJsonEvents(mixed, "test");
+      assert.equal(result.formatMismatch, false, "Minority unrecognized events should not trigger formatMismatch");
     });
   });
 });

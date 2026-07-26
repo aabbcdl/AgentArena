@@ -217,6 +217,8 @@ function createResult(agentId, overrides = {}) {
     tokenUsage: overrides.tokenUsage ?? 100,
     estimatedCostUsd: overrides.estimatedCostUsd ?? 0,
     costKnown: overrides.costKnown ?? false,
+    costQuality: overrides.costQuality,
+    scoreExcluded: overrides.scoreExcluded,
     changedFiles: overrides.changedFiles ?? [],
     judgeResults: overrides.judgeResults ?? [],
     diffPrecision: overrides.diffPrecision
@@ -469,7 +471,7 @@ test("getRunVerdict returns best and fastest agents", () => {
   });
 
   const verdict = getRunVerdict(run);
-  assert.equal(verdict.bestAgent.agentId, "slow-success");
+  assert.equal(verdict.bestAgent.agentId, "fast-success");
   assert.equal(verdict.fastest.agentId, "fast-success");
   assert.equal(verdict.lowestKnownCost.agentId, "fast-success");
 });
@@ -661,6 +663,21 @@ test("buildShareCardSvg returns a shareable SVG card", () => {
   assert.match(svg, /Demo Fast/);
   assert.match(svg, /Score mode: Correctness First/);
   assert.match(svg, /Run run-svg/);
+});
+
+test("share cards mark estimated aggregate cost instead of showing zero", () => {
+  const run = createRun("run-estimated-cost", "Estimated Cost", {
+    results: [
+      createResult("demo-fast", { costKnown: false, costQuality: "estimated", estimatedCostUsd: 0.08 }),
+      createResult("demo-thorough", { costKnown: false, costQuality: "estimated", estimatedCostUsd: 0.16 })
+    ]
+  });
+
+  const text = buildShareCard(run);
+  const svg = buildShareCardSvg(run);
+  assert.match(text, /Cost: \u2248\$0\.24/);
+  assert.match(svg, /\u2248\$0\.24/);
+  assert.doesNotMatch(svg, />\$0\.00</);
 });
 
 test("findPreviousComparableRun requires matching task identity, not just title", () => {
@@ -1020,15 +1037,18 @@ test("getRunVerdict handles empty results array", () => {
   assert.ok(verdict);
 });
 
-test("getRunVerdict handles all failed results", () => {
+test("getRunVerdict does not crown failed or score-excluded results", () => {
   const run = createRun("run-all-failed", "Task All Failed", {
     results: [
-      createResult("agent-a", { status: "failed", judgeResults: [{ success: false }] }),
-      createResult("agent-b", { status: "failed", judgeResults: [{ success: false }] })
+      createResult("agent-a", { status: "failed", costKnown: true, estimatedCostUsd: 0.01, judgeResults: [{ success: false }] }),
+      createResult("agent-b", { status: "success", scoreExcluded: true, costKnown: true, estimatedCostUsd: 0.02, judgeResults: [{ success: true }] })
     ]
   });
   const verdict = getRunVerdict(run);
-  assert.ok(verdict);
+  assert.equal(verdict.bestAgent, null);
+  assert.equal(verdict.fastest, null);
+  assert.equal(verdict.lowestKnownCost, null);
+  assert.equal(verdict.highestJudgePassRate, null);
 });
 
 test("getCompositeScoreDetails handles result with no judges", () => {

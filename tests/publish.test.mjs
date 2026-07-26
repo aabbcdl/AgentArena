@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 // Import from built dist — sorted alphabetically
-import { buildLeaderboardEntries, extractCommunityEntry } from "../packages/cli/dist/publish.js";
+import { buildLeaderboardEntries, extractCommunityEntry, verifyRepoAccess } from "../packages/cli/dist/publish.js";
 
 function makeMockRun(overrides = {}) {
   return {
@@ -254,4 +254,67 @@ test("buildLeaderboardEntries preserves exact scores (no inflation artifacts)", 
   // Verify no synthetic artifacts: success rate should reflect actual statuses
   // All 5 runs are "success" for claude-code
   assert.equal(claudeEntry.successRate, 1.0);
+});
+
+// ─── verifyRepoAccess ───
+
+function mockFetch(responses) {
+  // responses: Array of { status, body }
+  const queue = [...responses];
+  globalThis.fetch = async () => {
+    const next = queue.shift() ?? { status: 404, body: { message: "Not Found" } };
+    return {
+      ok: next.status >= 200 && next.status < 300,
+      status: next.status,
+      json: async () => next.body,
+      text: async () => JSON.stringify(next.body),
+    };
+  };
+}
+
+test("verifyRepoAccess throws actionable error when repo does not exist (404)", async () => {
+  const originalFetch = globalThis.fetch;
+  mockFetch([{ status: 404, body: { message: "Not Found", status: "404" } }]);
+  try {
+    await assert.rejects(
+      verifyRepoAccess("agentarena", "leaderboard-data", "fake-token"),
+      /was not found/
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("verifyRepoAccess throws when token lacks push permission", async () => {
+  const originalFetch = globalThis.fetch;
+  mockFetch([
+    {
+      status: 200,
+      body: { permissions: { push: false, pull: true } },
+    },
+  ]);
+  try {
+    await assert.rejects(
+      verifyRepoAccess("agentarena", "leaderboard-data", "fake-token"),
+      /does not have write access/
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("verifyRepoAccess resolves when repo exists and push is allowed", async () => {
+  const originalFetch = globalThis.fetch;
+  mockFetch([
+    {
+      status: 200,
+      body: { permissions: { push: true, pull: true } },
+    },
+  ]);
+  try {
+    await verifyRepoAccess("agentarena", "leaderboard-data", "fake-token");
+    assert.ok(true, "should resolve without throwing");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

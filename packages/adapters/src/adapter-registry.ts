@@ -176,10 +176,13 @@ async function checkConfigFiles(relativePaths: string[]): Promise<{ found: strin
  * Returns the version string or undefined if the command fails or produces no version.
  */
 async function probeVersion(binaryName: string, versionArgs: string[], timeoutMs = 10_000): Promise<string | undefined> {
-  const { runProcess } = await import("./process-utils.js");
-  const cmd = process.platform === "win32" && !binaryName.endsWith(".cmd") && !binaryName.endsWith(".bat") && !binaryName.endsWith(".exe")
-    ? `${binaryName}.cmd`
-    : binaryName;
+  const { runProcess, findExecutableOnPath } = await import("./process-utils.js");
+  let cmd = binaryName;
+  if (process.platform === "win32" && !binaryName.endsWith(".cmd") && !binaryName.endsWith(".bat") && !binaryName.endsWith(".exe")) {
+    // Resolve across .cmd/.exe/extensionless so native-exe CLIs are not
+    // misreported as missing; fall back to .cmd when nothing is on PATH.
+    cmd = (await findExecutableOnPath([`${binaryName}.cmd`, `${binaryName}.exe`, binaryName])) ?? `${binaryName}.cmd`;
+  }
 
   try {
     const result = await runProcess(cmd, versionArgs, process.cwd(), timeoutMs);

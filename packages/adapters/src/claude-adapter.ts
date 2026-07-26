@@ -341,10 +341,29 @@ abstract class ClaudeLikeAdapter implements AgentAdapter {
     // suspicious (result event seen but zero tokens), AND an authoritative
     // cumulative total was present (the "result" event; without it the
     // per-message sum can double-count cache-read tokens across turns).
+    // Additionally, format mismatch (CLI changed event schema) makes all
+    // parsed data untrustworthy.
     const tokenUsageReliable =
       !usedFallback &&
       !(parsed?.tokenCountSuspicious ?? false) &&
+      !(parsed?.formatMismatch ?? false) &&
+      !((parsed?.missingCriticalEvents?.length ?? 0) > 0) &&
       (parsed ? parsed.tokenUsageFromResultEvent !== false : true);
+
+    const qualityWarnings: string[] = [];
+    if (parsed?.formatMismatch) {
+      qualityWarnings.push(
+        `${this.title} output format changed — token usage, cost, and tool-call data may be inaccurate.`
+      );
+    }
+    if (parsed?.missingCriticalEvents?.length) {
+      qualityWarnings.push(
+        `${this.title} missing critical events: ${parsed.missingCriticalEvents.join(", ")} — token and cost data may be incomplete.`
+      );
+    }
+    const dataQualityWarning = qualityWarnings.length > 0 ? qualityWarnings.join(" ") : undefined;
+
+    const hasMissingCritical = (parsed?.missingCriticalEvents?.length ?? 0) > 0;
 
     return {
       status,
@@ -352,7 +371,10 @@ abstract class ClaudeLikeAdapter implements AgentAdapter {
       tokenUsage: parsed?.tokenUsage ?? 0,
       estimatedCostUsd: parsed?.estimatedCostUsd ?? 0,
       costKnown: parsed?.costKnown ?? false,
+      costQuality: hasMissingCritical ? "unavailable" : undefined,
       tokenUsageReliable,
+      dataQualityWarning,
+      missingCriticalEvents: parsed?.missingCriticalEvents,
       changedFilesHint: changed.files,
       resolvedRuntime
     };

@@ -27,6 +27,10 @@ export const WEB_REPORT_DIST_ROOT = resolveCliAssetPath(
   ["web-report"],
   ["apps", "web-report", "dist"]
 );
+export const DEMO_TASKPACK_PATH = resolveCliAssetPath(
+  ["taskpacks", "demo", "demo-ui-tour.yaml"],
+  ["examples", "taskpacks", "demo", "demo-ui-tour.yaml"]
+);
 export const OFFICIAL_TASKPACK_ROOT = resolveCliAssetPath(
   ["taskpacks", "official"],
   ["examples", "taskpacks", "official"]
@@ -35,6 +39,21 @@ export const BUILTIN_REPOS_ROOT = resolveCliAssetPath(
   ["taskpacks", "repos"],
   ["examples", "taskpacks", "repos"]
 );
+
+export function isTrustedBuiltinTaskPack(taskPath: string): boolean {
+  const resolved = path.resolve(taskPath);
+  const roots = [
+    OFFICIAL_TASKPACK_ROOT,
+    path.join(WORKSPACE_ROOT, "examples", "taskpacks", "official"),
+    path.dirname(DEMO_TASKPACK_PATH),
+    path.join(WORKSPACE_ROOT, "examples", "taskpacks"),
+    path.join(WORKSPACE_ROOT, "examples", "taskpacks", "demo")
+  ];
+  return roots.some((root) => {
+    const relative = path.relative(path.resolve(root), resolved);
+    return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+  });
+}
 
 export interface UiRunPayload {
   repoPath: string;
@@ -58,6 +77,7 @@ export interface UiRunPayload {
   maxConcurrency?: number;
   scoreMode?: ScoreMode;
   tokenBudget?: number;
+  entryPoint?: "legacy-launcher" | "legacy-quick-demo" | "workbench-plan";
 }
 
 export interface ParsedTaskPackMetadataFile {

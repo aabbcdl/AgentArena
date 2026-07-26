@@ -84,7 +84,7 @@ export function preflightTimeoutMs(): number {
 }
 
 /**
- * Default transport timeout: 5 minutes.
+ * Default transport timeout: 10 minutes.
  *
  * Real coding agents can spend several minutes reading, editing, and verifying
  * even tiny tasks on cold starts. Keep this below the per-agent timeout, but

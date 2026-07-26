@@ -8,8 +8,7 @@
  * Structure:
  * - Types, constants, path resolution
  * - Registry file I/O (read/write JSON at ~/.config/agentarena/)
- * - Secret storage: Windows uses PasswordVault via PowerShell,
- *   other platforms use AES-256-GCM with machine-bound key (hostname + username)
+ * - Secret storage: delegated to secret-storage.ts
  * - Profile CRUD: save, get, list, delete, buildEnvironment
  * - Workspace settings writer (generates .claude/settings.json per run)
  *
@@ -19,18 +18,22 @@
  * - Unknown hosts require _confirmBaseUrlRisk acknowledgment
  * - Secrets are machine-bound: changing hostname or username silently
  *   invalidates encrypted secrets (logged via console.warn)
- *
- * Why one file: crypto, PowerShell, and file I/O are tightly coupled to
- * the profile lifecycle. Splitting creates circular deps between the
- * secret layer and the profile layer.
  */
-import { execFile } from "node:child_process";
-import { createCipheriv, createDecipheriv, randomBytes, randomUUID, scryptSync } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { ClaudeProviderProfile, ClaudeProviderRiskFlag } from "@agentarena/core";
 import { getHealthCache, hasInternalDnsResolution, isInternalUrl, logger } from "@agentarena/core";
+import {
+  __secretStorageTestUtils,
+  deleteSecret,
+  getSecret,
+  hasStoredSecret,
+  setSecret,
+  supportsWindowsCredentialManager,
+  validateProfileId
+} from "./secret-storage.js";
 
 interface ProfileRegistryFile {
   schemaVersion: 1;
@@ -142,32 +145,6 @@ function registryPath(): string {
   return path.join(appDataRoot(), "claude-provider-profiles.json");
 }
 
-function secretTarget(profileId: string): string {
-  validateProfileId(profileId);
-  const prefix = process.env.AGENTARENA_CLAUDE_SECRET_PREFIX?.trim() || "AgentArena/claude-profile/";
-  return `${prefix}${profileId}`;
-}
-
-function secretDirectory(): string {
-  return path.join(appDataRoot(), "secrets");
-}
-
-function secretFilePath(profileId: string): string {
-  validateProfileId(profileId);
-  return path.join(secretDirectory(), `${profileId}.secret`);
-}
-
-function validateProfileId(profileId: string): void {
-  if (
-    !/^[a-zA-Z0-9][a-zA-Z0-9-]{0,62}[a-zA-Z0-9]$/.test(profileId) &&
-    !/^[a-zA-Z0-9]$/.test(profileId)
-  ) {
-    throw new Error(
-      `Invalid profile ID: "${profileId}". Must contain only alphanumeric characters and hyphens.`
-    );
-  }
-}
-
 function slugify(value: string): string {
   return value
     .trim()
@@ -254,256 +231,13 @@ async function writeRegistry(registry: ProfileRegistryFile): Promise<void> {
   await fs.writeFile(registryPath(), JSON.stringify(registry, null, 2), "utf8");
 }
 
-function powershellExecutable(): string {
-  return process.platform === "win32" ? "powershell.exe" : "powershell";
-}
-
-function encodeForPowerShell(value: string): string {
-  return Buffer.from(value, "utf8").toString("base64");
-}
-
-/**
- * Run a PowerShell script and parse its JSON output.
- *
- * SECURITY: The script is encoded as Base64 UTF-16LE for -EncodedCommand,
- * which eliminates shell injection risk through script content. The user-
- * provided data (target, password) is Base64-encoded within the script and
- * decoded at runtime inside PowerShell, so special characters cannot break
- * out of string interpolation.
- */
-async function runPowerShellJson(script: string): Promise<unknown> {
-  // Encode the entire script as Base64 UTF-16LE for -EncodedCommand,
-  // eliminating any risk of shell injection through script content.
-  const encoded = Buffer.from(script, "utf16le").toString("base64");
-  return await new Promise((resolve, reject) => {
-    execFile(
-      powershellExecutable(),
-      ["-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
-      { windowsHide: true },
-      (error, stdout, stderr) => {
-        if (error) {
-          reject(new Error(stderr.trim() || stdout.trim() || error.message));
-          return;
-        }
-
-        const trimmed = stdout.trim();
-        if (!trimmed) {
-          resolve(null);
-          return;
-        }
-
-        try {
-          resolve(JSON.parse(trimmed));
-        } catch (_parseError) {
-          reject(new Error(`Failed to parse PowerShell JSON output: ${trimmed}`));
-        }
-      }
-    );
-  });
-}
-
 // ---------------------------------------------------------------------------
-// Section 2: Secret storage (Windows Credential Manager / AES-256-GCM)
+// Section 2: Secret storage — delegated to secret-storage.ts
+// See secret-storage.ts for Windows Credential Manager and AES-256-GCM
+// implementations. Re-exported here for backward compatibility.
 // ---------------------------------------------------------------------------
 
-async function setSecretWindows(profileId: string, secret: string): Promise<void> {
-  const target = secretTarget(profileId);
-  const resource = encodeForPowerShell(target);
-  const password = encodeForPowerShell(secret);
-  const script = `
-Add-Type -AssemblyName System.Runtime.WindowsRuntime
-$null = [Windows.Security.Credentials.PasswordVault, Windows.Security.Credentials, ContentType = WindowsRuntime]
-$vault = New-Object Windows.Security.Credentials.PasswordVault
-$resource = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${resource}'))
-$user = 'agentarena'
-$password = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${password}'))
-try {
-  try {
-    $existing = $vault.Retrieve($resource, $user)
-    $existing.RetrievePassword()
-    $vault.Remove($existing)
-  } catch {
-    Write-Verbose "No existing credential to remove for $resource"
-  }
-  $credential = New-Object Windows.Security.Credentials.PasswordCredential($resource, $user, $password)
-  $vault.Add($credential)
-  @{ ok = $true } | ConvertTo-Json -Compress
-} catch {
-  throw $_
-}
-`;
-  await runPowerShellJson(script);
-}
-
-async function getSecretWindows(profileId: string): Promise<string | null> {
-  const target = secretTarget(profileId);
-  const resource = encodeForPowerShell(target);
-  const script = `
-Add-Type -AssemblyName System.Runtime.WindowsRuntime
-$null = [Windows.Security.Credentials.PasswordVault, Windows.Security.Credentials, ContentType = WindowsRuntime]
-$vault = New-Object Windows.Security.Credentials.PasswordVault
-$resource = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${resource}'))
-$user = 'agentarena'
-try {
-  $credential = $vault.Retrieve($resource, $user)
-  $credential.RetrievePassword()
-  @{ secret = $credential.Password } | ConvertTo-Json -Compress
-} catch {
-  @{ secret = $null } | ConvertTo-Json -Compress
-}
-`;
-  const result = (await runPowerShellJson(script)) as { secret?: string | null } | null;
-  return result?.secret ?? null;
-}
-
-async function deleteSecretWindows(profileId: string): Promise<void> {
-  const target = secretTarget(profileId);
-  const resource = encodeForPowerShell(target);
-  const script = `
-Add-Type -AssemblyName System.Runtime.WindowsRuntime
-$null = [Windows.Security.Credentials.PasswordVault, Windows.Security.Credentials, ContentType = WindowsRuntime]
-$vault = New-Object Windows.Security.Credentials.PasswordVault
-$resource = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${resource}'))
-$user = 'agentarena'
-try {
-  $credential = $vault.Retrieve($resource, $user)
-  $credential.RetrievePassword()
-  $vault.Remove($credential)
-} catch {
-  Write-Verbose "No existing credential to remove for $resource"
-}
-@{ ok = $true } | ConvertTo-Json -Compress
-`;
-  await runPowerShellJson(script);
-}
-
-const SECRET_ENCRYPTION_MARKER = "ENC1:";
-
-/**
- * Derive a machine-bound encryption key from hostname + username.
- *
- * THREAT MODEL:
- * - Protects secrets at rest on shared filesystems (NFS, cloud drives)
- * - Does NOT protect against local privilege escalation (key derivation
- *   inputs are publicly known: hostname and username)
- * - Does NOT protect against a process running as the same user
- *
- * CAVEAT: Renaming the machine or user account silently invalidates all
- * encrypted secrets. The getSecretFile() function catches the decryption
- * failure and logs a warning, but does NOT auto-recover.
- *
- * Algorithm: scrypt (memory-hard KDF) with default parameters.
- * Salt: agentarena-secret-${hostname}-${username}
- * Output: 32-byte key for AES-256-GCM
- */
-function deriveMachineKey(): Buffer {
-  const hostname = os.hostname();
-  const username = os.userInfo().username;
-  const salt = `agentarena-secret-${hostname}-${username}`;
-  return scryptSync(hostname + username, salt, 32);
-}
-
-function encryptSecret(plaintext: string): string {
-  const key = deriveMachineKey();
-  const iv = randomBytes(16);
-  const cipher = createCipheriv("aes-256-gcm", key, iv);
-  const encrypted = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
-  const authTag = cipher.getAuthTag();
-  return SECRET_ENCRYPTION_MARKER + Buffer.concat([iv, authTag, encrypted]).toString("base64");
-}
-
-function decryptSecret(encrypted: string): string | null {
-  if (!encrypted.startsWith(SECRET_ENCRYPTION_MARKER)) return null;
-  try {
-    const data = Buffer.from(encrypted.slice(SECRET_ENCRYPTION_MARKER.length), "base64");
-    const iv = data.subarray(0, 16);
-    const authTag = data.subarray(16, 32);
-    const ciphertext = data.subarray(32);
-    const key = deriveMachineKey();
-    const decipher = createDecipheriv("aes-256-gcm", key, iv);
-    decipher.setAuthTag(authTag);
-    return decipher.update(ciphertext) + decipher.final("utf8");
-  } catch {
-    logger.warn("adapter", "profile.decrypt_failed", `Failed to decrypt secret: decryption error (possible machine-key mismatch)`);
-    return null;
-  }
-}
-
-async function setSecretFile(profileId: string, secret: string): Promise<void> {
-  await fs.mkdir(secretDirectory(), { recursive: true });
-  const filePath = secretFilePath(profileId);
-  const encrypted = encryptSecret(secret.trim());
-  await fs.writeFile(filePath, `${encrypted}\n`, { encoding: "utf8", mode: 0o600 });
-  await fs.chmod(filePath, 0o600).catch((err) => {
-    logger.debug("adapter", "profile.chmod_failed", `chmod 0o600 failed for ${filePath}: ${err instanceof Error ? err.message : String(err)}`);
-  });
-}
-
-/**
- * Read a secret from the file-based storage backend.
- *
- * FORMAT MIGRATION HISTORY (newest first):
- * 1. ENC1: prefix — AES-256-GCM encrypted, machine-bound key (current)
- * 2. Valid Base64 — decoded and used (legacy, auto-detected)
- * 3. Raw plaintext — used as-is (oldest legacy, no encoding)
- *
- * The fallback chain reads the file once and tries each format in order.
- * New secrets are always written in ENC1 format via setSecretFile().
- */
-async function getSecretFile(profileId: string): Promise<string | null> {
-  try {
-    const raw = (await fs.readFile(secretFilePath(profileId), "utf8")).trim();
-    if (!raw) return null;
-    if (raw.startsWith(SECRET_ENCRYPTION_MARKER)) {
-      const decrypted = decryptSecret(raw);
-      if (decrypted === null) {
-        // biome-ignore lint/suspicious/noConsole: security diagnostic for failed decryption
-        console.warn(
-          `[agentarena] Failed to decrypt secret for profile "${profileId}". ` +
-          `The secret was encrypted on a different machine (hostname+username derived key). ` +
-          `Please re-set the secret using: agentarena ui → Provider Profiles → Set Secret`
-        );
-        return null;
-      }
-      return decrypted;
-    }
-    try {
-      const decoded = Buffer.from(raw, "base64").toString("utf8");
-      if (Buffer.from(decoded, "utf8").toString("base64") === raw) {
-        return decoded || null;
-      }
-    } catch {
-      // Fall through to return raw value for legacy plaintext files
-      logger.debug("adapter", "profile.secret_decode", `Base64 decode failed for profile "${profileId}"; falling back to raw value`);
-    }
-    return raw || null;
-  } catch {
-    return null;
-  }
-}
-
-async function deleteSecretFile(profileId: string): Promise<void> {
-  await fs.rm(secretFilePath(profileId), { force: true });
-}
-
-async function hasStoredSecret(profileId: string): Promise<boolean> {
-  if (process.platform === "win32") {
-    return (await getSecretWindows(profileId)) !== null;
-  }
-
-  return (await getSecretFile(profileId)) !== null;
-}
-
-/**
- * @deprecated Always returns `true`. Profile secret storage now works on every
- * platform (Windows Credential Manager, macOS Keychain, encrypted file
- * fallback), so the predicate has no remaining purpose. Callers using this
- * as a feature gate are dead branches — remove or replace with explicit
- * platform checks where actually needed.
- */
-export function supportsWindowsCredentialManager(): boolean {
-  return true;
-}
+export { supportsWindowsCredentialManager } from "./secret-storage.js";
 
 export async function listClaudeProviderProfiles(): Promise<ClaudeProviderProfile[]> {
   const registry = await tryReadRegistry();
@@ -725,11 +459,7 @@ export async function deleteClaudeProviderProfile(profileId: string): Promise<vo
     profiles: registry.profiles.filter((entry) => entry.id !== profileId)
   });
 
-  if (process.platform === "win32") {
-    await deleteSecretWindows(profileId);
-  } else {
-    await deleteSecretFile(profileId);
-  }
+  await deleteSecret(profileId);
 
   // The profile is gone — drop any cached health verdict for it.
   await invalidateProfileHealth(profileId, [removedBaseUrl]);
@@ -740,25 +470,15 @@ export async function setClaudeProviderProfileSecret(profileId: string, secret: 
     throw new Error("The built-in official Claude profile does not use a stored secret.");
   }
 
-  // Resolve the endpoint up front so both the set and clear paths can drop the
-  // cached health verdict — changing the secret can flip a "blocked" verdict.
   const baseUrl = await lookupProfileBaseUrl(profileId);
 
   if (!secret.trim()) {
-    if (process.platform === "win32") {
-      await deleteSecretWindows(profileId);
-    } else {
-      await deleteSecretFile(profileId);
-    }
+    await deleteSecret(profileId);
     await invalidateProfileHealth(profileId, [baseUrl]);
     return;
   }
 
-  if (process.platform === "win32") {
-    await setSecretWindows(profileId, secret.trim());
-  } else {
-    await setSecretFile(profileId, secret.trim());
-  }
+  await setSecret(profileId, secret.trim());
 
   await invalidateProfileHealth(profileId, [baseUrl]);
 }
@@ -768,9 +488,7 @@ export async function getClaudeProviderProfileSecret(profileId: string): Promise
     return null;
   }
 
-  return process.platform === "win32"
-    ? await getSecretWindows(profileId)
-    : await getSecretFile(profileId);
+  return await getSecret(profileId);
 }
 
 export async function buildClaudeProviderEnvironment(
@@ -864,6 +582,9 @@ export async function writeClaudeWorkspaceSettings(
 export const __providerProfileTestUtils = {
   appDataRoot,
   registryPath,
-  secretTarget,
+  // Re-exposed from secret-storage.ts (where the helper now lives) so the
+  // tracked provider-profiles.test.mjs, which reads it here, keeps passing
+  // after the secret-storage extraction.
+  secretTarget: __secretStorageTestUtils.secretTarget,
   supportsWindowsCredentialManager
 };

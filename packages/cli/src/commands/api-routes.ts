@@ -47,6 +47,8 @@ export {
 export {
   handlePreflight,
   handleQuickPreflight,
+  handleTelemetry,
+  handleTelemetrySummary,
   handleUiInfo,
 } from "./api-routes/ui.js";
 

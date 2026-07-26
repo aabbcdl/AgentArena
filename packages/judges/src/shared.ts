@@ -178,6 +178,13 @@ export interface JudgeExecutionOptions {
   signal?: AbortSignal;
   tokenUsage?: number;
   tokenBudget?: number;
+  /**
+   * Whether the adapter's token count is trustworthy. When explicitly false,
+   * the token-efficiency judge must not derive a pass/fail from the count
+   * (mirrors the derived-score gating in runner result-assembly.ts).
+   */
+  tokenUsageReliable?: boolean;
+  allowEval?: boolean;
 }
 
 export function defaultJudgeTimeoutMs(): number {

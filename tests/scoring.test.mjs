@@ -403,6 +403,38 @@ test("backend and frontend computeCompositeScore produce identical scores", () =
   );
 });
 
+test("backend and frontend Rule-2 (critical-fail) scores match across all modes", () => {
+  // Regression: the critical-fail band diverged because the backend put
+  // mode-specific weights in the denominator while summing only six
+  // components. This asserts parity for a failing critical judge in every mode.
+  const modes = ["practical", "balanced", "issue-resolution", "efficiency-first", "rotating-tasks", "comprehensive"];
+  const result = createResult({
+    status: "success",
+    durationMs: 1500,
+    estimatedCostUsd: 0.08,
+    costKnown: true,
+    judgeResults: [
+      { success: false, critical: true },
+      { success: true, critical: false },
+      { success: true, type: "test-result", totalCount: 5, passedCount: 4, failedCount: 1 },
+      { success: true, type: "lint-check", errorCount: 0, warningCount: 2 }
+    ]
+  });
+  const otherResult = createResult({ durationMs: 800, estimatedCostUsd: 0.02, costKnown: true });
+  const run = createRun({ results: [result, otherResult], expectedChangedPaths: ["src/a.ts"] });
+
+  for (const mode of modes) {
+    const backendScore = computeCompositeScore(result, run, undefined, mode);
+    const frontendScore = getCompositeScoreDetails(result, run, getScoreWeightPreset(mode)).total;
+    assert.ok(
+      Math.abs(backendScore - frontendScore) < 0.2,
+      `Rule-2 score mismatch for mode='${mode}': backend=${backendScore} frontend=${frontendScore}`
+    );
+    // Sanity: a critical-fail score must land in the critical-fail band.
+    assert.ok(backendScore >= 50 && backendScore <= 70, `mode='${mode}' backend=${backendScore} not in [50,70]`);
+  }
+});
+
 test("frontend SCORE_WEIGHT_PRESETS match backend getDefaultWeights for all modes", () => {
   const modes = ["practical", "balanced", "issue-resolution", "efficiency-first", "rotating-tasks", "comprehensive"];
   for (const mode of modes) {

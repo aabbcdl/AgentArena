@@ -106,7 +106,7 @@ export async function runJudge(
         result = await runPatchValidationJudge(judge, workspacePath, baseAllowedNames, options);
         break;
       case "token-efficiency":
-        result = await runTokenEfficiencyJudge(judge, options.tokenUsage, options.tokenBudget);
+        result = await runTokenEfficiencyJudge(judge, options.tokenUsage, options.tokenBudget, options.tokenUsageReliable);
         break;
       case "directory-exists":
         result = await runDirectoryExistsJudge(judge, workspacePath);

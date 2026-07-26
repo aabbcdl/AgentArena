@@ -7,8 +7,24 @@
   "types": "dist/index.d.ts",
   "exports": {
     ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./artifact-contract": {
+      "types": "./dist/artifact-contract.d.ts",
+      "import": "./dist/artifact-contract.js"
+    },
+    "./metrics": {
+      "types": "./dist/metrics.d.ts",
+      "import": "./dist/metrics.js"
+    },
+    "./telemetry": {
+      "types": "./dist/telemetry.d.ts",
+      "import": "./dist/telemetry.js"
+    },
+    "./snapshot": {
+      "types": "./dist/snapshot.d.ts",
+      "import": "./dist/snapshot.js"
     }
   },
   "files": [

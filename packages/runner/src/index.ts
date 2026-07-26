@@ -2,7 +2,8 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 
 import { preflightAdapters } from "@agentarena/adapters";
-import {AgentLogStore, 
+import {
+  AgentLogStore,
   type AgentRunResult,
   type AgentSelection,
   type BenchmarkCancellation,
@@ -10,9 +11,12 @@ import {AgentLogStore,
   getDefaultWeights,
   isAbortError,
   logger,
+  RESULT_ARTIFACT_SCHEMA,
+  recordTelemetryEvent,
   type ScoreMode,
   type TaskCompatibilityResult,
-  throwIfAborted,writeJsonAtomic 
+  throwIfAborted,
+  writeJsonAtomic
 } from "@agentarena/core";
 import { runAgent } from "./agent-lifecycle.js";
 import { agentConcurrency, mapWithConcurrency } from "./concurrency.js";
@@ -24,6 +28,16 @@ import {
   createSkippedRunResult,
 } from "./result-builder.js";
 import { collectResults } from "./result-collection.js";
+import {
+  AgentResultPersistenceError,
+  createResultSelectionFingerprint,
+  createRunContractFingerprint,
+  createRunFingerprint,
+  createSelectionFingerprint,
+  isAgentRunResult,
+  loadResumeState,
+  writeAgentResult,
+} from "./resume.js";
 import { checkTaskCompatibility } from "./task-compatibility.js";
 import { cleanupWorkspace, formatErrorDetails, formatErrorMessage, type WorkspaceCleanupResult } from "./workspace.js";
 import { prepareWorkspace } from "./workspace-prep.js";
@@ -61,6 +75,10 @@ export interface BenchmarkOptions {
   scoreMode?: ScoreMode;
   tokenBudget?: number;
   debug?: boolean;
+  /** Explicit opt-in for trusted built-in task packs that still use inline eval commands. */
+  allowEvalInTaskCommands?: boolean;
+  /** Low-cardinality source of the run request for local activation measurement. */
+  entryPoint?: "cli" | "legacy-launcher" | "legacy-quick-demo" | "workbench-plan";
   /**
    * When true, the runner emits fine-grained `agent-activity` progress
    * events (stdout/stderr lines) AND per-agent log capture. Default-off
@@ -139,124 +157,6 @@ function agentResultPath(outputPath: string, variantId: string): string {
   return path.join(outputPath, "agents", variantId, "result.json");
 }
 
-function isAgentRunResult(value: unknown): value is AgentRunResult {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-  const result = value as Record<string, unknown>;
-  return (
-    typeof result.variantId === "string" &&
-    typeof result.agentId === "string" &&
-    (result.status === "success" ||
-      result.status === "failed" ||
-      result.status === "cancelled")
-  );
-}
-
-class AgentResultPersistenceError extends Error {
-  constructor(result: AgentRunResult, cause: unknown) {
-    super(
-      `Failed to persist resumable result for ${result.displayLabel}: ${cause instanceof Error ? cause.message : String(cause)}`,
-      { cause }
-    );
-    this.name = "AgentResultPersistenceError";
-  }
-}
-
-async function writeAgentResult(outputPath: string, result: AgentRunResult): Promise<void> {
-  const filePath = agentResultPath(outputPath, result.variantId);
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
-  try {
-    await writeJsonAtomic(filePath, result);
-  } catch (error) {
-    throw new AgentResultPersistenceError(result, error);
-  }
-}
-
-async function loadResumeState(
-  resumeFrom: string | undefined,
-): Promise<{ taskId?: string; results: Map<string, AgentRunResult> }> {
-  const results = new Map<string, AgentRunResult>();
-  if (!resumeFrom) {
-    return { results };
-  }
-
-  let taskId: string | undefined;
-  try {
-    const marker = JSON.parse(
-      await fs.readFile(path.join(resumeFrom, "run-state.json"), "utf8"),
-    ) as Record<string, unknown>;
-    if (typeof marker.taskId === "string") {
-      taskId = marker.taskId;
-    }
-  } catch {
-    // Older or partial runs may not have a readable marker.
-  }
-
-  try {
-    const summary = JSON.parse(
-      await fs.readFile(path.join(resumeFrom, "summary.json"), "utf8"),
-    ) as BenchmarkRun;
-    if (typeof summary.task?.id === "string") {
-      taskId = summary.task.id;
-    }
-    for (const result of summary.results ?? []) {
-      if (isAgentRunResult(result) && result.status !== "cancelled") {
-        results.set(result.variantId, result);
-      }
-    }
-  } catch {
-    // Interrupted runs may not have reached report generation.
-  }
-
-  try {
-    const agentsDir = path.join(resumeFrom, "agents");
-    const entries = await fs.readdir(agentsDir, { withFileTypes: true });
-    for (const entry of entries) {
-      if (!entry.isDirectory()) {
-        continue;
-      }
-      const resultPath = path.join(agentsDir, entry.name, "result.json");
-      let rawResult: string;
-      try {
-        rawResult = await fs.readFile(resultPath, "utf8");
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") {
-          continue;
-        }
-        throw new Error(
-          `Cannot resume agent "${entry.name}": result file could not be read. Refusing to rerun completed work silently.`,
-          { cause: error }
-        );
-      }
-
-      let result: unknown;
-      try {
-        result = JSON.parse(rawResult) as unknown;
-      } catch (error) {
-        throw new Error(
-          `Cannot resume agent "${entry.name}": result file is corrupt or malformed. Refusing to rerun completed work silently.`,
-          { cause: error }
-        );
-      }
-      if (!isAgentRunResult(result) || result.variantId !== entry.name) {
-        throw new Error(
-          `Cannot resume agent "${entry.name}": result file has an invalid shape or mismatched variant id. Refusing to rerun completed work silently.`
-        );
-      }
-      if (result.status !== "cancelled") {
-        results.set(result.variantId, result);
-      }
-    }
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException | undefined)?.code !== "ENOENT") {
-      throw error;
-    }
-    // No per-agent result directory yet.
-  }
-
-  return { taskId, results };
-}
 
 function createTaskIncompatibleResult(
   preflight: Awaited<ReturnType<typeof preflightAdapters>>[number],
@@ -280,6 +180,17 @@ function createTaskIncompatibleResult(
   };
 }
 
+
+function telemetryResultIntegrity(results: AgentRunResult[]): "complete" | "partial" | "unavailable" {
+  if (results.length === 0) return "unavailable";
+  return results.every((result) =>
+    typeof result.status === "string" &&
+    Number.isFinite(result.durationMs) &&
+    Number.isFinite(result.tokenUsage) &&
+    Array.isArray(result.judgeResults)
+  ) ? "complete" : "partial";
+}
+
 export async function runBenchmark(options: BenchmarkOptions): Promise<BenchmarkRun> {
   const cancellation = options.cancellation;
   const safeProgress = async (event: BenchmarkProgressEvent): Promise<void> => {
@@ -299,7 +210,7 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
   // mutated shared counters (which would silently miscount if an `await` were
   // ever inserted between read and write).
   let snapshotTotal = 0;
-  const statusByAgent = new Map<string, "running" | "success" | "failed">();
+  const statusByAgent = new Map<string, "running" | "success" | "failed" | "cancelled">();
   const lastActivityByAgent: Record<string, number> = {};
 
   // Monotonic per-run activity sequence counter. Ensures every activity event
@@ -365,17 +276,25 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
         }
       : resolved.task;
 
-  const resumeState = await loadResumeState(options.resumeFrom);
+  const selections = normalizeSelections(options);
+  const scoreMode = options.scoreMode ?? "practical";
+  const runContractFingerprint = createRunContractFingerprint(repoPath, task, scoreMode);
+  const runFingerprint = createRunFingerprint(repoPath, task, selections, scoreMode);
+  const resumeState = await loadResumeState(options.resumeFrom, runFingerprint, runContractFingerprint);
   const resumeResults =
     resumeState.taskId && resumeState.taskId !== task.id
       ? new Map<string, AgentRunResult>()
-      : resumeState.results;
-  if (options.resumeFrom && resumeState.taskId && resumeState.taskId !== task.id) {
+      : resumeState.mismatchReason
+        ? new Map<string, AgentRunResult>()
+        : resumeState.results;
+  if (options.resumeFrom && (resumeState.taskId && resumeState.taskId !== task.id || resumeState.mismatchReason)) {
     logger.warn(
       "runner",
-      "resume.task_mismatch",
-      `Ignoring resume results from ${options.resumeFrom}: task id ${resumeState.taskId} does not match ${task.id}. ` +
-      `Discarding ${resumeState.results.size} cached agent result(s) (per-variantId) — the run will be re-executed.`
+      "resume.rejected",
+      `Ignoring resume results from ${options.resumeFrom}: ${resumeState.taskId && resumeState.taskId !== task.id
+        ? `task id ${resumeState.taskId} does not match ${task.id}`
+        : resumeState.mismatchReason}. ` +
+      `Discarding ${resumeState.results.size} cached agent result(s); the run will be re-executed.`
     );
   }
 
@@ -389,24 +308,34 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
   await writeRunMarker(outputPath, "in-progress", {
     runId,
     taskId: task.id,
-    taskTitle: task.title
+    taskTitle: task.title,
+    runFingerprint,
+    runContractFingerprint
   });
 
-  const selections = normalizeSelections(options);
   // Set total once to the full selection count — NOT incremented per agent.
   // This ensures progress percentage is correct from the start (e.g. 0/40, not 0/1).
   snapshotTotal = selections.length;
+  // Opt-in product measurement (no-op unless AGENTARENA_TELEMETRY=1).
+  // Records only aggregate, decision-relevant signals — no repo paths or prompts.
+  void recordTelemetryEvent("run_started", {
+    agentCount: selections.length,
+    taskPackId: task.id,
+    scoreMode: options.scoreMode ?? "practical",
+    entryPoint: options.entryPoint ?? "cli",
+    probeAuth: options.probeAuth === true,
+  });
   // Track all workspace paths for cleanup. Added BEFORE runAgent so that even
   // if runAgent throws, the path is in the Set for the finally-block cleanup.
   // If the entire benchmark is aborted before a callback runs, that workspace
   // was never created so no cleanup is needed.
   const workspacePaths = new Set<string>();
 
-  throwIfAborted(cancellation?.signal, createCancellationSummary("startup"));
-
   let taskCompatibility: TaskCompatibilityResult | undefined;
   let completedNormally = false;
+  let terminalError: unknown;
   try {
+  throwIfAborted(cancellation?.signal, createCancellationSummary("startup"));
   await emitProgress({
     phase: "starting",
     message: `Created run ${runId}.`,
@@ -494,13 +423,34 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
     }
   });
 
+  const validatedResumeResults = new Map<string, AgentRunResult>();
+  for (const preflight of preflights) {
+    const cachedResult = resumeResults.get(preflight.variantId);
+    if (!cachedResult) continue;
+    const currentSelectionFingerprint = createSelectionFingerprint({
+      baseAgentId: preflight.baseAgentId,
+      variantId: preflight.variantId,
+      displayLabel: preflight.displayLabel,
+      config: preflight.requestedConfig
+    });
+    if (currentSelectionFingerprint !== createResultSelectionFingerprint(cachedResult)) {
+      logger.warn(
+        "runner",
+        "resume.agent_rejected",
+        `Ignoring cached result for ${preflight.displayLabel}: the current agent selection does not match the persisted result.`
+      );
+      continue;
+    }
+    validatedResumeResults.set(preflight.variantId, cachedResult);
+  }
+
   const incompatibleCompatibility = taskCompatibility;
   if (incompatibleCompatibility?.status === "incompatible") {
     const results = preflights.map((preflight) =>
       createTaskIncompatibleResult(preflight, outputPath, workspaceRootPath, incompatibleCompatibility)
     );
 
-    await Promise.all(results.map((result) => writeAgentResult(outputPath, result)));
+    await Promise.all(results.map((result) => writeAgentResult(outputPath, result, RESULT_ARTIFACT_SCHEMA, writeJsonAtomic)));
 
     await emitProgress({
       phase: "complete",
@@ -518,10 +468,24 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
       runId,
       taskId: task.id,
       taskTitle: task.title,
+      runFingerprint,
+      runContractFingerprint,
       totalResults: results.length,
       successResults: 0,
       cancelledResults: 0,
       taskCompatibility: incompatibleCompatibility
+    });
+
+    // Telemetry: run ended because the task pack was incompatible with the repo.
+    void recordTelemetryEvent("run_completed", {
+      agentCount: results.length,
+      taskPackId: task.id,
+      scoreMode: options.scoreMode ?? "practical",
+      entryPoint: options.entryPoint ?? "cli",
+      resultIntegrity: telemetryResultIntegrity(results),
+      outcome: "incompatible",
+      successCount: 0,
+      totalCount: results.length,
     });
 
     return {
@@ -548,11 +512,11 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
         throw persistenceFailure;
       }
       throwIfAborted(cancellation?.signal, createCancellationSummary("agent scheduling"));
-      const resumedResult = resumeResults.get(preflight.variantId);
+      const resumedResult = validatedResumeResults.get(preflight.variantId);
       if (resumedResult) {
         const result: AgentRunResult = { ...resumedResult, preflight };
         // Mark terminal status; `deriveSnapshot()` recomputes counters/array.
-        statusByAgent.set(preflight.variantId, result.status === "failed" ? "failed" : "success");
+        statusByAgent.set(preflight.variantId, result.status);
         lastActivityByAgent[preflight.variantId] = Date.now();
         await emitProgress({
           phase: "agent-finish",
@@ -592,6 +556,7 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
           updateSnapshots: options.updateSnapshots,
           cancellation,
           debug: options.debug,
+          allowEvalInTaskCommands: options.allowEvalInTaskCommands,
           enableActivityEvents: enableActivity,
           agentLogStore: enableActivity ? agentLogStore : undefined,
           nextActivitySeq: enableActivity ? nextActivitySeq : undefined,
@@ -635,11 +600,11 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
       }
 
       // Mark terminal status; `deriveSnapshot()` recomputes counters/array.
-      statusByAgent.set(preflight.variantId, result.status === "failed" ? "failed" : "success");
+      statusByAgent.set(preflight.variantId, result.status);
       lastActivityByAgent[preflight.variantId] = Date.now();
 
       try {
-        await writeAgentResult(outputPath, result);
+        await writeAgentResult(outputPath, result, RESULT_ARTIFACT_SCHEMA, writeJsonAtomic);
       } catch (error) {
         if (error instanceof AgentResultPersistenceError) {
           persistenceFailure ??= error;
@@ -716,7 +681,20 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
     taskTitle: task.title,
     totalResults: results.length,
     successResults: results.filter((value) => value.status === "success").length,
-    cancelledResults: results.filter((value) => value.status === "cancelled").length
+    cancelledResults: results.filter((value) => value.status === "cancelled").length,
+    runFingerprint,
+    runContractFingerprint
+  });
+  // Telemetry: run finished (success or cancelled-with-successes).
+  void recordTelemetryEvent("run_completed", {
+    agentCount: results.length,
+    taskPackId: task.id,
+    scoreMode: options.scoreMode ?? "practical",
+    entryPoint: options.entryPoint ?? "cli",
+    resultIntegrity: telemetryResultIntegrity(results),
+    outcome: completedWithCancellation ? "cancelled" : "completed",
+    successCount: results.filter((value) => value.status === "success").length,
+    totalCount: results.length,
   });
   return {
     runId,
@@ -730,12 +708,26 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
     preflights,
     results
   };
+  } catch (error) {
+    terminalError = error;
+    throw error;
   } finally {
     if (!completedNormally) {
-      await writeRunMarker(outputPath, "failed", {
+      const terminalState = isAbortError(terminalError) ? "cancelled" : "failed";
+      void recordTelemetryEvent("run_completed", {
+        agentCount: selections.length,
+        taskPackId: task.id,
+        scoreMode: options.scoreMode ?? "practical",
+        entryPoint: options.entryPoint ?? "cli",
+        resultIntegrity: "unavailable",
+        outcome: terminalState,
+      });
+      await writeRunMarker(outputPath, terminalState, {
         runId,
         taskId: task.id,
-        taskTitle: task.title
+        taskTitle: task.title,
+        runFingerprint,
+        runContractFingerprint
       });
       for (const workspacePath of workspacePaths) {
         await cleanupWorkspace(workspacePath).catch(() => {});

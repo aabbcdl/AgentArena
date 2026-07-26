@@ -7,7 +7,7 @@
  */
 
 import path from "node:path";
-import { isPathInsideWorkspace } from "@agentarena/core";
+import { isPathInsideWorkspace, isScoreMode, SCORE_MODES } from "@agentarena/core";
 import type { UiRunPayload } from "./shared.js";
 
 function isPathInsideSync(basePath: string, targetPath: string): boolean {
@@ -60,6 +60,12 @@ export function validateRunPayload(
     const parsed = Number(runPayload.tokenBudget);
     if (!Number.isFinite(parsed) || parsed <= 0) {
       return "tokenBudget must be a positive number.";
+    }
+  }
+  if (runPayload.scoreMode !== undefined && runPayload.scoreMode !== null) {
+    // Runtime payloads may carry dirty strings; isScoreMode is the boundary.
+    if (!isScoreMode(runPayload.scoreMode as unknown)) {
+      return `scoreMode must be one of: ${SCORE_MODES.join(", ")}.`;
     }
   }
   return null;

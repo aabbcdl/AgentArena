@@ -132,6 +132,19 @@ export function parseCodexEvents(stdout: string, workspacePath: string): {
    * Indicates the CLI may have changed its usage field names.
    */
   tokenCountSuspicious: boolean;
+  /**
+   * True when the parser saw JSON lines with `type` fields but the majority
+   * were unrecognized — indicating the CLI changed its event schema.
+   * When true, tokenUsage and changedFilesHint may be inaccurate.
+   */
+  formatMismatch: boolean;
+  /**
+   * Names of critical events that were expected but not seen in the stream.
+   * For Codex: "turn.completed" (usage totals).
+   * When non-empty, tokenUsage may be inaccurate and consumers
+   * SHOULD set tokenUsageReliable=false and costQuality="unavailable".
+   */
+  missingCriticalEvents: string[];
 } {
   const changedFiles = new Set<string>();
   let tokenUsage = 0;
@@ -141,7 +154,13 @@ export function parseCodexEvents(stdout: string, workspacePath: string): {
   let eventReasoningEffort: string | undefined;
   let parseErrorCount = 0;
   let turnCompletedCount = 0;
+  // Track recognized vs unrecognized typed JSON events for format mismatch detection
+  let totalTypedEvents = 0;
+  let unrecognizedTypedEvents = 0;
   const MAX_PARSE_ERRORS = 10; // Stop logging after this many to avoid noise
+  // These lifecycle events carry no result fields, but are valid Codex output.
+  // They must not be treated as evidence of a schema break.
+  const knownLifecycleTypes = new Set(["thread.started", "turn.started", "item.started", "item.completed"]);
 
   for (const rawLine of stdout.split(/\r?\n/)) {
     const line = stripAnsi(rawLine.trim());
@@ -171,15 +190,21 @@ export function parseCodexEvents(stdout: string, workspacePath: string): {
       continue;
     }
 
+    // Track whether this JSON line had a recognized event type
+    let recognizedType = false;
+
     if (parsed.type === "thread.started" && typeof parsed.thread_id === "string") {
       threadId = parsed.thread_id;
+      recognizedType = true;
     }
 
     if (parsed.type === "item.completed" && parsed.item?.type === "agent_message" && typeof parsed.item.text === "string") {
       summaryFromEvents = parsed.item.text;
+      recognizedType = true;
     }
 
     if (parsed.type === "item.completed" && parsed.item?.type === "file_change" && Array.isArray(parsed.item.changes)) {
+      recognizedType = true;
       for (const change of parsed.item.changes) {
         if (!change.path) {
           continue;
@@ -193,12 +218,25 @@ export function parseCodexEvents(stdout: string, workspacePath: string): {
     }
 
     if (parsed.type === "turn.completed") {
+      recognizedType = true;
       turnCompletedCount += 1;
       if (parsed.usage) {
         tokenUsage +=
           safeNumber(parsed.usage.input_tokens) +
           safeNumber(parsed.usage.cached_input_tokens) +
           safeNumber(parsed.usage.output_tokens);
+      }
+    }
+
+    // Count typed events for format mismatch detection. A known lifecycle
+    // event is recognized even when it has no result payload we need.
+    if (typeof parsed.type === "string") {
+      totalTypedEvents += 1;
+      if (knownLifecycleTypes.has(parsed.type)) {
+        recognizedType = true;
+      }
+      if (!recognizedType) {
+        unrecognizedTypedEvents += 1;
       }
     }
 
@@ -227,6 +265,24 @@ export function parseCodexEvents(stdout: string, workspacePath: string): {
     logger.warn("adapter", "codex.zero_tokens", `parseCodexEvents: Saw ${turnCompletedCount} turn.completed events but tokenUsage is 0. The CLI may have changed its usage field names (expected: input_tokens, cached_input_tokens, output_tokens).`);
   }
 
+  // Format mismatch: majority of typed JSON events were unrecognized.
+  // This indicates the CLI changed its event schema — tokenUsage and
+  // changedFilesHint may be inaccurate (silently zero/empty).
+  const formatMismatch =
+    totalTypedEvents > 0 && unrecognizedTypedEvents / totalTypedEvents >= 0.5;
+  if (formatMismatch) {
+    logger.warn(
+      "adapter",
+      "codex.format_mismatch",
+      `parseCodexEvents: ${unrecognizedTypedEvents}/${totalTypedEvents} typed JSON events were unrecognized. The CLI may have changed its event schema.`,
+    );
+  }
+
+  const missingCriticalEvents: string[] = [];
+  if (turnCompletedCount === 0 && totalTypedEvents > 0) {
+    missingCriticalEvents.push("turn.completed");
+  }
+
   return {
     changedFilesHint: uniqueSorted(Array.from(changedFiles)),
     tokenUsage,
@@ -241,7 +297,9 @@ export function parseCodexEvents(stdout: string, workspacePath: string): {
             verification: "confirmed"
           }
         : undefined,
-    tokenCountSuspicious
+    tokenCountSuspicious,
+    formatMismatch,
+    missingCriticalEvents
   };
 }
 
@@ -295,6 +353,20 @@ export function parseStreamJsonEvents(
    * false value as "token total not authoritative".
    */
   tokenUsageFromResultEvent: boolean;
+  /**
+   * True when the parser saw JSON lines with `type` fields but the majority
+   * were unrecognized — indicating the CLI changed its event schema.
+   * When true, tokenUsage, cost, and toolCalls may be inaccurate.
+   */
+  formatMismatch: boolean;
+  /**
+   * Names of critical events that were expected but not seen in the stream.
+   * For Claude: "result" (authoritative cumulative total).
+   * For Codex: "turn.completed" (usage totals).
+   * When non-empty, tokenUsage and cost may be inaccurate and consumers
+   * SHOULD set tokenUsageReliable=false and costQuality="unavailable".
+   */
+  missingCriticalEvents: string[];
 } {
   let tokenUsage = 0;
   let estimatedCostUsd = 0;
@@ -305,6 +377,9 @@ export function parseStreamJsonEvents(
   const toolCalls: ToolCallEvent[] = [];
   let parseErrorCount = 0;
   let resultEventSeen = false;
+  // Track recognized vs unrecognized typed JSON events for format mismatch detection
+  let totalTypedEvents = 0;
+  let unrecognizedTypedEvents = 0;
   const MAX_PARSE_ERRORS = 10;
 
   for (const rawLine of stdout.split(/\r?\n/)) {
@@ -327,11 +402,16 @@ export function parseStreamJsonEvents(
       continue;
     }
 
+    // Track whether this JSON line had a recognized event type
+    let recognizedType = false;
+
     if (parsed.session_id) {
+      recognizedType = true;
       sessionId = parsed.session_id;
     }
 
     if (parsed.message?.content && Array.isArray(parsed.message.content)) {
+      recognizedType = true;
       const text = parsed.message.content
         .filter((value) => value.type === "text" && typeof value.text === "string")
         .map((value) => value.text?.trim() ?? "")
@@ -360,6 +440,7 @@ export function parseStreamJsonEvents(
     }
 
     if (parsed.type === "result") {
+      recognizedType = true;
       resultEventSeen = true;
       // The result event contains the final cumulative usage summary.
       // Replace the running total to avoid double-counting with per-message usage.
@@ -385,6 +466,14 @@ export function parseStreamJsonEvents(
         error = parsed.error ?? parsed.result ?? "The adapter reported an error.";
       }
     }
+
+    // Count typed events for format mismatch detection
+    if (typeof parsed.type === "string") {
+      totalTypedEvents += 1;
+      if (!recognizedType) {
+        unrecognizedTypedEvents += 1;
+      }
+    }
   }
 
   if (parseErrorCount > MAX_PARSE_ERRORS) {
@@ -398,6 +487,22 @@ export function parseStreamJsonEvents(
     logger.warn("adapter", "stream_json.zero_tokens", `${callerName}: Saw "result" event but tokenUsage is 0. The CLI may have changed its usage field names (expected: input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens).`);
   }
 
+  // Format mismatch: majority of typed JSON events were unrecognized.
+  const formatMismatch =
+    totalTypedEvents > 0 && unrecognizedTypedEvents / totalTypedEvents >= 0.5;
+  if (formatMismatch) {
+    logger.warn(
+      "adapter",
+      "stream_json.format_mismatch",
+      `${callerName}: ${unrecognizedTypedEvents}/${totalTypedEvents} typed JSON events were unrecognized. The CLI may have changed its event schema.`,
+    );
+  }
+
+  const missingCriticalEvents: string[] = [];
+  if (!resultEventSeen && totalTypedEvents > 0) {
+    missingCriticalEvents.push("result");
+  }
+
   return {
     tokenUsage,
     estimatedCostUsd,
@@ -407,7 +512,9 @@ export function parseStreamJsonEvents(
     error,
     toolCalls,
     tokenCountSuspicious,
-    tokenUsageFromResultEvent: resultEventSeen
+    tokenUsageFromResultEvent: resultEventSeen,
+    formatMismatch,
+    missingCriticalEvents
   };
 }
 

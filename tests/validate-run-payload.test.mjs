@@ -87,6 +87,40 @@ test("accepts valid maxConcurrency", () => {
   }), null);
 });
 
+test("rejects invalid scoreMode from Workbench-style phantom modes", () => {
+  const error = validateRunPayload({
+    repoPath: CWD,
+    taskPath: path.join(CWD, "task.yaml"),
+    scoreMode: "speed",
+  });
+  assert.ok(error);
+  assert.match(error, /scoreMode must be one of/);
+});
+
+test("accepts every canonical ScoreMode", () => {
+  for (const scoreMode of [
+    "practical",
+    "balanced",
+    "issue-resolution",
+    "efficiency-first",
+    "rotating-tasks",
+    "comprehensive",
+  ]) {
+    assert.equal(validateRunPayload({
+      repoPath: CWD,
+      taskPath: path.join(CWD, "task.yaml"),
+      scoreMode,
+    }), null, scoreMode);
+  }
+});
+
+test("accepts omitted scoreMode", () => {
+  assert.equal(validateRunPayload({
+    repoPath: CWD,
+    taskPath: path.join(CWD, "task.yaml"),
+  }), null);
+});
+
 test("rejects tokenBudget <= 0", () => {
   assert.ok(validateRunPayload({
     repoPath: CWD,

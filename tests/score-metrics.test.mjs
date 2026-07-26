@@ -333,3 +333,20 @@ test("passToPassScore returns 1 when all passToPassResults pass", () => {
   });
   assert.equal(passToPassScore(result), 1);
 });
+
+
+test("durationEfficiencyScore ignores failed results when choosing the baseline", () => {
+  const success = makeResult({ agentId: "success", durationMs: 1000 });
+  const failed = makeResult({ agentId: "failed", status: "failed", durationMs: 1 });
+  assert.equal(durationEfficiencyScore(success, makeRun([success, failed])), 1);
+});
+
+test("precisionScore returns zero for an unreliable diff", () => {
+  const run = makeRun();
+  run.task.expectedChangedPaths = ["src/**"];
+  const result = makeResult({
+    diff: { added: [], changed: [], removed: [], skippedLargeFiles: [], reliable: false },
+    diffPrecision: { score: 1, expectedScopeCount: 1, totalChangedFiles: 1, matchedFiles: ["src/a.ts"], unexpectedFiles: [], missingExpectedScopes: [] }
+  });
+  assert.equal(precisionScore(result, run), 0);
+});

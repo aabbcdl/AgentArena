@@ -86,7 +86,8 @@ export class DemoAdapter implements AgentAdapter {
       summary,
       tokenUsage,
       estimatedCostUsd: this.profile.estimatedCostUsd,
-      costKnown: true,
+      costKnown: false,
+      costQuality: "estimated",
       changedFilesHint,
       resolvedRuntime: {
         effectiveAgentVersion: version,

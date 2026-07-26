@@ -4,6 +4,7 @@ import type {
   CommandStepResult,
   DiffPrecisionSummary,
   DiffSummary,
+  FileDiffArtifact,
 } from "@agentarena/core";
 import { logger, metrics } from "@agentarena/core";
 import type { runJudges } from "@agentarena/judges";
@@ -29,10 +30,13 @@ export function buildFinalResult(
   diffPrecision: DiffPrecisionSummary | undefined,
   cancelled: boolean,
   success: boolean,
-  assembledPrompt?: string
+  assembledPrompt?: string,
+  diffReliable?: boolean,
+  fileDiffs?: FileDiffArtifact[]
 ): AgentRunResult {
   const { adapter, workspacePath, tracePath, task } = context;
   const durationMs = Date.now() - startedAt;
+  const fileDiffPayload = fileDiffs && fileDiffs.length > 0 ? fileDiffs : undefined;
 
   if (cancelled) {
     return createBaseResult({
@@ -44,11 +48,13 @@ export function buildFinalResult(
       durationMs,
       changedFiles,
       changedFilesHint: changedFiles,
+      fileDiffs: fileDiffPayload,
       setupResults,
       judgeResults,
       teardownResults,
       diff,
       diffPrecision,
+      diffReliable,
       assembledPrompt
     });
   }
@@ -64,9 +70,11 @@ export function buildFinalResult(
       durationMs,
       changedFiles,
       changedFilesHint: changedFiles,
+      fileDiffs: fileDiffPayload,
       setupResults,
       diff,
       diffPrecision,
+      diffReliable,
       assembledPrompt
     });
   }
@@ -81,9 +89,11 @@ export function buildFinalResult(
       durationMs,
       changedFiles,
       changedFilesHint: changedFiles,
+      fileDiffs: fileDiffPayload,
       setupResults,
       diff,
       diffPrecision,
+      diffReliable,
       assembledPrompt
     });
   }
@@ -170,14 +180,19 @@ export function buildFinalResult(
     tokenUsage: adapterResult.tokenUsage,
     estimatedCostUsd: adapterResult.estimatedCostUsd,
     costKnown: adapterResult.costKnown,
+    costQuality: adapterResult.costQuality,
     tokenUsageReliable: adapterResult.tokenUsageReliable,
+    dataQualityWarning: adapterResult.dataQualityWarning,
+    missingCriticalEvents: adapterResult.missingCriticalEvents,
     changedFiles,
     changedFilesHint: changedFiles,
+    fileDiffs: fileDiffPayload,
     setupResults,
     judgeResults,
     teardownResults,
     diff,
     diffPrecision,
+    diffReliable,
     resolvedRuntime: mergeResolvedRuntime(adapterResult.resolvedRuntime, preflight.resolvedRuntime),
     tokenUsageBreakdown,
     tokenEfficiencyScore,

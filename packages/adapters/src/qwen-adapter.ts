@@ -24,7 +24,7 @@ export const QWEN_CODE_CAPABILITY: AdapterCapability = {
   invocationMethod: "Qwen Code CLI headless mode with JSON output",
   authPrerequisites: ["Qwen Code CLI installed and configured with API keys."],
   tokenAvailability: "available",
-  costAvailability: "available",
+  costAvailability: "estimated",
   traceRichness: "partial",
   configurableRuntime: { model: true, reasoningEffort: false },
   knownLimitations: [
@@ -404,6 +404,7 @@ export class QwenCodeAdapter implements AgentAdapter {
         tokenUsage: 0,
         estimatedCostUsd: 0,
         costKnown: false,
+        costQuality: "unavailable",
         changedFilesHint: [],
         resolvedRuntime: runtimeWithVersion
       };
@@ -458,7 +459,8 @@ export class QwenCodeAdapter implements AgentAdapter {
       summary,
       tokenUsage: parsed.tokenUsage,
       estimatedCostUsd: parsed.estimatedCostUsd,
-      costKnown: true,
+      costKnown: false,
+      costQuality: parsed.tokenUsage > 0 ? "estimated" : "unavailable",
       changedFilesHint,
       resolvedRuntime: runtimeWithVersion
     };

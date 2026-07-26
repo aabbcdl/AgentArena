@@ -10,12 +10,16 @@ import {
 } from "@agentarena/adapters";
 import {
   createAgentSelection,
+  isTelemetryEnabled,
   logger,
   metrics,
+  readTelemetrySummary,
+  recordTelemetryEvent,
+  type TelemetryEventName,
 } from "@agentarena/core";
 import { jsonResponse } from "../../server/index.js";
 import { readVersionInfo } from "../../server/version.js";
-import { OFFICIAL_TASKPACK_ROOT } from "../shared.js";
+import { DEMO_TASKPACK_PATH, OFFICIAL_TASKPACK_ROOT } from "../shared.js";
 import type { ApiResponse } from "./types.js";
 
 export async function handleUiInfo(codexDefaults: unknown, host: string, port: number, isLocalhost: boolean): Promise<ApiResponse> {
@@ -30,6 +34,7 @@ export async function handleUiInfo(codexDefaults: unknown, host: string, port: n
     mode: "local-service",
     repoPath: process.cwd(),
     defaultTaskPath: path.join(OFFICIAL_TASKPACK_ROOT, "repo-health.yaml"),
+    demoTaskPath: DEMO_TASKPACK_PATH,
     defaultOutputPath: path.join(process.cwd(), ".agentarena", "ui-runs"),
     codexDefaults,
     claudeProviderProfiles: providerProfiles.map((profile) => ({
@@ -47,8 +52,45 @@ export async function handleUiInfo(codexDefaults: unknown, host: string, port: n
     version: versionInfo ?? null,
     host,
     port,
-    authRequired: !isLocalhost
+    authRequired: !isLocalhost,
+    telemetryEnabled: isTelemetryEnabled()
   });
+}
+
+
+export async function handleTelemetrySummary(): Promise<ApiResponse> {
+  return jsonResponse(await readTelemetrySummary());
+}
+
+const ALLOWED_TELEMETRY_EVENTS = new Set<TelemetryEventName>([
+  "app_opened",
+  "run_started",
+  "run_completed",
+  "result_viewed",
+  "preflight_completed",
+  "evidence_opened",
+]);
+
+/**
+ * POST /api/telemetry — accepts a UI-emitted product event and appends it to
+ * the local telemetry log. A no-op (returns ok) when telemetry is disabled
+ * server-side, so the UI never needs to distinguish enabled/disabled beyond
+ * reading `telemetryEnabled` from /api/ui-info.
+ */
+export async function handleTelemetry(rawBody: string): Promise<ApiResponse> {
+  let body: { event?: string; props?: Record<string, unknown> };
+  try {
+    body = JSON.parse(rawBody);
+  } catch {
+    return jsonResponse({ error: "Invalid JSON." }, 400);
+  }
+  const eventName = body.event as string;
+  if (!eventName || !ALLOWED_TELEMETRY_EVENTS.has(eventName as TelemetryEventName)) {
+    return jsonResponse({ error: `Unknown telemetry event: ${eventName ?? "(missing)"}` }, 400);
+  }
+  // Always fire-and-forget; recordTelemetryEvent no-ops when disabled.
+  void recordTelemetryEvent(eventName as TelemetryEventName, body.props ?? {});
+  return jsonResponse({ ok: true });
 }
 
 export async function handlePreflight(rawBody: string): Promise<ApiResponse> {

@@ -67,6 +67,43 @@ test("workbench mobile layout keeps primary navigation usable", { timeout: 12000
     await page.getByRole("heading", { name: "创建一次可信评测" }).waitFor();
     await page.getByRole("button", { name: /运行/ }).last().click();
     await page.getByRole("heading", { name: "实验运行中心" }).waitFor();
+    await page.getByRole("button", { name: /设置/ }).last().click();
+    await page.getByRole("heading", { name: "设置" }).waitFor();
+    assert.deepEqual(errors, []);
+  } finally { await browser.close(); await server.stop(); }
+});
+
+test("workbench outcome localizes trust reasons and execution status", { timeout: 120000 }, async (t) => {
+  const chromium = await loadChromiumOrSkip(t); if (!chromium) return;
+  const cwd = path.resolve("."); const server = await startServer(cwd); const browser = await chromium.launch({ headless: true }); const page = await browser.newPage({ viewport: { width: 1440, height: 900 } }); const errors = collectErrors(page);
+  try {
+    await page.goto(`http://127.0.0.1:${server.selectedPort}/workbench/`, { waitUntil: "domcontentloaded" });
+    await page.getByRole("button", { name: /安全 Demo/ }).first().click();
+    await page.getByRole("heading", { name: "Improve repository health" }).waitFor();
+    await page.getByText("已完成").first().waitFor();
+    await page.getByText("结果使用兼容旧产物格式").waitFor();
+    await page.getByText("部分费用为估算").waitFor();
+    assert.equal(await page.getByText("legacy-artifact").count(), 0);
+    assert.equal(await page.getByText("cost-estimated", { exact: true }).count(), 0);
+    assert.equal(await page.locator("th", { hasText: "分数" }).count() > 0, true);
+    assert.deepEqual(errors, []);
+  } finally { await browser.close(); await server.stop(); }
+});
+
+test("workbench plan context bar shows draft identity", { timeout: 120000 }, async (t) => {
+  const chromium = await loadChromiumOrSkip(t); if (!chromium) return;
+  const cwd = path.resolve("."); const server = await startServer(cwd); const browser = await chromium.launch({ headless: true }); const page = await browser.newPage({ viewport: { width: 1440, height: 900 } }); const errors = collectErrors(page);
+  try {
+    await page.goto(`http://127.0.0.1:${server.selectedPort}/workbench/#/plan`, { waitUntil: "domcontentloaded" });
+    await page.getByRole("heading", { name: "创建一次可信评测" }).waitFor();
+    await page.waitForFunction(() => {
+      const text = document.querySelector(".context-bar")?.textContent ?? "";
+      return text.includes("草稿") && !text.includes("尚未选择");
+    }, { timeout: 15000 });
+    const context = await page.locator(".context-bar").innerText();
+    assert.match(context, /草稿/);
+    assert.ok(!context.includes("尚未选择"));
+    await page.getByRole("button", { name: /启动评测/ }).waitFor();
     assert.deepEqual(errors, []);
   } finally { await browser.close(); await server.stop(); }
 });

@@ -17,6 +17,7 @@ import {
   assertOptionalBoolean,
   assertOptionalNonNegativeInteger,
   assertOptionalNumber,
+  assertOptionalPositiveNumber,
   assertOptionalString,
   assertString,
   assertStringArray,
@@ -157,7 +158,12 @@ function normalizeJudge(
 
   const normalizer = JUDGE_NORMALIZERS[type];
   if (normalizer) {
-    return normalizer(value, index, id, label, critical);
+    const normalized = normalizer(value, index, id, label, critical);
+    // `weight` is validated as a common field but the per-type normalizers do
+    // not carry it through, so attach it centrally. Without this the value is
+    // silently dropped and weightedJudgePassRatio degrades to equal weighting.
+    const weight = assertOptionalPositiveNumber(value.weight, `judges[${index}].weight`);
+    return weight === undefined ? normalized : { ...normalized, weight };
   }
 
   const supportedTypes = judgeTypeRegistry.getAllTypes();

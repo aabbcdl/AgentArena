@@ -1,3 +1,6 @@
+// Allow inline node -e in the built-in demo task used by this integration test.
+process.env.AGENTARENA_ALLOW_EVAL_IN_JUDGES = "1";
+
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";

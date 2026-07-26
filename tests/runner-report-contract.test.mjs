@@ -1,7 +1,3 @@
-// Allow inline node -e in test fixture task packs. Production task packs
-// should use script files; tests use inline scripts for brevity.
-process.env.AGENTARENA_ALLOW_EVAL_IN_JUDGES = "1";
-
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -25,7 +21,7 @@ test("runBenchmark output is directly consumable by writeReport", async () => {
       title: "Runner-Report Contract",
       prompt: "Verify runner output feeds into report without errors.",
       judges: [
-        { id: "pass", type: "command", label: "Always pass", command: "node -e \"process.exit(0)\"" }
+        { id: "pass", type: "file-exists", label: "README exists", path: "README.md" }
       ]
     }), "utf8");
 

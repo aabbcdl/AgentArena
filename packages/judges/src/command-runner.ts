@@ -142,12 +142,15 @@ const EVAL_INTERPRETERS = new Set([
  *   `/\s-(?:e|c)\s/` regex.
  * - For node/nodejs, `-c` is a syntax-check (not code execution) so only `-e`
  *   is treated as eval; for other interpreters `-c` IS eval.
+ * - For node/nodejs, `-p`/`--print` evaluate an expression just like `-e`.
+ * - For python/python3/py, `-m` executes an arbitrary importable module.
  */
 function hasEvalFlag(commandBasename: string, commandArgs: string[]): boolean {
   if (!EVAL_INTERPRETERS.has(commandBasename)) {
     return false;
   }
   const nodeLike = commandBasename === "node" || commandBasename === "nodejs";
+  const pythonLike = commandBasename === "python" || commandBasename === "python3" || commandBasename === "py";
   return commandArgs.some((arg) => {
     if (arg === "-e" || arg === "--eval" || arg.startsWith("--eval=")) {
       return true;
@@ -156,6 +159,14 @@ function hasEvalFlag(commandBasename: string, commandArgs: string[]): boolean {
       return true;
     }
     if (!nodeLike && (arg === "-c" || /^-c.+/u.test(arg))) {
+      return true;
+    }
+    // node -p / --print evaluate an expression and print the result.
+    if (nodeLike && (arg === "-p" || arg === "--print" || arg.startsWith("--print=") || /^-p.+/u.test(arg))) {
+      return true;
+    }
+    // python -m runs an arbitrary module's __main__, bypassing the allowlist.
+    if (pythonLike && (arg === "-m" || /^-m.+/u.test(arg))) {
       return true;
     }
     return false;

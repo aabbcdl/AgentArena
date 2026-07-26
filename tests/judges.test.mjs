@@ -516,6 +516,32 @@ test("token-efficiency judge handles zero usage", async () => {
   assert.ok(result.stdout.includes("100.0%"));
 });
 
+test("token-efficiency judge stays neutral when token usage is unreliable", async () => {
+  // Over budget, but the count is flagged unreliable — must NOT fail. Mirrors
+  // the derived-score gating so unreliable counts never drive a pass/fail.
+  const result = await runJudge(
+    { id: "te-6", label: "TE unreliable", type: "token-efficiency", critical: true },
+    ".",
+    [],
+    { tokenUsage: 999999, tokenBudget: 1000, tokenUsageReliable: false }
+  );
+  assert.equal(result.success, true);
+  assert.equal(result.critical, false);
+  assert.ok(result.stdout.toLowerCase().includes("unreliable"));
+});
+
+test("token-efficiency judge still scores when reliability is unspecified", async () => {
+  // Backward compatibility: absent flag keeps the existing over-budget behavior.
+  const result = await runJudge(
+    { id: "te-7", label: "TE reliable default", type: "token-efficiency" },
+    ".",
+    [],
+    { tokenUsage: 2000, tokenBudget: 1000 }
+  );
+  assert.equal(result.success, false);
+  assert.ok(result.stderr.includes("exceeded budget"));
+});
+
 // ===== patch-validation judge tests =====
 
 test("patch-validation judge fails when test suite command fails", async () => {

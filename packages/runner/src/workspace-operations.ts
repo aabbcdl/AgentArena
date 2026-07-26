@@ -155,7 +155,7 @@ export async function runSetupCommands(
   let setupResults: CommandStepResult[] = [];
   try {
     throwIfCancelled("setup");
-    setupResults = await runCommandSteps(task.setupCommands, workspacePath, task.envAllowList, cancellation?.signal, { allowEval: true });
+    setupResults = await runCommandSteps(task.setupCommands, workspacePath, task.envAllowList, cancellation?.signal, { allowEval: context.allowEvalInTaskCommands });
   } catch (error) {
     if (isAbortError(error)) {
       return {
@@ -249,7 +249,7 @@ export async function runTeardownCommands(
       workspacePath,
       task.envAllowList,
       effectiveSignal,
-      { allowEval: true }
+      { allowEval: context.allowEvalInTaskCommands }
     );
   } catch (error) {
     if (!isAbortError(error)) {

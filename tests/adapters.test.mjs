@@ -155,6 +155,8 @@ test("Qwen adapter sends task prompt through stdin instead of argv", async () =>
 
     const captured = JSON.parse(await readFile(capturePath, "utf8"));
     assert.equal(result.status, "success");
+    assert.equal(result.costKnown, false);
+    assert.equal(result.costQuality, "estimated");
     assert.equal(captured.argv.includes(dangerousPrompt), false);
     assert.match(captured.argv.join(" "), /--prompt/);
     assert.match(captured.stdin, /Do not run: & echo injected/);
@@ -194,7 +196,8 @@ test("demo adapter execution returns normalized benchmark output", async () => {
   });
 
   assert.equal(result.status, "success");
-  assert.equal(result.costKnown, true);
+  assert.equal(result.costKnown, false);
+  assert.equal(result.costQuality, "estimated");
   assert.equal(result.changedFilesHint.length > 0, true);
   assert.match(result.summary, /demo adapter path/i);
 
@@ -765,8 +768,8 @@ test("new adapter preflight returns missing when CLI not installed", async () =>
     // Adapters that are actually installed on this machine return "ready".
     if (preflight.status !== "ready") {
       assert.ok(
-        preflight.status === "missing" || preflight.status === "unverified",
-        `${adapterId}: expected missing or unverified, got ${preflight.status}`
+        preflight.status === "missing" || preflight.status === "unverified" || preflight.status === "blocked",
+        `${adapterId}: expected missing, unverified, or blocked, got ${preflight.status}`
       );
       missingCount++;
     }
@@ -1009,7 +1012,8 @@ test("demo-thorough adapter execution returns normalized benchmark output", asyn
   });
 
   assert.equal(result.status, "success");
-  assert.equal(result.costKnown, true);
+  assert.equal(result.costKnown, false);
+  assert.equal(result.costQuality, "estimated");
   assert.equal(result.changedFilesHint.length > 0, true);
 
   await rm(tempDir, { recursive: true, force: true });

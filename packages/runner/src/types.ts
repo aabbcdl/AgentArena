@@ -17,4 +17,5 @@ export interface AgentRunContext {
   cancellation: BenchmarkCancellation | undefined;
   throwIfCancelled: (stage: string) => void;
   debug: boolean;
+  allowEvalInTaskCommands?: boolean;
 }

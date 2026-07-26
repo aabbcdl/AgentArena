@@ -205,9 +205,12 @@ function authTokensMatch(expectedToken: string, providedToken: string): boolean 
  * Cache of computed allowed-origin Sets keyed by `host:port`.
  *
  * The host and port are immutable for the lifetime of a server, so the Set
- * (8 entries + the 4-entry `0.0.0.0` extension) can be built once and reused
- * across every request. Previously this was constructed on every CORS check,
- * adding hundreds of needless allocations per second under load.
+ * can be built once and reused across every request. Previously this was
+ * constructed on every CORS check, adding hundreds of needless allocations
+ * per second under load.
+ *
+ * UI host is restricted to local addresses only; there is no special-case
+ * branch for `0.0.0.0` (that bind is rejected at CLI validation).
  */
 // Soft-capped at 16 entries. In practice only 1-2 host:port keys are ever
 // created (single local server), so 16 prevents unbounded growth from edge
@@ -230,12 +233,6 @@ function buildAllowedOrigins(host: string, port: number): Set<string> {
     `https://127.0.0.1:${port}`,
     `https://[::1]:${port}`,
   ]);
-  if (host === "0.0.0.0") {
-    allowed.add(`http://localhost:${port}`);
-    allowed.add(`http://127.0.0.1:${port}`);
-    allowed.add(`https://localhost:${port}`);
-    allowed.add(`https://127.0.0.1:${port}`);
-  }
   // Evict oldest entry if cache grows beyond reasonable bound (single-server model)
   if (corsOriginCache.size > 16) {
     const firstKey = corsOriginCache.keys().next().value;

@@ -4,6 +4,7 @@ import type { LeaderboardData } from "./leaderboard.js";
 import {
   escapeHtml,
   formatCompositeScoreValue,
+  formatCostUsd,
   formatDiffPrecisionMetric,
   formatLintMetric,
   formatRuntimeIdentity,
@@ -159,6 +160,11 @@ function renderAgentCards(run: BenchmarkRun): string {
         <section class="card">
           <h2>${escapeHtml(result.displayLabel ?? result.agentTitle ?? result.agentId)} <span>${escapeHtml(result.variantId ?? result.agentId)}</span></h2>
           <p>${escapeHtml(result.summary)}</p>
+          ${
+            result.dataQualityWarning
+              ? `<p class="meta" style="color:#b45309"><strong>Data quality:</strong> ${escapeHtml(result.dataQualityWarning)}</p>`
+              : ""
+          }
           <p class="meta">Preflight: ${escapeHtml(result.preflight.status)} - ${escapeHtml(
             result.preflight.summary
           )}</p>
@@ -170,7 +176,7 @@ function renderAgentCards(run: BenchmarkRun): string {
             <div><strong>Composite Score</strong><span>${escapeHtml(formatCompositeScoreValue(result))}</span></div>
             <div><strong>Duration</strong><span>${escapeHtml(formatDuration(result.durationMs))}</span></div>
             <div><strong>Tokens</strong><span>${escapeHtml(String(result.tokenUsage ?? "N/A"))}</span></div>
-            <div><strong>Cost</strong><span>${escapeHtml(result.costKnown ? `$${result.estimatedCostUsd.toFixed(4)}` : "n/a")}</span></div>
+            <div><strong>Cost</strong><span>${escapeHtml(formatCostUsd(result.estimatedCostUsd, result.costKnown, result.costQuality))}</span></div>
             <div><strong>Tests</strong><span>${escapeHtml(formatTestMetric(result))}</span></div>
             <div><strong>Lint</strong><span>${escapeHtml(formatLintMetric(result))}</span></div>
             <div><strong>Diff Precision</strong><span>${escapeHtml(formatDiffPrecisionMetric(result))}</span></div>

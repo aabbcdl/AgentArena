@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { AdapterPreflightResult, BenchmarkRun, TaskJudge, TaskPack } from "@agentarena/core";
+import { type AdapterPreflightResult, type BenchmarkRun, resolveCostQuality, type TaskJudge, type TaskPack } from "@agentarena/core";
 import { enrichRunWithScores } from "@agentarena/report";
 
 function createTaskIdentity(task: TaskPack): string {
@@ -88,6 +88,7 @@ export function buildBenchmarkOutputSummary(
       tokenUsage: result.tokenUsage,
       estimatedCostUsd: result.estimatedCostUsd,
       costKnown: result.costKnown,
+      costQuality: resolveCostQuality(result),
       changedFiles: result.changedFiles,
       changedFilesCount: result.changedFiles.length,
       tracePath: result.tracePath,
@@ -100,9 +101,9 @@ export function buildBenchmarkOutputSummary(
     totals: {
       tokens: scoredBenchmark.results.reduce((sum, result) => sum + (result.tokenUsage ?? 0), 0),
       costUsd: scoredBenchmark.results
-        .filter((result) => result.costKnown)
+        .filter((result) => resolveCostQuality(result) === "known")
         .reduce((sum, result) => sum + (result.estimatedCostUsd ?? 0), 0),
-      costKnownCount: scoredBenchmark.results.filter((result) => result.costKnown).length,
+      costKnownCount: scoredBenchmark.results.filter((result) => resolveCostQuality(result) === "known").length,
       agentCount: scoredBenchmark.results.length,
       successCount: scoredBenchmark.results.filter((result) => result.status === "success").length
     },

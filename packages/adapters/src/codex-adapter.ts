@@ -327,13 +327,37 @@ export class CodexCliAdapter implements AgentAdapter {
       }
     });
 
+    const qualityWarnings: string[] = [];
+    if (parsed.formatMismatch) {
+      qualityWarnings.push(
+        "Codex CLI output format changed — token usage and changed-files data may be inaccurate."
+      );
+    }
+    if (parsed.tokenCountSuspicious) {
+      qualityWarnings.push(
+        "Codex CLI reported turn completion with zero token usage — token counts may be inaccurate."
+      );
+    }
+    if (parsed.missingCriticalEvents.length > 0) {
+      qualityWarnings.push(
+        `Codex CLI missing critical events: ${parsed.missingCriticalEvents.join(", ")} — token and cost data may be incomplete.`
+      );
+    }
+    const dataQualityWarning = qualityWarnings.length > 0 ? qualityWarnings.join(" ") : undefined;
+
+    const hasMissingCritical = parsed.missingCriticalEvents.length > 0;
+
     return {
       status: execution.exitCode === 0 && !execution.error ? "success" : "failed",
       summary,
       tokenUsage: parsed.tokenUsage,
       estimatedCostUsd: 0,
       costKnown: false,
+      costQuality: hasMissingCritical ? "unavailable" : undefined,
       changedFilesHint: parsed.changedFilesHint,
+      dataQualityWarning,
+      missingCriticalEvents: parsed.missingCriticalEvents.length > 0 ? parsed.missingCriticalEvents : undefined,
+      tokenUsageReliable: dataQualityWarning ? false : undefined,
       resolvedRuntime: parsed.resolvedRuntime
         ? {
             effectiveModel: parsed.resolvedRuntime.effectiveModel ?? resolvedRuntime.effectiveModel,
