@@ -196,18 +196,19 @@ agentarena ui --port 4321
 
 ### Can't access UI from another machine
 
-By default, the UI binds to `127.0.0.1` (localhost only).
+By design the UI only binds to local addresses (`127.0.0.1`, `localhost`, `::1`, `::ffff:127.0.0.1`). Remote / LAN access via `--host 0.0.0.0` is **not supported**.
 
-**Fix:**
+**Fix:** Run the UI on the same machine as the browser:
+
 ```bash
-agentarena ui --host 0.0.0.0 --auth-token my-secret-password
+agentarena ui --host 127.0.0.1
 ```
 
-> **Security note**: Always set `--auth-token` when binding to a non-localhost address.
+Open `http://127.0.0.1:4320`. For multi-machine use, run AgentArena on each machine or use SSH port forwarding to localhost.
 
 ### "Authentication failed" when accessing UI
 
-The UI requires an auth token for non-localhost access.
+Sensitive API paths require a Bearer token even on localhost.
 
 **Fix:** Check the terminal output for `auth_token_file=...`, read that file, or set your own:
 ```bash

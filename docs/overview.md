@@ -5,7 +5,7 @@ AgentArena is a local-first evaluation and replay tool for AI coding agents.
 
 It lets you run multiple agents against the same repository task, inspect what they changed, compare outcomes, and export a shareable report.
 
-The intended manual entry point is `agentarena ui`, which starts a local service and gives you a browser-based launcher plus report view in one place. Opening existing result files is a fallback path, not the primary workflow.
+The intended manual entry point is `agentarena ui`. Its root URL opens Workbench, which is the default launcher and report experience. The legacy interface remains available at `/legacy/` for historical links and compatibility until the published exit gates are met.
 
 External CLI adapters are still subject to upstream tool behavior, login state, and provider compatibility. Use `agentarena doctor` as the readiness check before comparing results seriously.
 
@@ -64,7 +64,10 @@ Different coding agents should plug into the same execution and reporting model.
 If an agent is blocked by missing authentication or local setup, AgentArena should report that clearly instead of pretending the benchmark was fair.
 
 ## Near-term Priorities
-- expand stable real-agent support (Devin, open-source agents)
-- add Python task packs and builtin Python test repositories
-- public leaderboard page for community-contributed results
-- improve capability transparency and fairness documentation
+- improve reliability and failure explanations for the existing adapter set
+- improve result, ranking, and cost confidence across every report surface
+- complete the Workbench migration while preserving legacy links and saved runs
+- keep the official task pack catalog and bilingual metadata synchronized from source files
+- use opt-in local measurement and real participant research to decide the next product phase
+
+See [Product direction](./product-direction.md) and [Product research plan](./product-research-plan.md).

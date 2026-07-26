@@ -12,6 +12,12 @@ metadata:
   tags: ["testing", "coverage"]
   dependencies: []
   differentiator: Good agents write tests that catch real bugs; weak agents write empty tests.
+  i18n:
+    zh-CN:
+      title: 提升测试覆盖
+      description: 为尚未覆盖的模块添加测试。
+      objective: 为 validator.js 和 logger.js 编写有意义的测试。
+      judgeRationale: 行为测试验证新增测试文件确实会运行，且全部通过。
 
 repoSource: "builtin://nodejs-app"
 

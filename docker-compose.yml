@@ -1,8 +1,11 @@
 services:
   agentarena:
     build: .
-    ports:
-      - "4320:4320"
+    # Default image entrypoint shows CLI help. Override command for real work:
+    #   command: ["doctor"]
+    #   command: ["run", "--repo", "/app", "--task", "...", "--agents", "demo-fast"]
+    # UI binds localhost only inside the container (not reachable via host port map).
+    # Prefer host-side `agentarena ui` for the browser launcher.
     volumes:
       - ./.agentarena:/app/.agentarena
       - ./examples:/app/examples:ro

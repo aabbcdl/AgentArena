@@ -15,16 +15,17 @@ Its goal is not to estimate raw model intelligence. Its goal is to answer a more
 
 Which variant completed this repository task best under the current benchmark setup?
 
-The default weighting favors correctness first, then efficiency:
+The default weighting favors correctness first, then efficiency.
+Values match `getDefaultWeights("practical")` in `@agentarena/core`:
 
-- `status`: 24%
-- `tests`: 26%
-- `criticalJudges`: 20%
-- `nonCriticalJudges`: 8%
-- `precision`: 5%
-- `lint`: 3%
-- `duration`: 8%
-- `cost`: 6%
+- `status`: 20%
+- `tests`: 22%
+- `criticalJudges`: 18%
+- `nonCriticalJudges`: 6%
+- `precision`: 4%
+- `lint`: 2%
+- `duration`: 15%
+- `cost`: 13%
 
 The score also uses guardrails:
 

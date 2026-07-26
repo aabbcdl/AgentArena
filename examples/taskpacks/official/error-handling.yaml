@@ -12,6 +12,12 @@ metadata:
   tags: ["error-handling", "validation"]
   dependencies: []
   differentiator: Good agents create proper error classes with correct behavior; weak agents skip validation.
+  i18n:
+    zh-CN:
+      title: 创建错误类
+      description: 创建自定义错误类层次，并添加输入验证。
+      objective: 创建错误类层次，并为现有逻辑增加输入验证。
+      judgeRationale: 行为测试验证错误类可用，且无效输入会被拒绝。
 
 repoSource: "builtin://nodejs-app"
 

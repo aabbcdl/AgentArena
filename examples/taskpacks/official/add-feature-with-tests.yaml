@@ -12,6 +12,12 @@ metadata:
   tags: ["feature", "testing", "implementation"]
   dependencies: []
   differentiator: Tests end-to-end implementation — weak agents add code but don't test it.
+  i18n:
+    zh-CN:
+      title: 添加功能并补充测试
+      description: 为函数添加记忆化功能，并为它编写测试。
+      objective: 检验 Agent 添加功能、编写测试并验证结果的能力。
+      judgeRationale: 行为测试验证新功能正确，且全部测试通过。
 
 repoSource: "builtin://nodejs-app"
 

@@ -69,7 +69,7 @@ AGENTARENA_RUN_BROWSER_SMOKE=1 pnpm test:web-report:e2e
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **RepoArena** (8343 symbols, 14825 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **RepoArena** (9619 symbols, 16910 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 

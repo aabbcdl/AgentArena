@@ -60,6 +60,8 @@ examples/taskpacks/task-packs.json
 packages/cli/assets/
 
 # Process/temp files
+output/
+--full-page
 findings.md
 progress.md
 task_plan.md

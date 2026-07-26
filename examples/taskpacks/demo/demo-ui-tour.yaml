@@ -1,0 +1,41 @@
+schemaVersion: agentarena.taskpack/v1
+id: demo-ui-tour
+title: Demo UI Tour
+description: A reliable built-in task for demonstrating the complete AgentArena run, judge, trace, and report flow.
+metadata:
+  source: community
+  owner: AgentArena
+  difficulty: easy
+  objective: Demonstrate a complete benchmark without requiring an external agent or the user's repository.
+  repoTypes: ["node"]
+  tags: ["demo", "onboarding"]
+  dependencies: []
+  judgeRationale: The checks verify the controlled built-in repository and the artifact contract implemented by every DemoAdapter profile.
+  i18n:
+    zh-CN:
+      title: Demo 界面导览
+      description: 使用内置仓库稳定演示 AgentArena 的运行、检查、回放和报告完整流程。
+      objective: 无需外部 Agent 或用户仓库即可完成一次可信的演示跑分。
+      judgeRationale: 检查受控内置仓库和所有 DemoAdapter 配置都会生成的演示产物。
+repoSource: "builtin://nodejs-app"
+prompt: |
+  Inspect the controlled built-in repository and create a concise benchmark note
+  under agentarena-demo/. Do not modify the application source files.
+judges:
+  - id: builtin-package-present
+    type: file-exists
+    label: Built-in repository package manifest exists
+    path: package.json
+    critical: true
+  - id: demo-artifact-created
+    type: command
+    label: Demo adapter created a benchmark note
+    command: >-
+      node -e "const fs=require('node:fs');const p='agentarena-demo';const files=fs.existsSync(p)?fs.readdirSync(p).filter(f=>f.endsWith('.md')):[];if(files.length<1)throw new Error('No demo note created');const text=fs.readFileSync(p+'/'+files[0],'utf8');if(!text.includes('built-in demo adapter'))throw new Error('Demo note contract missing');console.log('PASS: demo artifact created')"
+    timeoutMs: 10000
+    critical: true
+  - id: application-source-present
+    type: file-exists
+    label: Controlled application source remains present
+    path: src/utils.js
+    critical: true

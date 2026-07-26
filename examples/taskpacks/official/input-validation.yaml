@@ -12,6 +12,12 @@ metadata:
   tags: ["validation", "security"]
   dependencies: []
   differentiator: Good agents implement real sanitization; weak agents add comments.
+  i18n:
+    zh-CN:
+      title: 添加输入验证
+      description: 添加 HTML 清理和路径遍历防护。
+      objective: 添加安全关键的清理和验证函数。
+      judgeRationale: 行为测试验证 XSS 载荷被转义，且路径遍历被阻止。
 
 repoSource: "builtin://nodejs-app"
 

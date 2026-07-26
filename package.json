@@ -1,7 +1,7 @@
 {
   "name": "agentarena",
   "version": "0.1.0",
-  "buildNumber": 15,
+  "buildNumber": 24,
   "private": true,
   "description": "Open-source benchmark and replay tool for comparing AI coding agents in real repositories.",
   "repository": {
@@ -24,7 +24,6 @@
     "node": ">=22.0.0"
   },
   "scripts": {
-    "prebuild": "node scripts/bump-build.js",
     "build": "pnpm -r --if-present build",
     "postbuild": "node scripts/check-syntax.js",
     "changeset": "changeset",
@@ -32,15 +31,19 @@
     "release": "pnpm build && changeset publish",
     "start": "pnpm build && node packages/cli/dist/index.js ui",
     "ui": "pnpm build && node packages/cli/dist/index.js ui",
-    "demo": "pnpm build && node packages/cli/dist/index.js run --repo . --task examples/taskpacks/demo-repo-health.json --agents demo-fast,demo-thorough,demo-budget",
+    "demo": "pnpm build && node packages/cli/dist/index.js run --repo . --task examples/taskpacks/demo/demo-ui-tour.yaml --agents demo-fast,demo-thorough,demo-budget",
     "demo:codex": "pnpm build && node packages/cli/dist/index.js run --repo . --task examples/taskpacks/demo-repo-health.json --agents codex",
     "demo:arena": "pnpm build && node packages/cli/dist/index.js run --repo . --task examples/taskpacks/demo-repo-health.json --agents demo-fast,codex,claude-code,cursor,gemini-cli,aider,kilo-cli,opencode",
     "doctor": "pnpm build && node packages/cli/dist/index.js doctor --agents codex,claude-code,cursor,gemini-cli,aider,kilo-cli,opencode,demo-fast --probe-auth",
     "lint": "biome check .",
     "test": "pnpm build && node --test --test-concurrency=1 tests/*.test.mjs",
+    "test:quick": "node scripts/run-quick-tests.mjs",
+    "test:quick:build": "pnpm build && node scripts/run-quick-tests.mjs",
     "test:coverage": "pnpm build && node --experimental-test-coverage --test tests/*.test.mjs",
     "test:web-report:e2e": "pnpm build && node scripts/run-web-report-e2e.mjs",
-    "typecheck": "pnpm -r --if-present typecheck"
+    "typecheck": "pnpm -r --if-present typecheck",
+    "taskpacks:sync": "node scripts/sync-taskpack-catalog.mjs",
+    "taskpacks:check": "node scripts/sync-taskpack-catalog.mjs --check"
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.8",

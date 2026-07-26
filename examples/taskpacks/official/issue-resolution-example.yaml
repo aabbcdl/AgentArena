@@ -7,6 +7,8 @@ metadata:
     zh-CN:
       title: "问题解决示例（SWE-Bench 风格）"
       description: "以问题解决率为核心评估编码代理"
+      objective: 修复代码库中的 bug，并使用测试套件验证。
+      judgeRationale: 使用项目自身的测试套件验证 bug 修复。
   source: official
   owner: AgentArena
   difficulty: hard

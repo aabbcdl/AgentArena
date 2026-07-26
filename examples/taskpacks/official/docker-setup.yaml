@@ -7,6 +7,8 @@ metadata:
     zh-CN:
       title: "Docker 配置"
       description: "创建或改进 Docker 配置"
+      objective: 为项目创建可用的 Dockerfile 和 docker-compose.yml。
+      judgeRationale: 通过文件存在性检查验证配置已正确创建。
   source: official
   owner: AgentArena
   difficulty: medium

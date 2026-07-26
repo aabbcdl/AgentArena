@@ -138,12 +138,16 @@ node packages/cli/dist/index.js ui
 
 ### 核心入口
 
-- `agentarena ui`
+- `agentarena ui`（默认打开 Workbench；历史链接和旧版能力保留在 `/legacy/`）
 - `agentarena run`
 - `agentarena doctor`
 - `agentarena list-adapters`
 - `agentarena init-taskpack`
 - `agentarena init-ci`
+
+### 当前可靠性重点
+
+当前暂停新增 adapter，近期优先把现有 adapter、结果可信度和 Workbench 主流程做稳。详见 [产品方向](./docs/product-direction.md)。
 
 ### 每次运行可输出
 
@@ -173,23 +177,23 @@ node packages/cli/dist/index.js ui
 
 ### 当前 adapter 覆盖
 
-| Adapter | 状态 | 说明 |
+| Adapter | 分级 | 说明 |
 | --- | --- | --- |
-| `codex` | 可用 | 支持模型与推理强度配置 |
-| `claude-code` | 可用 | 带鉴权感知报错 |
-| `cursor` | 可用 | 本地桥接，受登录态影响 |
-| `gemini-cli` | 可用 | 支持 token / cost 解析 |
-| `aider` | 可用 | 多模型支持 |
-| `copilot` | 可用 | token 估算 |
-| `qwen-code` | 可用 | JSON 输出解析 |
-| `kilo-cli` | 可用 | 基于 OpenCode |
-| `opencode` | 可用 | 开源多 provider CLI |
-| `trae` | 可用 | 事件流解析 |
-| `augment` | 可用 | 多模型支持 |
-| `windsurf` | 阻塞 | 鉴权稳定性问题 |
-| `demo-fast` / `demo-thorough` / `demo-budget` | 内置 | 不依赖外部登录 |
+| `codex` | supported | 支持模型与推理强度配置 |
+| `claude-code` | experimental | 带鉴权感知报错 |
+| `cursor` | experimental | 本地桥接，受登录态影响 |
+| `gemini-cli` | experimental | 支持 token / cost 解析 |
+| `aider` | experimental | 多模型支持 |
+| `copilot` | experimental | token 估算 |
+| `qwen-code` | experimental | JSON 输出解析 |
+| `kilo-cli` | experimental | 基于 OpenCode |
+| `opencode` | experimental | 开源多 provider CLI |
+| `trae` | experimental | 事件流解析 |
+| `augment` | experimental | 多模型支持 |
+| `windsurf` | blocked | 鉴权稳定性问题 |
+| `demo-fast` / `demo-thorough` / `demo-budget` | supported | 内置，不依赖外部登录 |
 
-> **说明**：「可用」表示 adapter 可以正常运行，但可能对本地登录态、CLI 版本或安装路径敏感。详见 [Adapter 能力矩阵](./docs/adapter-capabilities.md) 了解详细分级定义。
+> **分级说明**：`supported` = 已验证的标准集成路径；`experimental` = 可用，但对本地登录态、CLI 参数变更或安装布局敏感；`blocked` = 当前不作为稳定自动化处理。完整能力矩阵见 [Adapter 能力矩阵](./docs/adapter-capabilities.md)。
 
 ## 为什么结果更可信
 
@@ -252,48 +256,44 @@ pnpm test:web-report:e2e
 
 ## 官方任务包库
 
-19 个任务包覆盖常见开发场景：
+<!-- official-taskpacks:start -->
 
-**质量与测试**
-- `test-coverage` — 提升现有模块的测试覆盖率
-- `failing-test-fix` — 修复失败的测试
+当前共有 **30** 个官方任务包。以下目录直接由任务包文件生成。
 
-**Bug 修复与重构**
-- `react-bugfix` — 修复 React 组件 bug
-- `small-refactor` — 小规模重构
-- `cross-module-refactor` — 跨模块重构 *(内置仓库)*
-- `multi-file-rename` — 跨文件重命名 *(内置仓库)*
-- `config-repair` — 修复配置问题
+| 任务包 | 名称 | 用途 |
+| --- | --- | --- |
+| `add-error-handling` | 添加缓存验证 | 为缓存函数添加输入验证和错误处理。 |
+| `add-feature-with-tests` | 添加功能并补充测试 | 为函数添加记忆化功能，并为它编写测试。 |
+| `api-documentation` | API 文档 | 为 API 模块编写文档。 |
+| `bug-chain-fix` | 链式 Bug 修复 | 修复分布在 3 个文件中、彼此依赖的 3 个相关 bug。 |
+| `official-builtin-demo-coding` | 内置演示：添加错误处理 | 开箱即用的编码任务——不需要本地项目。 使用内置测试仓库（4 个 TypeScript 包）。 Agent 需要为服务函数添加正确的错误处理。 |
+| `official-config-repair` | 配置修复 | 修复损坏的配置文件以匹配其 schema。 |
+| `cross-file-refactor` | 跨文件重构 | 将函数移到新模块，并更新所有引用。 |
+| `official-cross-module-refactor` | 跨模块重构 | 重构一个跨越多个模块/包的功能。 |
+| `dependency-update` | 增强日志器 | 为日志器添加级别和上下文支持。 |
+| `docker-setup` | Docker 配置 | 创建或改进 Docker 配置 |
+| `efficiency-first-example` | 效率优先示例（CursorBench 风格） | 以 token 效率为核心评估编码代理 |
+| `error-handling` | 创建错误类 | 创建自定义错误类层次，并添加输入验证。 |
+| `failing-test-fix` | 修复失败测试 | 通过修正实现来修复失败的测试。 |
+| `go-microservice` | Go 微服务功能 | 为 Go 微服务添加新功能 |
+| `input-validation` | 添加输入验证 | 添加 HTML 清理和路径遍历防护。 |
+| `issue-resolution-example` | 问题解决示例（SWE-Bench 风格） | 以问题解决率为核心评估编码代理 |
+| `iterative-debug` | 迭代调试 | 通过运行测试、阅读失败信息并反复修正来解决 bug。 |
+| `official-json-contract-repair` | JSON 契约修复 | 修复 JSON 响应以匹配其契约。 |
+| `logging-improvement` | 改进日志 | 为日志器添加级别和上下文支持。 |
+| `multi-file-rename` | 多文件重命名 | 在多个源文件中重命名一个函数。 |
+| `official-performance-optimize` | 性能优化 | 优化工具函数以提升性能。 |
+| `python-api` | Python API 端点 | 在 Python Web 应用中实现新的 REST API 端点 |
+| `react-bugfix` | React 组件 Bug 修复 | 修复 React 组件中的 bug 并验证修复 |
+| `refactor-with-tests` | 带测试的重构 | 在保持所有测试通过的前提下重构函数。 |
+| `official-repo-health` | 仓库健康检查 | 修复工具函数中的 bug 并验证现有测试通过。 |
+| `rotating-tasks-2026-04-example` | 轮转任务示例（LiveBench 风格） | 跨类别平衡评估编码代理 |
+| `security-hardening` | 安全加固 | 添加 HTML 清理和路径遍历防护。 |
+| `official-small-refactor` | 小型重构 | 执行低风险重构，同时保持核心仓库结构完整。 |
+| `official-snapshot-fix` | 快照修复 | 修复生成器脚本以匹配其预期输出。 |
+| `test-coverage` | 提升测试覆盖 | 为尚未覆盖的模块添加测试。 |
 
-**API 与后端**
-- `python-api` — 添加 Python API 端点
-- `go-microservice` — 添加 Go 微服务功能
-- `json-contract-repair` — 修复 JSON schema 问题
-
-**DevOps 与基础设施**
-- `docker-setup` — 创建或改进 Docker 配置
-- `dependency-update` — 更新过时的依赖
-
-**安全与可靠性**
-- `security-hardening` — 应用安全最佳实践
-- `error-handling` — 改进错误处理
-- `input-validation` — 添加输入验证
-
-**可观测性与文档**
-- `logging-improvement` — 添加结构化日志
-- `api-documentation` — 添加 OpenAPI 文档
-
-**评分模式**
-- `issue-resolution` — SWE-Bench 风格评分
-- `efficiency-first` — CursorBench 风格评分
-- `rotating-tasks` — LiveBench 风格评分
-
-**通用**
-- `repo-health` — 综合仓库健康检查
-- `performance-optimize` — 优化性能瓶颈
-- `snapshot-fix` — 修复快照问题
-
-所有官方任务包在 [`examples/taskpacks/official/`](./examples/taskpacks/official/README.md)。
+<!-- official-taskpacks:end -->
 
 ## 文档
 

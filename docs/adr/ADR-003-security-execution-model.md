@@ -35,11 +35,25 @@ Commands that are in SAFE_COMMANDS but blocked by default:
 Enable with: `AGENTARENA_ALLOW_RISKY_COMMANDS_IN_JUDGES=1`
 
 #### Eval-style invocation block
-`node -e`, `python -c`, `ruby -e`, etc. are blocked by a regex check (separate from the allowlist) because they execute arbitrary code.
+`node -e`, `python -c`, `ruby -e`, etc. are blocked because they execute arbitrary code. Detection is scoped to a known-interpreter allowlist, `EVAL_INTERPRETERS` (`command-runner.ts`: `node`, `nodejs`, `python`, `python3`, `py`, `ruby`, `rb`, `perl`, `bun`, `deno`, `lua`, `luajit`, `php`). Only those commands are inspected, so unrelated commands that use `-e` (e.g. `grep -e`, `echo -e`, `test -e`) are never falsely blocked — there is no separate exception list.
 
-Exception: `echo`, `printf`, `type`, `which`, `where` use `-e` for their own flags — they are in `COMMANDS_USING_E_FLAG` and bypass the eval check.
+`hasEvalFlag` blocks these eval-style forms (including glued variants like `-eCODE`):
+- `-e` / `--eval` / `--eval=` for all interpreters
+- `-c` for non-node interpreters (node's `-c` is a syntax check, not eval)
+- `-p` / `--print` for node/nodejs (evaluate-and-print)
+- `-m` for python/python3/py (executes an arbitrary module's `__main__`)
 
 Enable with: `AGENTARENA_ALLOW_EVAL_IN_JUDGES=1`
+
+#### Trusted built-in task packs versus external task packs
+
+The CLI does not enable eval-style commands globally. It makes a path-based trust decision before calling the runner:
+
+- Task packs shipped under the packaged or workspace `taskpacks/official` directory are trusted built-ins.
+- The packaged or workspace demo task-pack directory is also trusted because existing built-in examples use inline checks.
+- Task packs loaded from any other path are external and keep eval-style commands blocked by default, even if their metadata claims `source: official`.
+
+The trust decision is passed through `allowEvalInTaskCommands` and applies consistently to setup commands, judges, and teardown commands. Direct `runBenchmark()` callers must leave this option unset for external task packs and may set it only for task packs whose source path is controlled by the application. `AGENTARENA_ALLOW_EVAL_IN_JUDGES=1` remains an explicit process-wide escape hatch for operators who accept the risk; it is not enabled automatically by AgentArena.
 
 ### 2. Environment Variable Security
 
@@ -62,14 +76,14 @@ Comma-separated additional variable names to pass through.
 
 | Constant | Value | Env Var Override | Location | Purpose |
 |----------|-------|-----------------|----------|---------|
-| `DEFAULT_AGENT_TIMEOUT_MS` | 15 min | `AGENTARENA_AGENT_TIMEOUT_MS` | `process-utils.ts:34` | Agent execution timeout |
-| `DEFAULT_PREFLIGHT_TIMEOUT_MS` | 60s | `AGENTARENA_PREFLIGHT_TIMEOUT_MS` | `process-utils.ts:63` | Individual auth probe timeout |
-| `DEFAULT_TRANSPORT_TIMEOUT_MS` | 120s | `AGENTARENA_TRANSPORT_TIMEOUT_MS` | `process-utils.ts:75` | Transport-level timeout |
-| `DEFAULT_JUDGE_TIMEOUT_MS` | 5 min | `AGENTARENA_JUDGE_TIMEOUT_MS` | `shared.ts:20` | Judge execution timeout |
+| `DEFAULT_AGENT_TIMEOUT_MS` | 15 min | `AGENTARENA_AGENT_TIMEOUT_MS` | `process-utils.ts:51` | Agent execution timeout |
+| `DEFAULT_PREFLIGHT_TIMEOUT_MS` | 60s | `AGENTARENA_PREFLIGHT_TIMEOUT_MS` | `process-utils.ts:80` | Individual auth probe timeout |
+| `DEFAULT_TRANSPORT_TIMEOUT_MS` | 10 min | `AGENTARENA_TRANSPORT_TIMEOUT_MS` | `process-utils.ts:94` | Transport-level timeout |
+| `DEFAULT_JUDGE_TIMEOUT_MS` | 5 min | `AGENTARENA_JUDGE_TIMEOUT_MS` | `shared.ts:21` | Judge execution timeout |
 | `PREFLIGHT_TIMEOUT_MS` | 120s | _(none)_ | `adapter-registry.ts:78` | Registry-level preflight wrap |
-| `SIGKILL_GRACE_MS` | 2s | _(none)_ | `process-utils.ts:42` | Grace before SIGKILL after SIGTERM |
-| `TERMINATE_ESCALATE_MS` | 1s | _(none)_ | `process-utils.ts:49` | Escalation delay in process tree termination |
-| `DEFAULT_JUDGE_CONCURRENCY` | 4 | `AGENTARENA_JUDGE_CONCURRENCY` | `judges/index.ts:179` | Max parallel command judges |
+| `SIGKILL_GRACE_MS` | 2s | _(none)_ | `process-utils.ts:59` | Grace before SIGKILL after SIGTERM |
+| `TERMINATE_ESCALATE_MS` | 1s | _(none)_ | `process-utils.ts:67` | Escalation delay in process tree termination |
+| `DEFAULT_JUDGE_CONCURRENCY` | 4 | `AGENTARENA_JUDGE_CONCURRENCY` | `judges/index.ts:182` | Max parallel command judges |
 
 **Important distinction:** `PREFLIGHT_TIMEOUT_MS` (120s, registry-level) wraps the entire preflight flow. `DEFAULT_PREFLIGHT_TIMEOUT_MS` (60s, process-level) controls individual auth probes. They are different timeouts at different layers.
 

@@ -12,6 +12,12 @@ metadata:
   tags: ["debugging", "iterative", "test-driven"]
   dependencies: []
   differentiator: Tests iterative workflow — good harnesses auto-run tests and iterate; bad harnesses guess and hope.
+  i18n:
+    zh-CN:
+      title: 迭代调试
+      description: 通过运行测试、阅读失败信息并反复修正来解决 bug。
+      objective: 检验执行环境能否运行测试并根据失败结果迭代。
+      judgeRationale: 该 bug 需要通过运行测试才能发现；能自动测试的执行环境会更快定位。
 
 repoSource: "builtin://nodejs-app"
 

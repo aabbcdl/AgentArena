@@ -1,159 +1,87 @@
 # Official Task Packs | 官方任务包
 
-[English](#english) | [中文](#中文)
-
----
-
-## English
-
 This directory contains the first-party task pack library maintained by AgentArena.
 
-### Difficulty Levels | 难度分级
+<!-- official-taskpacks:start -->
 
-| Level | Name | Description | Tests What |
-|-------|------|-------------|------------|
-| 🟢 Easy | Basic | Single-file, straightforward tasks | Basic code generation, syntax correctness |
-| 🟡 Medium | Intermediate | Multi-file coordination, understanding | Module comprehension, import handling |
-| 🔴 Hard | Advanced | Cross-module refactoring, complex reasoning | Architecture understanding, tool usage, security |
+There are **30** official task packs. This catalog is generated directly from the task pack files.
 
-### Included Packs | 任务包列表
+| Task pack | Name | Purpose |
+| --- | --- | --- |
+| `add-error-handling` | Add Cache Validation | Add input validation and error handling to a cache function. |
+| `add-feature-with-tests` | Add Feature with Tests | Add a memoization feature to a function and write tests for it. |
+| `api-documentation` | API Documentation | Write documentation for an API module. |
+| `bug-chain-fix` | Bug Chain Fix | Fix 3 related bugs across 3 files where each fix depends on the others. |
+| `official-builtin-demo-coding` | Built-in Demo: Add Error Handling | A coding task that works out of the box — no local project needed. Uses the built-in test repository with 4 TypeScript packages. The agent must add proper error handling to a service function. |
+| `official-config-repair` | Config Repair | Fix a broken configuration file to match its schema. |
+| `cross-file-refactor` | Cross-File Refactor | Move a function to a new module and update all references. |
+| `official-cross-module-refactor` | Official Cross-Module Refactor | Refactor a feature that spans multiple modules/packages. |
+| `dependency-update` | Enhance Logger | Add log levels and context support to the logger. |
+| `docker-setup` | Docker Configuration | Create or improve Docker configuration for a project. |
+| `efficiency-first-example` | Efficiency First Example (CursorBench Inspired) | Demonstrates token-efficiency judge for cost-effective coding |
+| `error-handling` | Create Error Classes | Create custom error class hierarchy and add input validation. |
+| `failing-test-fix` | Failing Test Fix | Fix a failing test by correcting the implementation. |
+| `go-microservice` | Go Microservice Feature | Add a feature to a Go microservice with proper error handling and tests. |
+| `input-validation` | Add Input Validation | Add HTML sanitization and path traversal protection. |
+| `issue-resolution-example` | Issue Resolution Example (SWE-Bench Inspired) | Demonstrates patch-validation judge for GitHub issue fixing |
+| `iterative-debug` | Iterative Debug | Fix a bug by running tests, reading failures, and fixing iteratively. |
+| `official-json-contract-repair` | JSON Contract Repair | Fix a JSON response to match its contract. |
+| `logging-improvement` | Improve Logging | Add log levels and context support to the logger. |
+| `multi-file-rename` | Multi-File Rename | Rename a function across multiple source files. |
+| `official-performance-optimize` | Performance Optimize | Optimize utility functions for better performance. |
+| `python-api` | Python API Endpoint | Implement a new REST API endpoint in a Python web application. |
+| `react-bugfix` | React Component Bug Fix | Fix a bug in a React component and verify the fix with tests. |
+| `refactor-with-tests` | Refactor with Tests | Refactor a function while keeping all tests passing. |
+| `official-repo-health` | Official Repo Health | Fix a bug in a utility function and verify existing tests pass. |
+| `rotating-tasks-2026-04-example` | Rotating Tasks Example (LiveBench Inspired) | Demonstrates anti-contamination mechanism with task rotation |
+| `security-hardening` | Security Hardening | Add HTML sanitization and path traversal protection. |
+| `official-small-refactor` | Official Small Refactor | Performs a low-risk refactor while keeping core repository structure intact. |
+| `official-snapshot-fix` | Snapshot Fix | Fix a generator script to match its expected output. |
+| `test-coverage` | Increase Test Coverage | Add tests for untested modules. |
 
-#### 🟢 Easy (Basic)
+<!-- official-taskpacks:end -->
 
-| Pack | Purpose | What It Tests | Differentiator |
-|------|---------|---------------|----------------|
-| `repo-health.yaml` | Basic repository maintenance | Can agent make small improvements without breaking structure? | Baseline - all agents should pass |
-| `config-repair.yaml` | Fix broken JSON configuration | Can agent repair structured config without introducing errors? | JSON syntax understanding, schema awareness |
-| `snapshot-fix.yaml` | Align output with expected snapshot | Can agent match exact output format? | Precision, attention to detail |
+## 中文目录
 
-#### 🟡 Medium (Intermediate)
+<!-- official-taskpacks-zh:start -->
 
-| Pack | Purpose | What It Tests | Differentiator |
-|------|---------|---------------|----------------|
-| `failing-test-fix.yaml` | Debug and fix failing tests | Can agent identify root cause and fix without breaking other tests? | Debugging, test understanding, isolation |
-| `json-contract-repair.yaml` | Fix API contract violations | Can agent satisfy both schema and value constraints? | API understanding, constraint satisfaction |
-| `small-refactor.yaml` | Perform maintainability refactoring | Can agent improve code without changing behavior? | Refactoring discipline, preservation |
+当前共有 **30** 个官方任务包。以下目录直接由任务包文件生成。
 
-#### 🔴 Hard (Advanced)
+| 任务包 | 名称 | 用途 |
+| --- | --- | --- |
+| `add-error-handling` | 添加缓存验证 | 为缓存函数添加输入验证和错误处理。 |
+| `add-feature-with-tests` | 添加功能并补充测试 | 为函数添加记忆化功能，并为它编写测试。 |
+| `api-documentation` | API 文档 | 为 API 模块编写文档。 |
+| `bug-chain-fix` | 链式 Bug 修复 | 修复分布在 3 个文件中、彼此依赖的 3 个相关 bug。 |
+| `official-builtin-demo-coding` | 内置演示：添加错误处理 | 开箱即用的编码任务——不需要本地项目。 使用内置测试仓库（4 个 TypeScript 包）。 Agent 需要为服务函数添加正确的错误处理。 |
+| `official-config-repair` | 配置修复 | 修复损坏的配置文件以匹配其 schema。 |
+| `cross-file-refactor` | 跨文件重构 | 将函数移到新模块，并更新所有引用。 |
+| `official-cross-module-refactor` | 跨模块重构 | 重构一个跨越多个模块/包的功能。 |
+| `dependency-update` | 增强日志器 | 为日志器添加级别和上下文支持。 |
+| `docker-setup` | Docker 配置 | 创建或改进 Docker 配置 |
+| `efficiency-first-example` | 效率优先示例（CursorBench 风格） | 以 token 效率为核心评估编码代理 |
+| `error-handling` | 创建错误类 | 创建自定义错误类层次，并添加输入验证。 |
+| `failing-test-fix` | 修复失败测试 | 通过修正实现来修复失败的测试。 |
+| `go-microservice` | Go 微服务功能 | 为 Go 微服务添加新功能 |
+| `input-validation` | 添加输入验证 | 添加 HTML 清理和路径遍历防护。 |
+| `issue-resolution-example` | 问题解决示例（SWE-Bench 风格） | 以问题解决率为核心评估编码代理 |
+| `iterative-debug` | 迭代调试 | 通过运行测试、阅读失败信息并反复修正来解决 bug。 |
+| `official-json-contract-repair` | JSON 契约修复 | 修复 JSON 响应以匹配其契约。 |
+| `logging-improvement` | 改进日志 | 为日志器添加级别和上下文支持。 |
+| `multi-file-rename` | 多文件重命名 | 在多个源文件中重命名一个函数。 |
+| `official-performance-optimize` | 性能优化 | 优化工具函数以提升性能。 |
+| `python-api` | Python API 端点 | 在 Python Web 应用中实现新的 REST API 端点 |
+| `react-bugfix` | React 组件 Bug 修复 | 修复 React 组件中的 bug 并验证修复 |
+| `refactor-with-tests` | 带测试的重构 | 在保持所有测试通过的前提下重构函数。 |
+| `official-repo-health` | 仓库健康检查 | 修复工具函数中的 bug 并验证现有测试通过。 |
+| `rotating-tasks-2026-04-example` | 轮转任务示例（LiveBench 风格） | 跨类别平衡评估编码代理 |
+| `security-hardening` | 安全加固 | 添加 HTML 清理和路径遍历防护。 |
+| `official-small-refactor` | 小型重构 | 执行低风险重构，同时保持核心仓库结构完整。 |
+| `official-snapshot-fix` | 快照修复 | 修复生成器脚本以匹配其预期输出。 |
+| `test-coverage` | 提升测试覆盖 | 为尚未覆盖的模块添加测试。 |
 
-| Pack | Purpose | What It Tests | Differentiator |
-|------|---------|---------------|----------------|
-| `multi-file-rename.yaml` | Rename symbol across multiple files | Can agent coordinate changes across files? | Cross-file coordination, import updates |
-| `cross-module-refactor.yaml` | Refactor across module boundaries | Can agent understand module dependencies? | Architecture comprehension, dependency analysis |
-| `performance-optimize.yaml` | Optimize code for performance | Can agent identify and fix performance issues? | Performance profiling, optimization strategies |
+<!-- official-taskpacks-zh:end -->
 
-### How to Choose | 如何选择
+## Usage | 使用方式
 
-**Quick baseline check (快速基线检查):**
-```bash
---task repo-health.yaml
-```
-Use this to verify agent can run in your repository.
-
-**Debugging capability (调试能力):**
-```bash
---task failing-test-fix.yaml
-```
-Tests if agent can read errors, locate issues, and fix them.
-
-**Real-world complexity (真实复杂度):**
-```bash
---task multi-file-rename.yaml,cross-module-refactor.yaml
-```
-Tests multi-file coordination - this is where agents differ most.
-
-**Full evaluation (完整评估):**
-```bash
---task repo-health.yaml,failing-test-fix.yaml,multi-file-rename.yaml,cross-module-refactor.yaml
-```
-Recommended for comparing multiple agents.
-
-### Design Rules | 设计规则
-
-- Every official task pack includes metadata describing purpose, repo types, dependencies, and judge rationale.
-- Official packs should favor a small number of interpretable judges over large opaque command chains.
-- Official packs are intended to be loaded directly or copied into repository-specific variants.
-- Each pack has a clear **differentiator** - what skill difference it can reveal between agents.
-
----
-
-## 中文
-
-本目录包含由 AgentArena 维护的官方任务包库。
-
-### 难度分级
-
-| 等级 | 名称 | 描述 | 测试内容 |
-|------|------|------|---------|
-| 🟢 简单 | 基础 | 单文件、直观任务 | 基础代码生成、语法正确性 |
-| 🟡 中等 | 进阶 | 多文件协调、理解能力 | 模块理解、导入处理 |
-| 🔴 困难 | 高级 | 跨模块重构、复杂推理 | 架构理解、工具使用、安全性 |
-
-### 任务包详情
-
-#### 🟢 简单（基础级）
-
-| 任务包 | 用途 | 测试能力 | 区分度 |
-|--------|------|---------|--------|
-| `repo-health.yaml` | 基础仓库维护 | Agent 能否在不破坏结构的情况下做小改进？ | 基线测试 - 所有 agent 都应通过 |
-| `config-repair.yaml` | 修复损坏的 JSON 配置 | Agent 能否修复结构化配置且不引入错误？ | JSON 语法理解、schema 意识 |
-| `snapshot-fix.yaml` | 对齐输出快照 | Agent 能否精确匹配输出格式？ | 精确度、细节关注 |
-
-#### 🟡 中等（进阶级）
-
-| 任务包 | 用途 | 测试能力 | 区分度 |
-|--------|------|---------|--------|
-| `failing-test-fix.yaml` | 调试并修复失败测试 | Agent 能否定位根因并修复且不破坏其他测试？ | 调试能力、测试理解、问题隔离 |
-| `json-contract-repair.yaml` | 修复 API 契约违规 | Agent 能否同时满足 schema 和值约束？ | API 理解、约束满足能力 |
-| `small-refactor.yaml` | 执行可维护性重构 | Agent 能否在不改变行为的前提下改进代码？ | 重构纪律、行为保持 |
-
-#### 🔴 困难（高级）
-
-| 任务包 | 用途 | 测试能力 | 区分度 |
-|--------|------|---------|--------|
-| `multi-file-rename.yaml` | 跨多文件重命名符号 | Agent 能否协调多文件变更？ | 跨文件协调、导入更新 |
-| `cross-module-refactor.yaml` | 跨模块边界重构 | Agent 能否理解模块依赖关系？ | 架构理解、依赖分析 |
-| `performance-optimize.yaml` | 性能优化 | Agent 能否识别并修复性能问题？ | 性能分析、优化策略 |
-
-### 如何选择任务包
-
-**快速基线检查：**
-```bash
---task repo-health.yaml
-```
-验证 agent 能否在你的仓库中运行。
-
-**调试能力测试：**
-```bash
---task failing-test-fix.yaml
-```
-测试 agent 是否能阅读错误、定位问题并修复。
-
-**真实复杂度测试：**
-```bash
---task multi-file-rename.yaml,cross-module-refactor.yaml
-```
-测试多文件协调能力 - 这是 agent 差异最明显的地方。
-
-**完整评估：**
-```bash
---task repo-health.yaml,failing-test-fix.yaml,multi-file-rename.yaml,cross-module-refactor.yaml
-```
-推荐用于比较多个 agent。
-
-### Agent 能力差异对照表
-
-| 场景 | 简单 Agent | 优秀 Agent | 差异表现 |
-|------|-----------|-----------|---------|
-| 单文件修改 | ✅ 通过 | ✅ 通过 | 无差异 |
-| 测试修复 | ⚠️ 可能破坏其他测试 | ✅ 隔离修复 | 理解深度 |
-| 多文件重命名 | ❌ 漏改/错改 | ✅ 完整协调 | 跨文件能力 |
-| 跨模块重构 | ❌ 无法理解依赖 | ✅ 正确处理 | 架构理解 |
-| 性能优化 | ⚠️ 可能引入 bug | ✅ 安全优化 | 安全意识 |
-
-### 推荐评估流程
-
-1. **筛选阶段**：用简单任务过滤明显不合格的 agent
-2. **能力评估**：用中等任务评估核心能力
-3. **差异对比**：用困难任务区分优秀 agent
-4. **综合报告**：生成对比报告，查看各维度得分
+Choose a task pack in Workbench, or pass its path to `agentarena run --task <path>`.

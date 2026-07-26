@@ -12,6 +12,12 @@ metadata:
   tags: ["refactor", "multi-file", "coordination"]
   dependencies: []
   differentiator: Tests multi-file coordination — weak agents miss references or break imports.
+  i18n:
+    zh-CN:
+      title: 跨文件重构
+      description: 将函数移到新模块，并更新所有引用。
+      objective: 检验多文件协同和导入关系管理能力。
+      judgeRationale: 行为测试验证函数在新位置正常工作，且所有引用已更新。
 
 repoSource: "builtin://nodejs-app"
 

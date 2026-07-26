@@ -123,12 +123,16 @@ If an adapter is blocked by missing auth or broken local setup, `agentarena doct
 
 ### Core flows
 
-- `agentarena ui` for browser-based launch + report viewing
+- `agentarena ui` for browser-based launch + report viewing; Workbench is the default, and `/legacy/` keeps historical links compatible
 - `agentarena run` for direct CLI execution
 - `agentarena doctor` for readiness and auth-aware checks
 - `agentarena list-adapters` for adapter capability listing
 - `agentarena init-taskpack` for starter task packs
 - `agentarena init-ci` for GitHub Actions benchmark workflows
+
+### Reliability focus
+
+New adapter work is currently paused. The near-term focus is making existing adapters, results, and the Workbench journey more reliable. See [Product direction](./docs/product-direction.md).
 
 ### Report outputs
 
@@ -162,23 +166,23 @@ Current built-in judge types include:
 
 ### Adapter coverage
 
-| Adapter | Status | Notes |
+| Adapter | Tier | Notes |
 | --- | --- | --- |
-| `codex` | usable | configurable model + reasoning effort |
-| `claude-code` | usable | auth-aware failure reporting |
-| `cursor` | usable | local bridge, auth-sensitive |
-| `gemini-cli` | usable | token and cost parsing |
-| `aider` | usable | multi-model support |
-| `copilot` | usable | token estimation |
-| `qwen-code` | usable | JSON output parsing |
-| `kilo-cli` | usable | OpenCode-based |
-| `opencode` | usable | multi-provider open source CLI |
-| `trae` | usable | event stream parsing |
-| `augment` | usable | multi-model support |
+| `codex` | supported | configurable model + reasoning effort |
+| `claude-code` | experimental | auth-aware failure reporting |
+| `cursor` | experimental | local bridge, auth-sensitive |
+| `gemini-cli` | experimental | token and cost parsing |
+| `aider` | experimental | multi-model support |
+| `copilot` | experimental | token estimation |
+| `qwen-code` | experimental | JSON output parsing |
+| `kilo-cli` | experimental | OpenCode-based |
+| `opencode` | experimental | multi-provider open source CLI |
+| `trae` | experimental | event stream parsing |
+| `augment` | experimental | multi-model support |
 | `windsurf` | blocked | auth stability issues |
-| `demo-fast` / `demo-thorough` / `demo-budget` | built-in | no external setup required |
+| `demo-fast` / `demo-thorough` / `demo-budget` | supported | built-in, no external setup required |
 
-> **Note**: "usable" means the adapter can run normally, but may be sensitive to local auth state, CLI version changes, or install layout. See [Adapter Capabilities](./docs/adapter-capabilities.md) for detailed tier definitions.
+> **Tiers**: `supported` = verified standard integration path; `experimental` = usable, but sensitive to local auth, CLI flag changes, or install layout; `blocked` = intentionally not treated as stable automation today. See [Adapter Capabilities](./docs/adapter-capabilities.md) for the full capability matrix.
 
 ## Quick Start
 
@@ -275,48 +279,44 @@ pnpm test:web-report:e2e
 
 ## Official Task Pack Library
 
-19 task packs covering common development scenarios:
+<!-- official-taskpacks:start -->
 
-**Quality & Testing**
-- `test-coverage` — increase test coverage for existing modules
-- `failing-test-fix` — fix a failing test suite
+There are **30** official task packs. This catalog is generated directly from the task pack files.
 
-**Bug Fixes & Refactoring**
-- `react-bugfix` — fix a React component bug
-- `small-refactor` — refactor a small module
-- `cross-module-refactor` — refactor across multiple modules *(builtin repo)*
-- `multi-file-rename` — rename symbols across files *(builtin repo)*
-- `config-repair` — fix broken configuration
+| Task pack | Name | Purpose |
+| --- | --- | --- |
+| `add-error-handling` | Add Cache Validation | Add input validation and error handling to a cache function. |
+| `add-feature-with-tests` | Add Feature with Tests | Add a memoization feature to a function and write tests for it. |
+| `api-documentation` | API Documentation | Write documentation for an API module. |
+| `bug-chain-fix` | Bug Chain Fix | Fix 3 related bugs across 3 files where each fix depends on the others. |
+| `official-builtin-demo-coding` | Built-in Demo: Add Error Handling | A coding task that works out of the box — no local project needed. Uses the built-in test repository with 4 TypeScript packages. The agent must add proper error handling to a service function. |
+| `official-config-repair` | Config Repair | Fix a broken configuration file to match its schema. |
+| `cross-file-refactor` | Cross-File Refactor | Move a function to a new module and update all references. |
+| `official-cross-module-refactor` | Official Cross-Module Refactor | Refactor a feature that spans multiple modules/packages. |
+| `dependency-update` | Enhance Logger | Add log levels and context support to the logger. |
+| `docker-setup` | Docker Configuration | Create or improve Docker configuration for a project. |
+| `efficiency-first-example` | Efficiency First Example (CursorBench Inspired) | Demonstrates token-efficiency judge for cost-effective coding |
+| `error-handling` | Create Error Classes | Create custom error class hierarchy and add input validation. |
+| `failing-test-fix` | Failing Test Fix | Fix a failing test by correcting the implementation. |
+| `go-microservice` | Go Microservice Feature | Add a feature to a Go microservice with proper error handling and tests. |
+| `input-validation` | Add Input Validation | Add HTML sanitization and path traversal protection. |
+| `issue-resolution-example` | Issue Resolution Example (SWE-Bench Inspired) | Demonstrates patch-validation judge for GitHub issue fixing |
+| `iterative-debug` | Iterative Debug | Fix a bug by running tests, reading failures, and fixing iteratively. |
+| `official-json-contract-repair` | JSON Contract Repair | Fix a JSON response to match its contract. |
+| `logging-improvement` | Improve Logging | Add log levels and context support to the logger. |
+| `multi-file-rename` | Multi-File Rename | Rename a function across multiple source files. |
+| `official-performance-optimize` | Performance Optimize | Optimize utility functions for better performance. |
+| `python-api` | Python API Endpoint | Implement a new REST API endpoint in a Python web application. |
+| `react-bugfix` | React Component Bug Fix | Fix a bug in a React component and verify the fix with tests. |
+| `refactor-with-tests` | Refactor with Tests | Refactor a function while keeping all tests passing. |
+| `official-repo-health` | Official Repo Health | Fix a bug in a utility function and verify existing tests pass. |
+| `rotating-tasks-2026-04-example` | Rotating Tasks Example (LiveBench Inspired) | Demonstrates anti-contamination mechanism with task rotation |
+| `security-hardening` | Security Hardening | Add HTML sanitization and path traversal protection. |
+| `official-small-refactor` | Official Small Refactor | Performs a low-risk refactor while keeping core repository structure intact. |
+| `official-snapshot-fix` | Snapshot Fix | Fix a generator script to match its expected output. |
+| `test-coverage` | Increase Test Coverage | Add tests for untested modules. |
 
-**API & Backend**
-- `python-api` — add a Python API endpoint
-- `go-microservice` — add a Go microservice feature
-- `json-contract-repair` — fix JSON schema/contract issues
-
-**DevOps & Infrastructure**
-- `docker-setup` — create or improve Docker configuration
-- `dependency-update` — update outdated dependencies
-
-**Security & Reliability**
-- `security-hardening` — apply security best practices
-- `error-handling` — improve error handling
-- `input-validation` — add input validation
-
-**Observability & Docs**
-- `logging-improvement` — add structured logging
-- `api-documentation` — add OpenAPI documentation
-
-**Scoring Modes**
-- `issue-resolution` — SWE-Bench style scoring
-- `efficiency-first` — CursorBench style scoring
-- `rotating-tasks` — LiveBench style scoring
-
-**General**
-- `repo-health` — comprehensive repository health check
-- `performance-optimize` — optimize performance bottlenecks
-- `snapshot-fix` — fix snapshot-related issues
-
-Official task packs live under [`examples/taskpacks/official/`](./examples/taskpacks/official/README.md).
+<!-- official-taskpacks:end -->
 
 ## Repository Layout
 

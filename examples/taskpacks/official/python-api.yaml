@@ -7,6 +7,8 @@ metadata:
     zh-CN:
       title: "Python API 端点"
       description: "在 Python Web 应用中实现新的 REST API 端点"
+      objective: 添加具有完整验证、错误处理和测试的新 API 端点。
+      judgeRationale: 测试验证正确性，lint 检查代码质量。
   source: official
   owner: AgentArena
   difficulty: medium

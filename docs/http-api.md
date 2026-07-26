@@ -221,9 +221,14 @@ Required fields: `repoPath`, `taskPath`, at least one agent selection.
 
 Path restrictions: `repoPath` and `taskPath` must be within the server's working directory.
 
+Score mode: when `scoreMode` is provided it must be one of
+`practical`, `balanced`, `issue-resolution`, `efficiency-first`,
+`rotating-tasks`, `comprehensive`. Invalid values return **400** and are not
+silently rewritten. Omitted `scoreMode` defaults to `practical` in the runner.
+
 **Response 202:** `{ "accepted": true }` — run started asynchronously.
 
-**Response 400:** Validation error.
+**Response 400:** Validation error (including invalid `scoreMode` or out-of-cwd paths).
 
 **Response 409:** `{ "error": "A benchmark run is already in progress." }`
 
@@ -362,7 +367,7 @@ All API responses include:
 
 ### Network Binding
 
-By default, the server binds to `127.0.0.1` only — it is not reachable from other machines on the network. Use `--host 0.0.0.0` to bind to all interfaces, but only do so on trusted networks and always with an auth token.
+By default, the server binds to `127.0.0.1` only — it is not reachable from other machines on the network. AgentArena UI only accepts local hosts (`127.0.0.1`, `localhost`, `::1`, `::ffff:127.0.0.1`). Binding to `0.0.0.0` or other non-local addresses is rejected.
 
 ### Authentication Model
 

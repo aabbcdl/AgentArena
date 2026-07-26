@@ -12,6 +12,12 @@ metadata:
   tags: ["logging", "observability"]
   dependencies: []
   differentiator: Good agents create a working logger with real features; weak agents rename log to info.
+  i18n:
+    zh-CN:
+      title: 改进日志
+      description: 为日志器添加级别和上下文支持。
+      objective: 通过级别、过滤和上下文能力增强日志器。
+      judgeRationale: 行为测试验证日志级别、过滤和 withContext 均正常工作。
 
 repoSource: "builtin://nodejs-app"
 

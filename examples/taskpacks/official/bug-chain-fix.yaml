@@ -12,6 +12,12 @@ metadata:
   tags: ["bugfix", "multi-file", "debugging"]
   dependencies: []
   differentiator: Tests deep understanding — weak agents fix one bug but miss the others.
+  i18n:
+    zh-CN:
+      title: 链式 Bug 修复
+      description: 修复分布在 3 个文件中、彼此依赖的 3 个相关 bug。
+      objective: 检验 Agent 理解完整代码并协同修复相关问题的能力。
+      judgeRationale: 行为测试验证 3 个 bug 全部修复，且测试通过。
 
 repoSource: "builtin://nodejs-app"
 

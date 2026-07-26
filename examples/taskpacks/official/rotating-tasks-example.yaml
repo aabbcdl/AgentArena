@@ -7,6 +7,8 @@ metadata:
     zh-CN:
       title: "轮转任务示例（LiveBench 风格）"
       description: "跨类别平衡评估编码代理"
+      objective: 使用客观标准完成编程挑战。
+      judgeRationale: 使用客观验证，不依赖 LLM 裁判。
   source: official
   owner: AgentArena
   difficulty: medium

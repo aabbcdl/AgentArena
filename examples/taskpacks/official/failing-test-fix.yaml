@@ -12,6 +12,12 @@ metadata:
   tags: ["bugfix", "testing", "debugging"]
   dependencies: []
   differentiator: Tests iterative debugging — good harnesses run tests and iterate.
+  i18n:
+    zh-CN:
+      title: 修复失败测试
+      description: 通过修正实现来修复失败的测试。
+      objective: 检验 Agent 诊断和修复测试失败的能力。
+      judgeRationale: Agent 必须运行测试、阅读失败信息，并修正真正的实现问题。
 
 repoSource: "builtin://nodejs-app"
 
