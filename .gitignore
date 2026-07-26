@@ -76,3 +76,7 @@ scripts/architecture-audit*
 stderr.txt
 test-output*.txt
 test-ux-*.png
+
+# Local scratch (build logs, ad-hoc artifacts)
+.tmp/
+.arts/

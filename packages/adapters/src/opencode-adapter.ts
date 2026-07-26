@@ -3,6 +3,7 @@ import type {
   AgentAdapter,
   AgentResolvedRuntime
 } from "@agentarena/core";
+import { UNATTENDED_ACCESS_DISCLOSURE } from "./adapter-capabilities.js";
 import { createCliAdapter } from "./base-cli-adapter.js";
 
 export const OPENCODE_CAPABILITY: AdapterCapability = {
@@ -17,6 +18,7 @@ export const OPENCODE_CAPABILITY: AdapterCapability = {
     reasoningEffort: false
   },
   knownLimitations: [
+    UNATTENDED_ACCESS_DISCLOSURE,
     "OpenCode CLI is an emerging tool with evolving interfaces.",
     "Token usage and cost are not reported by the CLI.",
     "Changed files are inferred from workspace diff, not emitted directly by the adapter."
