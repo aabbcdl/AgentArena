@@ -3,6 +3,7 @@ import type {
   AgentAdapter,
   AgentResolvedRuntime
 } from "@agentarena/core";
+import { UNATTENDED_ACCESS_DISCLOSURE } from "./adapter-capabilities.js";
 import { createCliAdapter } from "./base-cli-adapter.js";
 import { parseGeminiEvents } from "./event-parsers.js";
 
@@ -18,6 +19,7 @@ export const GEMINI_CAPABILITY: AdapterCapability = {
     reasoningEffort: false
   },
   knownLimitations: [
+    UNATTENDED_ACCESS_DISCLOSURE,
     "Gemini CLI JSON output format may change across versions.",
     "Changed files are inferred from workspace diff, not emitted directly by the adapter.",
     "Authentication relies on local gcloud or Google account login."

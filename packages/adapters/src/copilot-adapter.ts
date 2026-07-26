@@ -7,6 +7,7 @@ import {
   type AgentResolvedRuntime,
   ensureDirectory
 } from "@agentarena/core";
+import { UNATTENDED_ACCESS_DISCLOSURE } from "./adapter-capabilities.js";
 import type { InvocationSpec } from "./adapter-capabilities.js";
 import { createCliAdapter } from "./base-cli-adapter.js";
 import { probeInvocationVersion } from "./invocation-probes.js";
@@ -20,6 +21,7 @@ export const COPILOT_CAPABILITY: AdapterCapability = {
   traceRichness: "minimal",
   configurableRuntime: { model: false, reasoningEffort: false },
   knownLimitations: [
+    UNATTENDED_ACCESS_DISCLOSURE,
     "Token usage is estimated using character count (1 token ≈ 4 chars) and may vary by ±50%.",
     "Estimation includes both prompt and output, but may overestimate due to non-LLM CLI output.",
     "Actual cost cannot be determined without API access.",

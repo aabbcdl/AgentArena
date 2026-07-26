@@ -1,5 +1,13 @@
 import type { AdapterCapability } from "@agentarena/core";
 
+/**
+ * Shared safety disclosure for external agents that run tools without
+ * interactive approval. Surfaced via knownLimitations so `doctor` and reports
+ * show it consistently — matching the warning Claude Code already gives.
+ */
+export const UNATTENDED_ACCESS_DISCLOSURE =
+  "Runs with unattended access to your OS-account permissions during a benchmark; only run trusted task packs and repositories.";
+
 interface DemoProfile {
   title: string;
   delayMs: number;
@@ -51,6 +59,7 @@ export const CODEX_CAPABILITY: AdapterCapability = {
     reasoningEffort: true
   },
   knownLimitations: [
+    UNATTENDED_ACCESS_DISCLOSURE,
     "Cost is not reported by the CLI and remains unknown.",
     "Output parsing depends on Codex CLI JSON event compatibility."
   ]

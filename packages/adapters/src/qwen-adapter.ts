@@ -10,6 +10,7 @@ import {
   type AgentResolvedRuntime,
   ensureDirectory
 } from "@agentarena/core";
+import { UNATTENDED_ACCESS_DISCLOSURE } from "./adapter-capabilities.js";
 import type { InvocationSpec } from "./adapter-capabilities.js";
 import { formatAdapterError } from "./adapter-diagnostics.js";
 import { buildAgentPrompt, createPreflightResult, getChangedFilesFromGit, savePromptArtifact } from "./adapter-helpers.js";
@@ -28,6 +29,7 @@ export const QWEN_CODE_CAPABILITY: AdapterCapability = {
   traceRichness: "partial",
   configurableRuntime: { model: true, reasoningEffort: false },
   knownLimitations: [
+    UNATTENDED_ACCESS_DISCLOSURE,
     "Model selection requires environment configuration (QWEN_CODE_MODEL or settings file).",
     "Model parameter support depends on Qwen CLI version. Falls back to environment config if unsupported.",
     "Cost estimation based on published pricing and may vary.",
