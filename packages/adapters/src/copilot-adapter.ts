@@ -7,8 +7,8 @@ import {
   type AgentResolvedRuntime,
   ensureDirectory
 } from "@agentarena/core";
-import { UNATTENDED_ACCESS_DISCLOSURE } from "./adapter-capabilities.js";
 import type { InvocationSpec } from "./adapter-capabilities.js";
+import { UNATTENDED_ACCESS_DISCLOSURE } from "./adapter-capabilities.js";
 import { createCliAdapter } from "./base-cli-adapter.js";
 import { probeInvocationVersion } from "./invocation-probes.js";
 

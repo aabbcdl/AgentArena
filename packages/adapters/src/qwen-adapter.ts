@@ -10,8 +10,8 @@ import {
   type AgentResolvedRuntime,
   ensureDirectory
 } from "@agentarena/core";
-import { UNATTENDED_ACCESS_DISCLOSURE } from "./adapter-capabilities.js";
 import type { InvocationSpec } from "./adapter-capabilities.js";
+import { UNATTENDED_ACCESS_DISCLOSURE } from "./adapter-capabilities.js";
 import { formatAdapterError } from "./adapter-diagnostics.js";
 import { buildAgentPrompt, createPreflightResult, getChangedFilesFromGit, savePromptArtifact } from "./adapter-helpers.js";
 import { probeHelp, probeInvocationVersion } from "./invocation-probes.js";
