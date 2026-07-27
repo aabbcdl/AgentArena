@@ -112,9 +112,9 @@ export function PlanPage() {
     <>
       <PageHeader
         eyebrow="PLAN"
-        title={locale === "zh-CN" ? "创建一次可信评测" : "Create a trustworthy evaluation"}
+        title={t(locale, "createEvaluation")}
         description={locale === "zh-CN" ? "启动前确认目标、参赛配置、安全条件和实际提交内容。" : "Confirm the target, participants, safety conditions, and exact submission before starting."}
-        actions={<button class="button ghost" type="button" onClick={() => setPage("runs")}>{locale === "zh-CN" ? "返回运行" : "Back to runs"}</button>}
+        actions={<button class="button ghost" type="button" onClick={() => setPage("runs")}>{t(locale, "backToRuns")}</button>}
       />
       {environment.error && (
         <Notice kind="danger">
@@ -127,7 +127,7 @@ export function PlanPage() {
       )}
       <div class="plan-layout">
         <div class="plan-main" ref={mainRef}>
-          <Section title={locale === "zh-CN" ? "1. 目标" : "1. Target"} description={locale === "zh-CN" ? "选择真实仓库和任务包。" : "Choose the real repository and task pack."}>
+          <Section title={t(locale, "target")} description={t(locale, "chooseRepoTask")}>
             <div class="form-grid">
               <Field label={t(locale, "repo")} help={t(locale, "repoPathHelp")} error={showErrors && !plan.repoPath ? t(locale, "fieldRequired") : undefined}>
                 <input
@@ -138,14 +138,14 @@ export function PlanPage() {
               </Field>
               <Field label={t(locale, "task")} error={showErrors && !plan.taskPath ? t(locale, "fieldRequired") : undefined}>
                 <select value={plan.taskPath} onChange={(event) => updatePlan({ taskPath: event.currentTarget.value })}>
-                  <option value="">{locale === "zh-CN" ? "选择任务包" : "Select task pack"}</option>
+                  <option value="">{t(locale, "selectTaskPack")}</option>
                   {localizedTaskPacks.map((task) => <option value={task.path}>{task.title ?? task.id ?? task.path}</option>)}
                 </select>
               </Field>
             </div>
           </Section>
 
-          <Section title={locale === "zh-CN" ? "2. 参赛配置" : "2. Participants"} description={`${t(locale, "selected")} ${plan.agentIds.length}`}>
+          <Section title={t(locale, "participants")} description={`${t(locale, "selected")} ${plan.agentIds.length}`}>
             {environment.loading ? (
               <Skeleton lines={3} label={t(locale, "loading")} />
             ) : environment.failed.adapters ? (
@@ -213,23 +213,23 @@ export function PlanPage() {
             )}
           </Section>
 
-          <Section title={locale === "zh-CN" ? "3. 安全与运行" : "3. Safety and runtime"}>
+          <Section title={t(locale, "safetyRuntime")}>
             <div class="form-grid three">
-              <Field label={locale === "zh-CN" ? "评分模式" : "Score mode"} help={t(locale, "scoreModeHelp")}>
+              <Field label={t(locale, "scoreMode")} help={t(locale, "scoreModeHelp")}>
                 <select value={plan.scoreMode} onChange={(event) => updatePlan({ scoreMode: event.currentTarget.value })}>
                   {SCORE_MODES.map((mode) => (
                     <option key={mode} value={mode}>{labelScoreMode(locale, mode)}</option>
                   ))}
                 </select>
               </Field>
-              <Field label={locale === "zh-CN" ? "最大并发" : "Max concurrency"}>
+              <Field label={t(locale, "maxConcurrency")}>
                 <input type="number" min="1" max="8" value={plan.maxConcurrency} onInput={(event) => updatePlan({ maxConcurrency: Number(event.currentTarget.value) || 1 })} />
               </Field>
               <div class="field">
-                <span class="field-label">{locale === "zh-CN" ? "认证探测" : "Auth probe"}</span>
+                <span class="field-label">{t(locale, "authProbe")}</span>
                 <label class="switch-row">
                   <input type="checkbox" checked={plan.probeAuth} onChange={(event) => updatePlan({ probeAuth: event.currentTarget.checked })} />
-                  <span>{locale === "zh-CN" ? "启动前检查登录状态" : "Check authentication before start"}</span>
+                  <span>{t(locale, "checkAuthBeforeStart")}</span>
                 </label>
               </div>
             </div>
@@ -264,14 +264,14 @@ export function PlanPage() {
 
         <aside class="plan-summary">
           <div class="sticky-panel">
-            <div class="eyebrow">{locale === "zh-CN" ? "最终确认" : "FINAL REVIEW"}</div>
-            <h2>{locale === "zh-CN" ? "即将提交" : "Ready to submit"}</h2>
+            <div class="eyebrow">{t(locale, "finalReview")}</div>
+            <h2>{t(locale, "readyToSubmit")}</h2>
             <dl>
               <div><dt>{t(locale, "repo")}</dt><dd>{plan.repoPath || t(locale, "missing")}</dd></div>
               <div><dt>{t(locale, "task")}</dt><dd>{selectedTask?.title ?? (plan.taskPath || t(locale, "missing"))}</dd></div>
               <div><dt>{t(locale, "agents")}</dt><dd>{selectedAdapters.map((item) => item.title).join(", ") || t(locale, "missing")}</dd></div>
               <div>
-                <dt>{locale === "zh-CN" ? "配置来源" : "Config source"}</dt>
+                <dt>{t(locale, "configSource")}</dt>
                 <dd>
                   {selectedAdapters.some((item) => item.id === "claude-code") && environment.providers.some((item) => item.kind !== "official")
                     ? t(locale, "isolatedProvider")
@@ -291,7 +291,7 @@ export function PlanPage() {
                 {t(locale, "skipPreflight")}
               </button>
             )}
-            <p class="fine-print">{locale === "zh-CN" ? "启动后会创建独立 Run，不会覆盖历史结果。" : "Starting creates a new Run and never overwrites history."}</p>
+            <p class="fine-print">{t(locale, "startCreatesRun")}</p>
           </div>
         </aside>
       </div>

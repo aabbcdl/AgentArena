@@ -21,9 +21,20 @@ function readJson<T>(key: string, fallback: T): T {
   catch { return fallback; }
 }
 
+function readLocaleFromUrl(): Locale | null {
+  // Support both ?lang= and #/...?lang= (hash routing) for shareable links.
+  const fromQuery = new URLSearchParams(window.location.search).get("lang");
+  if (fromQuery === "en" || fromQuery === "zh-CN") return fromQuery;
+  const hashQuery = window.location.hash.split("?")[1];
+  if (hashQuery) {
+    const hashLang = new URLSearchParams(hashQuery).get("lang");
+    if (hashLang === "en" || hashLang === "zh-CN") return hashLang;
+  }
+  return null;
+}
+
 function initialLocale(preferred?: Locale): Locale {
-  const requested = new URLSearchParams(window.location.search).get("lang");
-  return requested === "en" || requested === "zh-CN" ? requested : preferred ?? "zh-CN";
+  return readLocaleFromUrl() ?? preferred ?? "zh-CN";
 }
 
 function initialPage(): PageId {
@@ -58,7 +69,14 @@ export function WorkbenchProvider({ children }: { children: preact.ComponentChil
 
   const selectedRun = useMemo(() => runs.find((item) => item.runId === selectedRunId) ?? runs[0] ?? null, [runs, selectedRunId]);
   const persistPreferences = useCallback((next: { locale: Locale; theme: Theme; density: Density }) => { try { localStorage.setItem(PREFS_KEY, JSON.stringify(next)); } catch { /* private mode */ } }, []);
-  const setLocale = useCallback((next: Locale) => { setLocaleState(next); persistPreferences({ locale: next, theme, density }); }, [density, persistPreferences, theme]);
+  const setLocale = useCallback((next: Locale) => {
+    setLocaleState(next);
+    persistPreferences({ locale: next, theme, density });
+    // Keep the URL in sync so the active locale is shareable/bookmarkable.
+    const url = new URL(window.location.href);
+    url.searchParams.set("lang", next);
+    window.history.replaceState(null, "", url.toString());
+  }, [density, persistPreferences, theme]);
   const setTheme = useCallback((next: Theme) => { setThemeState(next); persistPreferences({ locale, theme: next, density }); }, [density, locale, persistPreferences]);
   const setDensity = useCallback((next: Density) => { setDensityState(next); persistPreferences({ locale, theme, density: next }); }, [locale, persistPreferences, theme]);
   const setPage = useCallback((next: PageId) => { window.location.hash = `/${next}`; setPageState(next); }, []);

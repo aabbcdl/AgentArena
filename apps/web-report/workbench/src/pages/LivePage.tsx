@@ -18,12 +18,12 @@ export function LivePage() {
         <PageHeader
           eyebrow="LIVE"
           title={t(locale, "live")}
-          description={locale === "zh-CN" ? "实时查看阶段、Agent 活动、日志和异常。" : "Inspect phases, agent activity, logs, and anomalies in real time."}
+          description={t(locale, "liveHint")}
         />
         <EmptyState
           icon="live"
-          title={locale === "zh-CN" ? "当前没有活动运行" : "No active run"}
-          message={locale === "zh-CN" ? "创建一次评测，或从最近结果查看结论。" : "Create an evaluation or inspect a recent outcome."}
+          title={t(locale, "noActiveRun")}
+          message={t(locale, "noActiveRunDesc")}
           actions={<button class="button primary" type="button" onClick={() => setPage("plan")}>{t(locale, "newEvaluation")}</button>}
         />
       </>
@@ -34,7 +34,7 @@ export function LivePage() {
     <>
       <PageHeader
         eyebrow="LIVE"
-        title={active ? t(locale, "runInProgress") : locale === "zh-CN" ? "运行已结束" : "Run ended"}
+        title={active ? t(locale, "runInProgress") : t(locale, "runEnded")}
         description={`${runStatus.runId ?? "Run"} · ${t(locale, "latestActivity")} ${formatTime(runStatus.updatedAt, locale)}`}
         actions={
           <>
@@ -71,13 +71,13 @@ export function LivePage() {
         />
         <Metric
           icon="agent"
-          label={locale === "zh-CN" ? "当前 Agent" : "Current agent"}
+          label={t(locale, "currentAgent")}
           value={runStatus.currentDisplayLabel ?? runStatus.currentVariantId ?? t(locale, "unknown")}
         />
         <Metric icon="clock" label={t(locale, "latestActivity")} value={formatTime(runStatus.updatedAt, locale)} />
       </div>
 
-      <Section title={locale === "zh-CN" ? "运行时间线" : "Run timeline"}>
+      <Section title={t(locale, "runTimeline")}>
         <ol class="timeline">
           {phaseOrder.slice(0, 4).map((phase, index) => {
             const complete = index < currentIndex || runStatus.state === "done";
@@ -102,7 +102,7 @@ export function LivePage() {
       </Section>
 
       <div class="two-column live-columns">
-        <Section title={locale === "zh-CN" ? "Agent 轨道" : "Agent tracks"}>
+        <Section title={t(locale, "agentTracks")}>
           <div class="agent-tracks">
             {agents.map((agent) => {
               const current = agent === runStatus.currentVariantId || agent === runStatus.currentAgentId;
@@ -121,7 +121,7 @@ export function LivePage() {
             })}
           </div>
         </Section>
-        <Section title={t(locale, "logs")} description={locale === "zh-CN" ? "仅保留最近 400 条浏览器日志。" : "The browser retains only the latest 400 entries."}>
+        <Section title={t(locale, "logs")} description={t(locale, "retainLatestLogs")}>
           <div class="log-view" role="log" aria-live="polite">
             {runStatus.logs.length === 0 ? (
               <p>{locale === "zh-CN" ? "等待运行事件…" : "Waiting for run events…"}</p>

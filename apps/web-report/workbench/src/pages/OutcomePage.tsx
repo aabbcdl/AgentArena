@@ -123,7 +123,7 @@ export function OutcomePage() {
         </Section>
       </div>
 
-      <Section title={locale === "zh-CN" ? "Agent 结果" : "Agent results"} description={locale === "zh-CN" ? "失败结果保留事实，但不参与合格排名。" : "Failed results remain visible but do not join the qualified ranking."}>
+      <Section title={t(locale, "agentResults")} description={t(locale, "failedResultsNote")}>
         <div class="results-table">
           <table>
             <caption class="visually-hidden">{locale === "zh-CN" ? "Agent 结果" : "Agent results"}</caption>
