@@ -23,6 +23,8 @@ interface BaseResultOptions {
   tracePath: string;
   workspacePath: string;
   status?: AgentRunResult["status"];
+  executionStatus?: AgentRunResult["executionStatus"];
+  validationStatus?: AgentRunResult["validationStatus"];
   summary?: string;
   durationMs?: number;
   tokenUsage?: number;
@@ -64,6 +66,7 @@ interface BaseResultOptions {
  */
 export function createBaseResult(options: BaseResultOptions): AgentRunResult {
   const { preflight, tracePath, workspacePath } = options;
+  const status = options.status ?? "failed";
   return {
     agentId: preflight.agentId,
     baseAgentId: preflight.baseAgentId,
@@ -74,7 +77,11 @@ export function createBaseResult(options: BaseResultOptions): AgentRunResult {
     agentTitle: preflight.agentTitle,
     adapterKind: preflight.adapterKind,
     preflight,
-    status: options.status ?? "failed",
+    status,
+    executionStatus:
+      options.executionStatus ??
+      (status === "success" ? "completed" : status === "cancelled" ? "cancelled" : "not-run"),
+    validationStatus: options.validationStatus ?? (status === "success" ? "passed" : "not-run"),
     summary: options.summary ?? preflight.summary,
     durationMs: options.durationMs ?? 0,
     tokenUsage: options.tokenUsage ?? 0,

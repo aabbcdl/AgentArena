@@ -20,6 +20,7 @@ import {
   formatCompositeScore,
   formatDiffPrecisionMetric,
   getAgentTrendRows,
+  getComparableRuns,
   getCompareResults,
   getCompositeScoreDetails,
   getCrossRunCompareRows,
@@ -730,14 +731,14 @@ test("getRunToRunAgentDiff computes deltas against the previous comparable run",
   const diff = getRunToRunAgentDiff([currentRun, previousRun], currentRun);
   assert.equal(diff.previousRun.runId, "run-old");
   assert.equal(diff.rows.length, 2);
-  const demoFastRow = diff.rows.find((row) => row.agentId.startsWith("demo-fast"));
+  const demoFastRow = diff.rows.find((row) => row.currentResult?.variantId === "demo-fast");
   assert.equal(demoFastRow.statusChange, "success -> success");
   assert.equal(demoFastRow.durationDeltaMs, -500);
   assert.equal(demoFastRow.tokenDelta, 20);
   assert.ok(Math.abs(demoFastRow.costDelta + 0.05) < 1e-9);
   assert.equal(demoFastRow.judgeDelta, 1);
 
-  const codexRow = diff.rows.find((row) => row.agentId.startsWith("codex"));
+  const codexRow = diff.rows.find((row) => row.currentResult?.variantId === "codex");
   assert.equal(codexRow.statusChange, "failed -> success");
 });
 
@@ -868,6 +869,33 @@ test("getFairComparisonExclusionReasons returns empty when runs are fully compar
   const reasons = getFairComparisonExclusionReasons(candidate, anchor);
 
   assert.deepEqual(reasons, []);
+});
+
+test("legacy getComparableRuns uses persisted fair-comparison metadata", () => {
+  const identity = { taskIdentity: "task:A", judgeIdentity: "judge:x", repoBaselineIdentity: "repo:y" };
+  const results = [createResult("agent-1", { judgeResults: [{ success: true }] })];
+  const base = createRun("run-base", "Task A", { scoreMode: "practical", fairComparison: identity, results });
+  const same = createRun("run-same", "Task A", { scoreMode: "practical", fairComparison: { ...identity }, results });
+  const differentJudge = createRun("run-judge", "Task A", {
+    scoreMode: "practical",
+    fairComparison: { ...identity, judgeIdentity: "judge:z" },
+    results
+  });
+  const differentRepo = createRun("run-repo", "Task A", {
+    scoreMode: "practical",
+    fairComparison: { ...identity, repoBaselineIdentity: "repo:z" },
+    results
+  });
+  const legacy = createRun("run-legacy", "Task A", {
+    scoreMode: "practical",
+    fairComparison: undefined,
+    results
+  });
+
+  assert.deepEqual(
+    getComparableRuns([base, same, differentJudge, differentRepo, legacy], base).map((run) => run.runId),
+    ["run-base", "run-same", "run-legacy"]
+  );
 });
 
 test("getFairComparisonExclusionReasons returns 'different-task-pack' when task identity differs", () => {

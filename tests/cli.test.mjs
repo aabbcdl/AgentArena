@@ -356,7 +356,8 @@ test("agentarena run exits with code 1 on failed benchmark", { timeout: 60_000 }
         id: "fail",
         type: "command",
         label: "Always fail",
-        command: "node -e \"process.exit(1)\""
+        command: "node -e \"process.exit(1)\"",
+        critical: true
       }
     ]
   });

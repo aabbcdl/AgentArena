@@ -123,6 +123,31 @@ test("comparison excludes different task, revision and score mode", () => {
   ]);
 });
 
+test("workbench comparison uses persisted fair-comparison metadata", () => {
+  const identity = {
+    taskIdentity: "task:a",
+    judgeIdentity: "judge:a",
+    repoBaselineIdentity: "repo:a"
+  };
+  const base = normalizeRun(run({ fairComparison: identity }));
+  const same = normalizeRun(run({ runId: "run-002", fairComparison: { ...identity } }));
+  const differentJudge = normalizeRun(run({
+    runId: "run-003",
+    fairComparison: { ...identity, judgeIdentity: "judge:b" }
+  }));
+  const differentRepo = normalizeRun(run({
+    runId: "run-004",
+    fairComparison: { ...identity, repoBaselineIdentity: "repo:b" }
+  }));
+  const legacy = normalizeRun(run({ runId: "run-005", fairComparison: undefined }));
+
+  assert.deepEqual(base.fairComparison, identity);
+  assert.deepEqual(comparisonExclusionReasons(base, same), []);
+  assert.deepEqual(comparisonExclusionReasons(base, differentJudge), ["different-judge-logic"]);
+  assert.deepEqual(comparisonExclusionReasons(base, differentRepo), ["different-repo-baseline"]);
+  assert.deepEqual(comparisonExclusionReasons(base, legacy), []);
+});
+
 test("invalid imported payload is marked damaged without inventing results", () => {
   const normalized = normalizeRun({ runId: "broken", results: "not-an-array" });
   const outcome = deriveRunOutcome(normalized);

@@ -61,6 +61,10 @@ async function recoverInterruptedReplacement(filePath: string, backupPath: strin
   await syncDirectory(path.dirname(filePath));
 }
 
+export async function recoverAtomicFile(filePath: string): Promise<void> {
+  await recoverInterruptedReplacement(filePath, backupPathFor(filePath));
+}
+
 function isReplaceConflict(error: unknown): boolean {
   const code = (error as NodeJS.ErrnoException | undefined)?.code;
   return code === "EEXIST" || code === "EPERM" || code === "EACCES";

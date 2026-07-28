@@ -202,6 +202,16 @@ export interface AgentRunResult {
   resolvedRuntime?: AgentResolvedRuntime;
   agentTitle: string;
   status: "success" | "failed" | "cancelled";
+  /**
+   * Whether the execution pipeline itself completed independently of validation.
+   * Missing on historical results; consumers must fall back to `status`.
+   */
+  executionStatus?: "completed" | "failed" | "cancelled" | "not-run";
+  /**
+   * Outcome of judge validation after a completed agent execution.
+   * `partial` means only non-critical judges failed.
+   */
+  validationStatus?: "passed" | "partial" | "failed" | "error" | "not-run";
   adapterKind: "demo" | "external";
   preflight: AdapterPreflightResult;
   summary: string;

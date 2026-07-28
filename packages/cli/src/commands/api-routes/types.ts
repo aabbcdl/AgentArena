@@ -2,6 +2,7 @@
  * Shared types and validation helpers for API route handlers.
  */
 
+import { validateClaudeProviderProfileId } from "@agentarena/adapters";
 import type { ClaudeProviderProfile } from "@agentarena/core";
 
 // ─── Types ───
@@ -34,6 +35,10 @@ export interface ProviderProfilePayload {
 // ─── Helpers ───
 
 export function validateProviderProfilePayload(payload: ProviderProfilePayload): string | null {
+  if (payload.id !== undefined) {
+    const profileIdError = validateClaudeProviderProfileId(payload.id);
+    if (profileIdError) return profileIdError;
+  }
   if (!payload.name?.trim()) return "name is required.";
   if (!payload.kind?.trim()) return "kind is required (e.g. 'official', 'anthropic-compatible', 'openai-proxy').";
   if (!payload.apiFormat?.trim()) return "apiFormat is required (e.g. 'anthropic-messages', 'openai-chat-via-proxy').";
@@ -41,10 +46,7 @@ export function validateProviderProfilePayload(payload: ProviderProfilePayload):
 }
 
 export function validateProfileId(profileId: string): string | null {
-  if (!profileId || typeof profileId !== "string") return "Profile ID is required.";
-  if (profileId.length > 128) return "Profile ID too long (max 128 characters).";
-  if (!/^[a-zA-Z0-9_-]+$/.test(profileId)) return "Profile ID may only contain alphanumeric characters, hyphens, and underscores.";
-  return null;
+  return validateClaudeProviderProfileId(profileId);
 }
 
 /**

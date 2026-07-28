@@ -543,6 +543,21 @@ test("FAILED_SCORE_BAND: failed run score is within [10, 40]", () => {
   assert.ok(score <= FAILED_SCORE_BAND.max, `Score ${score} above max ${FAILED_SCORE_BAND.max}`);
 });
 
+test("FAILED_SCORE_BAND: legacy failed run without executionStatus keeps legacy behavior", () => {
+  const result = createResult({
+    status: "failed",
+    judgeResults: [
+      { success: false, critical: true, type: "command" }
+    ]
+  });
+  delete result.executionStatus;
+  const run = createRun({ results: [result] });
+
+  const score = computeCompositeScore(result, run);
+  assert.ok(score >= FAILED_SCORE_BAND.min);
+  assert.ok(score <= FAILED_SCORE_BAND.max);
+});
+
 test("FAILED_SCORE_BAND: failed run with fast duration and low cost still capped at 40", () => {
   const fastResult = createResult({ status: "error", durationMs: 100 });
   const cheapResult = createResult({ status: "success", durationMs: 500, estimatedCostUsd: 0.01, costKnown: true });
@@ -554,7 +569,9 @@ test("FAILED_SCORE_BAND: failed run with fast duration and low cost still capped
 
 test("CRITICAL_FAIL_SCORE_BAND: critical judge failure produces score in [50, 70]", () => {
   const result = createResult({
-    status: "success",
+    status: "failed",
+    executionStatus: "completed",
+    validationStatus: "failed",
     durationMs: 1000,
     estimatedCostUsd: 0.05,
     costKnown: true,

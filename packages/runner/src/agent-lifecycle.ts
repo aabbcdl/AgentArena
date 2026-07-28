@@ -331,15 +331,23 @@ export async function recordFinalEvents(
   judgeError: unknown,
   teardownResults: CommandStepResult[],
   teardownError: unknown,
-  success: boolean,
+  validationStatus: NonNullable<AgentRunResult["validationStatus"]>,
   context: AgentRunContext
 ): Promise<void> {
+  const validationMessage = {
+    passed: "All judges passed",
+    partial: "One or more non-critical judges failed",
+    failed: "One or more critical judges failed",
+    error: "Judges execution failed",
+    "not-run": "Judges were not run"
+  }[validationStatus];
   await context.traceRecorder.record({
     agentId: preflight.agentId,
     timestamp: new Date().toISOString(),
     type: "judge.finish",
-    message: success ? "All judges passed" : "One or more judges failed",
+    message: validationMessage,
     metadata: {
+      validationStatus,
       judgeResults: judgeResults.map((value) => ({
         label: value.label,
         type: value.type,
@@ -392,7 +400,8 @@ export async function recordFinalEvents(
  *
  * **Pipeline phases:** createAgentRunContext -> setupWorkspaceAndPrechecks ->
  * runSetupCommands -> createBeforeSnapshot -> executeAgent ->
- * runJudgesAndAfterSnapshot -> runTeardownCommands -> buildFinalResult.
+ * runJudgesAndAfterSnapshot -> collectFileDiffs -> runTeardownCommands ->
+ * buildFinalResult.
  *
  * **Critical behaviors:**
  * - Teardown failure marks the ENTIRE run as failed (intentional: environment problem).
@@ -550,6 +559,12 @@ export async function runAgent(
     context
   );
 
+  // Capture agent-produced evidence before teardown commands can modify or
+  // remove the files that were evaluated.
+  const fileDiffs = changedFiles.length > 0
+    ? await collectFileDiffs(context.workspacePath, changedFiles)
+    : [];
+
   let teardownResults: CommandStepResult[] = [];
   let teardownError: unknown;
   const teardownTimeout = TEARDOWN_TIMEOUT_MS;
@@ -597,16 +612,46 @@ export async function runAgent(
     isAbortError(judgeError) ||
     isAbortError(teardownError) ||
     context.cancellation?.signal?.aborted === true;
+  const criticalJudgeFailed = judgeResults.some(
+    (value) => value.critical === true && !value.success
+  );
+  const nonCriticalJudgeFailed = judgeResults.some(
+    (value) => value.critical !== true && !value.success
+  );
+  const validationStatus: NonNullable<AgentRunResult["validationStatus"]> =
+    adapterResult?.status !== "success" || adapterError
+      ? "not-run"
+      : judgeError
+        ? "error"
+        : criticalJudgeFailed
+          ? "failed"
+          : nonCriticalJudgeFailed
+            ? "partial"
+            : "passed";
+  const executionStatus: NonNullable<AgentRunResult["executionStatus"]> =
+    cancelled
+      ? "cancelled"
+      : adapterResult?.status !== "success" ||
+          adapterError ||
+          judgeError ||
+          teardownError ||
+          teardownResults.some((value) => !value.success)
+        ? "failed"
+        : "completed";
   const success =
-    !cancelled &&
-    adapterResult?.status === "success" &&
-    !adapterError &&
-    !judgeError &&
-    judgeResults.every((value) => value.success) &&
-    !teardownError &&
-    teardownResults.every((value) => value.success);
+    executionStatus === "completed" &&
+    validationStatus !== "failed" &&
+    validationStatus !== "error";
 
-  await recordFinalEvents(preflight, judgeResults, judgeError, teardownResults, teardownError, success, context);
+  await recordFinalEvents(
+    preflight,
+    judgeResults,
+    judgeError,
+    teardownResults,
+    teardownError,
+    validationStatus,
+    context
+  );
 
   // Extract the assembled prompt for inclusion in the result.
   // Three-layer fallback (any layer may silently produce undefined):
@@ -636,11 +681,6 @@ export async function runAgent(
     }
   }
 
-  // Collect line-level diffs for Workbench Evidence (best-effort; never blocks).
-  const fileDiffs = changedFiles.length > 0
-    ? await collectFileDiffs(context.workspacePath, changedFiles)
-    : [];
-
   const runResult = buildFinalResult(
     preflight,
     context,
@@ -657,7 +697,9 @@ export async function runAgent(
     success,
     assembledPrompt,
     diffReliable,
-    fileDiffs
+    fileDiffs,
+    executionStatus,
+    validationStatus
   );
 
   // Attach failureTail when the run failed (opt-in: only when activity capture was enabled)

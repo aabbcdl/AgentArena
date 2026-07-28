@@ -14,7 +14,7 @@ import { isScoreExcluded } from "./scoring.js";
 export function getLeaderboardIdentity(run, result) {
   const runtime = runtimeIdentity(result);
   const taskId = run.task?.id || run.task?.title || "unknown-task";
-  const scoreMode = run.scoreMode || "balanced";
+  const scoreMode = run.scoreMode || "practical";
 
   return {
     taskId,
@@ -184,7 +184,7 @@ export function buildLeaderboard(runs, currentRun) {
 
   return {
     taskId: currentRun.task?.id || currentRun.task?.title || "unknown",
-    scoreMode: currentRun.scoreMode || "balanced",
+    scoreMode: currentRun.scoreMode || "practical",
     comparableRunCount: comparableRuns.length,
     excludedRunCount: excludedRuns.length,
     rows,

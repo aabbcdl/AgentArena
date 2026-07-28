@@ -3,7 +3,7 @@ groups:
     rules:
       - alert: AgentSuccessRateTooLow
         expr: rate(agentarena_agent_status_total{status="success"}[30m]) / rate(agentarena_agent_status_total[30m]) < 0.3
-        for: 3 runs
+        for: 15m
         labels:
           severity: critical
         annotations:

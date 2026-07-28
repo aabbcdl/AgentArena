@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import { promises as fs } from "node:fs";
 import type http from "node:http";
 import path from "node:path";
@@ -15,20 +14,11 @@ import type { UiRunRequestContext } from "./ui-run-types.js";
 export { sendApiResponse } from "./ui-http.js";
 export { WEB_REPORT_DIST_ROOT };
 
-function escapeHtmlAttribute(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("\"", "&quot;")
-    .replaceAll("'", "&#39;")
-    .replaceAll("`", "&#96;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;");
-}
-
 export interface RequestContext extends UiRunRequestContext {
   host: string;
   port: number;
   isLocalhost: boolean;
+  exchangeAuthBootstrap?: (code: string) => string | null;
   codexDefaults: Awaited<ReturnType<typeof getCodexDefaultResolvedRuntime>>;
 }
 
@@ -66,6 +56,32 @@ export function createRequestHandler(ctx: RequestContext) {
       const origin = request.headers.origin;
       if (!checkCorsOrigin(origin, ctx.host, ctx.port)) {
         sendApiResponse(response, jsonResponse({ error: "Cross-origin requests are not allowed." }, 403));
+        return;
+      }
+
+      if (
+        request.method === "POST" &&
+        requestUrl.pathname === "/api/auth/bootstrap" &&
+        ctx.exchangeAuthBootstrap
+      ) {
+        const rawBody = await readRequestBody(request);
+        let payload: { code?: unknown };
+        try {
+          payload = JSON.parse(rawBody) as { code?: unknown };
+        } catch {
+          sendApiResponse(response, jsonResponse({ error: "Invalid JSON in request body." }, 400));
+          return;
+        }
+        if (typeof payload.code !== "string" || !payload.code) {
+          sendApiResponse(response, jsonResponse({ error: "Bootstrap code is required." }, 400));
+          return;
+        }
+        const token = ctx.exchangeAuthBootstrap(payload.code);
+        if (!token) {
+          sendApiResponse(response, jsonResponse({ error: "Bootstrap code is invalid or expired." }, 401));
+          return;
+        }
+        sendApiResponse(response, jsonResponse({ token }));
         return;
       }
 
@@ -266,50 +282,12 @@ export function createRequestHandler(ctx: RequestContext) {
         }
 
         try {
-          let body = await fs.readFile(filePath);
-
-          // SECURITY: Auth token injection for localhost UX (nonce-based CSP)
-          //
-          // Acceptable trade-off for a localhost-only dev tool:
-          // - The meta tag and inline script exist briefly in the HTML response.
-          // - A per-request CSP nonce restricts script execution to only the
-          //   cleanup script; any injected <script> without the nonce is blocked.
-          // - The meta tag is the FIRST thing the script reads, and .remove()
-          //   is called immediately after copying to sessionStorage.
-          // - sessionStorage is tab-scoped (not persisted across tabs or restarts).
-          // - The server only injects this for 127.0.0.1/localhost connections.
-          // - Risk: brief token visibility in raw HTTP response body (localhost only).
-          //   Mitigated by: localhost binding + CORS + CSP nonce + no-cache headers.
-          // - The token is NOT persisted in saved pages, screenshots, or printouts.
-          const isInjectingToken = ctx.isLocalhost && filePath.endsWith("index.html") && ctx.authToken;
-          const cspNonce = isInjectingToken ? randomBytes(16).toString("base64") : "";
-
-          if (isInjectingToken) {
-            let html = body.toString("utf8");
-            const metaTag = `<meta name="agentarena-auth-token" content="${escapeHtmlAttribute(ctx.authToken)}">`;
-            // Nonce restricts execution to this single script tag only.
-            // The first action is reading + removing the meta tag so no other
-            // script (even same-origin) can access it after this point.
-            const cleanupScript = `<script nonce="${cspNonce}">(function(){var m=document.querySelector('meta[name="agentarena-auth-token"]');if(m){try{sessionStorage.setItem('agentarena-auth-token',m.getAttribute('content'))}catch(e){/* ignore: sessionStorage may be unavailable */}m.remove()}})();</script>`;
-            // Inject meta tag and its cleanup script immediately before </head>
-            // so they execute before any app scripts.
-            const injection = `  ${metaTag}\n  ${cleanupScript}\n`;
-            if (html.includes("</head>")) {
-              html = html.replace("</head>", `${injection}</head>`);
-            } else {
-              html = injection + html;
-            }
-            body = Buffer.from(html, "utf8");
-          }
-
-          const scriptSrcPolicy = cspNonce
-            ? `script-src 'self' 'nonce-${cspNonce}'`
-            : "script-src 'self'";
+          const body = await fs.readFile(filePath);
 
           response.writeHead(200, {
             "Content-Type": detectContentType(filePath),
             "Cache-Control": "no-store",
-            "Content-Security-Policy": `default-src 'self'; ${scriptSrcPolicy}; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://raw.githubusercontent.com`,
+            "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://raw.githubusercontent.com",
             "X-Frame-Options": "DENY",
             "X-Content-Type-Options": "nosniff",
             "Referrer-Policy": "strict-origin-when-cross-origin",

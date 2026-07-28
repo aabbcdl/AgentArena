@@ -273,6 +273,12 @@ export function isScoreExcluded(result) {
   return result?.scoreExcluded === true;
 }
 
+function isExecutionCompleted(result) {
+  return result?.executionStatus === undefined
+    ? result?.status === "success"
+    : result.executionStatus === "completed";
+}
+
 function resolveCostQuality(result) {
   if (["known", "estimated", "unavailable"].includes(result?.costQuality)) return result.costQuality;
   return result?.costKnown === true ? "known" : "unavailable";
@@ -514,7 +520,7 @@ export function getCompositeScoreDetails(result, run, weights = DEFAULT_SCORE_WE
   }
 
   // Rule 1: Failed run → failed band
-  if (result.status !== "success") {
+  if (!isExecutionCompleted(result)) {
     const baseScore = FAILED_SCORE_BAND.min;
     const efficiencyBonus = components.duration * 0.3 + components.cost * 0.2;
     // MUST match backend FAILED_EFFICIENCY_SCALE = 100
@@ -632,7 +638,7 @@ export function getCompositeScoreReasons(result, run, weights = DEFAULT_SCORE_WE
   const components = getScoreComponents(result, run);
   const reasons = [];
 
-  if (result.status !== "success") {
+  if (!isExecutionCompleted(result)) {
     reasons.push("failed");
     return reasons;
   }

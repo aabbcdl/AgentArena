@@ -30,6 +30,46 @@ async function fileExists(filePath) {
   }
 }
 
+async function waitForFile(filePath, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await fileExists(filePath)) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`Timed out waiting for ${filePath}`);
+}
+
+function processExists(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function writeProcessTreeFixture(workspace) {
+  const childScript = path.join(workspace, "tree-child.mjs");
+  const parentScript = path.join(workspace, "tree-parent.mjs");
+  const pidPath = path.join(workspace, "tree-child.pid");
+  await fs.writeFile(childScript, "setInterval(() => {}, 1000);\n", "utf8");
+  await fs.writeFile(
+    parentScript,
+    [
+      'import { spawn } from "node:child_process";',
+      'import { writeFileSync } from "node:fs";',
+      'import path from "node:path";',
+      'import { fileURLToPath } from "node:url";',
+      'const dir = path.dirname(fileURLToPath(import.meta.url));',
+      'const child = spawn(process.execPath, [path.join(dir, "tree-child.mjs")], { stdio: "ignore" });',
+      'writeFileSync(path.join(dir, "tree-child.pid"), String(child.pid), "utf8");',
+      "setInterval(() => {}, 1000);"
+    ].join("\n"),
+    "utf8"
+  );
+  return { parentScript, pidPath };
+}
+
 const ALLOWED_NAMES = ["PATH", "HOME", "NODE"];
 
 test("file-exists judge passes when file exists", async () => {
@@ -293,7 +333,62 @@ test("command step aborts when signal is cancelled", async () => {
   await fs.rm(workspace, { recursive: true, force: true });
 });
 
-test("judges can run concurrently in a shared workspace", async () => {
+test("command timeout terminates descendant processes", async () => {
+  const workspace = await setupWorkspace();
+  const { pidPath } = await writeProcessTreeFixture(workspace);
+
+  try {
+    const result = await runCommandStep(
+      {
+        id: "tree-timeout",
+        label: "process tree timeout",
+        command: "node tree-parent.mjs",
+        cwd: ".",
+        timeoutMs: 750
+      },
+      workspace,
+      ALLOWED_NAMES
+    );
+    assert.equal(result.success, false);
+    await waitForFile(pidPath);
+    const childPid = Number(await fs.readFile(pidPath, "utf8"));
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    assert.equal(processExists(childPid), false, `descendant process ${childPid} should be terminated`);
+  } finally {
+    await fs.rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("command cancellation terminates descendant processes", async () => {
+  const workspace = await setupWorkspace();
+  const { pidPath } = await writeProcessTreeFixture(workspace);
+  const controller = new AbortController();
+
+  try {
+    const commandPromise = runCommandStep(
+      {
+        id: "tree-cancel",
+        label: "process tree cancellation",
+        command: "node tree-parent.mjs",
+        cwd: ".",
+        timeoutMs: 10_000
+      },
+      workspace,
+      ALLOWED_NAMES,
+      controller.signal
+    );
+    await waitForFile(pidPath);
+    const childPid = Number(await fs.readFile(pidPath, "utf8"));
+    controller.abort();
+    await assert.rejects(commandPromise, /Benchmark run cancelled/);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    assert.equal(processExists(childPid), false, `descendant process ${childPid} should be terminated`);
+  } finally {
+    await fs.rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("command judges run serially by default", async () => {
   const workspace = await setupWorkspace();
 
   const results = await runJudges(
@@ -308,7 +403,7 @@ test("judges can run concurrently in a shared workspace", async () => {
         id: "read-marker",
         label: "read marker",
         type: "command",
-        command: "node -e \"(async()=>{const fs=require('node:fs');const end=Date.now()+2000;while(Date.now()<end){if(fs.existsSync('marker.txt'))process.exit(0);await new Promise(r=>setTimeout(r,50));}process.exit(1);})()\""
+        command: "node -e \"process.exit(require('node:fs').existsSync('marker.txt') ? 0 : 1)\""
       }
     ],
     workspace,
@@ -319,6 +414,40 @@ test("judges can run concurrently in a shared workspace", async () => {
   assert.equal(results[1].success, true);
 
   await fs.rm(workspace, { recursive: true, force: true });
+});
+
+test("AGENTARENA_JUDGE_CONCURRENCY can opt command judges into concurrency", async () => {
+  const workspace = await setupWorkspace();
+  const original = process.env.AGENTARENA_JUDGE_CONCURRENCY;
+  process.env.AGENTARENA_JUDGE_CONCURRENCY = "2";
+
+  try {
+    const results = await runJudges(
+      [
+        {
+          id: "write-marker",
+          label: "write marker",
+          type: "command",
+          command: "node -e \"setTimeout(() => require('node:fs').writeFileSync('marker.txt', 'done'), 300)\""
+        },
+        {
+          id: "read-marker",
+          label: "read marker",
+          type: "command",
+          command: "node -e \"(async()=>{const fs=require('node:fs');const end=Date.now()+2000;while(Date.now()<end){if(fs.existsSync('marker.txt'))process.exit(0);await new Promise(r=>setTimeout(r,50));}process.exit(1);})()\""
+        }
+      ],
+      workspace,
+      ALLOWED_NAMES
+    );
+
+    assert.equal(results[0].success, true);
+    assert.equal(results[1].success, true);
+  } finally {
+    if (original === undefined) delete process.env.AGENTARENA_JUDGE_CONCURRENCY;
+    else process.env.AGENTARENA_JUDGE_CONCURRENCY = original;
+    await fs.rm(workspace, { recursive: true, force: true });
+  }
 });
 
 test("listWorkspaceFiles skips node_modules", async () => {

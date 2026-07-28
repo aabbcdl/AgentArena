@@ -139,15 +139,16 @@ test("GET /api/ui-info returns correct structure", { timeout: 60_000 }, async ()
   }
 });
 
-test("GET /workbench/ escapes localhost auth token before injecting it into index.html", { timeout: 60_000 }, async () => {
+test("GET /workbench/ never exposes the localhost auth token in index.html", { timeout: 60_000 }, async () => {
   const port = await getAvailablePort();
   const unsafeToken = 'unsafe"><script>window.__agentarenaXss = true</script>';
   const { child } = await startServer(port, unsafeToken);
   try {
     const res = await request(port, "GET", "/workbench/");
     assert.equal(res.statusCode, 200);
-    assert.match(res.body, /meta name="agentarena-auth-token"/);
-    assert.match(res.body, /unsafe&quot;&gt;&lt;script&gt;window\.__agentarenaXss = true&lt;\/script&gt;/);
+    assert.doesNotMatch(res.body, /meta name="agentarena-auth-token"/);
+    assert.doesNotMatch(res.body, /agentarena-auth-token/);
+    assert.doesNotMatch(res.body, /unsafe/);
     assert.doesNotMatch(res.body, /<script>window\.__agentarenaXss = true<\/script>/);
   } finally {
     child.kill("SIGTERM");
@@ -427,7 +428,7 @@ test("GET /workbench/ serves the nested workbench index", { timeout: 60_000 }, a
     const res = await request(port, "GET", "/workbench/");
     assert.equal(res.statusCode, 200);
     assert.match(String(res.body), /AgentArena Workbench/);
-    assert.match(String(res.body), /agentarena-auth-token/);
+    assert.doesNotMatch(String(res.body), /agentarena-auth-token/);
   } finally {
     child.kill("SIGTERM");
   }

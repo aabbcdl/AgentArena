@@ -12,6 +12,7 @@ import {
   setTrustProxy,
   startRateLimitCleanup,
 } from "../server/index.js";
+import { createUiAuthBootstrap } from "./ui-auth-bootstrap.js";
 import { createRequestHandler } from "./ui-routes.js";
 import { UiRunStateController } from "./ui-run-state.js";
 
@@ -67,6 +68,7 @@ export async function runUi(parsed: ParsedArgs): Promise<void> {
   }
   // Token priority: --auth-token > AGENTARENA_AUTH_TOKEN env > auto-generated
   const authToken = parsed.authToken?.trim() || process.env.AGENTARENA_AUTH_TOKEN?.trim() || generateAuthToken();
+  const authBootstrap = parsed.noOpen ? undefined : createUiAuthBootstrap(authToken);
   const runState = new UiRunStateController(process.cwd());
   await runState.restore();
   const codexDefaults = await getCodexDefaultResolvedRuntime();
@@ -84,6 +86,7 @@ export async function runUi(parsed: ParsedArgs): Promise<void> {
     port,
     isLocalhost: true,
     authToken,
+    exchangeAuthBootstrap: authBootstrap?.exchange,
     codexDefaults,
     get activeRun() { return runState.activeRun; },
     setActiveRun: (run) => runState.setActiveRun(run),
@@ -160,13 +163,13 @@ export async function runUi(parsed: ParsedArgs): Promise<void> {
   }
   // Never print the token (or any prefix of it) to stdout — CI logs and terminal
   // scrollback capture stdout, and even a partial prefix narrows brute force.
-  // Don't include the token in the URL fragment either: browser history persists it.
+  // The real token is never included in the opened URL.
   // Operators retrieve the token by reading the file path printed below.
   console.log(`auth_token_file=${authTokenFilePath}`);
   console.log(`  WARNING: The token in ${authTokenFilePath} grants full API access. Do not share it.`);
 
   if (!parsed.noOpen) {
-    maybeOpenBrowser(url);
+    maybeOpenBrowser(`${url}/workbench/#bootstrap=${encodeURIComponent(authBootstrap?.code ?? "")}`);
   }
 
   await new Promise<void>((resolve) => {

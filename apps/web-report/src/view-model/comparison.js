@@ -50,7 +50,12 @@ export function runtimeIdentity(result) {
 
 export function resultRecordKey(result) {
   const runtime = runtimeIdentity(result);
-  return `${result.variantId ?? result.agentId}@@${runtime.version}`;
+  return JSON.stringify([
+    result.baseAgentId ?? result.agentId ?? "unknown-agent",
+    runtime.provider || "official",
+    runtime.model || "unknown",
+    runtime.version || "unknown"
+  ]);
 }
 
 export function fairComparisonIdentity(run) {
@@ -85,22 +90,32 @@ export function missingCoreComparisonData(run) {
 }
 
 export function getFairComparisonExclusionReasons(candidateRun, anchorRun) {
+  const reasons = [];
   const candidate = fairComparisonIdentity(candidateRun);
   const anchor = fairComparisonIdentity(anchorRun);
-  const reasons = [];
-  const candidateHasFairMetadata = Boolean(candidateRun?.fairComparison);
-  const anchorHasFairMetadata = Boolean(anchorRun?.fairComparison);
+  const candidateHasFairMetadata = Boolean(
+    candidateRun?.fairComparison?.taskIdentity &&
+    candidateRun?.fairComparison?.judgeIdentity &&
+    candidateRun?.fairComparison?.repoBaselineIdentity
+  );
+  const anchorHasFairMetadata = Boolean(
+    anchorRun?.fairComparison?.taskIdentity &&
+    anchorRun?.fairComparison?.judgeIdentity &&
+    anchorRun?.fairComparison?.repoBaselineIdentity
+  );
 
-  if (!candidate.taskIdentity || candidate.taskIdentity !== anchor.taskIdentity) {
-    reasons.push("different-task-pack");
-  }
   if (candidateHasFairMetadata && anchorHasFairMetadata) {
+    if (candidate.taskIdentity !== anchor.taskIdentity) {
+      reasons.push("different-task-pack");
+    }
     if (!candidate.judgeIdentity || candidate.judgeIdentity !== anchor.judgeIdentity) {
       reasons.push("different-judge-logic");
     }
     if (!candidate.repoBaselineIdentity || candidate.repoBaselineIdentity !== anchor.repoBaselineIdentity) {
       reasons.push("different-repo-baseline");
     }
+  } else if (taskIdentity(candidateRun) !== taskIdentity(anchorRun)) {
+    reasons.push("different-task-pack");
   }
   if (missingCoreComparisonData(candidateRun)) {
     reasons.push("missing-core-data");
@@ -340,13 +355,16 @@ export function getAgentTrendRows(runs, currentRun, agentId) {
 }
 
 export function getComparableRuns(runs, currentRun) {
-  const currentTaskId = currentRun.task?.id || currentRun.task?.title;
-  const currentScoreMode = currentRun.scoreMode || "balanced";
+  const currentScoreMode = currentRun.scoreMode || "practical";
 
   return runs.filter((run) => {
-    const taskId = run.task?.id || run.task?.title;
-    const scoreMode = run.scoreMode || "balanced";
-    return taskId === currentTaskId && scoreMode === currentScoreMode;
+    const scoreMode = run.scoreMode || "practical";
+    const fairnessReasons = getFairComparisonExclusionReasons(run, currentRun)
+      .filter((reason) => reason !== "missing-core-data");
+    return (
+      scoreMode === currentScoreMode &&
+      fairnessReasons.length === 0
+    );
   });
 }
 

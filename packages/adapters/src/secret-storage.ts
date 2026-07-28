@@ -20,6 +20,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { logger } from "@agentarena/core";
+import { assertClaudeProviderProfileId } from "./provider-profile-id.js";
 
 // ---------------------------------------------------------------------------
 // Path helpers
@@ -37,19 +38,8 @@ function appDataRoot(): string {
   return path.join(process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), ".config"), "agentarena");
 }
 
-export function validateProfileId(profileId: string): void {
-  if (
-    !/^[a-zA-Z0-9][a-zA-Z0-9-]{0,62}[a-zA-Z0-9]$/.test(profileId) &&
-    !/^[a-zA-Z0-9]$/.test(profileId)
-  ) {
-    throw new Error(
-      `Invalid profile ID: "${profileId}". Must contain only alphanumeric characters and hyphens.`
-    );
-  }
-}
-
 function secretTarget(profileId: string): string {
-  validateProfileId(profileId);
+  assertClaudeProviderProfileId(profileId);
   const prefix = process.env.AGENTARENA_CLAUDE_SECRET_PREFIX?.trim() || "AgentArena/claude-profile/";
   return `${prefix}${profileId}`;
 }
@@ -59,7 +49,7 @@ function secretDirectory(): string {
 }
 
 function secretFilePath(profileId: string): string {
-  validateProfileId(profileId);
+  assertClaudeProviderProfileId(profileId);
   return path.join(secretDirectory(), `${profileId}.secret`);
 }
 

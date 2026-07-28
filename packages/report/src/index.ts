@@ -19,6 +19,7 @@ export {
 } from "./decision-report.js";
 export {
   buildLeaderboard,
+  getComparableRuns,
   getLeaderboardExplanation,
   type LeaderboardData,
   type LeaderboardIdentity,

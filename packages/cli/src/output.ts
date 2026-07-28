@@ -1,30 +1,5 @@
-import { createHash } from "node:crypto";
-import { type AdapterPreflightResult, type BenchmarkRun, resolveCostQuality, type TaskJudge, type TaskPack } from "@agentarena/core";
+import { type AdapterPreflightResult, type BenchmarkRun, resolveCostQuality } from "@agentarena/core";
 import { enrichRunWithScores } from "@agentarena/report";
-
-function createTaskIdentity(task: TaskPack): string {
-  return task.id ? `task:${task.id}` : `task-title:${task.title}`;
-}
-
-function createJudgeIdentity(task: TaskPack): string {
-  const payload = JSON.stringify(
-    task.judges.map((judge: TaskJudge) => ({
-      id: judge.id,
-      type: judge.type,
-      label: judge.label,
-      critical: judge.critical ?? false
-    }))
-  );
-  return `judge:${createHash("sha256").update(payload).digest("hex")}`;
-}
-
-function createRepoBaselineIdentity(benchmark: BenchmarkRun): string | undefined {
-  const baseCommit = benchmark.task.metadata?.githubIssue?.baseCommit;
-  if (baseCommit) {
-    return `repo-base:${baseCommit}`;
-  }
-  return undefined;
-}
 
 export function formatCapabilitySummary(capability: AdapterPreflightResult["capability"]): string {
   return [
@@ -55,11 +30,7 @@ export function buildBenchmarkOutputSummary(
     scoreWeights: scoredBenchmark.scoreWeights,
     scoreScope: scoredBenchmark.scoreScope,
     scoreValidityNote: scoredBenchmark.scoreValidityNote,
-    fairComparison: {
-      taskIdentity: createTaskIdentity(scoredBenchmark.task),
-      judgeIdentity: createJudgeIdentity(scoredBenchmark.task),
-      repoBaselineIdentity: createRepoBaselineIdentity(scoredBenchmark)
-    },
+    fairComparison: scoredBenchmark.fairComparison,
     task: {
       id: scoredBenchmark.task.id,
       title: scoredBenchmark.task.title,
@@ -78,6 +49,8 @@ export function buildBenchmarkOutputSummary(
       agentTitle: result.agentTitle,
       adapterKind: result.adapterKind,
       status: result.status,
+      executionStatus: result.executionStatus,
+      validationStatus: result.validationStatus,
       summary: result.summary,
       compositeScore: result.compositeScore,
       scoreReasons: result.scoreReasons,

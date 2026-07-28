@@ -43,6 +43,12 @@ export function isScoreExcluded(result: BenchmarkRun["results"][number]): boolea
   return result.scoreExcluded === true;
 }
 
+function isExecutionCompleted(result: BenchmarkRun["results"][number]): boolean {
+  return result.executionStatus === undefined
+    ? result.status === "success"
+    : result.executionStatus === "completed";
+}
+
 // ---------------------------------------------------------------------------
 // Score band constants (used by both backend and frontend)
 // ---------------------------------------------------------------------------
@@ -162,7 +168,7 @@ export function computeCompositeScore(
   const weights = scoreWeights ?? getDefaultWeights(scoreMode ?? "practical");
 
   // Rule 1: Failed run → failed band
-  if (result.status !== "success") {
+  if (!isExecutionCompleted(result)) {
     const baseScore = FAILED_SCORE_BAND.min;
     const efficiencyBonus = (
       durationEfficiencyScore(result, run) * FAILED_DURATION_WEIGHT +
@@ -235,7 +241,7 @@ export function computeScoreReasons(result: BenchmarkRun["results"][number], run
     return [result.scoreExclusionReason ?? "not-comparable"];
   }
 
-  if (result.status !== "success") {
+  if (!isExecutionCompleted(result)) {
     reasons.push("failed");
     return reasons;
   }

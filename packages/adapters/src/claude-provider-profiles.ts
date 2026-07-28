@@ -24,15 +24,18 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { ClaudeProviderProfile, ClaudeProviderRiskFlag } from "@agentarena/core";
-import { getHealthCache, hasInternalDnsResolution, isInternalUrl, logger } from "@agentarena/core";
+import { getHealthCache, hasInternalDnsResolution, isInternalUrl, logger, recoverAtomicFile, writeJsonAtomic } from "@agentarena/core";
+import {
+  assertClaudeProviderProfileId,
+  validateClaudeProviderProfileId
+} from "./provider-profile-id.js";
 import {
   __secretStorageTestUtils,
   deleteSecret,
   getSecret,
   hasStoredSecret,
   setSecret,
-  supportsWindowsCredentialManager,
-  validateProfileId
+  supportsWindowsCredentialManager
 } from "./secret-storage.js";
 
 interface ProfileRegistryFile {
@@ -168,7 +171,7 @@ function normalizeProfile(profile: ClaudeProviderProfile): ClaudeProviderProfile
     extraEnv: Object.fromEntries(
       Object.entries(profile.extraEnv ?? {}).filter(([key, value]) => key.trim() && String(value).trim())
     ),
-    riskFlags: profile.riskFlags.length > 0 ? profile.riskFlags : defaultRiskFlags(profile.kind)
+    riskFlags: profile.riskFlags?.length > 0 ? profile.riskFlags : defaultRiskFlags(profile.kind)
   };
 }
 
@@ -182,6 +185,7 @@ async function ensureRegistryDir(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 async function readRegistry(): Promise<ProfileRegistryFile> {
+  await recoverAtomicFile(registryPath());
   let rawRegistry: string;
   try {
     rawRegistry = await fs.readFile(registryPath(), "utf8");
@@ -213,10 +217,38 @@ async function readRegistry(): Promise<ProfileRegistryFile> {
   }
 
   const registry = parsed as Partial<ProfileRegistryFile>;
-  return {
+  const sourceProfiles = Array.isArray(registry.profiles) ? registry.profiles : [];
+  const profiles: ClaudeProviderProfile[] = [];
+  let removedInvalidProfiles = false;
+  for (const candidate of sourceProfiles) {
+    const profileId = (candidate as Partial<ClaudeProviderProfile> | null)?.id;
+    const profileIdError = validateClaudeProviderProfileId(profileId);
+    if (profileIdError) {
+      removedInvalidProfiles = true;
+      logger.warn(
+        "adapter",
+        "profile.invalid_id_skipped",
+        `Ignoring Claude provider profile with invalid ID "${String(profileId)}": ${profileIdError}`
+      );
+      continue;
+    }
+    profiles.push(normalizeProfile(candidate as ClaudeProviderProfile));
+  }
+
+  const cleanedRegistry: ProfileRegistryFile = {
     schemaVersion: 1,
-    profiles: Array.isArray(registry.profiles) ? registry.profiles.map(normalizeProfile) : []
+    profiles
   };
+  if (removedInvalidProfiles) {
+    await writeRegistry(cleanedRegistry).catch((error) => {
+      logger.warn(
+        "adapter",
+        "profile.invalid_id_cleanup_failed",
+        `Failed to remove invalid Claude provider profile records: ${error instanceof Error ? error.message : String(error)}`
+      );
+    });
+  }
+  return cleanedRegistry;
 }
 
 function tryReadRegistry(): Promise<ProfileRegistryFile> {
@@ -228,7 +260,10 @@ function tryReadRegistry(): Promise<ProfileRegistryFile> {
 
 async function writeRegistry(registry: ProfileRegistryFile): Promise<void> {
   await ensureRegistryDir();
-  await fs.writeFile(registryPath(), JSON.stringify(registry, null, 2), "utf8");
+  for (const profile of registry.profiles) {
+    assertClaudeProviderProfileId(profile.id);
+  }
+  await writeJsonAtomic(registryPath(), registry);
 }
 
 // ---------------------------------------------------------------------------
@@ -259,6 +294,7 @@ export async function getClaudeProviderProfile(profileId?: string): Promise<Clau
   if (!profileId || profileId === BUILT_IN_OFFICIAL_PROFILE.id) {
     return BUILT_IN_OFFICIAL_PROFILE;
   }
+  assertClaudeProviderProfileId(profileId);
 
   const profiles = await listClaudeProviderProfiles();
   const profile = profiles.find((entry) => entry.id === profileId);
@@ -332,6 +368,8 @@ export async function saveClaudeProviderProfile(input: ClaudeProviderProfileInpu
   }
 
   assertAllowedClaudeProviderEnvironment(input.extraEnv);
+  const id = input.id?.trim() || `${slugify(input.name) || "claude-profile"}-${randomUUID().slice(0, 6)}`;
+  assertClaudeProviderProfileId(id);
 
   if (input.baseUrl && isInternalUrl(input.baseUrl)) {
     throw new Error("baseUrl cannot point to an internal/private address. This restriction prevents Server-Side Request Forgery (SSRF) attacks.");
@@ -408,7 +446,6 @@ export async function saveClaudeProviderProfile(input: ClaudeProviderProfileInpu
   }
 
   const registry = await tryReadRegistry();
-  const id = input.id?.trim() || `${slugify(input.name) || "claude-profile"}-${randomUUID().slice(0, 6)}`;
   const profile = normalizeProfile({
     id,
     name: input.name.trim(),
@@ -451,6 +488,7 @@ export async function deleteClaudeProviderProfile(profileId: string): Promise<vo
   if (profileId === BUILT_IN_OFFICIAL_PROFILE.id) {
     throw new Error("The built-in official Claude profile cannot be deleted.");
   }
+  assertClaudeProviderProfileId(profileId);
 
   const registry = await readRegistry();
   const removedBaseUrl = registry.profiles.find((entry) => entry.id === profileId)?.baseUrl;
@@ -469,6 +507,7 @@ export async function setClaudeProviderProfileSecret(profileId: string, secret: 
   if (profileId === BUILT_IN_OFFICIAL_PROFILE.id) {
     throw new Error("The built-in official Claude profile does not use a stored secret.");
   }
+  assertClaudeProviderProfileId(profileId);
 
   const baseUrl = await lookupProfileBaseUrl(profileId);
 
@@ -487,6 +526,7 @@ export async function getClaudeProviderProfileSecret(profileId: string): Promise
   if (profileId === BUILT_IN_OFFICIAL_PROFILE.id) {
     return null;
   }
+  assertClaudeProviderProfileId(profileId);
 
   return await getSecret(profileId);
 }

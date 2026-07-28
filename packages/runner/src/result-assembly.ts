@@ -32,7 +32,9 @@ export function buildFinalResult(
   success: boolean,
   assembledPrompt?: string,
   diffReliable?: boolean,
-  fileDiffs?: FileDiffArtifact[]
+  fileDiffs?: FileDiffArtifact[],
+  executionStatus?: AgentRunResult["executionStatus"],
+  validationStatus?: AgentRunResult["validationStatus"]
 ): AgentRunResult {
   const { adapter, workspacePath, tracePath, task } = context;
   const durationMs = Date.now() - startedAt;
@@ -44,6 +46,8 @@ export function buildFinalResult(
       tracePath,
       workspacePath,
       status: "cancelled",
+      executionStatus: executionStatus ?? "cancelled",
+      validationStatus: validationStatus ?? "not-run",
       summary: createCancellationSummary("agent execution"),
       durationMs,
       changedFiles,
@@ -66,6 +70,8 @@ export function buildFinalResult(
       tracePath,
       workspacePath,
       status: "failed",
+      executionStatus: "failed",
+      validationStatus: "not-run",
       summary: `${adapter.title} crashed: ${errorMessage}`,
       durationMs,
       changedFiles,
@@ -85,6 +91,8 @@ export function buildFinalResult(
       tracePath,
       workspacePath,
       status: "failed",
+      executionStatus: "failed",
+      validationStatus: "not-run",
       summary: `${adapter.title} did not return a result.`,
       durationMs,
       changedFiles,
@@ -138,6 +146,9 @@ export function buildFinalResult(
     : undefined;
 
   const finalStatus = success ? "success" : "failed";
+  const finalExecutionStatus =
+    executionStatus ?? (adapterResult.status === "success" ? "completed" : "failed");
+  const finalValidationStatus = validationStatus ?? (success ? "passed" : "not-run");
   const durationSeconds = durationMs / 1000;
 
   metrics.agentStatusTotal.inc({ status: finalStatus, agentId: preflight.agentId, adapterKind: adapter.kind });
@@ -175,6 +186,8 @@ export function buildFinalResult(
     tracePath,
     workspacePath,
     status: success ? "success" : "failed",
+    executionStatus: finalExecutionStatus,
+    validationStatus: finalValidationStatus,
     summary: adapterResult.summary,
     durationMs,
     tokenUsage: adapterResult.tokenUsage,

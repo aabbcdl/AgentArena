@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { promises as fs } from "node:fs";
+import { closeSync, promises as fs, lstatSync, openSync, readlinkSync, readSync } from "node:fs";
 import path from "node:path";
 
 import {
@@ -19,11 +19,83 @@ function stableSerialize(value: unknown): string {
   return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableSerialize(record[key])}`).join(",")}}`;
 }
 
+function updateIdentityField(
+  hash: ReturnType<typeof createHash>,
+  label: string,
+  value: string | Buffer
+): void {
+  const data = typeof value === "string" ? Buffer.from(value, "utf8") : value;
+  hash.update(`${label}:${data.length}:`);
+  hash.update(data);
+}
+
+function updateFileContentHash(
+  hash: ReturnType<typeof createHash>,
+  filePath: string,
+  size: number
+): void {
+  hash.update(`file:${size}:`);
+  const handle = openSync(filePath, "r");
+  const buffer = Buffer.allocUnsafe(64 * 1024);
+  try {
+    while (true) {
+      const bytesRead = readSync(handle, buffer, 0, buffer.length, null);
+      if (bytesRead === 0) break;
+      hash.update(buffer.subarray(0, bytesRead));
+    }
+  } finally {
+    closeSync(handle);
+  }
+}
+
+function changedRepositoryPaths(status: string): string[] {
+  const records = status.split("\0");
+  const paths: string[] = [];
+
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index];
+    if (!record || record.length < 4) continue;
+    const statusCode = record.slice(0, 2);
+    paths.push(record.slice(3));
+    if (statusCode.includes("R") || statusCode.includes("C")) {
+      index += 1;
+    }
+  }
+
+  return [...new Set(paths)].sort();
+}
+
 export function repositoryIdentity(repoPath: string): string {
   try {
     const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repoPath, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
-    const status = execFileSync("git", ["status", "--porcelain=v1"], { cwd: repoPath, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
-    return `${head}\n${status}`;
+    const status = execFileSync("git", ["status", "--porcelain=v1", "-z", "--untracked-files=all"], { cwd: repoPath, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    if (!status) {
+      return `${head}\n`;
+    }
+
+    const contentHash = createHash("sha256");
+    updateIdentityField(contentHash, "status", status);
+
+    for (const relativePath of changedRepositoryPaths(status)) {
+      updateIdentityField(contentHash, "path", relativePath);
+      const filePath = path.join(repoPath, relativePath);
+      try {
+        const stat = lstatSync(filePath);
+        if (stat.isFile()) {
+          updateFileContentHash(contentHash, filePath, stat.size);
+        } else if (stat.isSymbolicLink()) {
+          updateIdentityField(contentHash, "symlink", readlinkSync(filePath));
+        } else if (stat.isDirectory()) {
+          updateIdentityField(contentHash, "directory", repositoryIdentity(filePath));
+        } else {
+          updateIdentityField(contentHash, "other", `${stat.mode}:${stat.size}`);
+        }
+      } catch {
+        updateIdentityField(contentHash, "missing", relativePath);
+      }
+    }
+
+    return `${head}\ndirty-sha256:${contentHash.digest("hex")}\n`;
   } catch {
     return `non-git:${path.resolve(repoPath)}`;
   }

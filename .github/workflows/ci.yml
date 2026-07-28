@@ -36,6 +36,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Audit dependencies
+        run: pnpm audit --audit-level=high
+
+      - name: Validate Prometheus rules
+        run: docker run --rm -v "$PWD/monitoring:/rules:ro" --entrypoint /bin/promtool prom/prometheus:v3.5.0 check rules /rules/alerts.yaml
+
       - name: Build workspace
         run: pnpm build
 

@@ -25,6 +25,7 @@ export interface FileDiff {
 
 export interface NormalizedAgentResult {
   agentId: string;
+  baseAgentId: string;
   variantId: string;
   displayLabel: string;
   status: string;
@@ -55,6 +56,11 @@ export interface NormalizedRun {
   repository: { path: string | null; revision: string | null };
   task: { id: string | null; title: string; schemaVersion: string | null };
   scoreMode: string;
+  fairComparison: {
+    taskIdentity: string;
+    judgeIdentity: string;
+    repoBaselineIdentity: string;
+  } | null;
   source: { kind: RunSourceKind; label: string };
   results: NormalizedAgentResult[];
   integrity: IntegrityLevel;
@@ -125,6 +131,7 @@ function normalizeResult(value: unknown, index: number): NormalizedAgentResult {
     : [];
   return {
     agentId,
+    baseAgentId: text(item.baseAgentId) ?? agentId,
     variantId,
     displayLabel: text(item.displayLabel) ?? text(item.agentTitle) ?? variantId,
     status: text(item.status) ?? "unknown",
@@ -167,6 +174,9 @@ export function normalizeRun(value: unknown): NormalizedRun {
   const artifactValidation = validateSummaryArtifact(value);
   const repository = record(raw.repository);
   const fairComparison = record(raw.fairComparison);
+  const taskIdentity = text(fairComparison.taskIdentity);
+  const judgeIdentity = text(fairComparison.judgeIdentity);
+  const repoBaselineIdentity = text(fairComparison.repoBaselineIdentity);
   const task = record(raw.task);
   const source = inferSource(raw);
   const rawResults: unknown[] | null = Array.isArray(raw.results) ? raw.results : null;
@@ -213,6 +223,9 @@ export function normalizeRun(value: unknown): NormalizedRun {
       schemaVersion: text(task.schemaVersion) ?? text(fairComparison.taskSchemaVersion)
     },
     scoreMode: normalizeScoreMode(text(raw.scoreMode) ?? "practical"),
+    fairComparison: taskIdentity && judgeIdentity && repoBaselineIdentity
+      ? { taskIdentity, judgeIdentity, repoBaselineIdentity }
+      : null,
     source,
     results,
     integrity,
@@ -275,10 +288,22 @@ export function runIdentityKey(run: NormalizedRun, agentId: string | null = null
 
 export function comparisonExclusionReasons(base: NormalizedRun, candidate: NormalizedRun): string[] {
   const reasons: string[] = [];
-  if (base.task.id !== candidate.task.id || base.task.schemaVersion !== candidate.task.schemaVersion) {
-    reasons.push("different-task");
+  if (base.fairComparison && candidate.fairComparison) {
+    if (base.fairComparison.taskIdentity !== candidate.fairComparison.taskIdentity) {
+      reasons.push("different-task");
+    }
+    if (base.fairComparison.judgeIdentity !== candidate.fairComparison.judgeIdentity) {
+      reasons.push("different-judge-logic");
+    }
+    if (base.fairComparison.repoBaselineIdentity !== candidate.fairComparison.repoBaselineIdentity) {
+      reasons.push("different-repo-baseline");
+    }
+  } else {
+    if (base.task.id !== candidate.task.id || base.task.schemaVersion !== candidate.task.schemaVersion) {
+      reasons.push("different-task");
+    }
+    if (base.repository.revision !== candidate.repository.revision) reasons.push("different-revision");
   }
-  if (base.repository.revision !== candidate.repository.revision) reasons.push("different-revision");
   if (normalizeScoreMode(base.scoreMode) !== normalizeScoreMode(candidate.scoreMode)) {
     reasons.push("different-score-mode");
   }

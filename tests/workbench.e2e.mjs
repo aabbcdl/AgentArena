@@ -8,10 +8,17 @@ import { loadChromiumForSmoke as loadChromiumOrSkip } from "./browser-smoke-supp
 async function port() { return await new Promise((resolve, reject) => { const server = http.createServer(); server.listen(0, "127.0.0.1", () => { const address = server.address(); const value = typeof address === "object" && address ? address.port : 0; server.close(() => resolve(value)); }); server.on("error", reject); }); }
 async function startServer(cwd) {
   const selectedPort = await port();
-  const child = spawn(process.execPath, [path.resolve(cwd, "packages/cli/dist/index.js"), "ui", "--host", "127.0.0.1", "--port", String(selectedPort), "--no-open"], { cwd, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, BROWSER: "none" } });
+  const authToken = `workbench-e2e-${selectedPort}-${Date.now()}`;
+  const child = spawn(process.execPath, [path.resolve(cwd, "packages/cli/dist/index.js"), "ui", "--host", "127.0.0.1", "--port", String(selectedPort), "--no-open", "--auth-token", authToken], { cwd, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, BROWSER: "none" } });
   let stdout = ""; let stderr = ""; child.stdout.on("data", (chunk) => { stdout += chunk.toString(); }); child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
   await new Promise((resolve, reject) => { const timer = setTimeout(() => reject(new Error(`server timeout\n${stdout}\n${stderr}`)), 15000); child.stdout.on("data", () => { if (stdout.includes("AgentArena UI server running")) { clearTimeout(timer); resolve(); } }); child.on("error", reject); child.on("exit", (code) => reject(new Error(`server exited ${code}\n${stdout}\n${stderr}`))); });
-  return { selectedPort, stop: async () => { child.kill("SIGTERM"); await new Promise((resolve) => child.once("exit", resolve)); } };
+  return { selectedPort, authToken, stop: async () => { child.kill("SIGTERM"); await new Promise((resolve) => child.once("exit", resolve)); } };
+}
+
+async function newAuthenticatedPage(browser, server, options) {
+  const page = await browser.newPage(options);
+  await page.addInitScript((token) => sessionStorage.setItem("agentarena-auth-token", token), server.authToken);
+  return page;
 }
 
 function allFailedRun() {
@@ -25,7 +32,7 @@ function collectErrors(page) { const errors = []; page.on("console", (message) =
 
 test("workbench demo, evidence and language flow has no browser errors", { timeout: 120000 }, async (t) => {
   const chromium = await loadChromiumOrSkip(t); if (!chromium) return;
-  const cwd = path.resolve("."); const server = await startServer(cwd); const browser = await chromium.launch({ headless: true }); const page = await browser.newPage({ viewport: { width: 1440, height: 900 } }); const errors = collectErrors(page);
+  const cwd = path.resolve("."); const server = await startServer(cwd); const browser = await chromium.launch({ headless: true }); const page = await newAuthenticatedPage(browser, server, { viewport: { width: 1440, height: 900 } }); const errors = collectErrors(page);
   try {
     await page.goto(`http://127.0.0.1:${server.selectedPort}/workbench/`, { waitUntil: "domcontentloaded" });
     await page.getByRole("heading", { name: "实验运行中心" }).waitFor();
@@ -46,7 +53,7 @@ test("workbench demo, evidence and language flow has no browser errors", { timeo
 
 test("workbench all-failed import shows no qualified winner", { timeout: 120000 }, async (t) => {
   const chromium = await loadChromiumOrSkip(t); if (!chromium) return;
-  const cwd = path.resolve("."); const server = await startServer(cwd); const browser = await chromium.launch({ headless: true }); const page = await browser.newPage({ viewport: { width: 1280, height: 800 } }); const errors = collectErrors(page);
+  const cwd = path.resolve("."); const server = await startServer(cwd); const browser = await chromium.launch({ headless: true }); const page = await newAuthenticatedPage(browser, server, { viewport: { width: 1280, height: 800 } }); const errors = collectErrors(page);
   try {
     await page.goto(`http://127.0.0.1:${server.selectedPort}/workbench/`, { waitUntil: "domcontentloaded" });
     await page.locator('input[type="file"]').setInputFiles({ name: "all-failed.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(allFailedRun())) });
@@ -59,7 +66,7 @@ test("workbench all-failed import shows no qualified winner", { timeout: 120000 
 
 test("workbench mobile layout keeps primary navigation usable", { timeout: 120000 }, async (t) => {
   const chromium = await loadChromiumOrSkip(t); if (!chromium) return;
-  const cwd = path.resolve("."); const server = await startServer(cwd); const browser = await chromium.launch({ headless: true }); const page = await browser.newPage({ viewport: { width: 390, height: 844 } }); const errors = collectErrors(page);
+  const cwd = path.resolve("."); const server = await startServer(cwd); const browser = await chromium.launch({ headless: true }); const page = await newAuthenticatedPage(browser, server, { viewport: { width: 390, height: 844 } }); const errors = collectErrors(page);
   try {
     await page.goto(`http://127.0.0.1:${server.selectedPort}/workbench/`, { waitUntil: "domcontentloaded" });
     await page.getByRole("heading", { name: "实验运行中心" }).waitFor();
@@ -75,7 +82,7 @@ test("workbench mobile layout keeps primary navigation usable", { timeout: 12000
 
 test("workbench outcome localizes trust reasons and execution status", { timeout: 120000 }, async (t) => {
   const chromium = await loadChromiumOrSkip(t); if (!chromium) return;
-  const cwd = path.resolve("."); const server = await startServer(cwd); const browser = await chromium.launch({ headless: true }); const page = await browser.newPage({ viewport: { width: 1440, height: 900 } }); const errors = collectErrors(page);
+  const cwd = path.resolve("."); const server = await startServer(cwd); const browser = await chromium.launch({ headless: true }); const page = await newAuthenticatedPage(browser, server, { viewport: { width: 1440, height: 900 } }); const errors = collectErrors(page);
   try {
     await page.goto(`http://127.0.0.1:${server.selectedPort}/workbench/`, { waitUntil: "domcontentloaded" });
     await page.getByRole("button", { name: /安全 Demo/ }).first().click();
@@ -92,7 +99,7 @@ test("workbench outcome localizes trust reasons and execution status", { timeout
 
 test("workbench plan context bar shows draft identity", { timeout: 120000 }, async (t) => {
   const chromium = await loadChromiumOrSkip(t); if (!chromium) return;
-  const cwd = path.resolve("."); const server = await startServer(cwd); const browser = await chromium.launch({ headless: true }); const page = await browser.newPage({ viewport: { width: 1440, height: 900 } }); const errors = collectErrors(page);
+  const cwd = path.resolve("."); const server = await startServer(cwd); const browser = await chromium.launch({ headless: true }); const page = await newAuthenticatedPage(browser, server, { viewport: { width: 1440, height: 900 } }); const errors = collectErrors(page);
   try {
     await page.goto(`http://127.0.0.1:${server.selectedPort}/workbench/#/plan`, { waitUntil: "domcontentloaded" });
     await page.getByRole("heading", { name: "创建一次可信评测" }).waitFor();

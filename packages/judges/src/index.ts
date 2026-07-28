@@ -171,15 +171,12 @@ export async function runJudge(
 
 const COMMAND_BASED_TYPES = new Set(["command", "test-result", "lint-check", "compilation", "patch-validation"]);
 /**
- * Max command-based judges to run in parallel. Each command judge typically
- * spawns a child process (npm test, eslint, tsc, …). Running them serially
- * stretched a 5-judge task pack into 5x the total command duration with
- * minimal CPU saturation. The workspace is effectively read-only between
- * agent execution and judge phase, so concurrent reads/builds are safe.
+ * Command judges can invoke tools that write caches or build artifacts, so the
+ * safe default is serial execution.
  *
  * Override at runtime via AGENTARENA_JUDGE_CONCURRENCY.
  */
-const DEFAULT_JUDGE_CONCURRENCY = 4;
+const DEFAULT_JUDGE_CONCURRENCY = 1;
 
 function getJudgeConcurrency(): number {
   const raw = process.env.AGENTARENA_JUDGE_CONCURRENCY;

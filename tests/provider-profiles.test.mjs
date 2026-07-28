@@ -14,8 +14,9 @@ import {
   saveClaudeProviderProfile,
   setClaudeProviderProfileSecret,
 } from "../packages/adapters/dist/claude-provider-profiles.js";
+import { validateClaudeProviderProfileId } from "../packages/adapters/dist/provider-profile-id.js";
 
-const { appDataRoot, secretTarget } = __providerProfileTestUtils;
+const { appDataRoot, registryPath, secretTarget } = __providerProfileTestUtils;
 
 // ─── Unit tests for internal helpers (via test utils) ───
 
@@ -73,6 +74,14 @@ test("secretTarget accepts valid profile IDs", () => {
   assert.doesNotThrow(() => secretTarget("a".repeat(64)));
 });
 
+test("provider profile ID validation is canonical across storage and CRUD", () => {
+  assert.equal(validateClaudeProviderProfileId("valid-profile-1"), null);
+  assert.match(validateClaudeProviderProfileId("invalid_profile"), /start and end|hyphens/i);
+  assert.match(validateClaudeProviderProfileId("-invalid"), /start and end/i);
+  assert.match(validateClaudeProviderProfileId("invalid-"), /start and end/i);
+  assert.match(validateClaudeProviderProfileId("a".repeat(65)), /maximum 64/i);
+});
+
 // ─── Integration tests for profile CRUD ───
 // These tests use a temporary directory to avoid polluting the real registry.
 
@@ -120,6 +129,97 @@ test("saveClaudeProviderProfile creates a new profile", async () => {
     assert.equal(profile.kind, "anthropic-compatible");
     assert.equal(profile.isBuiltIn, false);
     assert.ok(profile.riskFlags.length > 0, "Non-official profiles should have risk flags");
+  });
+});
+
+test("saveClaudeProviderProfile rejects invalid explicit IDs before persistence", async () => {
+  await withTempRoot(async () => {
+    await assert.rejects(
+      () => saveClaudeProviderProfile({
+        id: "invalid_profile",
+        name: "Invalid ID",
+        kind: "anthropic-compatible",
+        apiFormat: "anthropic-messages",
+      }),
+      /invalid profile id/i
+    );
+    await assert.rejects(() => fs.access(registryPath()), { code: "ENOENT" });
+  });
+});
+
+test("listClaudeProviderProfiles removes historical invalid IDs without hiding valid profiles", async () => {
+  await withTempRoot(async () => {
+    const validProfile = {
+      id: "valid-history",
+      name: "Valid History",
+      kind: "anthropic-compatible",
+      apiFormat: "anthropic-messages",
+      extraEnv: {},
+      writeCommonConfig: true,
+      riskFlags: ["third-party-provider"],
+      isBuiltIn: false,
+      secretStored: false
+    };
+    await fs.writeFile(
+      registryPath(),
+      JSON.stringify({
+        schemaVersion: 1,
+        profiles: [
+          validProfile,
+          { ...validProfile, id: "invalid_history", name: "Invalid History" }
+        ]
+      }),
+      "utf8"
+    );
+
+    const profiles = await listClaudeProviderProfiles();
+    assert.ok(profiles.some((profile) => profile.id === "valid-history"));
+    assert.equal(profiles.some((profile) => profile.id === "invalid_history"), false);
+
+    const repaired = JSON.parse(await fs.readFile(registryPath(), "utf8"));
+    assert.deepEqual(repaired.profiles.map((profile) => profile.id), ["valid-history"]);
+  });
+});
+
+test("provider registry recovers an interrupted atomic replacement before reading", async () => {
+  await withTempRoot(async () => {
+    const backupPath = path.join(
+      path.dirname(registryPath()),
+      `.${path.basename(registryPath())}.bak`
+    );
+    const recoveredProfile = {
+      id: "recovered-profile",
+      name: "Recovered Profile",
+      kind: "anthropic-compatible",
+      apiFormat: "anthropic-messages",
+      extraEnv: {},
+      writeCommonConfig: true,
+      riskFlags: ["third-party-provider"],
+      isBuiltIn: false,
+      secretStored: false
+    };
+    await fs.writeFile(
+      backupPath,
+      JSON.stringify({ schemaVersion: 1, profiles: [recoveredProfile] }),
+      "utf8"
+    );
+
+    const profiles = await listClaudeProviderProfiles();
+    assert.ok(profiles.some((profile) => profile.id === "recovered-profile"));
+    await fs.access(registryPath());
+    await assert.rejects(() => fs.access(backupPath), { code: "ENOENT" });
+
+    await saveClaudeProviderProfile({
+      id: "new-profile",
+      name: "New Profile",
+      kind: "anthropic-compatible",
+      apiFormat: "anthropic-messages"
+    });
+    const persisted = JSON.parse(await fs.readFile(registryPath(), "utf8"));
+    assert.deepEqual(
+      persisted.profiles.map((profile) => profile.id).sort(),
+      ["new-profile", "recovered-profile"]
+    );
   });
 });
 

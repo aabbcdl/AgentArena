@@ -94,6 +94,20 @@ test("getCompositeScoreDetails: failed result stays in FAILED_SCORE_BAND [10, 40
   assert.ok(score.total <= 40, `score ${score.total} should be <= 40`);
 });
 
+test("getCompositeScoreDetails: completed execution with critical validation failure stays in [50, 70]", () => {
+  const result = makeResult({
+    status: "failed",
+    executionStatus: "completed",
+    validationStatus: "failed",
+    judgeResults: [
+      { type: "command", success: false, critical: true },
+    ],
+  });
+  const score = getCompositeScoreDetails(result, makeRun());
+  assert.ok(score.total >= 50, `score ${score.total} should be >= 50`);
+  assert.ok(score.total <= 70, `score ${score.total} should be <= 70`);
+});
+
 test("getCompositeScoreDetails: critical judge failure stays in [50, 70]", () => {
   const result = makeResult({
     judgeResults: [

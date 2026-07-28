@@ -6,7 +6,8 @@ import {
   getComparableRuns,
   getCrossRunCompareRows,
   getCrossRunRecommendation,
-  getSelectionTrust
+  getSelectionTrust,
+  recordKey
 } from "../domain/compare";
 import {
   comparisonExclusionReasons,
@@ -19,10 +20,7 @@ import type { Locale } from "../types";
 
 function agentKeyFor(run: NormalizedRun, variantId: string): string {
   const result = run.results.find((item) => item.variantId === variantId);
-  const version = result?.resolvedRuntime && typeof result.resolvedRuntime.version === "string"
-    ? String(result.resolvedRuntime.version)
-    : "";
-  return `${variantId}@@${version}`;
+  return result ? recordKey(result) : "";
 }
 
 export function ComparePage() {

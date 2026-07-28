@@ -184,6 +184,27 @@ test("handleProviderProfileCreate: returns 400 for missing apiFormat", async () 
   assert.ok(body.error.includes("apiFormat"));
 });
 
+test("provider profile routes reject IDs that secret storage cannot use", async () => {
+  await withTempProviderRegistry(async () => {
+    const payload = JSON.stringify({
+      id: "invalid_profile",
+      name: "Invalid Profile",
+      kind: "anthropic-compatible",
+      apiFormat: "anthropic-messages"
+    });
+    const created = await handleProviderProfileCreate(payload);
+    assert.equal(created.statusCode, 400);
+    assert.match(JSON.parse(created.body).error, /profile id/i);
+
+    const updated = await handleProviderProfileUpdate("invalid_profile", payload);
+    assert.equal(updated.statusCode, 400);
+    const secret = await handleProviderProfileSecret("invalid_profile", JSON.stringify({ secret: "x" }));
+    assert.equal(secret.statusCode, 400);
+    const deleted = await handleProviderProfileDelete("invalid_profile");
+    assert.equal(deleted.statusCode, 400);
+  });
+});
+
 test("provider profile write responses mask extraEnv values", async () => {
   await withTempProviderRegistry(async () => {
     const createPayload = {

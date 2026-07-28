@@ -29,6 +29,10 @@ export type { InstallGuide } from "./install-guides.js";
 export { getInstallGuide, INSTALL_GUIDES, listInstallGuides } from "./install-guides.js";
 export { probeAuthConfig, probeClaudeLikeAuthFast, probeCliExists, probeQuickPreflight } from "./invocation-probes.js";
 export { loadAdapterPlugins, registerExternalAdapters } from "./plugin-registry.js";
+export {
+  assertClaudeProviderProfileId,
+  validateClaudeProviderProfileId
+} from "./provider-profile-id.js";
 export type { Transport, TransportChainOptions, TransportChainResult, TransportFallbackThresholds, TransportResult } from "./transport.js";
 export { createClaudeTransportChain, DEFAULT_FALLBACK_THRESHOLDS, RawTransport, resolveFallbackThresholds, StreamJsonTransport, TextTransport, TransportChain } from "./transport.js";
 

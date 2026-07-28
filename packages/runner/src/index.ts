@@ -8,6 +8,7 @@ import {
   type AgentSelection,
   type BenchmarkCancellation,
   type BenchmarkRun,
+  createFairComparisonMetadata,
   getDefaultWeights,
   isAbortError,
   logger,
@@ -36,6 +37,7 @@ import {
   createSelectionFingerprint,
   isAgentRunResult,
   loadResumeState,
+  repositoryIdentity,
   writeAgentResult,
 } from "./resume.js";
 import { checkTaskCompatibility } from "./task-compatibility.js";
@@ -278,6 +280,7 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
 
   const selections = normalizeSelections(options);
   const scoreMode = options.scoreMode ?? "practical";
+  const fairComparison = createFairComparisonMetadata(task, repositoryIdentity(repoPath));
   const runContractFingerprint = createRunContractFingerprint(repoPath, task, scoreMode);
   const runFingerprint = createRunFingerprint(repoPath, task, selections, scoreMode);
   const resumeState = await loadResumeState(options.resumeFrom, runFingerprint, runContractFingerprint);
@@ -495,6 +498,7 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
       outputPath,
       scoreMode: options.scoreMode ?? "practical",
       scoreWeights: getDefaultWeights(options.scoreMode ?? "practical"),
+      fairComparison,
       task,
       taskCompatibility: incompatibleCompatibility,
       preflights,
@@ -703,6 +707,7 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
     outputPath,
     scoreMode: options.scoreMode ?? "practical",
     scoreWeights: getDefaultWeights(options.scoreMode ?? "practical"),
+    fairComparison,
     task,
     taskCompatibility,
     preflights,

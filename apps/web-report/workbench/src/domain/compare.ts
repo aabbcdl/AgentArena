@@ -1,12 +1,24 @@
-import type { NormalizedAgentResult, NormalizedRun } from "./run";
+import { comparisonExclusionReasons, type NormalizedAgentResult, type NormalizedRun } from "./run.ts";
 import { normalizeScoreMode } from "./score-mode.ts";
 
 export type TrustLevel = "strong" | "caution";
 
-function recordKey(result: NormalizedAgentResult): string {
+export function recordKey(result: NormalizedAgentResult): string {
   const runtime = (result.resolvedRuntime ?? {}) as Record<string, unknown>;
-  const version = typeof runtime.version === "string" ? runtime.version : "";
-  return `${result.variantId ?? result.agentId}@@${version}`;
+  const provider = typeof runtime.providerProfileName === "string"
+    ? runtime.providerProfileName
+    : typeof result.requestedConfig.providerProfileId === "string"
+      ? result.requestedConfig.providerProfileId
+      : "official";
+  const model = typeof runtime.effectiveModel === "string"
+    ? runtime.effectiveModel
+    : typeof result.requestedConfig.model === "string"
+      ? result.requestedConfig.model
+      : "unknown";
+  const version = typeof runtime.effectiveAgentVersion === "string"
+    ? runtime.effectiveAgentVersion
+    : "unknown";
+  return JSON.stringify([result.baseAgentId, provider, model, version]);
 }
 
 function passedJudgeCount(result: NormalizedAgentResult): number {
@@ -18,7 +30,7 @@ function judgePassRatio(result: NormalizedAgentResult): number {
 }
 
 function runtimeVersion(result: NormalizedAgentResult): string {
-  const version = result.resolvedRuntime?.version;
+  const version = result.resolvedRuntime?.effectiveAgentVersion;
   return typeof version === "string" ? version : "";
 }
 
@@ -28,13 +40,11 @@ function runtimeVersion(result: NormalizedAgentResult): string {
  * different tasks or score modes would be meaningless.
  */
 export function getComparableRuns(runs: NormalizedRun[], currentRun: NormalizedRun): NormalizedRun[] {
-  const currentTaskId = currentRun.task?.id || currentRun.task?.title;
   const currentScoreMode = normalizeScoreMode(currentRun.scoreMode);
 
   return runs.filter((run) => {
-    const taskId = run.task?.id || run.task?.title;
     const scoreMode = normalizeScoreMode(run.scoreMode);
-    return taskId === currentTaskId && scoreMode === currentScoreMode;
+    return scoreMode === currentScoreMode && comparisonExclusionReasons(currentRun, run).length === 0;
   });
 }
 
@@ -110,17 +120,6 @@ export interface CrossRunComparison {
   rows: CrossRunAgentRow[];
 }
 
-function exclusionReasons(base: NormalizedRun, candidate: NormalizedRun): string[] {
-  const reasons: string[] = [];
-  if (base.task.id !== candidate.task.id || base.task.schemaVersion !== candidate.task.schemaVersion) {
-    reasons.push("different-task");
-  }
-  if (base.repository.revision !== candidate.repository.revision) reasons.push("different-revision");
-  if (base.scoreMode !== candidate.scoreMode) reasons.push("different-score-mode");
-  if (candidate.integrity === "damaged") reasons.push("damaged-result");
-  return reasons;
-}
-
 // Minimal composite: judge pass ratio dominates, then shorter duration is better.
 // Intentionally dependency-free so the workbench stays decoupled from legacy scoring.
 function simpleComposite(result: NormalizedAgentResult): number {
@@ -140,10 +139,10 @@ export function getCrossRunCompareRows(selectedRuns: NormalizedRun[]): CrossRunC
   }
 
   const baseline = selectedRuns[0];
-  const comparableRuns = selectedRuns.filter((run) => exclusionReasons(baseline, run).length === 0);
+  const comparableRuns = selectedRuns.filter((run) => comparisonExclusionReasons(baseline, run).length === 0);
   const excludedRuns = selectedRuns
-    .filter((run) => exclusionReasons(baseline, run).length > 0)
-    .map((run) => ({ run, reasons: exclusionReasons(baseline, run) }));
+    .filter((run) => comparisonExclusionReasons(baseline, run).length > 0)
+    .map((run) => ({ run, reasons: comparisonExclusionReasons(baseline, run) }));
 
   const agentMap = new Map<string, Array<{ run: NormalizedRun; result: NormalizedAgentResult }>>();
   for (const run of comparableRuns) {
