@@ -20,6 +20,11 @@ interface TraceResponse {
   events: TraceEvent[];
 }
 
+interface TraceLoad {
+  events: TraceEvent[];
+  truncated: boolean;
+}
+
 function parseEvents(text: string): TraceEvent[] {
   return text
     .split("\n")
@@ -60,20 +65,20 @@ export function useTrace(run: NormalizedRun | null, result: NormalizedAgentResul
     const variantId = result?.variantId ?? null;
     const runId = run?.runId ?? null;
 
-    if (!run || !result || !variantId || result.traceAvailability === "missing") {
+    if (!run || !result || !variantId || result.traceAvailability === "missing" || run.raw.summaryOnly === true) {
       setState({ status: "missing" });
       return;
     }
 
-    const loadBuiltIn = async (): Promise<TraceEvent[]> => {
+    const loadBuiltIn = async (): Promise<TraceLoad> => {
       const res = await fetch(`trace-${variantId}.jsonl`, { cache: "no-store" });
       if (!res.ok) throw new Error(`builtin-trace-${res.status}`);
-      return parseEvents(await res.text());
+      return { events: parseEvents(await res.text()), truncated: false };
     };
 
-    const loadRemote = async (): Promise<TraceEvent[]> => {
+    const loadRemote = async (): Promise<TraceLoad> => {
       const data = await apiFetch<TraceResponse>(`/api/trace?runId=${encodeURIComponent(runId ?? "")}&variantId=${encodeURIComponent(variantId)}`);
-      return data.events;
+      return { events: data.events, truncated: data.truncated };
     };
 
     const toReady = (timeline: TraceTimeline, truncated: boolean) => {
@@ -103,13 +108,12 @@ export function useTrace(run: NormalizedRun | null, result: NormalizedAgentResul
 
     const source = run.source.kind === "demo" ? loadBuiltIn() : loadRemote();
 
-    source.then((events) => {
+    source.then(({ events, truncated }) => {
       if (cancelled) return;
       if (events.length === 0) {
         setState({ status: "missing" });
         return;
       }
-      const truncated = events.length >= 10_000;
       // Large traces are built off the main thread; small ones are cheap enough inline.
       if (!isLargeTrace(events.length)) {
         toReady(buildTimeline(events), truncated);

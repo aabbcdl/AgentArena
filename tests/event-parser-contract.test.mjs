@@ -49,7 +49,34 @@ describe("event-parser contracts", () => {
       const result = parseCodexEvents(stdout, "/workspace");
       // 1500 + 500 + 800 = 2800
       assert.equal(result.tokenUsage, 2800);
+      assert.deepEqual(result.tokenUsageBreakdown, {
+        inputTokens: 1500,
+        outputTokens: 800,
+        reasoningTokens: 0,
+        cacheReadTokens: 500,
+        cacheWriteTokens: 0
+      });
       assert.equal(result.tokenCountSuspicious, false, "Normal output should not be flagged");
+    });
+
+    it("keeps a deidentified Codex 0.145.0 event contract fail-closed", () => {
+      const result = parseCodexEvents(loadFixture("codex-cli-0.145.0.jsonl"), "/workspace");
+      assert.equal(result.threadId, "pilot-thread-0145");
+      assert.deepEqual(result.changedFilesHint, ["src/utils.js"]);
+      assert.equal(result.tokenUsage, 1648);
+      assert.equal(result.tokenUsageBreakdown.reasoningTokens, 80);
+      assert.equal(result.usageIncomplete, false);
+      assert.deepEqual(result.missingCriticalEvents, []);
+    });
+
+    it("marks alternate or incomplete usage as unreliable instead of inventing a breakdown", () => {
+      const result = parseCodexEvents(
+        '{"type":"turn.completed","usage":{"totalTokens":1234}}\n',
+        "/workspace"
+      );
+      assert.equal(result.tokenUsage, 1234);
+      assert.equal(result.usageIncomplete, true);
+      assert.equal(result.tokenUsageBreakdown.inputTokens, 0);
     });
 
     it("extracts runtime info from nested string values", () => {
@@ -57,6 +84,15 @@ describe("event-parser contracts", () => {
       const result = parseCodexEvents(stdout, "/workspace");
       assert.equal(result.resolvedRuntime?.effectiveModel, "o3");
       assert.equal(result.resolvedRuntime?.effectiveReasoningEffort, "medium");
+      assert.equal(result.resolvedRuntime?.modelIdentitySource, "confirmed");
+      assert.equal(result.resolvedRuntime?.reasoningEffortSource, "confirmed");
+    });
+
+    it("extracts reasoning tokens without double-counting them in the total", () => {
+      const stdout = '{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":20,"output_tokens":50,"output_tokens_details":{"reasoning_tokens":30}}}\n';
+      const result = parseCodexEvents(stdout, "/workspace");
+      assert.equal(result.tokenUsage, 170);
+      assert.equal(result.tokenUsageBreakdown.reasoningTokens, 30);
     });
 
     it("warns when turn.completed events produce zero tokens", () => {
@@ -65,6 +101,7 @@ describe("event-parser contracts", () => {
       const result = parseCodexEvents(brokenOutput, "/workspace");
       assert.equal(result.tokenUsage, 0, "Should be 0 because field names don't match");
       assert.equal(result.tokenCountSuspicious, true, "Should flag suspicious token count");
+      assert.equal(result.usageIncomplete, true, "Should flag an unrecognized usage breakdown");
       // Adapter consumers must treat this as tokenUsageReliable: false (codex-adapter).
       assert.equal(result.formatMismatch, false, "field rename alone is not a majority schema mismatch");
     });
@@ -126,6 +163,22 @@ describe("event-parser contracts", () => {
       assert.equal(result.summaryFromEvents, "done");
     });
 
+    it("extracts Codex turn failures without reporting protocol drift", () => {
+      const stdout = [
+        '{"type":"thread.started","thread_id":"t1"}',
+        '{"type":"turn.started"}',
+        '{"type":"error","message":"Reconnecting... 1/5 (unexpected status 503 Service Unavailable)"}',
+        '{"type":"error","message":"unexpected status 503 Service Unavailable"}',
+        '{"type":"turn.failed","error":{"message":"unexpected status 503 Service Unavailable"}}'
+      ].join("\n") + "\n";
+      const result = parseCodexEvents(stdout, "/workspace");
+
+      assert.equal(result.failureMessage, "unexpected status 503 Service Unavailable");
+      assert.equal(result.formatMismatch, false);
+      assert.deepEqual(result.missingCriticalEvents, []);
+      assert.equal(result.tokenUsage, 0);
+    });
+
     it("does NOT flag formatMismatch when no typed events are present", () => {
       // JSON lines without a `type` field should not count toward the ratio.
       const noTypes = '{"foo":"bar","usage":{"input_tokens":10}}\n';
@@ -159,8 +212,25 @@ describe("event-parser contracts", () => {
       const result = parseStreamJsonEvents(stdout, "test");
       // result event: 2000 + 600 + 100 + 300 = 3000
       assert.equal(result.tokenUsage, 3000);
+      assert.deepEqual(result.tokenUsageBreakdown, {
+        inputTokens: 2000,
+        outputTokens: 600,
+        reasoningTokens: 0,
+        cacheReadTokens: 300,
+        cacheWriteTokens: 100
+      });
       assert.equal(result.tokenCountSuspicious, false, "Normal output should not be flagged");
       assert.equal(result.tokenUsageFromResultEvent, true, "Authoritative result event was present");
+    });
+
+    it("uses the authoritative result event for reasoning token breakdown", () => {
+      const stdout = [
+        '{"type":"assistant","message":{"content":[{"type":"text","text":"working"}],"usage":{"input_tokens":50,"output_tokens":20,"reasoning_tokens":5}}}',
+        '{"type":"result","result":"done","total_cost_usd":0.01,"usage":{"input_tokens":100,"output_tokens":40,"reasoning_tokens":15}}'
+      ].join("\n") + "\n";
+      const result = parseStreamJsonEvents(stdout, "test");
+      assert.equal(result.tokenUsage, 140);
+      assert.equal(result.tokenUsageBreakdown.reasoningTokens, 15);
     });
 
     it("extracts cost from result event", () => {

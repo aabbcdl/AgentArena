@@ -78,8 +78,23 @@ export async function prepareWorkspace(options: WorkspacePrepOptions): Promise<W
     throw new Error(message);
   }
 
-  await ensureDirectory(outputRootPath);
-  await ensureDirectory(outputPath);
+  try {
+    await ensureDirectory(outputRootPath);
+    await ensureDirectory(outputPath);
+  } catch (error) {
+    try {
+      await fs.rm(workspaceRootPath, { recursive: true, force: true });
+    } catch (cleanupError) {
+      logger.warn(
+        "runner",
+        "workspace_prep.cleanup_failed",
+        `Failed to clean workspace root after output initialization failed: ${
+          cleanupError instanceof Error ? cleanupError.message : String(cleanupError)
+        }`
+      );
+    }
+    throw error;
+  }
 
   return { runId, outputPath, outputRootPath, workspaceRootPath };
 }

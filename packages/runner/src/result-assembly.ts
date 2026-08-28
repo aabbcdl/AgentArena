@@ -6,7 +6,7 @@ import type {
   DiffSummary,
   FileDiffArtifact,
 } from "@agentarena/core";
-import { logger, metrics } from "@agentarena/core";
+import { logger, metrics, relativizeWorkspacePathsInText } from "@agentarena/core";
 import type { runJudges } from "@agentarena/judges";
 import {
   createBaseResult,
@@ -72,7 +72,7 @@ export function buildFinalResult(
       status: "failed",
       executionStatus: "failed",
       validationStatus: "not-run",
-      summary: `${adapter.title} crashed: ${errorMessage}`,
+      summary: relativizeWorkspacePathsInText(`${adapter.title} crashed: ${errorMessage}`, workspacePath),
       durationMs,
       changedFiles,
       changedFilesHint: changedFiles,
@@ -188,7 +188,7 @@ export function buildFinalResult(
     status: success ? "success" : "failed",
     executionStatus: finalExecutionStatus,
     validationStatus: finalValidationStatus,
-    summary: adapterResult.summary,
+    summary: relativizeWorkspacePathsInText(adapterResult.summary, workspacePath),
     durationMs,
     tokenUsage: adapterResult.tokenUsage,
     estimatedCostUsd: adapterResult.estimatedCostUsd,

@@ -19,6 +19,11 @@ const packs = await Promise.all(files.map(async (name) => {
   const value = parse(raw);
   return { name, ...value };
 }));
+const corePacks = packs.filter((pack) => pack.metadata?.lifecycle === "core");
+const legacyPacks = packs.filter((pack) => pack.metadata?.lifecycle !== "core");
+if (corePacks.length === 0) {
+  throw new Error("No lifecycle: core task packs were found; refusing to generate an empty first-release catalog.");
+}
 
 function cell(value) {
   return String(value ?? "").replaceAll("|", "\\|").replaceAll("\n", " ").trim();
@@ -29,18 +34,27 @@ function block(locale) {
     start,
     "",
     isZh
-      ? `\u5f53\u524d\u5171\u6709 **${packs.length}** \u4e2a\u5b98\u65b9\u4efb\u52a1\u5305\u3002\u4ee5\u4e0b\u76ee\u5f55\u76f4\u63a5\u7531\u4efb\u52a1\u5305\u6587\u4ef6\u751f\u6210\u3002`
-      : `There are **${packs.length}** official task packs. This catalog is generated directly from the task pack files.`,
+      ? `\u9996\u53d1\u6bd4\u8f83\u76ee\u5f55\u5305\u542b **${corePacks.length}** \u4e2a\u6838\u5fc3\u4efb\u52a1\u5305\uff1b\u53e6\u6709 **${legacyPacks.length}** \u4e2a\u5386\u53f2/\u5b9e\u9a8c\u4efb\u52a1\u5305\u4fdd\u7559\u5728\u4ed3\u5e93\u4e2d\uff0c\u4f46\u4e0d\u8fdb\u5165\u9996\u53d1\u6bd4\u8f83\u3002`
+      : `The first-release comparison catalog contains **${corePacks.length}** core task packs. ${legacyPacks.length} historical/experimental packs remain in the repository but are excluded from first-release comparison.`,
     "",
     isZh ? "| \u4efb\u52a1\u5305 | \u540d\u79f0 | \u7528\u9014 |" : "| Task pack | Name | Purpose |",
     "| --- | --- | --- |"
   ];
-  for (const pack of packs) {
+  for (const pack of corePacks) {
     const translated = pack.metadata?.i18n?.[locale] ?? {};
     lines.push(`| \`${cell(pack.id)}\` | ${cell(translated.title ?? pack.title)} | ${cell(translated.description ?? pack.description)} |`);
   }
   lines.push("", end);
   return lines.join("\n");
+}
+
+function legacyBlock(locale) {
+  const isZh = locale === "zh-CN";
+  const heading = isZh ? "## \u4fdd\u7559\u4f46\u6682\u4e0d\u7eb3\u5165\u9996\u53d1\u6bd4\u8f83\u7684\u4efb\u52a1\u5305" : "## Retained legacy and experimental packs";
+  const intro = isZh
+    ? "\u4ee5\u4e0b\u4efb\u52a1\u5305\u6ca1\u6709\u5220\u9664\uff0c\u4f46\u5c1a\u672a\u5b8c\u6210\u9996\u53d1\u5939\u5177\u548c\u8fb9\u754c\u6821\u51c6\uff1b\u53ef\u624b\u52a8\u8fd0\u884c\uff0c\u4e0d\u4f1a\u51fa\u73b0\u5728\u9996\u53d1\u6bd4\u8f83\u5217\u8868\u3002"
+    : "These files are retained for manual use, but their fixtures or boundaries are not yet calibrated for first-release comparison.";
+  return [heading, "", intro, "", legacyPacks.map((pack) => `- \`${cell(pack.id)}\``).join("\n")].join("\n");
 }
 
 async function updateFile(filePath, contentFactory, bootstrap) {
@@ -77,6 +91,8 @@ const officialBody = [
   "",
   block("zh-CN").replace(start, "<!-- official-taskpacks-zh:start -->").replace(end, "<!-- official-taskpacks-zh:end -->"),
   "",
+  legacyBlock("en"),
+  "",
   "## Usage | \u4f7f\u7528\u65b9\u5f0f",
   "",
   "Choose a task pack in Workbench, or pass its path to `agentarena run --task <path>`.",
@@ -87,5 +103,5 @@ if (checkOnly) {
   if (current !== officialBody) throw new Error("examples/taskpacks/official/README.md task pack catalog is stale. Run pnpm taskpacks:sync.");
 } else {
   await fs.writeFile(officialReadme, officialBody, "utf8");
-  console.log(`Synchronized ${packs.length} official task packs across README catalogs.`);
+  console.log(`Synchronized ${corePacks.length} core task packs (${legacyPacks.length} legacy retained) across README catalogs.`);
 }

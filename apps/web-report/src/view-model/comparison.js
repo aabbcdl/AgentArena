@@ -48,6 +48,15 @@ export function runtimeIdentity(result) {
   };
 }
 
+export function usesThirdPartyProviderConfiguration(result) {
+  const runtime = result?.resolvedRuntime;
+  if (!runtime) return false;
+
+  return runtime.providerSource === "profile-config"
+    || runtime.source === "profile-config"
+    || (runtime.providerKind !== undefined && runtime.providerKind !== "official");
+}
+
 export function resultRecordKey(result) {
   const runtime = runtimeIdentity(result);
   return JSON.stringify([

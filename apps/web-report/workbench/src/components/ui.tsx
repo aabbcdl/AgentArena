@@ -4,7 +4,7 @@ import type { CopyKey } from "../i18n";
 import { copy } from "../i18n";
 import type { CostQuality, Locale } from "../types";
 
-export type IconName = "runs" | "plus" | "compare" | "library" | "environment" | "settings" | "plan" | "live" | "outcome" | "evidence" | "check" | "warning" | "danger" | "info" | "refresh" | "cancel" | "upload" | "clock" | "repo" | "agent" | "trace" | "file" | "cost" | "menu" | "chevron" | "external";
+export type IconName = "runs" | "plus" | "compare" | "library" | "environment" | "settings" | "plan" | "live" | "outcome" | "evidence" | "check" | "warning" | "danger" | "info" | "refresh" | "cancel" | "upload" | "download" | "copy" | "clock" | "repo" | "agent" | "trace" | "file" | "cost" | "menu" | "chevron" | "external";
 
 const paths: Record<IconName, ComponentChildren> = {
   runs: <><path d="M4 5h16v14H4z"/><path d="M8 9h8M8 13h5"/></>,
@@ -24,7 +24,9 @@ const paths: Record<IconName, ComponentChildren> = {
   repo: <><path d="M4 4h6l2 3h8v13H4z"/></>, agent: <><rect x="5" y="7" width="14" height="11" rx="2"/><path d="M12 3v4M9 12h.01M15 12h.01M9 15h6"/></>,
   trace: <><circle cx="5" cy="6" r="2"/><circle cx="19" cy="18" r="2"/><path d="M7 6h4a3 3 0 0 1 3 3v6a3 3 0 0 0 3 3"/></>, file: <><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v5h4"/></>,
   cost: <><circle cx="12" cy="12" r="9"/><path d="M15 8.5c-.7-.7-1.7-1-3-1-1.7 0-3 .8-3 2s1.2 1.8 3 2.2 3 1 3 2.3-1.3 2.5-3 2.5c-1.3 0-2.5-.4-3.2-1.2M12 5v14"/></>,
-  menu: <path d="M4 7h16M4 12h16M4 17h16"/>, chevron: <path d="m9 6 6 6-6 6"/>, external: <><path d="M14 4h6v6M20 4l-9 9"/><path d="M18 13v7H4V6h7"/></>
+  menu: <path d="M4 7h16M4 12h16M4 17h16"/>, chevron: <path d="m9 6 6 6-6 6"/>, external: <><path d="M14 4h6v6M20 4l-9 9"/><path d="M18 13v7H4V6h7"/></>,
+  download: <><path d="M12 4v11M7 11l5 5 5-5"/><path d="M5 20h14"/></>,
+  copy: <><rect x="8" y="8" width="11" height="12" rx="1"/><path d="M16 8V5H5v12h3"/></>
 };
 
 export function Icon({ name, size = 18 }: { name: IconName; size?: number }) {

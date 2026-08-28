@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import { escapeHtml } from "../packages/core/dist/index.js";
 import { renderHtml } from "../packages/report/dist/html-template.js";
 import { generateCsv, sanitizeRun } from "../packages/report/dist/index.js";
+import { renderMarkdown } from "../packages/report/dist/markdown-template.js";
 
 describe("report rendering", () => {
   describe("escapeHtml", () => {
@@ -110,9 +111,39 @@ describe("report rendering", () => {
   describe("sanitizeRun", () => {
     const baseResult = {
       agentId: "demo-fast",
+      baseAgentId: "demo-fast",
+      variantId: "demo-fast",
+      displayLabel: "Demo Fast",
+      requestedConfig: {},
+      status: "success",
+      summary: "Done",
+      durationMs: 1,
+      tokenUsage: 0,
+      estimatedCostUsd: 0,
+      costKnown: false,
+      changedFiles: [],
+      diff: { added: [], changed: [], removed: [] },
       workspacePath: "/tmp/ws/demo-fast",
       tracePath: "/abs/out/agents/demo-fast/trace.jsonl",
-      preflight: { command: "secret-cmd" },
+      preflight: {
+        agentId: "demo-fast",
+        baseAgentId: "demo-fast",
+        variantId: "demo-fast",
+        displayLabel: "Demo Fast",
+        requestedConfig: {},
+        status: "ready",
+        summary: "Ready",
+        capability: {
+          supportTier: "supported",
+          invocationMethod: "demo",
+          authPrerequisites: [],
+          tokenAvailability: "estimated",
+          costAvailability: "estimated",
+          traceRichness: "partial",
+          knownLimitations: []
+        },
+        command: "secret-cmd"
+      },
       setupResults: [],
       judgeResults: [],
       teardownResults: []
@@ -123,7 +154,51 @@ describe("report rendering", () => {
       repoPath: "/abs/repo",
       outputPath: "/abs/out",
       task: { id: "t", title: "T", prompt: "do x" },
-      preflights: []
+      preflights: [],
+      scoreScope: "run-local"
+    };
+    const jobManifest = {
+      schemaVersion: "agentarena.job-manifest/v1",
+      runId: "r1",
+      status: "completed",
+      createdAt: "2026-01-01T00:00:00Z",
+      updatedAt: "2026-01-01T00:01:00Z",
+      startedAt: "2026-01-01T00:00:01Z",
+      finishedAt: "2026-01-01T00:01:00Z",
+      failureSummary: "Provider rejected api_key=job-manifest-secret",
+      repositoryBaselineIdentity: "repo:baseline",
+      taskIdentity: "task:identity",
+      judgeIdentity: "judge:identity",
+      scoreMode: "practical",
+      variants: [{
+        order: 0,
+        variantId: "codex-profile",
+        agentKind: "codex",
+        profileId: "codex-profile",
+        profileRevision: 3,
+        secretRevision: 2,
+        launchSpecHash: "launch-spec:identity",
+        verificationReceiptId: "receipt:identity",
+        installationFingerprint: "installation:identity",
+        installationVersion: "1.2.3",
+        harnessSnapshotId: "harness-snapshot:before",
+        providerKind: "managed-provider",
+        requestedModel: "provider-model",
+        canonicalModelIdentity: "provider/model-family",
+        modelIdentitySource: "declared",
+        reasoningEffort: "high",
+        providerPolicyIdentity: "provider-policy:identity",
+        modelParametersIdentity: "model-parameters:identity",
+        permissionMode: "workspace-write",
+        fullPermissionBypass: false,
+        riskFlags: ["third-party-provider"],
+        harnessDrift: {
+          status: "unchanged",
+          checkedAt: "2026-01-01T00:01:00Z",
+          postRunSnapshotId: "harness-snapshot:after",
+          summary: "Harness unchanged; token=job-manifest-secret"
+        }
+      }]
     };
 
     it("redacts the assembled prompt from shareable output", () => {
@@ -142,6 +217,92 @@ describe("report rendering", () => {
     it("leaves an absent assembled prompt undefined", () => {
       const run = { ...baseRun, results: [{ ...baseResult, assembledPrompt: undefined }] };
       assert.equal(sanitizeRun(run).results[0].assembledPrompt, undefined);
+    });
+
+    it("normalizes workspace paths and redacts secrets in imported summaries", () => {
+      const workspacePath = "C:\\Users\\test\\AppData\\Local\\Temp\\agentarena-workspaces\\run";
+      const run = {
+        ...baseRun,
+        results: [{
+          ...baseResult,
+          workspacePath,
+          summary: `Updated C:/Users/test/AppData/Local/Temp/agentarena-workspaces/run/src/utils.js with api_key=report-secret`
+        }]
+      };
+      const sanitized = sanitizeRun(run);
+      assert.equal(sanitized.results[0].summary, "Updated src/utils.js with api_key=[redacted]");
+      assert.doesNotMatch(JSON.stringify(sanitized), /agentarena-workspaces|report-secret/);
+    });
+
+    it("preserves complete runtime identity and drift evidence while redacting Manifest diagnostics", () => {
+      const run = { ...baseRun, jobManifest, results: [{ ...baseResult }] };
+      const sanitized = sanitizeRun(run);
+
+      assert.equal(sanitized.jobManifest?.variants[0].launchSpecHash, "launch-spec:identity");
+      assert.equal(sanitized.jobManifest?.variants[0].verificationReceiptId, "receipt:identity");
+      assert.equal(sanitized.jobManifest?.variants[0].providerPolicyIdentity, "provider-policy:identity");
+      assert.equal(sanitized.jobManifest?.variants[0].modelParametersIdentity, "model-parameters:identity");
+      assert.deepEqual(sanitized.jobManifest?.variants[0].harnessDrift, {
+        status: "unchanged",
+        checkedAt: "2026-01-01T00:01:00Z",
+        postRunSnapshotId: "harness-snapshot:after",
+        summary: "Harness unchanged; token=[redacted]"
+      });
+      assert.equal(sanitized.jobManifest?.failureSummary, "Provider rejected api_key=[redacted]");
+      assert.doesNotMatch(JSON.stringify(sanitized), /job-manifest-secret/);
+    });
+
+    it("renders the same runtime integrity evidence in Markdown and HTML", () => {
+      const run = sanitizeRun({ ...baseRun, jobManifest, results: [{ ...baseResult }] });
+      const markdown = renderMarkdown(run, "en");
+      const html = renderHtml(run, "en");
+
+      for (const expected of [
+        "Execution Integrity",
+        "launch-spec:identity",
+        "receipt:identity",
+        "provider-policy:identity",
+        "model-parameters:identity",
+        "harness-snapshot:before",
+        "unchanged"
+      ]) {
+        assert.match(markdown, new RegExp(expected));
+        assert.match(html, new RegExp(expected));
+      }
+      assert.doesNotMatch(markdown, /job-manifest-secret/);
+      assert.doesNotMatch(html, /job-manifest-secret/);
+    });
+
+    it("does not mislabel inherited local Codex as a third-party Provider", () => {
+      const result = {
+        ...baseResult,
+        resolvedRuntime: {
+          providerProfileName: "codex-local",
+          providerSource: "unknown",
+          source: "cli-default",
+          verification: "inferred"
+        }
+      };
+      const run = sanitizeRun({ ...baseRun, results: [result] });
+
+      assert.doesNotMatch(renderMarkdown(run, "en"), /managed third-party Provider/);
+      assert.doesNotMatch(renderHtml(run, "en"), /managed third-party Provider/);
+    });
+
+    it("labels managed Provider results consistently in Markdown and HTML", () => {
+      const result = {
+        ...baseResult,
+        resolvedRuntime: {
+          providerProfileName: "managed-provider",
+          providerSource: "profile-config",
+          source: "profile-config",
+          verification: "inferred"
+        }
+      };
+      const run = sanitizeRun({ ...baseRun, results: [result] });
+
+      assert.match(renderMarkdown(run, "en"), /managed third-party Provider/);
+      assert.match(renderHtml(run, "en"), /managed third-party Provider/);
     });
   });
 

@@ -65,13 +65,18 @@ export async function writeReport(
   options: WriteReportOptions = {}
 ): Promise<{ htmlPath: string; jsonPath: string; markdownPath: string; badgePath: string; prCommentPath: string }> {
   const locale = options.locale ?? "en";
-  const allRuns = options.allRuns ?? [run];
+  const allRuns = options.allRuns ?? [];
   
   await ensureDirectory(run.outputPath);
-  const publicRun = sanitizeRun(enrichRunWithScores(run));
+  const scoredRun = enrichRunWithScores(run);
+  const publicRun = sanitizeRun(scoredRun);
 
-  // Build historical leaderboard from prior runs.
-  const leaderboard = buildLeaderboard(allRuns, run);
+  // Score historical and current runs through the same pipeline before aggregation.
+  const leaderboardRuns = allRuns
+    .filter((candidate) => candidate.runId !== run.runId)
+    .map((candidate) => enrichRunWithScores(candidate));
+  leaderboardRuns.push(scoredRun);
+  const leaderboard = buildLeaderboard(leaderboardRuns, scoredRun);
 
   const jsonPath = path.join(run.outputPath, "summary.json");
   const htmlPath = path.join(run.outputPath, "report.html");

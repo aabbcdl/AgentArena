@@ -43,11 +43,11 @@ pnpm install --no-strict-peer-dependencies
 
 ## Agent Authentication
 
-### "Claude Code unattended permissions are not enabled"
+### "Claude Code cannot run safely in the background"
 
-AgentArena 不会默认替 Claude Code 跳过权限确认，因为该选项会让 Claude Code 以当前本机账户权限执行命令。需要运行会修改临时仓库的 Claude 任务时，请在启动 AgentArena 前设置 `AGENTARENA_SKIP_PERMISSIONS=1`（或 `true`），然后重新检测。
+AgentArena 需要 Claude Code 支持 `--permission-mode dontAsk` 和 `--no-session-persistence`。这个模式会拒绝无法无提示授权的工具调用，不会跳过全部权限检查。
 
-未设置时，官方模式和第三方 Provider 模式都会在运行前明确阻止，不会继续等待无法交互的授权提示。只对可信任务包和仓库开启该选项。
+**处理：**升级 Claude Code，确认 `claude --help` 同时包含这两个参数，然后在 Environment 页重新执行三阶段验证。不要设置旧的 `AGENTARENA_SKIP_PERMISSIONS`；AgentArena 已忽略该变量，也不会追加 `--dangerously-skip-permissions`。
 
 ### "Agent not ready" or "Authentication failed"
 
@@ -83,15 +83,15 @@ claude --help
 
 ### "This Claude Code version cannot guarantee isolated third-party Provider execution"
 
-第三方 Provider 运行需要 Claude Code 支持隔离设置来源和严格 MCP 配置。AgentArena 不会为了兼容旧版本而退回读取个人配置。
+这条信息只来自旧 launcher 的 Claude-only Provider 兼容路径，该路径仍使用临时隔离配置。
 
-**处理：**升级 Claude Code，确认 `claude --help` 中包含 `--setting-sources`、`--strict-mcp-config` 和 `--no-session-persistence`，然后重新执行连接测试。
+**处理：**优先在新 Workbench Environment 页创建 managed RuntimeProfile；它继承正常 Harness，不要求 strict MCP 隔离。若必须使用旧兼容路径，则升级 Claude Code，确认 `claude --help` 中包含 `--setting-sources`、`--strict-mcp-config` 和 `--no-session-persistence`。
 
 ### "extraEnv cannot override reserved runtime fields"
 
-Provider 的附加环境中包含会破坏隔离的字段，例如 `CLAUDE_CONFIG_DIR`、`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_BASE_URL`、系统路径或主目录字段。
+Provider 的附加环境中包含保留的运行控制字段，例如 `CLAUDE_CONFIG_DIR`、`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_BASE_URL`、系统路径或主目录字段。
 
-**处理：**删除错误信息列出的字段。地址、模型和密钥使用 Provider 页面中的专用输入项填写；隔离目录由 AgentArena 自动管理。
+**处理：**删除错误信息列出的字段。地址、模型和密钥使用 RuntimeProfile 的专用输入项填写；AgentArena 会在任务子进程中注入，不会写入用户全局 CLI 配置。
 
 ## Benchmark Runs
 
@@ -208,14 +208,23 @@ Open `http://127.0.0.1:4320`. For multi-machine use, run AgentArena on each mach
 
 ### "Authentication failed" when accessing UI
 
-Sensitive API paths require a Bearer token even on localhost.
+敏感 API 路径仍由 Bearer Token 保护，但普通用户不需要手动查找它。首次打开 Workbench 的“运行环境”页时，直接设置一个本地服务密码；之后输入这个密码即可登录。密码只保存在本机 `.agentarena/ui-auth.json` 的哈希中。
 
-**Fix:** Check the terminal output for `auth_token_file=...`, read that file, or set your own:
+**Fix:** 在“运行环境”页设置或输入密码。当前这台本地 Pilot 使用的密码是 `admin`。
+
+如果需要脚本或兼容旧流程，仍可显式指定 Bearer Token：
 ```bash
 agentarena ui --auth-token my-secret
 ```
 
-Then open `http://127.0.0.1:4320` and paste the token if the UI asks for it.
+也可以使用本地开发变量：
+```powershell
+$env:AGENTARENA_LOCAL_AUTH_TOKEN = "admin"
+agentarena ui
+```
+该变量只对本机启动生效；如果未设置变量，首次启动会让 Workbench 设置密码。自动打开浏览器时仍会使用一次性 bootstrap，手动打开时不再要求用户读取 token 文件。
+
+然后打开 `http://127.0.0.1:4320`。
 
 ## Scoring
 

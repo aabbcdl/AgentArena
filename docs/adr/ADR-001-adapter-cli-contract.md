@@ -54,7 +54,7 @@ Expected JSON-per-line events:
 The `StreamJsonTransport` in `packages/adapters/src/transport.ts` uses these flags:
 
 ```
--p --output-format stream-json --verbose --dangerously-skip-permissions --no-session-persistence
+--permission-mode dontAsk -p --output-format stream-json --verbose --no-session-persistence
 ```
 
 | Flag | Why | Documented? |
@@ -62,8 +62,10 @@ The `StreamJsonTransport` in `packages/adapters/src/transport.ts` uses these fla
 | `-p` | Pipe prompt from stdin | Yes |
 | `--output-format stream-json` | Structured JSON output | Yes |
 | `--verbose` | Required for full structured output | **No** — undocumented requirement |
-| `--dangerously-skip-permissions` | Skip interactive permission prompts | **No** — internal flag, **gated** behind `AGENTARENA_SKIP_PERMISSIONS=1` (`transport.ts:191,323`); the adapter refuses to run without the opt-in. The auth probe still uses the milder `--permission-mode bypassPermissions` (`invocation-probes.ts:315`). |
+| `--permission-mode dontAsk` | Deny tool actions that would require an interactive approval | Yes in supported Claude Code versions; preflight blocks older versions. |
 | `--no-session-persistence` | Don't save session state | Yes |
+
+AgentArena does not generate `--dangerously-skip-permissions`. The former `AGENTARENA_SKIP_PERMISSIONS` switch was removed because a host-wide environment toggle could silently broaden every Claude-style transport invocation.
 
 ### 3. Transport Fallback Thresholds
 
@@ -104,7 +106,7 @@ The normalized keys are looked up against hardcoded strings. There is no schema 
 
 - Any CLI version update can silently break token counting and cost tracking
 - The `result` event's "replace vs add" semantic is critical but fragile
-- `--verbose` and `--permission-mode bypassPermissions` are undocumented flags that could be removed
+- `--verbose` remains an undocumented compatibility dependency; `--permission-mode dontAsk` is capability-probed before background execution
 
 ## Mitigations (implemented)
 

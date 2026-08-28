@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -52,6 +52,77 @@ test("accepts cwd itself as repoPath", () => {
     repoPath: CWD,
     taskPath: path.join(CWD, "task.yaml"),
   }), null);
+});
+
+test("accepts macOS /var aliases for paths inside the current working directory", async () => {
+  if (process.platform !== "darwin") {
+    assert.ok(true, "macOS path alias behavior");
+    return;
+  }
+
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-payload-alias-"));
+  try {
+    await mkdir(path.join(tempDir, "repo"), { recursive: true });
+    await writeFile(path.join(tempDir, "task.yaml"), "schemaVersion: agentarena.taskpack/v1\n", "utf8");
+    const realTempDir = await realpath(tempDir);
+    const aliasTempDir = realTempDir.startsWith("/private/")
+      ? realTempDir.slice("/private".length)
+      : realTempDir;
+    assert.notEqual(aliasTempDir, realTempDir);
+    const payload = {
+      repoPath: path.join(aliasTempDir, "repo"),
+      taskPath: path.join(aliasTempDir, "task.yaml"),
+    };
+    assert.equal(validateRunPayload(payload, realTempDir), null);
+    assert.equal(await validateRunPayloadPaths(payload, {
+      cwd: realTempDir,
+      taskRoots: [realTempDir]
+    }), null);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("accepts legacy string agent selections", () => {
+  assert.equal(validateRunPayload({
+    repoPath: CWD,
+    taskPath: path.join(CWD, "task.yaml"),
+    agents: ["demo-fast"]
+  }), null);
+});
+
+test("rejects an empty legacy string agent selection", () => {
+  assert.match(validateRunPayload({
+    repoPath: CWD,
+    taskPath: path.join(CWD, "task.yaml"),
+    agents: ["  "]
+  }), /non-empty string/);
+});
+
+test("accepts frozen runtime admission fingerprints", () => {
+  assert.equal(validateRunPayload({
+    repoPath: CWD,
+    taskPath: path.join(CWD, "task.yaml"),
+    agents: [{
+      baseAgentId: "codex",
+      runtimeProfileId: "codex-local",
+      launchSpecHash: "launch-spec:current",
+      verificationReceiptId: "verification-current"
+    }]
+  }), null);
+});
+
+test("rejects empty frozen runtime admission fingerprints", () => {
+  const error = validateRunPayload({
+    repoPath: CWD,
+    taskPath: path.join(CWD, "task.yaml"),
+    agents: [{
+      baseAgentId: "codex",
+      runtimeProfileId: "codex-local",
+      launchSpecHash: ""
+    }]
+  });
+  assert.match(error, /launchSpecHash/);
 });
 
 test("rejects path-traversal attempt via ../ segments resolving outside cwd", () => {
@@ -162,6 +233,22 @@ test("explicit cwd parameter is honored for path containment", () => {
     repoPath: path.join(altCwd, "nested"),
     taskPath: path.join(altCwd, "task.yaml"),
   }, altCwd), null);
+});
+
+test("resolves relative paths against the explicit cwd", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-relative-payload-"));
+  try {
+    assert.equal(validateRunPayload({
+      repoPath: ".",
+      taskPath: "task.yaml"
+    }, tempDir), null);
+    assert.equal(await validateRunPayloadPaths({
+      repoPath: ".",
+      taskPath: "task.yaml"
+    }, { cwd: tempDir, taskRoots: [tempDir] }), null);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
 });
 
 // --- Prefix-match bypass tests ---

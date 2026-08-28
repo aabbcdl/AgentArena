@@ -346,7 +346,7 @@ pnpm build && node packages/cli/dist/index.js run \
 
 3. **Changed files discrepancy**: Different adapters populate `changedFilesHint` differently. The runner's `buildChangedFiles()` merges hints with the snapshot diff. If your adapter emits file changes in its event stream, use those; otherwise, the base adapter's `git diff` fallback works.
 
-4. **Permission prompts**: Some CLIs (e.g. Claude Code) require explicit permission for unattended operation. Use `AGENTARENA_SKIP_PERMISSIONS=1` or `shouldSkipClaudePermissions()` to handle this.
+4. **Permission prompts**: An adapter must define a bounded non-interactive mode and fail preflight when the installed CLI cannot support it. Claude Code uses `--permission-mode dontAsk`; never add `--dangerously-skip-permissions` or a host environment switch that enables it.
 
 5. **Timeout handling**: The default transport timeout is 5 minutes (`AGENTARENA_TRANSPORT_TIMEOUT_MS`). Long-running agents may need a longer timeout. Set it via the environment variable.
 

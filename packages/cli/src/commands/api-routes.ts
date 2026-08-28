@@ -29,6 +29,15 @@ export {
   handleProviderProfileUpdate,
 } from "./api-routes/providers.js";
 export {
+  handleRuntimeProfileCreate,
+  handleRuntimeProfileDelete,
+  handleRuntimeProfileSecret,
+  handleRuntimeProfilesGet,
+  handleRuntimeProfileUpdate,
+  handleRuntimeProfileVerify,
+  handleRuntimeProfileVerifyProgress,
+} from "./api-routes/runtime-profiles.js";
+export {
   handleAdhocTaskpackDelete,
   handleAdhocTaskpacksList,
   handleCheckCompatibility,

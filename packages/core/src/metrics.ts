@@ -2,6 +2,53 @@ export interface MetricLabels {
   [key: string]: string | number;
 }
 
+const DEFAULT_MAX_SERIES = 1000;
+const OVERFLOW_SERIES_KEY = "__agentarena_metric_overflow__";
+
+interface ResolvedMetricLabels {
+  key: string;
+  labels: MetricLabels;
+}
+
+function normalizeMetricLabels(labelNames: string[], labels: MetricLabels): MetricLabels {
+  const normalized: MetricLabels = {};
+  for (const name of labelNames) {
+    normalized[name] = labels[name] ?? "";
+  }
+  return normalized;
+}
+
+function resolveMetricLabels(
+  labelNames: string[],
+  labels: MetricLabels,
+  existingKeys: ReadonlyMap<string, unknown>,
+  maxSeries: number
+): ResolvedMetricLabels {
+  const normalized = normalizeMetricLabels(labelNames, labels);
+  const key = JSON.stringify(labelNames.map((name) => normalized[name]));
+
+  // Reserve one series for overflow so the cap includes the overflow bucket.
+  if (labelNames.length === 0 || existingKeys.has(key) || existingKeys.size < maxSeries - 1) {
+    return { key, labels: normalized };
+  }
+
+  const overflowLabels = Object.fromEntries(labelNames.map((name) => [name, "__overflow__"]));
+  return { key: OVERFLOW_SERIES_KEY, labels: overflowLabels };
+}
+
+function escapeMetricLabelValue(value: string | number): string {
+  return String(value)
+    .replaceAll("\\", "\\\\")
+    .replaceAll("\n", "\\n")
+    .replaceAll('"', '\\"');
+}
+
+function formatMetricLabels(labelNames: string[], labels: MetricLabels): string {
+  if (labelNames.length === 0) return "";
+  const values = labelNames.map((name) => `${name}="${escapeMetricLabelValue(labels[name] ?? "")}"`);
+  return `{${values.join(",")}}`;
+}
+
 export interface MetricValue {
   name: string;
   type: "counter" | "gauge" | "histogram";
@@ -66,15 +113,18 @@ export class Counter {
   private readonly name: string;
   private readonly help: string;
   private readonly labelNames: string[];
+  private readonly maxSeries: number;
   private readonly values: Map<string, number> = new Map();
+  private readonly labelValues: Map<string, MetricLabels> = new Map();
   private cachedExport: string | null = null;
   private lastUpdateTime = 0;
   private readonly cacheValidMs = 100; // 100ms cache
 
-  constructor(name: string, help: string, labelNames: string[] = []) {
+  constructor(name: string, help: string, labelNames: string[] = [], maxSeries = DEFAULT_MAX_SERIES) {
     this.name = name;
     this.help = help;
     this.labelNames = labelNames;
+    this.maxSeries = Math.max(1, Math.floor(maxSeries));
   }
 
   private invalidateCache(): void {
@@ -83,27 +133,29 @@ export class Counter {
     invalidateAllMetricsCaches();
   }
 
-  private getLabelKey(labels: MetricLabels = {}): string {
-    return this.labelNames.map(k => `${k}="${labels[k] ?? ""}"`).join(",");
+  private resolveLabels(labels: MetricLabels = {}): ResolvedMetricLabels {
+    return resolveMetricLabels(this.labelNames, labels, this.values, this.maxSeries);
   }
 
   inc(labels: MetricLabels = {}, value = 1): void {
-    const key = this.getLabelKey(labels);
+    const resolved = this.resolveLabels(labels);
+    const key = resolved.key;
     const current = this.values.get(key) ?? 0;
     this.values.set(key, current + value);
+    this.labelValues.set(key, resolved.labels);
     this.invalidateCache();
     
     recordMetric({
       name: this.name,
       type: "counter",
       value: current + value,
-      labels,
+      labels: resolved.labels,
       timestamp: Date.now(),
     });
   }
 
   getValue(labels: MetricLabels = {}): number {
-    return this.values.get(this.getLabelKey(labels)) ?? 0;
+    return this.values.get(this.resolveLabels(labels).key) ?? 0;
   }
 
   export(): string {
@@ -116,11 +168,7 @@ export class Counter {
     output += `# TYPE ${this.name} counter\n`;
     
     for (const [key, value] of this.values) {
-      if (key) {
-        output += `${this.name}{${key}} ${value}\n`;
-      } else {
-        output += `${this.name} ${value}\n`;
-      }
+      output += `${this.name}${formatMetricLabels(this.labelNames, this.labelValues.get(key) ?? {})} ${value}\n`;
     }
     
     this.cachedExport = output;
@@ -133,15 +181,18 @@ export class Gauge {
   private readonly name: string;
   private readonly help: string;
   private readonly labelNames: string[];
+  private readonly maxSeries: number;
   private readonly values: Map<string, number> = new Map();
+  private readonly labelValues: Map<string, MetricLabels> = new Map();
   private cachedExport: string | null = null;
   private lastUpdateTime = 0;
   private readonly cacheValidMs = 100; // 100ms cache
 
-  constructor(name: string, help: string, labelNames: string[] = []) {
+  constructor(name: string, help: string, labelNames: string[] = [], maxSeries = DEFAULT_MAX_SERIES) {
     this.name = name;
     this.help = help;
     this.labelNames = labelNames;
+    this.maxSeries = Math.max(1, Math.floor(maxSeries));
   }
 
   private invalidateCache(): void {
@@ -150,8 +201,8 @@ export class Gauge {
     invalidateAllMetricsCaches();
   }
 
-  private getLabelKey(labels: MetricLabels = {}): string {
-    return this.labelNames.map(k => `${k}="${labels[k] ?? ""}"`).join(",");
+  private resolveLabels(labels: MetricLabels = {}): ResolvedMetricLabels {
+    return resolveMetricLabels(this.labelNames, labels, this.values, this.maxSeries);
   }
 
   set(labels: MetricLabels | number, value?: number): void {
@@ -165,51 +216,57 @@ export class Gauge {
       actualValue = value ?? 0;
     }
     
-    const key = this.getLabelKey(actualLabels);
+    const resolved = this.resolveLabels(actualLabels);
+    const key = resolved.key;
     this.values.set(key, actualValue);
+    this.labelValues.set(key, resolved.labels);
     this.invalidateCache();
     
     recordMetric({
       name: this.name,
       type: "gauge",
       value: actualValue,
-      labels: actualLabels,
+      labels: resolved.labels,
       timestamp: Date.now(),
     });
   }
 
   inc(labels: MetricLabels = {}, value = 1): void {
-    const key = this.getLabelKey(labels);
+    const resolved = this.resolveLabels(labels);
+    const key = resolved.key;
     const current = this.values.get(key) ?? 0;
     this.values.set(key, current + value);
+    this.labelValues.set(key, resolved.labels);
     this.invalidateCache();
     
     recordMetric({
       name: this.name,
       type: "gauge",
       value: current + value,
-      labels,
+      labels: resolved.labels,
       timestamp: Date.now(),
     });
   }
 
   dec(labels: MetricLabels = {}, value = 1): void {
-    const key = this.getLabelKey(labels);
+    const resolved = this.resolveLabels(labels);
+    const key = resolved.key;
     const current = this.values.get(key) ?? 0;
     this.values.set(key, current - value);
+    this.labelValues.set(key, resolved.labels);
     this.invalidateCache();
     
     recordMetric({
       name: this.name,
       type: "gauge",
       value: current - value,
-      labels,
+      labels: resolved.labels,
       timestamp: Date.now(),
     });
   }
 
   getValue(labels: MetricLabels = {}): number {
-    return this.values.get(this.getLabelKey(labels)) ?? 0;
+    return this.values.get(this.resolveLabels(labels).key) ?? 0;
   }
 
   export(): string {
@@ -222,11 +279,7 @@ export class Gauge {
     output += `# TYPE ${this.name} gauge\n`;
     
     for (const [key, value] of this.values) {
-      if (key) {
-        output += `${this.name}{${key}} ${value}\n`;
-      } else {
-        output += `${this.name} ${value}\n`;
-      }
+      output += `${this.name}${formatMetricLabels(this.labelNames, this.labelValues.get(key) ?? {})} ${value}\n`;
     }
     
     this.cachedExport = output;
@@ -240,16 +293,19 @@ export class Histogram {
   private readonly help: string;
   private readonly buckets: number[];
   private readonly labelNames: string[];
+  private readonly maxSeries: number;
   private readonly values: Map<string, { sum: number; count: number; buckets: Map<number, number> }> = new Map();
+  private readonly labelValues: Map<string, MetricLabels> = new Map();
   private cachedExport: string | null = null;
   private lastUpdateTime = 0;
   private readonly cacheValidMs = 100; // 100ms cache
 
-  constructor(name: string, help: string, buckets: number[] = [0.1, 0.5, 1, 2, 5, 10, 30, 60], labelNames: string[] = []) {
+  constructor(name: string, help: string, buckets: number[] = [0.1, 0.5, 1, 2, 5, 10, 30, 60], labelNames: string[] = [], maxSeries = DEFAULT_MAX_SERIES) {
     this.name = name;
     this.help = help;
     this.buckets = buckets.sort((a, b) => a - b);
     this.labelNames = labelNames;
+    this.maxSeries = Math.max(1, Math.floor(maxSeries));
   }
 
   private invalidateCache(): void {
@@ -258,8 +314,8 @@ export class Histogram {
     invalidateAllMetricsCaches();
   }
 
-  private getLabelKey(labels: MetricLabels = {}): string {
-    return this.labelNames.map(k => `${k}="${labels[k] ?? ""}"`).join(",");
+  private resolveLabels(labels: MetricLabels = {}): ResolvedMetricLabels {
+    return resolveMetricLabels(this.labelNames, labels, this.values, this.maxSeries);
   }
 
   observe(labels: MetricLabels | number, value?: number): void {
@@ -273,13 +329,15 @@ export class Histogram {
       actualValue = value ?? 0;
     }
     
-    const key = this.getLabelKey(actualLabels);
+    const resolved = this.resolveLabels(actualLabels);
+    const key = resolved.key;
     let entry = this.values.get(key);
     
     if (!entry) {
       entry = { sum: 0, count: 0, buckets: new Map(this.buckets.map(b => [b, 0])) };
       this.values.set(key, entry);
     }
+    this.labelValues.set(key, resolved.labels);
     
     entry.sum += actualValue;
     entry.count += 1;
@@ -295,7 +353,7 @@ export class Histogram {
       name: this.name,
       type: "histogram",
       value: actualValue,
-      labels: actualLabels,
+      labels: resolved.labels,
       timestamp: Date.now(),
     });
   }
@@ -310,14 +368,15 @@ export class Histogram {
     output += `# TYPE ${this.name} histogram\n`;
     
     for (const [key, entry] of this.values) {
-      const labelStr = key ? `{${key}}` : "";
-      
+      const labelStr = formatMetricLabels(this.labelNames, this.labelValues.get(key) ?? {});
+      const bucketLabelSuffix = this.labelNames.length > 0 ? labelStr.slice(1, -1) : "";
+
       for (const bucket of this.buckets) {
-        const bucketLabel = key ? `{le="${bucket}",${key}}` : `{le="${bucket}"}`;
+        const bucketLabel = this.labelNames.length > 0 ? `{le="${bucket}",${bucketLabelSuffix}}` : `{le="${bucket}"}`;
         output += `${this.name}_bucket${bucketLabel} ${entry.buckets.get(bucket) ?? 0}\n`;
       }
-      
-      output += `${this.name}_bucket${key ? `{le="+Inf",${key}}` : `{le="+Inf"}`} ${entry.count}\n`;
+
+      output += `${this.name}_bucket${this.labelNames.length > 0 ? `{le="+Inf",${bucketLabelSuffix}}` : `{le="+Inf"}`} ${entry.count}\n`;
       output += `${this.name}_sum${labelStr} ${entry.sum}\n`;
       output += `${this.name}_count${labelStr} ${entry.count}\n`;
     }

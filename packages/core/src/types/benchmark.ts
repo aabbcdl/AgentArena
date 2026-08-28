@@ -1,8 +1,10 @@
+import type { JobManifest } from "../runtime-launch.js";
 import type {
   AdapterPreflightResult,
   AgentRequestedConfig,
   AgentResolvedRuntime,
   CostQuality,
+  TokenUsageBreakdown,
 } from "./agent.js";
 import type { TaskJudge } from "./judge.js";
 import type { TaskPack } from "./task-pack.js";
@@ -302,13 +304,7 @@ export interface AgentRunResult {
   /** Signal name if the agent was terminated by a signal (e.g. "SIGTERM"). */
   signal?: string | null;
 
-  tokenUsageBreakdown?: {
-    inputTokens: number;
-    outputTokens: number;
-    reasoningTokens: number;
-    cacheReadTokens: number;
-    cacheWriteTokens: number;
-  };
+  tokenUsageBreakdown?: TokenUsageBreakdown;
   tokenEfficiencyScore?: number;
 
   sweBench?: SweBenchMetrics;
@@ -338,6 +334,7 @@ export interface BenchmarkRun {
   scoreScope?: "run-local";
   scoreValidityNote?: string;
   fairComparison?: FairComparisonMetadata;
+  jobManifest?: JobManifest;
   task: TaskPack;
   taskCompatibility?: TaskCompatibilityResult;
   preflights: AdapterPreflightResult[];

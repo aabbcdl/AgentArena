@@ -406,7 +406,9 @@ test(
         onProgress: (event) => {
           events.push(event);
           if (event.phase === "agent-start") {
-            setTimeout(() => controller.abort(), 1000);
+            // Abort shortly after scheduling so faster machines cannot finish
+            // the demo adapter before the cancellation reaches it.
+            setTimeout(() => controller.abort(), 50);
           }
         }
       });

@@ -9,12 +9,23 @@ import { logger } from "./logging.js";
 import { normalizePath } from "./paths.js";
 import type { DiffSummary, FileSnapshotEntry } from "./types/index.js";
 
-export const INTERNAL_IGNORED_NAMES = new Set([
+export const AGENTARENA_ADAPTER_METADATA_DIRECTORY_NAMES = new Set([
+  "agentarena-claude",
+  "agentarena-codex",
+  "agentarena-copilot",
+  "agentarena-qwen"
+]);
+
+export const AGENTARENA_GENERATED_DIRECTORY_NAMES = new Set([
   ".aa-evidence",
   ".agentarena",
-  ".claude",
+  ...AGENTARENA_ADAPTER_METADATA_DIRECTORY_NAMES,
+  "agentarena-demo"
+]);
+
+export const INTERNAL_IGNORED_NAMES = new Set([
+  ...AGENTARENA_GENERATED_DIRECTORY_NAMES,
   ".git",
-  "agentarena-demo",
   "node_modules"
 ]);
 const INTERNAL_IGNORED_FILES = new Set(["agent-stderr.log", "agent-stdout.jsonl", "prompt.txt"]);
@@ -59,11 +70,28 @@ export async function ensureDirectory(dirPath: string): Promise<void> {
   await fs.mkdir(dirPath, { recursive: true });
 }
 
-function isInternalPath(relativePath: string): boolean {
-  const parts = relativePath.split("/");
+export function isAgentArenaGeneratedPath(relativePath: string): boolean {
+  const normalized = normalizePath(relativePath).replace(/^\.\/+/, "");
+  const parts = normalized.split("/");
   return (
-    parts.some((part) => INTERNAL_IGNORED_NAMES.has(part)) ||
+    parts.some((part) => AGENTARENA_GENERATED_DIRECTORY_NAMES.has(part)) ||
     (parts.length === 1 && INTERNAL_IGNORED_FILES.has(parts[0]))
+  );
+}
+
+export function isAgentArenaAdapterMetadataPath(relativePath: string): boolean {
+  const normalized = normalizePath(relativePath).replace(/^\.\/+/, "");
+  return normalized
+    .split("/")
+    .some((part) => AGENTARENA_ADAPTER_METADATA_DIRECTORY_NAMES.has(part));
+}
+
+function isInternalPath(relativePath: string): boolean {
+  const normalized = normalizePath(relativePath).replace(/^\.\/+/, "");
+  const parts = normalized.split("/");
+  return (
+    isAgentArenaGeneratedPath(normalized) ||
+    parts.some((part) => INTERNAL_IGNORED_NAMES.has(part))
   );
 }
 

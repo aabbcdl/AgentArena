@@ -1,356 +1,213 @@
 # AgentArena
 
-> Benchmark the coding agents you already run locally on the same repo, the same task, and the same judges.
+> Run the coding agents you already use against the same repository, task, and judges—and inspect the evidence behind the result.
 
-[中文说明](./README.zh-CN.md)
+[中文说明](./README.zh-CN.md) · [npm package](https://www.npmjs.com/package/@agentarena/cli) · [Getting Started](./docs/getting-started.md)
 
-![AgentArena launcher](./docs/images/web-report-launcher.jpg)
+![AgentArena Workbench](./docs/images/web-report-launcher.jpg)
 ![AgentArena report](./docs/images/web-report-report.jpg)
 
-AgentArena is for people who already use coding agents in real work and want something more trustworthy than vibes.
+AgentArena is a local-first benchmark and replay tool for real coding-agent work. It is built for the question that comes after “how do I install an agent?”:
 
-It helps answer questions like:
+> Which local agent, model, and runtime setup actually performs better on the repository tasks I care about?
 
-- How strong is my current `Codex CLI + model X` setup on real repository tasks?
-- Is `Claude Code` actually better than `Cursor` for the kind of fixes I care about?
-- If I only run one local agent, how do I turn that into a repeatable capability baseline instead of a gut feeling?
-- When a run looks surprising, how do I inspect the diff, judge failures, and trace instead of trusting one score?
+AgentArena gives each run the same repository snapshot, task definition, setup commands, and judges. It then records the diff, judge evidence, trace, runtime identity, and report so a result can be inspected instead of trusted on appearance alone.
 
-AgentArena is local-first by default. You point it at your own repository, task pack, and locally installed agent CLIs. AgentArena handles shared setup, execution, judges, traces, and reports.
+The current public release is **0.2.1**, aimed at a local pilot. It is not a hosted service or a universal leaderboard.
 
-See **[docs/ui-and-adapters.md](./docs/ui-and-adapters.md)** for local UI bind address & auth rules, doctor/preflight semantics, and related contract tests. Quantitative line coverage: `pnpm test:coverage` (Node `--experimental-test-coverage`).
+## Install and start
 
-## Quick Install
+Requirements:
 
-```bash
-npm install -g @agentarena/cli
-```
+- Node.js **22 or newer**
+- A target repository and whatever toolchain that repository needs
+- An external agent CLI only when you want to benchmark a real external agent
 
-## Try It in 60 Seconds
-
-No external agent CLI needed. The built-in demo agents work out of the box:
+Install the published CLI:
 
 ```bash
-# Create a task pack
-agentarena init-taskpack --template repo-health --output my-task.yaml
-
-# Run with demo agents (no auth required)
-agentarena run --repo . --task my-task.yaml --agents demo-fast,demo-thorough
-
-# View the results in your browser
+npm install --global @agentarena/cli@0.2.1
 agentarena ui
 ```
 
-Open `http://127.0.0.1:4320`, load the result from `.agentarena/runs/`, and explore the dashboard.
+Open the local address printed by the command, normally `http://127.0.0.1:4320`.
 
-When you're ready to benchmark real agents, just install their CLIs and run:
+On the first startup, Workbench asks you to choose a local service password. Pick your own password (at least four characters). Only a salted password hash is saved under the workspace’s `.agentarena/` directory; you do not need to find or paste a Bearer Token during normal use. Later browser sessions may ask for the same password again. The password is local to that workspace—there is no shared default password.
+
+For scripts or an intentionally managed local setup, `--auth-token`, `AGENTARENA_LOCAL_AUTH_TOKEN`, and `AGENTARENA_AUTH_TOKEN` remain available. Keep the UI bound to loopback unless you have deliberately designed a stronger network boundary.
+
+## First run without external authentication
+
+You can verify the complete product flow with the built-in demo agents:
+
+```bash
+agentarena init-taskpack --template repo-health --output agentarena-task.yaml
+agentarena run \
+  --repo . \
+  --task agentarena-task.yaml \
+  --agents demo-fast,demo-thorough
+agentarena ui
+```
+
+This uses no API key and no external provider. In Workbench, you can also use the Safe Demo action to confirm the launch, live status, result, diff, and evidence pages before connecting a real agent.
+
+## Benchmark a real local agent
+
+Install and log in to only the agent CLI you intend to test. Then check readiness:
+
+```bash
+agentarena doctor --agents codex --probe-auth
+```
+
+From Workbench:
+
+1. Choose the target repository and task pack.
+2. Select a Harness that is installed, logged in, and marked ready.
+3. For Codex, review the detected CLI model and reasoning effort, or enter them manually before saving the run configuration.
+4. Start the run and follow the live status.
+5. Inspect the conclusion, judge breakdown, changed files, trace, and evidence.
+
+The UI does not silently connect a provider, change a global CLI configuration, or switch your model. Codex model discovery is intentionally conservative: the CLI does not provide a stable portable model-enumeration contract, so AgentArena reads the active local default when available and also accepts a manually entered model name.
+
+The equivalent CLI flow is:
 
 ```bash
 agentarena run \
-  --repo . \
-  --task my-task.yaml \
-  --agents codex,claude-code,cursor \
+  --repo /path/to/your/project \
+  --task /path/to/your/task.yaml \
+  --agents codex \
   --probe-auth
 ```
 
-> **New to AgentArena?** See the [Getting Started Guide](./docs/getting-started.md) for a step-by-step walkthrough.
-> **Running into issues?** Check the [Troubleshooting Guide](./docs/troubleshooting.md).
+## Create a custom task in Workbench
 
-## How AgentArena Compares
+Open **Plan → Create custom task** and enter:
 
-| | SWE-bench | HumanEval | BigCodeBench | **AgentArena** |
-|---|---|---|---|---|
-| Runs locally | ❌ cloud only | ❌ cloud only | ❌ cloud only | **✅ fully local** |
-| Your own repo | ❌ fixed repos | ❌ synthetic | ❌ synthetic | **✅ any repo** |
-| Custom tasks | ❌ | ❌ | ❌ | **✅ YAML/JSON task packs** |
-| Any agent CLI | ❌ SWE-agent only | ❌ | ❌ | **✅ 12+ adapters** |
-| Offline capable | ❌ | ❌ | ❌ | **✅ no internet needed** |
-| Built-in UI | ❌ | ❌ | ❌ | **✅ web dashboard** |
-| CI integration | ❌ | ❌ | ❌ | **✅ GitHub Actions** |
-| Diff + trace | ❌ | ❌ | ❌ | **✅ full audit trail** |
+- a natural-language goal;
+- the target repository;
+- optional expected changed paths.
 
-AgentArena is not a replacement for SWE-bench or HumanEval. It fills a different gap: **local, repeatable, agent-agnostic benchmarking on your own codebase**.
+AgentArena saves a local draft, checks task/repository compatibility, and shows a preview before the task is selected. The generated build/test/lint checks are **basic repository-health evidence**. They do not prove that a natural-language task is functionally correct. If expected paths are omitted, the UI explicitly marks the change scope as unconstrained. Arbitrary shell commands are not accepted in the first version.
 
-## Why This Exists
+## Read results correctly
 
-Most agent users are already past "how do I install an agent?" and into "which setup actually performs better on my work?"
+A run can finish successfully without proving that the requested product behavior is correct. AgentArena separates three kinds of evidence:
 
-AgentArena is built for that stage.
+- **Runtime readiness** — whether the selected Harness can perform a controlled edit in the current repository context.
+- **Task compatibility** — whether the task pack and repository have known structural conflicts.
+- **Task result evidence** — judges, tests, diff scope, trace, and the final report for this run.
 
-It gives you:
+The report also shows whether model identity, receipt, and result evidence are confirmed, declared, missing, or stale. Unknown token or cost data remains unknown; it is not displayed as zero or free.
 
-- a shared benchmark harness for agents you already use locally
-- repeatable task packs with structured judges
-- comparable outputs across both single-agent and multi-agent runs
-- a browser UI that works as both launcher and report viewer
-- reports you can keep, compare, share, and attach to CI
+One agent is enough to establish a repeatable baseline. Multiple agents do not automatically make a weak task more meaningful: a comparison is useful only when the task, repository baseline, judges, model parameters, and evidence quality are comparable. A single run normally produces a baseline, not a winner.
 
-## Best Use Cases
+## Current product surface
 
-- compare multiple local coding agents on the same repository task
-- track whether one agent / model / provider combo is getting better or worse over time
-- benchmark one agent repeatedly to estimate its current capability ceiling on your workflow
-- run local smoke benchmarks before rolling a new agent or model out to a team
-- generate HTML / Markdown / PR-comment artifacts from the same benchmark run
+### Main commands
 
-## What You Get From One Run
+```bash
+agentarena ui                         # local Workbench and report viewer
+agentarena run --repo . --task task.yaml --agents demo-fast
+agentarena doctor --agents codex --probe-auth
+agentarena list-adapters --json
+agentarena init-taskpack --template repo-health --output task.yaml
+agentarena init-ci --task task.yaml --agents codex
+```
 
-Even if you only benchmark one local agent, AgentArena is still useful. A single run gives you:
+When a UI workspace must be explicit:
 
-- a shared score and judge pass/fail breakdown
-- changed files and diff scope signals
-- duration, token usage, and cost when available
-- trace output for replay and diagnosis
-- comparable history once you keep running the same task over time
+```bash
+agentarena ui --workspace-root /path/to/workspace
+```
 
-That means a single-agent run is not "just one score". It becomes the baseline you compare future runs against.
+Without this option, the current working directory remains the workspace boundary.
 
-## What Makes The Result Credible
+### Adapter tiers
 
-AgentArena is opinionated about fairness:
-
-- same repository snapshot
-- same task definition
-- same setup commands
-- same judge logic
-- readiness checks before execution
-- isolated workspaces per run
-- structured report outputs after execution
-
-If an adapter is blocked by missing auth or broken local setup, `agentarena doctor` should tell you before you trust the result.
-
-## Current Capabilities
-
-### Core flows
-
-- `agentarena ui` for browser-based launch + report viewing; Workbench is the default, and `/legacy/` keeps historical links compatible
-- `agentarena run` for direct CLI execution
-- `agentarena doctor` for readiness and auth-aware checks
-- `agentarena list-adapters` for adapter capability listing
-- `agentarena init-taskpack` for starter task packs
-- `agentarena init-ci` for GitHub Actions benchmark workflows
-
-### Reliability focus
-
-New adapter work is currently paused. The near-term focus is making existing adapters, results, and the Workbench journey more reliable. See [Product direction](./docs/product-direction.md).
-
-### Report outputs
-
-Every run can generate:
-
-- `summary.json`
-- `summary.md`
-- `report.html`
-- `pr-comment.md`
-- `badge.json`
-
-### Judge coverage
-
-Current built-in judge types include:
-
-- `command`
-- `test-result`
-- `lint-check`
-- `file-exists`
-- `file-contains`
-- `regex-match`
-- `directory-exists`
-- `compilation`
-- `glob`
-- `file-count`
-- `snapshot`
-- `json-value`
-- `json-schema`
-- `patch-validation`
-- `token-efficiency`
-
-### Adapter coverage
+The default Workbench surface focuses on the integrations that have a defined local pilot path:
 
 | Adapter | Tier | Notes |
 | --- | --- | --- |
-| `codex` | supported | configurable model + reasoning effort |
-| `claude-code` | experimental | auth-aware failure reporting |
-| `cursor` | experimental | local bridge, auth-sensitive |
-| `gemini-cli` | experimental | token and cost parsing |
-| `aider` | experimental | multi-model support |
-| `copilot` | experimental | token estimation |
-| `qwen-code` | experimental | JSON output parsing |
-| `kilo-cli` | experimental | OpenCode-based |
-| `opencode` | experimental | multi-provider open source CLI |
-| `trae` | experimental | event stream parsing |
-| `augment` | experimental | multi-model support |
-| `windsurf` | blocked | auth stability issues |
-| `demo-fast` / `demo-thorough` / `demo-budget` | supported | built-in, no external setup required |
+| `demo-fast` / `demo-thorough` / `demo-budget` | supported | Built in; no external login required |
+| `codex` | supported | Codex CLI stream, configurable model and reasoning effort |
+| `claude-code` | experimental | Requires a compatible local CLI and login |
 
-> **Tiers**: `supported` = verified standard integration path; `experimental` = usable, but sensitive to local auth, CLI flag changes, or install layout; `blocked` = intentionally not treated as stable automation today. See [Adapter Capabilities](./docs/adapter-capabilities.md) for the full capability matrix.
+Additional adapters remain available for explicit CLI experiments, but are not presented as first-version stable integrations:
 
-## Quick Start
+| Adapter | Tier |
+| --- | --- |
+| `cursor`, `gemini-cli`, `aider`, `copilot` | experimental |
+| `kilo-cli`, `opencode`, `qwen-code`, `trae`, `augment` | experimental |
+| `windsurf` | blocked |
 
-### Path A: benchmark the local agent you already use
+See the [adapter capability matrix](./docs/adapter-capabilities.md) for invocation, token, cost, and trace details.
 
-```bash
-pnpm install
-pnpm build
-pnpm doctor
-node packages/cli/dist/index.js ui
-```
+### Judges and artifacts
 
-Then open the local address printed in the terminal, usually:
+Built-in judge types include `command`, `test-result`, `lint-check`, `file-exists`, `file-contains`, `regex-match`, `directory-exists`, `compilation`, `glob`, `file-count`, `snapshot`, `json-value`, `json-schema`, `patch-validation`, and `token-efficiency`.
 
-```text
-http://127.0.0.1:4320
-```
+Runs can produce:
 
-From there:
+- `summary.json` — machine-readable results;
+- `summary.md` — human-readable summary;
+- `report.html` — interactive report;
+- `pr-comment.md` — ready-to-paste PR comment;
+- `badge.json` — badge data.
 
-1. choose the repository you want to benchmark
-2. choose a task pack
-3. choose one or more local agents you already use
-4. run the benchmark
-5. inspect the result in the same UI
-
-### Path B: get a single-agent baseline from the CLI
-
-```bash
-node packages/cli/dist/index.js run --repo . --task examples/taskpacks/demo-repo-health.yaml --agents codex --output .agentarena/manual-run
-```
-
-This is the simplest "how strong is my current local Codex setup?" path.
-
-### Path C: compare multiple local agents on one task
-
-```bash
-node packages/cli/dist/index.js run --repo . --task examples/taskpacks/demo-repo-health.yaml --agents codex,claude-code,cursor --output .agentarena/manual-run
-```
-
-### Path D: fast product tour without external auth
-
-```bash
-pnpm demo
-node packages/cli/dist/index.js ui
-```
-
-Use the built-in demo adapters when you want to verify the product flow before benchmarking real agents.
-
-## Common Commands
-
-Check local adapter readiness:
-
-```bash
-pnpm doctor
-```
-
-List adapters and capability metadata:
-
-```bash
-node packages/cli/dist/index.js list-adapters --json
-```
-
-Fail fast when one requested adapter is not ready:
-
-```bash
-node packages/cli/dist/index.js doctor --agents codex,claude-code,cursor --probe-auth --strict
-```
-
-Return machine-readable benchmark output:
-
-```bash
-node packages/cli/dist/index.js run --repo . --task examples/taskpacks/demo-repo-health.yaml --agents codex --json
-```
-
-Generate a starter YAML task pack:
-
-```bash
-node packages/cli/dist/index.js init-taskpack --template repo-health --output agentarena.taskpack.yaml
-```
-
-Generate a benchmark workflow for GitHub Actions:
-
-```bash
-node packages/cli/dist/index.js init-ci --task agentarena.taskpack.yaml --agents codex,claude-code
-```
-
-Run the browser-level web-report smoke test:
-
-```bash
-npx playwright install --with-deps chromium
-pnpm test:web-report:e2e
-```
-
-## Official Task Pack Library
+## Official task pack library
 
 <!-- official-taskpacks:start -->
 
-There are **30** official task packs. This catalog is generated directly from the task pack files.
+The first-release comparison catalog contains **10** core task packs. 20 historical/experimental packs remain in the repository but are excluded from first-release comparison.
 
 | Task pack | Name | Purpose |
 | --- | --- | --- |
-| `add-error-handling` | Add Cache Validation | Add input validation and error handling to a cache function. |
-| `add-feature-with-tests` | Add Feature with Tests | Add a memoization feature to a function and write tests for it. |
-| `api-documentation` | API Documentation | Write documentation for an API module. |
-| `bug-chain-fix` | Bug Chain Fix | Fix 3 related bugs across 3 files where each fix depends on the others. |
-| `official-builtin-demo-coding` | Built-in Demo: Add Error Handling | A coding task that works out of the box — no local project needed. Uses the built-in test repository with 4 TypeScript packages. The agent must add proper error handling to a service function. |
-| `official-config-repair` | Config Repair | Fix a broken configuration file to match its schema. |
-| `cross-file-refactor` | Cross-File Refactor | Move a function to a new module and update all references. |
-| `official-cross-module-refactor` | Official Cross-Module Refactor | Refactor a feature that spans multiple modules/packages. |
-| `dependency-update` | Enhance Logger | Add log levels and context support to the logger. |
-| `docker-setup` | Docker Configuration | Create or improve Docker configuration for a project. |
-| `efficiency-first-example` | Efficiency First Example (CursorBench Inspired) | Demonstrates token-efficiency judge for cost-effective coding |
-| `error-handling` | Create Error Classes | Create custom error class hierarchy and add input validation. |
-| `failing-test-fix` | Failing Test Fix | Fix a failing test by correcting the implementation. |
-| `go-microservice` | Go Microservice Feature | Add a feature to a Go microservice with proper error handling and tests. |
-| `input-validation` | Add Input Validation | Add HTML sanitization and path traversal protection. |
-| `issue-resolution-example` | Issue Resolution Example (SWE-Bench Inspired) | Demonstrates patch-validation judge for GitHub issue fixing |
-| `iterative-debug` | Iterative Debug | Fix a bug by running tests, reading failures, and fixing iteratively. |
-| `official-json-contract-repair` | JSON Contract Repair | Fix a JSON response to match its contract. |
-| `logging-improvement` | Improve Logging | Add log levels and context support to the logger. |
-| `multi-file-rename` | Multi-File Rename | Rename a function across multiple source files. |
-| `official-performance-optimize` | Performance Optimize | Optimize utility functions for better performance. |
-| `python-api` | Python API Endpoint | Implement a new REST API endpoint in a Python web application. |
-| `react-bugfix` | React Component Bug Fix | Fix a bug in a React component and verify the fix with tests. |
-| `refactor-with-tests` | Refactor with Tests | Refactor a function while keeping all tests passing. |
-| `official-repo-health` | Official Repo Health | Fix a bug in a utility function and verify existing tests pass. |
-| `rotating-tasks-2026-04-example` | Rotating Tasks Example (LiveBench Inspired) | Demonstrates anti-contamination mechanism with task rotation |
-| `security-hardening` | Security Hardening | Add HTML sanitization and path traversal protection. |
-| `official-small-refactor` | Official Small Refactor | Performs a low-risk refactor while keeping core repository structure intact. |
-| `official-snapshot-fix` | Snapshot Fix | Fix a generator script to match its expected output. |
-| `test-coverage` | Increase Test Coverage | Add tests for untested modules. |
+| `add-feature-with-tests` | Add a Memoization Helper | Add a small reusable memoization feature and cover its observable contract. |
+| `config-repair` | Repair Typed Configuration | Correct a small JSON configuration while preserving unrelated values. |
+| `cross-file-refactor` | Extract the Slugify Module | Move a shared string helper into its own module without changing callers. |
+| `failing-test-fix` | Fix the Failing Arithmetic Test | Correct one calculator operation while preserving the rest of the arithmetic API. |
+| `input-validation` | Restore Input Validation Boundaries | Block script injection and path traversal while preserving useful input errors. |
+| `json-contract-repair` | Repair a JSON Response Contract | Restore a deterministic response fixture to its documented shape. |
+| `logging-improvement` | Improve Structured Logging | Restore log levels, context propagation, and child logger behavior. |
+| `repo-health` | Repair Word Capitalization | Restore word-level capitalization without disturbing neighboring helpers. |
+| `snapshot-fix` | Restore Deterministic Snapshot Output | Fix a generator so its stable text output matches the fixture contract. |
+| `test-coverage` | Add Focused Validator and Logger Tests | Add meaningful tests for two previously uncovered modules and prove they catch a mutation. |
 
 <!-- official-taskpacks:end -->
 
-## Repository Layout
+## Source checkout and development
 
-```text
-apps/
-  web-report/          Interactive benchmark UI (vanilla JS, PWA)
-packages/
-  cli/                 CLI entry point (ui, run, doctor, init-taskpack, init-ci)
-  core/                Shared types and utilities
-  runner/              Benchmark orchestrator
-  adapters/            Agent adapters and registry
-  judges/              Judge implementations
-  taskpacks/           Task pack loader and validator
-  trace/               Execution trace recorder and replay helpers
-  report/              Report generators (JSON, Markdown, HTML, badge)
-examples/
-  taskpacks/           Demo and official task packs
-fixtures/
-  nodejs-monorepo/     Standard test repository
-docs/
+The npm package is the fastest path for users. To work on AgentArena itself:
+
+```bash
+git clone https://github.com/aabbcdl/AgentArena.git
+cd AgentArena
+pnpm install --frozen-lockfile
+pnpm build
+pnpm test
+```
+
+The source checkout requires the repository’s declared `pnpm` version. It does not require Android Studio, Docker, Xcode, or Playwright Chromium for the core local pilot. Chromium is only needed for browser E2E validation.
+
+Useful checks:
+
+```bash
+pnpm typecheck
+pnpm lint
+pnpm taskpacks:check
+pnpm test:web-report:e2e
 ```
 
 ## Documentation
 
-- **[Getting Started](./docs/getting-started.md)** — install and run your first benchmark
-- **[Troubleshooting](./docs/troubleshooting.md)** — common issues and fixes
-- [Project overview](./docs/overview.md)
-- [Benchmark fairness](./docs/fairness.md)
+- [Getting Started](./docs/getting-started.md)
+- [Troubleshooting](./docs/troubleshooting.md)
+- [UI and adapter behavior](./docs/ui-and-adapters.md)
 - [Adapter capabilities](./docs/adapter-capabilities.md)
+- [Benchmark fairness](./docs/fairness.md)
 - [Task pack modes](./docs/taskpack-modes.md)
-- [Scoring deep dive](./docs/scoring.md)
+- [Scoring](./docs/scoring.md)
 - [HTTP API](./docs/http-api.md)
-- [Web report app](./apps/web-report/README.md)
-- [Runner Docker](./docs/runner-docker.md)
 - [Official task packs](./examples/taskpacks/official/README.md)
 - [Contributing](./CONTRIBUTING.md)
 - [Changelog](./CHANGELOG.md)

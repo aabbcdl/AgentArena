@@ -1,5 +1,6 @@
 import assert from "node:assert";
 import { describe, it } from "node:test";
+import { parseArgs } from "../packages/cli/dist/args.js";
 import { validateCommandArgs, validateInitCiCommand, validatePublishCommand, validateRunCommand, validateUiCommand } from "../packages/cli/dist/args-validators.js";
 
 describe("args-validators", () => {
@@ -88,6 +89,21 @@ describe("args-validators", () => {
     it("fails with negative port", () => {
       const result = validateUiCommand({ port: -1 });
       assert.equal(result.ok, false);
+    });
+  });
+
+  describe("parseArgs", () => {
+    it("parses the optional workspace root", () => {
+      const result = parseArgs(["ui", "--workspace-root", "/tmp/agentarena-workspace"]);
+      assert.equal(result.command, "ui");
+      assert.equal(result.workspaceRoot, "/tmp/agentarena-workspace");
+    });
+
+    it("rejects a missing workspace root value", () => {
+      assert.throws(
+        () => parseArgs(["ui", "--workspace-root"]),
+        /--workspace-root requires a directory path/
+      );
     });
   });
 

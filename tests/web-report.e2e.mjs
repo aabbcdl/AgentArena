@@ -460,7 +460,7 @@ test("score weight preset buttons update active state", {
 
   try {
     const page = await newAuthenticatedPage(browser, uiServer);
-    await page.goto(`http://127.0.0.1:${uiServer.port}/legacy/`);
+    await page.goto(`http://127.0.0.1:${uiServer.port}/legacy/`, { waitUntil: "domcontentloaded" });
 
     // Load demo data
     await page.locator("#try-demo-btn").click();
@@ -493,7 +493,7 @@ test("custom score weight sliders re-score the compare table", {
 
   try {
     const page = await newAuthenticatedPage(browser, uiServer, { viewport: { width: 1440, height: 960 } });
-    await page.goto(`http://127.0.0.1:${uiServer.port}/legacy/`);
+    await page.goto(`http://127.0.0.1:${uiServer.port}/legacy/`, { waitUntil: "domcontentloaded" });
     await injectTestRun(page);
 
     const scoreRow = page.locator("[data-compare-agent-id]").filter({ hasText: "Agent A" }).first();
@@ -536,7 +536,7 @@ test("trace replay toggle opens and renders trace events", {
 
   try {
     const page = await newAuthenticatedPage(browser, uiServer, { viewport: { width: 1440, height: 960 } });
-    await page.goto(`http://127.0.0.1:${uiServer.port}/legacy/`);
+    await page.goto(`http://127.0.0.1:${uiServer.port}/legacy/`, { waitUntil: "domcontentloaded" });
     await injectTestRun(page);
 
     await page.evaluate(() => {
@@ -580,7 +580,7 @@ test("run list delete button removes run", {
 
   try {
     const page = await newAuthenticatedPage(browser, uiServer);
-    await page.goto(`http://127.0.0.1:${uiServer.port}/legacy/`);
+    await page.goto(`http://127.0.0.1:${uiServer.port}/legacy/`, { waitUntil: "domcontentloaded" });
 
     // Load demo data
     await page.locator("#try-demo-btn").click();
@@ -619,7 +619,7 @@ test("dashboard shows verdict hero and comparison bars after loading demo", {
 
   try {
     const page = await newAuthenticatedPage(browser, uiServer);
-    await page.goto(`http://127.0.0.1:${uiServer.port}/legacy/`);
+    await page.goto(`http://127.0.0.1:${uiServer.port}/legacy/`, { waitUntil: "domcontentloaded" });
 
     await page.locator("#try-demo-btn").click();
     await page.waitForFunction(() => document.querySelectorAll("[data-compare-agent-id]").length > 0, { timeout: 10000 });
@@ -653,7 +653,7 @@ test("export run as JSON file", {
 
   try {
     const page = await newAuthenticatedPage(browser, uiServer);
-    await page.goto(`http://127.0.0.1:${uiServer.port}/legacy/`);
+    await page.goto(`http://127.0.0.1:${uiServer.port}/legacy/`, { waitUntil: "domcontentloaded" });
 
     await page.locator("#try-demo-btn").click();
     await page.waitForFunction(() => document.querySelectorAll("[data-compare-agent-id]").length > 0, { timeout: 10000 });
@@ -767,7 +767,7 @@ test("workbench evidence page replays trace and shows per-agent identity", {
 
   try {
     const page = await newAuthenticatedPage(browser, uiServer, { viewport: { width: 1440, height: 960 } });
-    await page.goto(`http://127.0.0.1:${uiServer.port}/workbench/`);
+    await page.goto(`http://127.0.0.1:${uiServer.port}/workbench/`, { waitUntil: "domcontentloaded" });
 
     // Load the safe demo from the Runs page.
     const demoButton = page.getByRole("button", { name: /Safe demo|安全 Demo/i }).first();
@@ -825,7 +825,7 @@ test("workbench compare page shows trend empty state and session controls", {
 
   try {
     const page = await newAuthenticatedPage(browser, uiServer, { viewport: { width: 1440, height: 960 } });
-    await page.goto(`http://127.0.0.1:${uiServer.port}/workbench/`);
+    await page.goto(`http://127.0.0.1:${uiServer.port}/workbench/`, { waitUntil: "domcontentloaded" });
 
     const demoButton = page.getByRole("button", { name: /Safe demo|安全 Demo/i }).first();
     await demoButton.waitFor({ state: "visible", timeout: 15000 });

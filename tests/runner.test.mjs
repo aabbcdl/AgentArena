@@ -1227,10 +1227,9 @@ test("runBenchmark returns cancelled results and still runs teardown after abort
     onProgress: (event) => {
       events.push(event);
       if (event.phase === "agent-start") {
-        // Delay must be long enough for setup to complete and the adapter to
-        // actually start executing. Too short and the abort fires during setup,
-        // which has an early-return path that skips teardown.
-        setTimeout(() => controller.abort(), 1000);
+        // Abort shortly after scheduling so faster machines cannot finish the
+        // demo adapter before the cancellation reaches it.
+        setTimeout(() => controller.abort(), 50);
       }
     }
   });
@@ -2067,6 +2066,108 @@ test("runBenchmark rejects resume results when task inputs change despite matchi
     assert.equal(second.results[0].executionStatus, "completed");
     assert.equal(second.results[0].validationStatus, "partial");
     assert.equal(second.results[0].judgeResults[0].success, false);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("changePolicy uses real snapshots and becomes a critical completion gate", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-change-policy-"));
+  const repoPath = path.join(tempDir, "repo");
+  await mkdir(path.join(repoPath, "src"), { recursive: true });
+  await writeFile(path.join(repoPath, "src", "main.js"), "module.exports = 1;\n", "utf8");
+  await writeFile(path.join(repoPath, "README.md"), "baseline\n", "utf8");
+
+  const capability = {
+    supportTier: "supported",
+    invocationMethod: "test",
+    authPrerequisites: [],
+    tokenAvailability: "available",
+    costAvailability: "available",
+    traceRichness: "partial",
+    knownLimitations: []
+  };
+  const task = {
+    schemaVersion: "agentarena.taskpack/v1",
+    id: "change-policy-runner",
+    title: "Change policy runner",
+    prompt: "Make the scoped change.",
+    envAllowList: [],
+    setupCommands: [],
+    judges: [],
+    teardownCommands: [],
+    changePolicy: {
+      requireAgentChange: true,
+      allowedPaths: ["src/main.js"],
+      minChangedFiles: 1,
+      maxChangedFiles: 1
+    }
+  };
+
+  async function runCase(mode) {
+    const adapter = {
+      id: `policy-${mode}`,
+      title: `Policy ${mode}`,
+      kind: "external",
+      capability,
+      async preflight() { throw new Error("not used"); },
+      async execute(context) {
+        if (mode === "allowed") {
+          await writeFile(path.join(context.workspacePath, "src", "main.js"), "module.exports = 2;\n", "utf8");
+        } else if (mode === "forbidden") {
+          await writeFile(path.join(context.workspacePath, "README.md"), "agent changed the wrong file\n", "utf8");
+        }
+        return {
+          status: "success",
+          summary: "done",
+          tokenUsage: 1,
+          estimatedCostUsd: 0,
+          costKnown: true,
+          changedFilesHint: ["src/main.js"]
+        };
+      }
+    };
+    const preflight = {
+      agentId: adapter.id,
+      baseAgentId: adapter.id,
+      variantId: adapter.id,
+      displayLabel: adapter.title,
+      requestedConfig: {},
+      agentTitle: adapter.title,
+      adapterKind: adapter.kind,
+      status: "ready",
+      summary: "ready",
+      capability,
+      adapter
+    };
+    return runAgent(
+      repoPath,
+      path.join(tempDir, `output-${mode}`),
+      path.join(tempDir, `workspace-${mode}`),
+      task,
+      preflight,
+      {}
+    );
+  }
+
+  try {
+    const noOp = await runCase("noop");
+    const noOpPolicy = noOp.judgeResults.find((judge) => judge.judgeId === "agentarena-change-policy");
+    assert.equal(noOp.changedFiles.length, 0);
+    assert.equal(noOpPolicy?.success, false);
+    assert.equal(noOp.status, "failed");
+
+    const allowed = await runCase("allowed");
+    const allowedPolicy = allowed.judgeResults.find((judge) => judge.judgeId === "agentarena-change-policy");
+    assert.deepEqual(allowed.changedFiles, ["src/main.js"]);
+    assert.equal(allowedPolicy?.success, true);
+    assert.equal(allowed.status, "success");
+
+    const forbidden = await runCase("forbidden");
+    const forbiddenPolicy = forbidden.judgeResults.find((judge) => judge.judgeId === "agentarena-change-policy");
+    assert.deepEqual(forbidden.changedFiles, ["README.md"]);
+    assert.equal(forbiddenPolicy?.success, false);
+    assert.equal(forbidden.status, "failed");
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }

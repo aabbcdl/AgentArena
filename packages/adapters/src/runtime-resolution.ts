@@ -35,11 +35,13 @@ function normalizeReasoningEffort(effort: string | null | undefined): string | u
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
-export async function readCodexConfigDefaults(): Promise<CodexConfigDefaults> {
-  const configuredCodexHome = process.env.CODEX_HOME?.trim();
+export async function readCodexConfigDefaults(
+  environment: NodeJS.ProcessEnv = process.env
+): Promise<CodexConfigDefaults> {
+  const configuredCodexHome = environment.CODEX_HOME?.trim();
   const codexHome = configuredCodexHome
     ? path.resolve(configuredCodexHome)
-    : path.join(process.env.USERPROFILE ?? process.env.HOME ?? os.homedir(), ".codex");
+    : path.join(environment.USERPROFILE ?? environment.HOME ?? os.homedir(), ".codex");
   const configPath = path.join(codexHome, "config.toml");
   try {
     const contents = await fs.readFile(configPath, "utf8");
@@ -59,51 +61,73 @@ export async function readCodexConfigDefaults(): Promise<CodexConfigDefaults> {
 export async function resolveCodexRuntime(context: {
   requestedConfig?: AdapterExecutionContext["selection"]["config"];
   configSource?: AdapterExecutionContext["selection"]["configSource"];
+  environment?: NodeJS.ProcessEnv;
 }): Promise<AgentResolvedRuntime> {
+  const environment = context.environment ?? process.env;
   const requestedConfig = context.requestedConfig ?? {};
   const normalizedRequestedModel = normalizeModelName(requestedConfig.model);
   const normalizedRequestedEffort = normalizeReasoningEffort(requestedConfig.reasoningEffort);
-  if (normalizedRequestedModel || normalizedRequestedEffort) {
-    return {
-      effectiveModel: normalizedRequestedModel,
-      effectiveReasoningEffort: normalizedRequestedEffort,
-      source: context.configSource ?? "ui",
-      verification: "inferred",
-      notes: ["Using explicit AgentArena Codex configuration."]
-    };
-  }
 
-  const normalizedEnvModel = normalizeModelName(process.env.AGENTARENA_CODEX_MODEL);
+  const normalizedEnvModel = normalizeModelName(environment.AGENTARENA_CODEX_MODEL);
   // Read the canonical env var first, fall back to the old name for backward compatibility.
   // The old name (AGENTARENA_CODEX_REASONING) was used in .env.example before 2026-06-07.
-  let envReasoningEffort = process.env.AGENTARENA_CODEX_REASONING_EFFORT;
-  if (envReasoningEffort == null && process.env.AGENTARENA_CODEX_REASONING) {
-    process.emitWarning(
-      "[agentarena] AGENTARENA_CODEX_REASONING is deprecated, use AGENTARENA_CODEX_REASONING_EFFORT instead"
-    );
-    envReasoningEffort = process.env.AGENTARENA_CODEX_REASONING;
+  let envReasoningEffort = environment.AGENTARENA_CODEX_REASONING_EFFORT;
+  if (envReasoningEffort == null && environment.AGENTARENA_CODEX_REASONING) {
+    if (environment === process.env) {
+      process.emitWarning(
+        "[agentarena] AGENTARENA_CODEX_REASONING is deprecated, use AGENTARENA_CODEX_REASONING_EFFORT instead"
+      );
+    }
+    envReasoningEffort = environment.AGENTARENA_CODEX_REASONING;
   }
   const normalizedEnvEffort = normalizeReasoningEffort(envReasoningEffort);
-  if (normalizedEnvModel || normalizedEnvEffort) {
-    return {
-      effectiveModel: normalizedEnvModel,
-      effectiveReasoningEffort: normalizedEnvEffort,
-      source: "env",
-      verification: "inferred",
-      notes: ["Using AGENTARENA_CODEX_* environment overrides."]
-    };
-  }
 
-  const configDefaults = await readCodexConfigDefaults();
+  const configDefaults = await readCodexConfigDefaults(environment);
   const normalizedConfigModel = normalizeModelName(configDefaults.model);
   const normalizedConfigEffort = normalizeReasoningEffort(configDefaults.reasoningEffort);
-  if (normalizedConfigModel || normalizedConfigEffort) {
+
+  const effectiveModel = normalizedRequestedModel ?? normalizedEnvModel ?? normalizedConfigModel;
+  const effectiveReasoningEffort = normalizedRequestedEffort ?? normalizedEnvEffort ?? normalizedConfigEffort;
+  const modelIdentitySource = normalizedRequestedModel
+    ? "declared" as const
+    : normalizedEnvModel
+      ? "inferred" as const
+      : normalizedConfigModel
+        ? "declared" as const
+        : undefined;
+  const reasoningEffortSource = normalizedRequestedEffort
+    ? "declared" as const
+    : normalizedEnvEffort
+      ? "inferred" as const
+      : normalizedConfigEffort
+        ? "declared" as const
+        : undefined;
+
+  if (effectiveModel || effectiveReasoningEffort) {
+    const source = normalizedRequestedModel || normalizedRequestedEffort
+      ? context.configSource ?? "ui"
+      : normalizedEnvModel || normalizedEnvEffort
+        ? "env"
+        : "codex-config";
+    const notes = [
+      ...(normalizedRequestedModel || normalizedRequestedEffort
+        ? ["Using explicit AgentArena Codex configuration."]
+        : []),
+      ...(normalizedEnvModel || normalizedEnvEffort
+        ? ["Using AGENTARENA_CODEX_* environment overrides."]
+        : []),
+      ...(normalizedConfigModel || normalizedConfigEffort
+        ? ["Using defaults from the active Codex config.toml."]
+        : [])
+    ];
     return {
-      effectiveModel: normalizedConfigModel,
-      effectiveReasoningEffort: normalizedConfigEffort,
-      source: "codex-config",
+      effectiveModel,
+      effectiveReasoningEffort,
+      ...(modelIdentitySource ? { modelIdentitySource } : {}),
+      ...(reasoningEffortSource ? { reasoningEffortSource } : {}),
+      source,
       verification: "inferred",
-      notes: ["Using defaults from the active Codex config.toml."]
+      notes
     };
   }
 
@@ -125,6 +149,9 @@ export async function resolveClaudeRuntime(context: {
   const runtime: AgentResolvedRuntime = {
     effectiveModel: resolveEffectiveModel(requestedConfig.model, profile.primaryModel),
     effectiveReasoningEffort: undefined,
+    ...(resolveEffectiveModel(requestedConfig.model, profile.primaryModel)
+      ? { modelIdentitySource: "declared" as const }
+      : {}),
     providerProfileId: profile.id,
     providerProfileName: profile.name,
     providerKind: profile.kind,

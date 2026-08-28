@@ -3,6 +3,7 @@ import {
   logger,
   normalizePath,
   portableRelativePath,
+  type TokenUsageBreakdown,
   uniqueSorted
 } from "@agentarena/core";
 import { safeNumber } from "./process-utils.js";
@@ -32,13 +33,31 @@ interface CodexUsageEvent {
   input_tokens?: number;
   cached_input_tokens?: number;
   output_tokens?: number;
+  inputTokens?: number;
+  cachedInputTokens?: number;
+  outputTokens?: number;
+  total_tokens?: number;
+  totalTokens?: number;
+  reasoning_tokens?: number;
+  reasoningTokens?: number;
+  output_tokens_details?: {
+    reasoning_tokens?: number;
+  };
+  outputTokensDetails?: {
+    reasoningTokens?: number;
+  };
 }
 
 export interface CodexJsonEvent {
   type?: string;
+  message?: string;
+  error?: string | {
+    message?: string;
+  };
   item?: {
     type?: string;
     text?: string;
+    message?: string;
     changes?: Array<{
       path?: string;
     }>;
@@ -47,11 +66,26 @@ export interface CodexJsonEvent {
   thread_id?: string;
 }
 
+const MAX_CODEX_FAILURE_MESSAGE_LENGTH = 4_000;
+
+function codexFailureMessage(event: CodexJsonEvent): string | undefined {
+  const nestedError = asJsonObject(event.error);
+  const candidate = typeof nestedError?.message === "string"
+    ? nestedError.message
+    : typeof event.error === "string"
+      ? event.error
+      : event.message;
+  const normalized = candidate?.replace(/\s+/g, " ").trim();
+  if (!normalized) return undefined;
+  return normalized.slice(0, MAX_CODEX_FAILURE_MESSAGE_LENGTH);
+}
+
 interface ClaudeUsageEvent {
   input_tokens?: number;
   output_tokens?: number;
   cache_creation_input_tokens?: number;
   cache_read_input_tokens?: number;
+  reasoning_tokens?: number;
 }
 
 export interface ClaudeJsonEvent {
@@ -117,6 +151,7 @@ export function extractNestedStringValues(value: unknown, collector: Map<string,
  * - `type: "item.completed"` + `item.type: "agent_message"` → `item.text` (summary)
  * - `type: "item.completed"` + `item.type: "file_change"` → `item.changes[].path`
  * - `type: "turn.completed"` → `usage.{input_tokens, cached_input_tokens, output_tokens}`
+ * - `type: "error"` or `type: "turn.failed"` → bounded failure diagnostics
  *
  * If any field is renamed or removed, tokenUsage silently drops to 0 and
  * changedFilesHint returns empty. See docs/adr/ADR-001-adapter-cli-contract.md.
@@ -124,7 +159,10 @@ export function extractNestedStringValues(value: unknown, collector: Map<string,
 export function parseCodexEvents(stdout: string, workspacePath: string): {
   changedFilesHint: string[];
   tokenUsage: number;
+  tokenUsageBreakdown: TokenUsageBreakdown;
   summaryFromEvents?: string;
+  /** Last top-level Codex error, preferring the terminal turn.failed message. */
+  failureMessage?: string;
   threadId?: string;
   resolvedRuntime?: AgentResolvedRuntime;
   /**
@@ -145,15 +183,28 @@ export function parseCodexEvents(stdout: string, workspacePath: string): {
    * SHOULD set tokenUsageReliable=false and costQuality="unavailable".
    */
   missingCriticalEvents: string[];
+  /** True when usage existed but did not expose a complete known breakdown. */
+  usageIncomplete: boolean;
 } {
   const changedFiles = new Set<string>();
   let tokenUsage = 0;
+  const tokenUsageBreakdown: TokenUsageBreakdown = {
+    inputTokens: 0,
+    outputTokens: 0,
+    reasoningTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0
+  };
   let summaryFromEvents: string | undefined;
+  let failureMessage: string | undefined;
   let threadId: string | undefined;
   let eventModel: string | undefined;
   let eventReasoningEffort: string | undefined;
   let parseErrorCount = 0;
   let turnCompletedCount = 0;
+  let failureEventCount = 0;
+  let usageIncomplete = false;
+  let sawJsonEvent = false;
   // Track recognized vs unrecognized typed JSON events for format mismatch detection
   let totalTypedEvents = 0;
   let unrecognizedTypedEvents = 0;
@@ -177,6 +228,7 @@ export function parseCodexEvents(stdout: string, workspacePath: string): {
         continue;
       }
       parsed = obj as CodexJsonEvent;
+      sawJsonEvent = true;
     } catch {
       parseErrorCount += 1;
       // Only log first few parse errors to avoid flooding
@@ -220,12 +272,31 @@ export function parseCodexEvents(stdout: string, workspacePath: string): {
     if (parsed.type === "turn.completed") {
       recognizedType = true;
       turnCompletedCount += 1;
-      if (parsed.usage) {
-        tokenUsage +=
-          safeNumber(parsed.usage.input_tokens) +
-          safeNumber(parsed.usage.cached_input_tokens) +
-          safeNumber(parsed.usage.output_tokens);
+      const usage = parsed.usage;
+      if (usage) {
+        const inputTokens = safeNumber(usage.input_tokens ?? usage.inputTokens);
+        const cacheReadTokens = safeNumber(usage.cached_input_tokens ?? usage.cachedInputTokens);
+        const outputTokens = safeNumber(usage.output_tokens ?? usage.outputTokens);
+        const totalTokens = safeNumber(usage.total_tokens ?? usage.totalTokens);
+        const reasoningTokens = safeNumber(usage.reasoning_tokens ?? usage.reasoningTokens)
+          || safeNumber(usage.output_tokens_details?.reasoning_tokens ?? usage.outputTokensDetails?.reasoningTokens);
+        const hasBreakdown = ["input_tokens", "inputTokens", "cached_input_tokens", "cachedInputTokens", "output_tokens", "outputTokens"]
+          .some((key) => key in usage);
+        if (!hasBreakdown) usageIncomplete = true;
+        tokenUsage += hasBreakdown ? inputTokens + cacheReadTokens + outputTokens : totalTokens;
+        tokenUsageBreakdown.inputTokens += inputTokens;
+        tokenUsageBreakdown.cacheReadTokens += cacheReadTokens;
+        tokenUsageBreakdown.outputTokens += outputTokens;
+        tokenUsageBreakdown.reasoningTokens += reasoningTokens;
+      } else {
+        usageIncomplete = true;
       }
+    }
+
+    if (parsed.type === "error" || parsed.type === "turn.failed") {
+      recognizedType = true;
+      failureEventCount += 1;
+      failureMessage = codexFailureMessage(parsed) ?? failureMessage;
     }
 
     // Count typed events for format mismatch detection. A known lifecycle
@@ -242,9 +313,10 @@ export function parseCodexEvents(stdout: string, workspacePath: string): {
 
     const stringValues = new Map<string, string>();
     extractNestedStringValues(parsed, stringValues);
-    eventModel =
+      eventModel =
       stringValues.get("modelname") ??
       stringValues.get("modelslug") ??
+      stringValues.get("modelid") ??
       stringValues.get("model") ??
       eventModel;
     eventReasoningEffort =
@@ -279,27 +351,35 @@ export function parseCodexEvents(stdout: string, workspacePath: string): {
   }
 
   const missingCriticalEvents: string[] = [];
-  if (turnCompletedCount === 0 && totalTypedEvents > 0) {
+  if (turnCompletedCount === 0 && totalTypedEvents > 0 && failureEventCount === 0) {
+    missingCriticalEvents.push("turn.completed");
+  }
+  if (turnCompletedCount === 0 && sawJsonEvent && failureEventCount === 0 && !missingCriticalEvents.includes("turn.completed")) {
     missingCriticalEvents.push("turn.completed");
   }
 
   return {
     changedFilesHint: uniqueSorted(Array.from(changedFiles)),
     tokenUsage,
+    tokenUsageBreakdown,
     summaryFromEvents,
+    failureMessage,
     threadId,
     resolvedRuntime:
       eventModel || eventReasoningEffort
         ? {
             effectiveModel: eventModel,
             effectiveReasoningEffort: eventReasoningEffort,
+            ...(eventModel ? { modelIdentitySource: "confirmed" as const } : {}),
+            ...(eventReasoningEffort ? { reasoningEffortSource: "confirmed" as const } : {}),
             source: "event-stream",
             verification: "confirmed"
           }
         : undefined,
     tokenCountSuspicious,
     formatMismatch,
-    missingCriticalEvents
+    missingCriticalEvents,
+    usageIncomplete
   };
 }
 
@@ -333,6 +413,7 @@ export function parseStreamJsonEvents(
   callerName: string
 ): {
   tokenUsage: number;
+  tokenUsageBreakdown: TokenUsageBreakdown;
   estimatedCostUsd: number;
   costKnown: boolean;
   summaryFromEvents?: string;
@@ -369,6 +450,13 @@ export function parseStreamJsonEvents(
   missingCriticalEvents: string[];
 } {
   let tokenUsage = 0;
+  const tokenUsageBreakdown: TokenUsageBreakdown = {
+    inputTokens: 0,
+    outputTokens: 0,
+    reasoningTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0
+  };
   let estimatedCostUsd = 0;
   let costKnown = false;
   let summaryFromEvents: string | undefined;
@@ -431,11 +519,17 @@ export function parseStreamJsonEvents(
 
       const usage = parsed.message.usage;
       if (usage) {
-        tokenUsage +=
-          safeNumber(usage.input_tokens) +
-          safeNumber(usage.output_tokens) +
-          safeNumber(usage.cache_creation_input_tokens) +
-          safeNumber(usage.cache_read_input_tokens);
+        const inputTokens = safeNumber(usage.input_tokens);
+        const outputTokens = safeNumber(usage.output_tokens);
+        const cacheWriteTokens = safeNumber(usage.cache_creation_input_tokens);
+        const cacheReadTokens = safeNumber(usage.cache_read_input_tokens);
+        const reasoningTokens = safeNumber(usage.reasoning_tokens);
+        tokenUsage += inputTokens + outputTokens + cacheWriteTokens + cacheReadTokens;
+        tokenUsageBreakdown.inputTokens += inputTokens;
+        tokenUsageBreakdown.outputTokens += outputTokens;
+        tokenUsageBreakdown.cacheWriteTokens += cacheWriteTokens;
+        tokenUsageBreakdown.cacheReadTokens += cacheReadTokens;
+        tokenUsageBreakdown.reasoningTokens += reasoningTokens;
       }
     }
 
@@ -446,11 +540,17 @@ export function parseStreamJsonEvents(
       // Replace the running total to avoid double-counting with per-message usage.
       const usage = parsed.usage;
       if (usage) {
-        tokenUsage =
-          safeNumber(usage.input_tokens) +
-          safeNumber(usage.output_tokens) +
-          safeNumber(usage.cache_creation_input_tokens) +
-          safeNumber(usage.cache_read_input_tokens);
+        const inputTokens = safeNumber(usage.input_tokens);
+        const outputTokens = safeNumber(usage.output_tokens);
+        const cacheWriteTokens = safeNumber(usage.cache_creation_input_tokens);
+        const cacheReadTokens = safeNumber(usage.cache_read_input_tokens);
+        const reasoningTokens = safeNumber(usage.reasoning_tokens);
+        tokenUsage = inputTokens + outputTokens + cacheWriteTokens + cacheReadTokens;
+        tokenUsageBreakdown.inputTokens = inputTokens;
+        tokenUsageBreakdown.outputTokens = outputTokens;
+        tokenUsageBreakdown.cacheWriteTokens = cacheWriteTokens;
+        tokenUsageBreakdown.cacheReadTokens = cacheReadTokens;
+        tokenUsageBreakdown.reasoningTokens = reasoningTokens;
       }
 
       if (typeof parsed.total_cost_usd === "number" && Number.isFinite(parsed.total_cost_usd)) {
@@ -505,6 +605,7 @@ export function parseStreamJsonEvents(
 
   return {
     tokenUsage,
+    tokenUsageBreakdown,
     estimatedCostUsd,
     costKnown,
     summaryFromEvents,

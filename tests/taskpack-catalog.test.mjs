@@ -15,9 +15,11 @@ async function readOfficialPacks() {
   return Promise.all(files.map(async (name) => ({ name, data: parseYaml(await fs.readFile(path.join(OFFICIAL, name), "utf8")) })));
 }
 
-test("official task pack catalog has 30 localized packs and generated README markers", async () => {
+test("official task pack catalog keeps 30 files but exposes only 10 core packs", async () => {
   const packs = await readOfficialPacks();
   assert.equal(packs.length, 30);
+  const core = packs.filter(({ data }) => data?.metadata?.lifecycle === "core");
+  assert.equal(core.length, 10);
   for (const { name, data } of packs) {
     const zh = data?.metadata?.i18n?.["zh-CN"];
     assert.ok(zh?.title, `${name} missing zh-CN title`);
@@ -30,7 +32,13 @@ test("official task pack catalog has 30 localized packs and generated README mar
     const readme = await fs.readFile(path.join(REPO_ROOT, readmeName), "utf8");
     assert.match(readme, /<!-- official-taskpacks:start -->/);
     assert.match(readme, /<!-- official-taskpacks:end -->/);
-    assert.match(readme, /\b30\b/);
-    for (const { data } of packs) assert.ok(readme.includes("`" + data.id + "`"), `${readmeName} missing ${data.id}`);
+    assert.match(readme, /\b10\b/);
+    for (const { data } of core) assert.ok(readme.includes("`" + data.id + "`"), `${readmeName} missing core ${data.id}`);
+  }
+
+  const officialReadme = await fs.readFile(path.join(OFFICIAL, "README.md"), "utf8");
+  assert.match(officialReadme, /Retained legacy and experimental packs/);
+  for (const { data } of packs.filter(({ data }) => data?.metadata?.lifecycle !== "core")) {
+    assert.ok(officialReadme.includes("`" + data.id + "`"), `official README missing retained ${data.id}`);
   }
 });

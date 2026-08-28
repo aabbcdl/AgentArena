@@ -3,6 +3,54 @@ const BOOTSTRAP_PARAM = "bootstrap";
 const LEGACY_TOKEN_PARAM = "token";
 let bootstrapInitialization: Promise<void> | undefined;
 
+export class ApiError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
+export function isApiErrorStatus(error: unknown, status: number): boolean {
+  return Boolean(error && typeof error === "object" && "status" in error && (error as { status?: unknown }).status === status);
+}
+
+export function setAuthToken(token: string): void {
+  try {
+    sessionStorage.setItem(AUTH_KEY, token.trim());
+  } catch {
+    // Storage-disabled browsers can still use the token for this request only.
+  }
+}
+
+export function clearAuthToken(): void {
+  try {
+    sessionStorage.removeItem(AUTH_KEY);
+  } catch {
+    // Ignore storage failures; the next request will simply omit the token.
+  }
+}
+
+export async function authenticateWithPassword(password: string, mode: "setup" | "login"): Promise<void> {
+  const response = await fetch(`/api/auth/${mode}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password }),
+    cache: "no-store"
+  });
+  const data = await response.json().catch(() => null) as { token?: unknown; error?: unknown } | null;
+  if (!response.ok) {
+    const message = typeof data?.error === "string" ? data.error : `${response.status} ${response.statusText}`;
+    throw new ApiError(message, response.status);
+  }
+  if (typeof data?.token !== "string" || !data.token) {
+    throw new ApiError("Local service authentication did not return a session token.", 500);
+  }
+  setAuthToken(data.token);
+}
+
 function authToken(): string {
   try {
     return sessionStorage.getItem(AUTH_KEY) ?? "";
@@ -79,7 +127,7 @@ export async function apiFetch<T>(url: string, options: RequestInit = {}): Promi
     const message = data && typeof data === "object" && "error" in data
       ? String((data as { error: unknown }).error)
       : `${response.status} ${response.statusText}`;
-    throw new Error(message);
+    throw new ApiError(message, response.status);
   }
   return data as T;
 }

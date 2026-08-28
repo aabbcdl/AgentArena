@@ -15,10 +15,15 @@ const UI_INFO_STABLE_KEYS = [
   "defaultOutputPath",
   "codexDefaults",
   "claudeProviderProfiles",
+  "runtimeProfiles",
   "riskNotice",
   "host",
   "port",
   "authRequired",
+  "authTokenFilePath",
+  "authTokenSource",
+  "authMode",
+  "authSetupRequired",
 ];
 
 test("contract: handleUiInfo exposes stable keys", async () => {
@@ -30,6 +35,7 @@ test("contract: handleUiInfo exposes stable keys", async () => {
   }
   assert.equal(body.mode, "local-service");
   assert.ok(Array.isArray(body.claudeProviderProfiles));
+  assert.ok(Array.isArray(body.runtimeProfiles));
 });
 
 test("contract: handleAdaptersList entries expose stable adapter fields", async () => {

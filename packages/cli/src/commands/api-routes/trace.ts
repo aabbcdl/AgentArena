@@ -14,8 +14,9 @@
  * rate limiting from the shared request middleware.
  */
 
-import { promises as fs } from "node:fs";
+import { createReadStream, promises as fs } from "node:fs";
 import path from "node:path";
+import { createInterface } from "node:readline";
 import { isPathInsideWorkspace } from "@agentarena/core";
 import { jsonResponse } from "../../server/index.js";
 
@@ -83,6 +84,34 @@ export function parseTrace(text: string): TraceEvent[] {
   return events;
 }
 
+async function readTraceWithLimit(filePath: string): Promise<{ events: TraceEvent[]; totalEvents: number }> {
+  const events: TraceEvent[] = [];
+  let totalEvents = 0;
+  const stream = createReadStream(filePath, { encoding: "utf8" });
+  const lines = createInterface({ input: stream, crlfDelay: Infinity });
+
+  try {
+    for await (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      try {
+        const value = JSON.parse(trimmed);
+        if (value && typeof value === "object" && typeof (value as TraceEvent).type === "string") {
+          totalEvents++;
+          if (events.length < MAX_EVENTS) events.push(value as TraceEvent);
+        }
+      } catch {
+        // Skip malformed lines instead of failing the whole replay.
+      }
+    }
+  } finally {
+    lines.close();
+    stream.destroy();
+  }
+
+  return { events, totalEvents };
+}
+
 /**
  * Pure handler. Resolves, contains, and reads the trace file for the given
  * workspace root + query. Returns an ApiResponse so it can be wrapped by
@@ -112,25 +141,23 @@ export async function handleTraceGet(workspaceRoot: string, runId: string | null
     return jsonResponse({ error: "trace-missing" }, 404);
   }
 
-  let text: string;
+  let trace: { events: TraceEvent[]; totalEvents: number };
   try {
-    text = await fs.readFile(filePath, "utf8");
+    trace = await readTraceWithLimit(filePath);
   } catch {
     return jsonResponse({ error: "trace-missing" }, 404);
   }
 
-  const events = parseTrace(text);
-  const totalEvents = events.length;
+  const { events, totalEvents } = trace;
   const truncated = totalEvents > MAX_EVENTS;
-  const returnedEvents = truncated ? events.slice(0, MAX_EVENTS) : events;
 
   const payload: TraceResponse = {
     runId: query.runId,
     variantId: query.variantId,
     totalEvents,
-    returnedEvents: returnedEvents.length,
+    returnedEvents: events.length,
     truncated,
-    events: returnedEvents
+    events
   };
   return jsonResponse(payload, 200);
 }

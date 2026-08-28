@@ -33,7 +33,8 @@ import {
   getScoreWeightPreset,
   getSelectionTrustSummary,
   missingCoreComparisonData,
-  resultRecordKey
+  resultRecordKey,
+  usesThirdPartyProviderConfiguration
 } from "../apps/web-report/src/view-model.js";
 
 test("safeExternalHref only allows absolute http and https URLs", () => {
@@ -76,7 +77,7 @@ test("new Codex variants inherit the current local configuration instead of pinn
   assert.equal(variant.source, "codex-config");
 });
 
-test("Claude profile descriptions explain official local use and third-party isolation", () => {
+test("legacy Claude profile descriptions explain compatibility isolation without full permission bypass", () => {
   const localText = (_zh, en) => en;
   const officialDescription = claudeRuntimeModeDescription({ kind: "official" }, localText);
   const isolatedDescription = claudeRuntimeModeDescription({ kind: "openai-proxy" }, localText);
@@ -87,14 +88,41 @@ test("Claude profile descriptions explain official local use and third-party iso
   );
   assert.match(
     isolatedDescription,
-    /isolated temporary configuration/i
+    /legacy compatibility mode/i
   );
   assert.match(
     isolatedDescription,
-    /AGENTS\.md and CLAUDE\.md/i
+    /isolated temporary configuration/i
   );
-  assert.match(officialDescription, /AGENTARENA_SKIP_PERMISSIONS=1/i);
-  assert.match(isolatedDescription, /AGENTARENA_SKIP_PERMISSIONS=1/i);
+  assert.match(officialDescription, /permission-mode dontAsk/i);
+  assert.match(isolatedDescription, /permission-mode dontAsk/i);
+  assert.doesNotMatch(officialDescription, /AGENTARENA_SKIP_PERMISSIONS/i);
+  assert.doesNotMatch(isolatedDescription, /AGENTARENA_SKIP_PERMISSIONS/i);
+});
+
+test("Provider risk labels distinguish inherited local and managed configurations", () => {
+  assert.equal(usesThirdPartyProviderConfiguration({
+    resolvedRuntime: {
+      providerProfileName: "codex-local",
+      providerSource: "unknown",
+      source: "cli-default"
+    }
+  }), false);
+  assert.equal(usesThirdPartyProviderConfiguration({
+    resolvedRuntime: {
+      providerProfileName: "managed-provider",
+      providerSource: "profile-config",
+      source: "profile-config"
+    }
+  }), true);
+  assert.equal(usesThirdPartyProviderConfiguration({
+    resolvedRuntime: {
+      providerProfileName: "official",
+      providerKind: "official",
+      providerSource: "official-login",
+      source: "official-login"
+    }
+  }), false);
 });
 
 test("safeTraceCategoryClass preserves normal trace categories", () => {

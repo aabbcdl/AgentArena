@@ -8,7 +8,7 @@ import type {
   FileDiffArtifact,
   JudgeResult
 } from "@agentarena/core";
-import { uniqueSorted } from "@agentarena/core";
+import { isAgentArenaAdapterMetadataPath, uniqueSorted } from "@agentarena/core";
 
 // ---------------------------------------------------------------------------
 // Base result factory — single source of truth for AgentRunResult shape
@@ -176,7 +176,8 @@ export function createSkippedRunResult(
 // ---------------------------------------------------------------------------
 
 export function buildChangedFiles(diff: DiffSummary, hints: string[]): string[] {
-  return uniqueSorted([...diff.added, ...diff.changed, ...diff.removed, ...hints]);
+  return uniqueSorted([...diff.added, ...diff.changed, ...diff.removed, ...hints])
+    .filter((filePath) => !isAgentArenaAdapterMetadataPath(filePath));
 }
 
 export function mergeResolvedRuntime(
@@ -190,7 +191,7 @@ export function mergeResolvedRuntime(
   const merged = {
     ...(fallback ?? {}),
     ...(primary ?? {}),
-    notes: [...(fallback?.notes ?? []), ...(primary?.notes ?? [])].filter(Boolean)
+    notes: [...new Set([...(fallback?.notes ?? []), ...(primary?.notes ?? [])].filter(Boolean))]
   };
 
   return {

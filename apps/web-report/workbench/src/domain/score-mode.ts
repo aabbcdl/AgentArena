@@ -2,7 +2,7 @@ import {
   isScoreMode,
   SCORE_MODES,
   type ScoreMode
-} from "../../../../../packages/core/src/scoring-weights.ts";
+} from "@agentarena/core/scoring-weights";
 import type { Locale } from "../types";
 
 export { isScoreMode, SCORE_MODES, type ScoreMode };

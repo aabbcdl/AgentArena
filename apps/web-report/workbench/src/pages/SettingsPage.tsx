@@ -1,9 +1,12 @@
+import { useMemo, useState } from "preact/hooks";
 import { Icon, Metric, Notice, PageHeader, Section, StatusPill, t } from "../components/ui";
+import { buildPilotDiagnostics, pilotDiagnosticsMarkdown } from "../domain/pilot-diagnostics";
 import { useWorkbench } from "../hooks/useWorkbench";
 import type { Density, Locale, Theme } from "../types";
 
 export function SettingsPage() {
-  const { locale, theme, density, setLocale, setTheme, setDensity, environment, refreshEnvironment, setPage } = useWorkbench();
+  const { locale, theme, density, setLocale, setTheme, setDensity, environment, refreshEnvironment, setPage, plan, runs, runStatus } = useWorkbench();
+  const [diagnosticNotice, setDiagnosticNotice] = useState<"copied" | "downloaded" | null>(null);
   const telemetry = environment.telemetrySummary;
   const telemetryOn = environment.uiInfo?.telemetryEnabled ?? false;
   const telemetryFailed = telemetryOn && environment.failed.telemetry;
@@ -18,6 +21,38 @@ export function SettingsPage() {
   };
   const entryPoints = Object.entries(telemetry?.entryPoints ?? {}).sort((left, right) => right[1] - left[1]);
   const integrity = Object.entries(telemetry?.resultIntegrity ?? {}).sort((left, right) => right[1] - left[1]);
+  const diagnostics = useMemo(() => buildPilotDiagnostics({
+    uiInfo: environment.uiInfo,
+    adapters: environment.adapters,
+    detectedAgents: environment.detectedAgents,
+    runtimeProfiles: environment.runtimeProfiles,
+    runtimeReadiness: environment.runtimeReadiness,
+    taskPacks: environment.taskPacks,
+    taskPath: plan.taskPath,
+    telemetrySummary: environment.telemetrySummary,
+    runs,
+    runStatus,
+    locale
+  }), [environment, locale, plan.taskPath, runStatus, runs]);
+  const diagnosticsSummary = useMemo(() => pilotDiagnosticsMarkdown(diagnostics, locale), [diagnostics, locale]);
+  const downloadDiagnostics = () => {
+    const blob = new Blob([JSON.stringify(diagnostics, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "agentarena-pilot-diagnostics.json";
+    link.click();
+    URL.revokeObjectURL(url);
+    setDiagnosticNotice("downloaded");
+  };
+  const copyDiagnostics = async () => {
+    try {
+      await navigator.clipboard.writeText(diagnosticsSummary);
+      setDiagnosticNotice("copied");
+    } catch {
+      setDiagnosticNotice(null);
+    }
+  };
   return <>
     <PageHeader eyebrow="SETTINGS" title={t(locale, "settings")} description={locale === "zh-CN" ? "\u8c03\u6574\u754c\u9762\u504f\u597d\uff0c\u5e76\u67e5\u770b\u4ec5\u4fdd\u5b58\u5728\u672c\u5730\u7684\u4f7f\u7528\u7edf\u8ba1\u3002" : "Adjust interface preferences and review local-only usage measurement."}/>
     <div class="settings-layout">
@@ -39,6 +74,14 @@ export function SettingsPage() {
           <div><h3>{locale === "zh-CN" ? "\u5165\u53e3\u6765\u6e90" : "Entry points"}</h3><div class="compact-list">{entryPoints.length === 0 ? <p class="muted-line">{emptyLabel}</p> : entryPoints.map(([name, count]) => <div class="compact-row"><span>{name}</span><strong>{count}</strong></div>)}</div></div>
           <div><h3>{locale === "zh-CN" ? "\u7ed3\u679c\u5b8c\u6574\u6027" : "Result integrity"}</h3><div class="compact-list">{integrity.length === 0 ? <p class="muted-line">{emptyLabel}</p> : integrity.map(([name, count]) => <div class="compact-row"><span>{name}</span><strong>{count}</strong></div>)}</div></div>
         </div>
+      </Section>
+      <Section title={t(locale, "diagnosticsExport")} description={t(locale, "diagnosticsDescription")} actions={<div class="row-actions"><button class="button secondary" type="button" onClick={downloadDiagnostics}><Icon name="download"/>{t(locale, "diagnosticsDownload")}</button><button class="button ghost" type="button" onClick={() => void copyDiagnostics()}><Icon name="copy"/>{t(locale, "diagnosticsCopy")}</button></div>}>
+        {diagnosticNotice === "copied" && <Notice kind="success">{t(locale, "diagnosticsCopied")}</Notice>}
+        {diagnosticNotice === "downloaded" && <Notice kind="success">{t(locale, "diagnosticsDownloaded")}</Notice>}
+        <pre class="diagnostics-preview">{diagnosticsSummary}</pre>
+      </Section>
+      <Section title={locale === "zh-CN" ? "真实运行边界" : "Real-run boundary"}>
+        <Notice kind="warning"><strong>{t(locale, "pilotSafetyNotice")}</strong><span>{t(locale, "pilotNextStep")}</span></Notice>
       </Section>
       <Section title={t(locale, "providerConfig")} description={t(locale, "providerConfigHint")}>
         <button class="button secondary" type="button" onClick={() => setPage("environment")}><Icon name="environment"/>{t(locale, "goToEnvironment")}</button>

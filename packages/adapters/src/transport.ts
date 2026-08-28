@@ -5,19 +5,6 @@ import type { ProcessResult, RunProcessCallbacks } from "./process-utils.js";
 import { runProcess } from "./process-utils.js";
 
 /**
- * Decide whether to pass Claude Code's `--dangerously-skip-permissions` flag.
- *
- * This flag disables all permission prompts, granting the agent unrestricted
- * filesystem and command access. It MUST be opted into explicitly via the
- * `AGENTARENA_SKIP_PERMISSIONS` environment variable ("1" or "true"); the
- * default is OFF so the agent runs with its normal, safer prompt behavior.
- */
-export function shouldSkipClaudePermissions(): boolean {
-  const v = process.env.AGENTARENA_SKIP_PERMISSIONS;
-  return v === "1" || v?.toLowerCase() === "true";
-}
-
-/**
  * Configurable thresholds that determine when StreamJsonTransport falls back
  * to the next transport in the chain.
  *
@@ -128,6 +115,13 @@ export interface TransportResult {
   parsed?: {
     summary?: string;
     tokenUsage?: number;
+    tokenUsageBreakdown?: {
+      inputTokens: number;
+      outputTokens: number;
+      reasoningTokens: number;
+      cacheReadTokens: number;
+      cacheWriteTokens: number;
+    };
     estimatedCostUsd?: number;
     costKnown?: boolean;
     toolCalls?: Array<{ name: string; input?: unknown }>;
@@ -164,7 +158,8 @@ export class StreamJsonTransport implements Transport {
   constructor(
     private readonly invocation: InvocationSpec,
     private readonly extraArgs: string[] = [],
-    thresholds?: Partial<TransportFallbackThresholds>
+    thresholds?: Partial<TransportFallbackThresholds>,
+    private readonly argumentsMode: "augment" | "exact" = "augment"
   ) {
     this.thresholds = resolveFallbackThresholds(thresholds);
   }
@@ -177,19 +172,17 @@ export class StreamJsonTransport implements Transport {
     signal?: AbortSignal,
     callbacks?: RunProcessCallbacks
   ): Promise<TransportResult> {
-    const args = [
-      ...this.invocation.argsPrefix,
-      ...this.extraArgs,
-      "-p",                        // Read prompt from stdin
-      "--output-format",
-      "stream-json",               // Structured JSON events (one per line)
-      "--verbose",                 // Required for full structured output (undocumented requirement)
-      "--no-session-persistence",  // Don't save session state between runs
-    ];
-
-    if (shouldSkipClaudePermissions()) {
-      args.push("--dangerously-skip-permissions");
-    }
+    const args = this.argumentsMode === "exact"
+      ? [...this.invocation.argsPrefix, ...this.extraArgs]
+      : [
+          ...this.invocation.argsPrefix,
+          ...this.extraArgs,
+          "-p",
+          "--output-format",
+          "stream-json",
+          "--verbose",
+          "--no-session-persistence"
+        ];
 
     const processResult = await runProcess(
       this.invocation.command,
@@ -212,6 +205,7 @@ export class StreamJsonTransport implements Transport {
       parsed: {
         summary: parsed.summaryFromEvents,
         tokenUsage: parsed.tokenUsage,
+        tokenUsageBreakdown: parsed.tokenUsageBreakdown,
         estimatedCostUsd: parsed.estimatedCostUsd,
         costKnown: parsed.costKnown,
         toolCalls: parsed.toolCalls,
@@ -299,7 +293,8 @@ export class TextTransport implements Transport {
 
   constructor(
     private readonly invocation: InvocationSpec,
-    private readonly extraArgs: string[] = []
+    private readonly extraArgs: string[] = [],
+    private readonly argumentsMode: "augment" | "exact" = "augment"
   ) {}
 
   async send(
@@ -310,18 +305,16 @@ export class TextTransport implements Transport {
     signal?: AbortSignal,
     callbacks?: RunProcessCallbacks
   ): Promise<TransportResult> {
-    const args = [
-      ...this.invocation.argsPrefix,
-      ...this.extraArgs,
-      "-p",
-      "--output-format",
-      "text",
-      "--no-session-persistence",
-    ];
-
-    if (shouldSkipClaudePermissions()) {
-      args.push("--dangerously-skip-permissions");
-    }
+    const args = this.argumentsMode === "exact"
+      ? [...this.invocation.argsPrefix, ...this.extraArgs]
+      : [
+          ...this.invocation.argsPrefix,
+          ...this.extraArgs,
+          "-p",
+          "--output-format",
+          "text",
+          "--no-session-persistence"
+        ];
 
     const processResult = await runProcess(
       this.invocation.command,
@@ -416,6 +409,8 @@ export interface TransportChainOptions {
    * `DEFAULT_FALLBACK_THRESHOLDS` are used (with env-var overrides applied).
    */
   fallbackThresholds?: Partial<TransportFallbackThresholds>;
+  /** The supplied extraArgs are the complete task arguments, not additions. */
+  argumentsMode?: "augment" | "exact";
 }
 
 export interface TransportChainResult {
@@ -575,13 +570,21 @@ export function createClaudeTransportChain(
   extraArgs: string[] = [],
   options?: TransportChainOptions
 ): TransportChain {
+  const argumentsMode = options?.argumentsMode ?? "augment";
   const transports: Transport[] = [
-    new StreamJsonTransport(invocation, extraArgs, options?.fallbackThresholds),
+    new StreamJsonTransport(
+      invocation,
+      extraArgs,
+      options?.fallbackThresholds,
+      argumentsMode
+    ),
   ];
 
-  // Add text transport as fallback for third-party providers
-  if (isThirdPartyProvider) {
-    transports.push(new TextTransport(invocation, extraArgs));
+  // A frozen LaunchSpec is exact. Falling back to a different argv would no
+  // longer be the configuration that was verified, so exact launches do not
+  // silently switch transports.
+  if (isThirdPartyProvider && argumentsMode !== "exact") {
+    transports.push(new TextTransport(invocation, extraArgs, argumentsMode));
   }
 
   return new TransportChain(transports, {

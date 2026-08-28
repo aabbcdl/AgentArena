@@ -4,9 +4,10 @@ import path from "node:path";
 import type { getCodexDefaultResolvedRuntime } from "@agentarena/adapters";
 import { isPathInsideWorkspace, metrics } from "@agentarena/core";
 import { formatLocalUiOrigin } from "../local-only.js";
-import { checkAuthHeader, checkCorsOrigin, checkRateLimit, detectContentType, getClientIp, HttpError, jsonResponse, readRequestBody, textResponse } from "../server/index.js";
-import { handleAdaptersList, handleAdhocTaskpackDelete, handleAdhocTaskpacksList, handleAgentDetection, handleCheckCompatibility, handleCreateAdhocTaskpack, handleInstallGuides, handlePreflight, handleProviderProfileCreate, handleProviderProfileDelete, handleProviderProfileSecret, handleProviderProfilesGet, handleProviderProfileUpdate, handleQuickPreflight, handleTaskpacksList, handleTelemetry, handleTelemetrySummary, handleTraceGet, handleUiInfo, withErrorHandling } from "./api-routes.js";
+import { checkAuthHeader, checkCorsOrigin, checkRateLimit, detectContentType, getClientIp, HttpError, jsonResponse, normalizeMetricPath, readRequestBody, textResponse } from "../server/index.js";
+import { handleAdaptersList, handleAdhocTaskpackDelete, handleAdhocTaskpacksList, handleAgentDetection, handleCheckCompatibility, handleCreateAdhocTaskpack, handleInstallGuides, handlePreflight, handleProviderProfileCreate, handleProviderProfileDelete, handleProviderProfileSecret, handleProviderProfilesGet, handleProviderProfileUpdate, handleQuickPreflight, handleRuntimeProfileCreate, handleRuntimeProfileDelete, handleRuntimeProfileSecret, handleRuntimeProfilesGet, handleRuntimeProfileUpdate, handleRuntimeProfileVerify, handleRuntimeProfileVerifyProgress, handleTaskpacksList, handleTelemetry, handleTelemetrySummary, handleTraceGet, handleUiInfo, withErrorHandling } from "./api-routes.js";
 import { WEB_REPORT_DIST_ROOT } from "./shared.js";
+import { type UiAuthMode, type UiAuthTokenSource, validateUiAuthPassword } from "./ui-auth.js";
 import { sendApiResponse } from "./ui-http.js";
 import { handleUiRunRequest, isUiRunRoute } from "./ui-run-routes.js";
 import type { UiRunRequestContext } from "./ui-run-types.js";
@@ -18,11 +19,18 @@ export interface RequestContext extends UiRunRequestContext {
   host: string;
   port: number;
   isLocalhost: boolean;
+  authMode?: UiAuthMode;
+  authTokenSource?: UiAuthTokenSource;
+  authTokenFilePath?: string;
+  authSetupRequired?: () => boolean;
+  setupAuthPassword?: (password: string) => Promise<string | null>;
+  loginWithAuthPassword?: (password: string) => Promise<string | null>;
   exchangeAuthBootstrap?: (code: string) => string | null;
   codexDefaults: Awaited<ReturnType<typeof getCodexDefaultResolvedRuntime>>;
 }
 
 export function createRequestHandler(ctx: RequestContext) {
+  const workspaceRoot = ctx.workspaceRoot ?? process.cwd();
   return async function handleRequest(request: http.IncomingMessage, response: http.ServerResponse): Promise<void> {
     const requestStartTime = Date.now();
     let requestPath = "/";
@@ -31,7 +39,7 @@ export function createRequestHandler(ctx: RequestContext) {
 
     try {
       const requestUrl = new URL(request.url ?? "/", formatLocalUiOrigin(ctx.host, ctx.port));
-      requestPath = requestUrl.pathname;
+      requestPath = normalizeMetricPath(requestUrl.pathname);
 
       // ─── Middleware: Rate limiting ───
       if (requestUrl.pathname.startsWith("/api/")) {
@@ -56,6 +64,86 @@ export function createRequestHandler(ctx: RequestContext) {
       const origin = request.headers.origin;
       if (!checkCorsOrigin(origin, ctx.host, ctx.port)) {
         sendApiResponse(response, jsonResponse({ error: "Cross-origin requests are not allowed." }, 403));
+        return;
+      }
+
+      // Password setup/login are intentionally available only on the local
+      // UI origin and before Bearer authentication. They exchange a user-facing
+      // password for the per-process Bearer token; the password never enters
+      // logs or the browser's persistent storage.
+      if (request.method === "GET" && requestUrl.pathname === "/api/auth/status") {
+        if (!ctx.isLocalhost) {
+          sendApiResponse(response, jsonResponse({ error: "Password authentication is local-only." }, 403));
+          return;
+        }
+        const mode = ctx.authMode ?? "token";
+        sendApiResponse(response, jsonResponse({
+          mode,
+          setupRequired: mode === "password" && (ctx.authSetupRequired?.() ?? false)
+        }));
+        return;
+      }
+
+      if (
+        request.method === "POST" &&
+        requestUrl.pathname === "/api/auth/setup"
+      ) {
+        if (!ctx.isLocalhost || ctx.authMode !== "password" || !ctx.setupAuthPassword) {
+          sendApiResponse(response, jsonResponse({ error: "Password setup is not available for this service." }, 403));
+          return;
+        }
+        const rawBody = await readRequestBody(request);
+        let payload: { password?: unknown };
+        try {
+          payload = JSON.parse(rawBody) as { password?: unknown };
+        } catch {
+          sendApiResponse(response, jsonResponse({ error: "Invalid JSON in request body." }, 400));
+          return;
+        }
+        if (typeof payload.password !== "string") {
+          sendApiResponse(response, jsonResponse({ error: "Local service password is required." }, 400));
+          return;
+        }
+        let password: string;
+        try {
+          password = validateUiAuthPassword(payload.password);
+        } catch (error) {
+          sendApiResponse(response, jsonResponse({ error: error instanceof Error ? error.message : "Invalid local service password." }, 400));
+          return;
+        }
+        sendApiResponse(response, await withErrorHandling(
+          ctx.setupAuthPassword(password).then((token) => token
+            ? jsonResponse({ token })
+            : jsonResponse({ error: "Local service password is already configured." }, 409))
+        ));
+        return;
+      }
+
+      if (
+        request.method === "POST" &&
+        requestUrl.pathname === "/api/auth/login"
+      ) {
+        if (!ctx.isLocalhost || ctx.authMode !== "password" || !ctx.loginWithAuthPassword) {
+          sendApiResponse(response, jsonResponse({ error: "Password authentication is not available for this service." }, 403));
+          return;
+        }
+        const rawBody = await readRequestBody(request);
+        let payload: { password?: unknown };
+        try {
+          payload = JSON.parse(rawBody) as { password?: unknown };
+        } catch {
+          sendApiResponse(response, jsonResponse({ error: "Invalid JSON in request body." }, 400));
+          return;
+        }
+        if (typeof payload.password !== "string" || !payload.password.trim()) {
+          sendApiResponse(response, jsonResponse({ error: "Invalid local service password." }, 401));
+          return;
+        }
+        sendApiResponse(response, await withErrorHandling(
+          ctx.loginWithAuthPassword(payload.password).then((token) => token
+            ? jsonResponse({ token })
+            : jsonResponse({ error: "Invalid local service password." }, 401))
+        ));
         return;
       }
 
@@ -96,7 +184,17 @@ export function createRequestHandler(ctx: RequestContext) {
 
       // GET /api/ui-info
       if (request.method === "GET" && requestUrl.pathname === "/api/ui-info") {
-        sendApiResponse(response, await withErrorHandling(handleUiInfo(ctx.codexDefaults, ctx.host, ctx.port, ctx.isLocalhost)));
+        sendApiResponse(response, await withErrorHandling(handleUiInfo(
+          ctx.codexDefaults,
+          ctx.host,
+          ctx.port,
+          ctx.isLocalhost,
+          ctx.authTokenFilePath,
+          ctx.authTokenSource,
+          workspaceRoot,
+          ctx.authMode,
+          ctx.authSetupRequired?.() ?? false
+        )));
         return;
       }
 
@@ -157,36 +255,86 @@ export function createRequestHandler(ctx: RequestContext) {
         }
       }
 
+      // RuntimeProfile API for the first-release Codex and Claude control plane.
+      if (request.method === "GET" && requestUrl.pathname === "/api/runtime-profiles") {
+        sendApiResponse(response, await withErrorHandling(handleRuntimeProfilesGet(requestUrl.searchParams)));
+        return;
+      }
+
+      if (request.method === "POST" && requestUrl.pathname === "/api/runtime-profiles") {
+        const rawBody = await readRequestBody(request);
+        sendApiResponse(response, await withErrorHandling(handleRuntimeProfileCreate(rawBody)));
+        return;
+      }
+
+      const runtimeVerificationProgressMatch = requestUrl.pathname.match(
+        /^\/api\/runtime-profiles\/([^/]+)\/verify-progress\/([^/]+)$/
+      );
+      if (request.method === "GET" && runtimeVerificationProgressMatch) {
+        sendApiResponse(response, await withErrorHandling(handleRuntimeProfileVerifyProgress(
+          decodeURIComponent(runtimeVerificationProgressMatch[1]),
+          decodeURIComponent(runtimeVerificationProgressMatch[2])
+        )));
+        return;
+      }
+
+      const runtimeProfileMatch = requestUrl.pathname.match(
+        /^\/api\/runtime-profiles\/([^/]+)(?:\/(secret|verify))?$/
+      );
+      if (runtimeProfileMatch) {
+        const profileId = decodeURIComponent(runtimeProfileMatch[1]);
+        const action = runtimeProfileMatch[2];
+        if (request.method === "PUT" && !action) {
+          const rawBody = await readRequestBody(request);
+          sendApiResponse(response, await withErrorHandling(handleRuntimeProfileUpdate(profileId, rawBody)));
+          return;
+        }
+        if (request.method === "DELETE" && !action) {
+          sendApiResponse(response, await withErrorHandling(handleRuntimeProfileDelete(profileId)));
+          return;
+        }
+        if (request.method === "POST" && action === "secret") {
+          const rawBody = await readRequestBody(request);
+          sendApiResponse(response, await withErrorHandling(handleRuntimeProfileSecret(profileId, rawBody)));
+          return;
+        }
+        if (request.method === "POST" && action === "verify") {
+          const rawBody = await readRequestBody(request);
+          sendApiResponse(response, await withErrorHandling(handleRuntimeProfileVerify(profileId, rawBody)));
+          return;
+        }
+      }
+
       // POST /api/create-adhoc-taskpack
       if (request.method === "POST" && requestUrl.pathname === "/api/create-adhoc-taskpack") {
         const rawBody = await readRequestBody(request);
-        sendApiResponse(response, await withErrorHandling(handleCreateAdhocTaskpack(rawBody)));
+        sendApiResponse(response, await withErrorHandling(handleCreateAdhocTaskpack(rawBody, workspaceRoot)));
         return;
       }
 
       // POST /api/check-compatibility
       if (request.method === "POST" && requestUrl.pathname === "/api/check-compatibility") {
         const rawBody = await readRequestBody(request);
-        sendApiResponse(response, await withErrorHandling(handleCheckCompatibility(rawBody)));
+        sendApiResponse(response, await withErrorHandling(handleCheckCompatibility(rawBody, workspaceRoot)));
         return;
       }
 
       // GET /api/adhoc-taskpacks
       if (request.method === "GET" && requestUrl.pathname === "/api/adhoc-taskpacks") {
-        sendApiResponse(response, await handleAdhocTaskpacksList());
+        sendApiResponse(response, await handleAdhocTaskpacksList(requestUrl.searchParams, workspaceRoot));
         return;
       }
 
       // DELETE /api/adhoc-taskpacks/:id
       if (request.method === "DELETE" && requestUrl.pathname.startsWith("/api/adhoc-taskpacks/")) {
         const adhocId = decodeURIComponent(requestUrl.pathname.slice("/api/adhoc-taskpacks/".length));
-        sendApiResponse(response, await handleAdhocTaskpackDelete(adhocId));
+        sendApiResponse(response, await handleAdhocTaskpackDelete(adhocId, workspaceRoot));
         return;
       }
 
       // GET /api/taskpacks
       if (request.method === "GET" && requestUrl.pathname === "/api/taskpacks") {
-        sendApiResponse(response, await handleTaskpacksList(requestUrl.searchParams));
+        sendApiResponse(response, await handleTaskpacksList(requestUrl.searchParams, workspaceRoot));
         return;
       }
 
@@ -242,7 +390,7 @@ export function createRequestHandler(ctx: RequestContext) {
       if (request.method === "GET" && requestUrl.pathname === "/api/trace") {
         const runId = requestUrl.searchParams.get("runId");
         const variantId = requestUrl.searchParams.get("variantId");
-        sendApiResponse(response, await withErrorHandling(handleTraceGet(process.cwd(), runId, variantId)));
+        sendApiResponse(response, await withErrorHandling(handleTraceGet(workspaceRoot, runId, variantId)));
         return;
       }
 

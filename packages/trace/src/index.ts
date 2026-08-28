@@ -128,7 +128,8 @@ export class JsonlTraceRecorder {
 
   constructor(
     private readonly filePath: string,
-    private readonly bufferSize: number = 0
+    private readonly bufferSize: number = 0,
+    private readonly transformEvent: (event: TraceEvent) => TraceEvent = (event) => event
   ) {}
 
   /**
@@ -236,6 +237,7 @@ export class JsonlTraceRecorder {
       return;
     }
 
+    const persistedEvent = this.transformEvent(event);
     if (this.bufferSize <= 1) {
       const filePath = this.filePath;
       this.enqueue(async () => {
@@ -243,10 +245,10 @@ export class JsonlTraceRecorder {
           await ensureDirectory(path.dirname(filePath));
           this.directoryEnsured = true;
         }
-        await fs.appendFile(filePath, `${JSON.stringify({ schemaVersion: TRACE_ARTIFACT_SCHEMA, ...event })}\n`, "utf8");
+        await fs.appendFile(filePath, `${JSON.stringify({ schemaVersion: TRACE_ARTIFACT_SCHEMA, ...persistedEvent })}\n`, "utf8");
       }, "Trace write");
     } else {
-      this.buffer.push(event);
+      this.buffer.push(persistedEvent);
       if (this.buffer.length >= this.bufferSize) {
         const events = this.buffer;
         this.buffer = [];
@@ -268,13 +270,14 @@ export class JsonlTraceRecorder {
       return;
     }
 
+    const persistedEvents = events.map((event) => this.transformEvent(event));
     const filePath = this.filePath;
     this.enqueue(async () => {
       if (!this.directoryEnsured) {
         await ensureDirectory(path.dirname(filePath));
         this.directoryEnsured = true;
       }
-      const lines = events.map((event) => JSON.stringify({ schemaVersion: TRACE_ARTIFACT_SCHEMA, ...event })).join("\n") + "\n";
+      const lines = persistedEvents.map((event) => JSON.stringify({ schemaVersion: TRACE_ARTIFACT_SCHEMA, ...event })).join("\n") + "\n";
       await fs.appendFile(filePath, lines, "utf8");
     }, "Trace batch write");
 

@@ -293,7 +293,8 @@ export async function probeClaudeLikeAuth(
   cwd: string,
   environment?: NodeJS.ProcessEnv,
   timeoutMs: number = 60_000,
-  extraArgs: string[] = []
+  extraArgs: string[] = [],
+  permissionMode: "dontAsk" = "dontAsk"
 ): Promise<{
   status: AdapterPreflightResult["status"];
   summary: string;
@@ -313,7 +314,7 @@ export async function probeClaudeLikeAuth(
         "stream-json",
         "--verbose",
         "--permission-mode",
-        "bypassPermissions",
+        permissionMode,
         "--no-session-persistence",
       ],
       cwd,
@@ -392,6 +393,7 @@ export async function probeClaudeLikeAuthFast(
     useCache?: boolean;
     forceProbe?: boolean;
     extraArgs?: string[];
+    permissionMode?: "dontAsk";
   }
 ): Promise<PreflightResult> {
   const useCache = options?.useCache !== false;
@@ -417,7 +419,14 @@ export async function probeClaudeLikeAuthFast(
   }
 
   // Run the actual probe with short timeout
-  const result = await probeClaudeLikeAuth(invocation, cwd, environment, timeoutMs, options?.extraArgs);
+  const result = await probeClaudeLikeAuth(
+    invocation,
+    cwd,
+    environment,
+    timeoutMs,
+    options?.extraArgs,
+    options?.permissionMode
+  );
 
   // Build structured result - map unverified to unverified, keep others as-is
   const status = result.status;
@@ -505,7 +514,8 @@ export async function probeClaudeProfileAuth(
       workspacePath,
       prepared.environment,
       60_000,
-      prepared.extraArgs
+      prepared.extraArgs,
+      "dontAsk"
     );
   } finally {
     await prepared.cleanup();

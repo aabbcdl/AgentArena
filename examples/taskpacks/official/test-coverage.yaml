@@ -1,73 +1,71 @@
 schemaVersion: agentarena.taskpack/v1
 id: test-coverage
-title: Increase Test Coverage
-description: Add tests for untested modules.
+title: Add Focused Validator and Logger Tests
+description: Add meaningful tests for two previously uncovered modules and prove they catch a mutation.
 metadata:
   source: official
   owner: AgentArena
-  difficulty: easy
-  objective: Write meaningful tests for validator.js and logger.js.
-  judgeRationale: Behavioral tests verify test files actually run and pass.
-  repoTypes: ["node"]
-  tags: ["testing", "coverage"]
+  lifecycle: core
+  difficulty: medium
+  objective: Expand behavioral coverage with non-trivial assertions and a deterministic mutation gate.
+  repoTypes: [node]
+  tags: [core, benchmark, tests, coverage]
   dependencies: []
-  differentiator: Good agents write tests that catch real bugs; weak agents write empty tests.
+  judgeRationale: Both test files must run and the mutation gate must observe a real failing assertion after a controlled source mutation.
+  differentiator: Rejects placeholder tests that merely execute code without detecting a regression.
   i18n:
     zh-CN:
-      title: 提升测试覆盖
-      description: 为尚未覆盖的模块添加测试。
-      objective: 为 validator.js 和 logger.js 编写有意义的测试。
-      judgeRationale: 行为测试验证新增测试文件确实会运行，且全部通过。
-
-repoSource: "builtin://nodejs-app"
-
+      title: 增加校验和日志测试
+      description: 为两个未覆盖模块增加有意义的测试，并证明测试能抓住变异。
+      objective: 用非平凡断言扩展行为覆盖，并通过确定性 mutation gate。
+      judgeRationale: 两个测试文件必须运行，mutation gate 必须观察到受控源码变异后的失败。
+repoSource: builtin://nodejs-core
 prompt: |
-  ## Task | 任务
+  Add focused tests for the currently uncovered `src/logger.js` and
+  `src/validator.js` modules:
 
-  `src/validator.js` and `src/logger.js` have NO tests. Add them:
+  - create `test/logger.test.js` covering level filtering, inherited context,
+    and child logger output;
+  - create `test/validator.test.js` covering script/markup removal, safe paths,
+    traversal rejection, and empty-name errors.
 
-  1. Create `test/validator.test.js` with tests for `requireString` and `requireNumber`:
-     - Happy path: valid inputs return expected values
-     - Error cases: wrong type, empty string, out of range
-     - At least 5 test cases
-
-  2. Create `test/logger.test.js` with tests for `createLogger`:
-     - Test that createLogger returns an object with a log method
-     - Test that log output includes the prefix
-     - At least 3 test cases
-
-  3. All tests must use `node:test` and `node:assert/strict`
-  4. All tests must pass with `node --test`
-
-  ## Constraints | 约束
-
-  - Do NOT modify existing test files
-  - Do NOT add new dependencies
-  - Tests must actually test the code (not just assert true)
-
-expectedChangedPaths:
-  - test/validator.test.js
-  - test/logger.test.js
-
+  Use real assertions and keep production code unchanged. The tests must catch
+  the validator mutation exercised by `scripts/check-coverage-gate.mjs`.
+expectedChangedPaths: [test/logger.test.js, test/validator.test.js]
+changePolicy:
+  requireAgentChange: true
+  allowedPaths: [test/logger.test.js, test/validator.test.js]
+  forbiddenPaths: ["src/**", "scripts/**", package.json, "fixtures/**"]
+  minChangedFiles: 2
+  maxChangedFiles: 2
 envAllowList: []
-setupCommands: []
-teardownCommands: []
+setupCommands:
+  - id: inject-fault
+    label: Prepare the uncovered-module baseline
+    command: node scripts/inject-task-fault.mjs test-coverage
+    timeoutMs: 10000
 judges:
-  - id: validator-tests-run
+  - id: behavior
     type: command
-    label: Validator tests run and pass
-    command: node --test test/validator.test.js
-    timeoutMs: 30000
+    label: Coverage task files and baseline behavior are valid
+    command: node scripts/verify-core-task.mjs test-coverage
+    timeoutMs: 10000
     critical: true
-  - id: logger-tests-run
+  - id: logger-tests
     type: command
-    label: Logger tests run and pass
+    label: New logger tests pass
     command: node --test test/logger.test.js
     timeoutMs: 30000
     critical: true
-  - id: validator-test-has-assertions
+  - id: validator-tests
     type: command
-    label: Validator test has real assertions
-    command: |
-      node -e "var c=require('node:fs').readFileSync('test/validator.test.js','utf8');if(!c.includes('assert')){console.error('No assertions found');process.exit(1)}var count=(c.match(/assert\./g)||[]).length;if(count<3){console.error('Too few assertions: '+count);process.exit(1)}console.log('PASS: '+count+' assertions');"
-    timeoutMs: 10000
+    label: New validator tests pass
+    command: node --test test/validator.test.js
+    timeoutMs: 30000
+    critical: true
+  - id: mutation-gate
+    type: command
+    label: Tests detect a controlled validator mutation
+    command: node scripts/check-coverage-gate.mjs
+    timeoutMs: 30000
+    critical: true

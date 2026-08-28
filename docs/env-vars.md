@@ -54,7 +54,10 @@ Default values are in parentheses. All are optional.
 | Variable | Default | File | Description |
 |----------|---------|------|-------------|
 | `AGENTARENA_CODEX_SANDBOX` | `danger-full-access` on Windows, `workspace-write` elsewhere | `packages/adapters/src/codex-adapter.ts` | Codex CLI sandbox mode (`read-only`, `workspace-write`, or `danger-full-access`) |
-| `AGENTARENA_SKIP_PERMISSIONS` | unset | `packages/adapters/src/transport.ts` | Explicitly allow unattended Claude Code tasks by passing its permission-bypass flag (`1` or `true`). Without it, Claude runs are blocked before execution. |
+
+`AGENTARENA_CODEX_SANDBOX` applies only to the legacy Codex adapter path when no frozen RuntimeProfile LaunchSpec is present. Workbench RuntimeProfile verification and execution use `workspace-write` with `approval_policy=never` on Unix; Windows uses the full-access bypass to avoid the optional Codex sandbox helper, which is unreliable in some npm installations. The child still runs against AgentArena's disposable workspace and shadow `CODEX_HOME`.
+
+`AGENTARENA_SKIP_PERMISSIONS` was removed. Claude tasks use `--permission-mode dontAsk`; AgentArena never adds `--dangerously-skip-permissions`, even if the old variable exists in the host environment.
 
 ## Claude Provider Profile Storage
 
@@ -90,7 +93,8 @@ Default values are in parentheses. All are optional.
 
 | Variable | Default | File | Description |
 |----------|---------|------|-------------|
-| `AGENTARENA_AUTH_TOKEN` | _(auto-generated)_ | `packages/cli/src/commands/ui.ts` | Custom auth token for UI server |
+| `AGENTARENA_AUTH_TOKEN` | _(auto-generated)_ | `packages/cli/src/commands/ui.ts` | Custom Bearer token for UI server and legacy/script clients |
+| `AGENTARENA_LOCAL_AUTH_TOKEN` | _(unset)_ | `packages/cli/src/commands/ui-auth.ts` | Explicit localhost-only service password/token (for example `admin`); otherwise Workbench provides first-start password setup |
 
 ## Community / Publish
 

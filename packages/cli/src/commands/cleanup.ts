@@ -53,7 +53,9 @@ export async function reapStaleTempWorkspaces(nowMs: number, base: string = tmpd
 
 export async function runCleanup(parsed: ParsedArgs): Promise<void> {
   const repoPath = parsed.repoPath ? path.resolve(parsed.repoPath) : process.cwd();
-  const runsDir = path.join(repoPath, ".agentarena", "runs");
+  const runsDir = parsed.outputPath
+    ? path.resolve(parsed.outputPath)
+    : path.join(repoPath, ".agentarena", "runs");
   const maxRuns = parsed.maxRuns ?? DEFAULT_MAX_RUNS;
 
   // Reap leaked temp workspaces regardless of the runs-dir state below.

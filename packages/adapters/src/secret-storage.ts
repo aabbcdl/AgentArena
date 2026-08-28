@@ -15,7 +15,7 @@
  */
 
 import { execFile } from "node:child_process";
-import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync } from "node:crypto";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -27,6 +27,9 @@ import { assertClaudeProviderProfileId } from "./provider-profile-id.js";
 // ---------------------------------------------------------------------------
 
 function appDataRoot(): string {
+  if (process.env.AGENTARENA_RUNTIME_PROFILE_ROOT?.trim()) {
+    return process.env.AGENTARENA_RUNTIME_PROFILE_ROOT.trim();
+  }
   if (process.env.AGENTARENA_CLAUDE_PROFILE_ROOT?.trim()) {
     return process.env.AGENTARENA_CLAUDE_PROFILE_ROOT.trim();
   }
@@ -61,6 +64,14 @@ function powershellExecutable(): string {
   return process.platform === "win32" ? "powershell.exe" : "powershell";
 }
 
+function powershellEnvironment(): NodeJS.ProcessEnv {
+  // Package-manager metadata and HOME can change Windows Runtime credential
+  // context. Keep the PowerShell child tied to the host Windows profile.
+  return Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => !/^(?:home|npm_|pnpm_)/iu.test(key))
+  );
+}
+
 function encodeForPowerShell(value: string): string {
   return Buffer.from(value, "utf8").toString("base64");
 }
@@ -80,7 +91,7 @@ async function runPowerShellJson(script: string): Promise<unknown> {
     execFile(
       powershellExecutable(),
       ["-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
-      { windowsHide: true },
+      { windowsHide: true, env: powershellEnvironment() },
       (error, stdout, stderr) => {
         if (error) {
           reject(new Error(stderr.trim() || stdout.trim() || error.message));
@@ -176,6 +187,43 @@ try {
 @{ ok = $true } | ConvertTo-Json -Compress
 `;
   await runPowerShellJson(script);
+}
+
+function warnWindowsSecretFallback(): void {
+  logger.warn(
+    "adapter",
+    "profile.secret_backend_fallback",
+    "Windows Credential Manager is unavailable; using the encrypted file backend"
+  );
+}
+
+async function setSecretWithFallback(profileId: string, secret: string): Promise<void> {
+  try {
+    await setSecretWindows(profileId, secret);
+    return;
+  } catch {
+    warnWindowsSecretFallback();
+  }
+  await setSecretFile(profileId, secret);
+}
+
+async function getSecretWithFallback(profileId: string): Promise<string | null> {
+  try {
+    const systemSecret = await getSecretWindows(profileId);
+    if (systemSecret !== null) return systemSecret;
+  } catch {
+    warnWindowsSecretFallback();
+  }
+  return await getSecretFile(profileId);
+}
+
+async function deleteSecretWithFallback(profileId: string): Promise<void> {
+  try {
+    await deleteSecretWindows(profileId);
+  } catch {
+    warnWindowsSecretFallback();
+  }
+  await deleteSecretFile(profileId);
 }
 
 // ---------------------------------------------------------------------------
@@ -296,7 +344,7 @@ async function deleteSecretFile(profileId: string): Promise<void> {
 
 export async function hasStoredSecret(profileId: string): Promise<boolean> {
   if (process.platform === "win32") {
-    return (await getSecretWindows(profileId)) !== null;
+    return (await getSecretWithFallback(profileId)) !== null;
   }
 
   return (await getSecretFile(profileId)) !== null;
@@ -315,7 +363,7 @@ export function supportsWindowsCredentialManager(): boolean {
 
 export async function setSecret(profileId: string, secret: string): Promise<void> {
   if (process.platform === "win32") {
-    await setSecretWindows(profileId, secret);
+    await setSecretWithFallback(profileId, secret);
   } else {
     await setSecretFile(profileId, secret);
   }
@@ -323,19 +371,68 @@ export async function setSecret(profileId: string, secret: string): Promise<void
 
 export async function getSecret(profileId: string): Promise<string | null> {
   return process.platform === "win32"
-    ? await getSecretWindows(profileId)
+    ? await getSecretWithFallback(profileId)
     : await getSecretFile(profileId);
 }
 
 export async function deleteSecret(profileId: string): Promise<void> {
   if (process.platform === "win32") {
-    await deleteSecretWindows(profileId);
+    await deleteSecretWithFallback(profileId);
   } else {
     await deleteSecretFile(profileId);
   }
 }
 
+function assertRuntimeSecretRef(secretRef: string): void {
+  if (!/^(?:runtime-profile\/(?:codex|claude-code)\/[a-z0-9-]+|legacy-claude\/[a-z0-9-]+)$/.test(secretRef)) {
+    throw new Error(`Invalid runtime secret reference "${secretRef}".`);
+  }
+}
+
+function runtimeSecretStorageId(secretRef: string): string {
+  assertRuntimeSecretRef(secretRef);
+  return `runtime-${createHash("sha256").update(secretRef).digest("hex").slice(0, 40)}`;
+}
+
+function useRuntimeSecretFileBackend(): boolean {
+  const configured = process.env.AGENTARENA_RUNTIME_SECRET_BACKEND?.trim().toLowerCase();
+  if (configured && configured !== "file" && configured !== "system") {
+    throw new Error("AGENTARENA_RUNTIME_SECRET_BACKEND must be file or system when set.");
+  }
+  return configured === "file" || (configured !== "system" && process.platform !== "win32");
+}
+
+export async function hasStoredRuntimeSecret(secretRef: string): Promise<boolean> {
+  return (await getRuntimeSecret(secretRef)) !== null;
+}
+
+export async function setRuntimeSecret(secretRef: string, secret: string): Promise<void> {
+  const storageId = runtimeSecretStorageId(secretRef);
+  if (useRuntimeSecretFileBackend()) {
+    await setSecretFile(storageId, secret);
+    return;
+  }
+  await setSecretWithFallback(storageId, secret);
+}
+
+export async function getRuntimeSecret(secretRef: string): Promise<string | null> {
+  const storageId = runtimeSecretStorageId(secretRef);
+  return useRuntimeSecretFileBackend()
+    ? await getSecretFile(storageId)
+    : await getSecretWithFallback(storageId);
+}
+
+export async function deleteRuntimeSecret(secretRef: string): Promise<void> {
+  const storageId = runtimeSecretStorageId(secretRef);
+  if (useRuntimeSecretFileBackend()) {
+    await deleteSecretFile(storageId);
+    return;
+  }
+  await deleteSecretWithFallback(storageId);
+}
+
 export const __secretStorageTestUtils = {
   appDataRoot,
-  secretTarget
+  secretTarget,
+  runtimeSecretStorageId
 };

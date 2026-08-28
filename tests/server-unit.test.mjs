@@ -11,6 +11,7 @@ import {
   getClientIp,
   HttpError,
   jsonResponse,
+  normalizeMetricPath,
   setTrustProxy,
   startRateLimitCleanup,
   textResponse,
@@ -47,6 +48,13 @@ test("checkAuthHeader: sensitive API paths require token even on localhost GET",
   const url2 = new URL("http://localhost:3000/api/provider-profiles/my-profile/secret");
   assert.equal(checkAuthHeader(url2, "GET", true, token, undefined), false, "profile secret sub-path should require token");
   assert.equal(checkAuthHeader(url2, "GET", true, token, `Bearer ${token}`), true);
+
+  const runtimeProfilesUrl = new URL("http://localhost:3000/api/runtime-profiles");
+  assert.equal(checkAuthHeader(runtimeProfilesUrl, "GET", true, token, undefined), false);
+  assert.equal(checkAuthHeader(runtimeProfilesUrl, "GET", true, token, `Bearer ${token}`), true);
+  const runtimeVerifyUrl = new URL("http://localhost:3000/api/runtime-profiles/codex-local/verify");
+  assert.equal(checkAuthHeader(runtimeVerifyUrl, "POST", true, token, undefined), false);
+  assert.equal(checkAuthHeader(runtimeVerifyUrl, "POST", true, token, `Bearer ${token}`), true);
 
   // /api/run is sensitive
   const url3 = new URL("http://localhost:3000/api/run");
@@ -139,6 +147,16 @@ test("checkCorsOrigin: DNS-rebinding — a foreign Origin against a loopback hos
 test("checkRateLimit: allows requests under the limit", () => {
   const result = checkRateLimit("127.0.0.1", "/api/adapters");
   assert.equal(result.allowed, true);
+});
+
+test("normalizeMetricPath: collapses dynamic and unknown paths", () => {
+  assert.equal(normalizeMetricPath("/api/provider-profiles/custom/secret"), "/api/provider-profiles/:id/secret");
+  assert.equal(normalizeMetricPath("/api/runtime-profiles/custom"), "/api/runtime-profiles/:id");
+  assert.equal(normalizeMetricPath("/api/runtime-profiles/custom/secret"), "/api/runtime-profiles/:id/secret");
+  assert.equal(normalizeMetricPath("/api/runtime-profiles/custom/verify"), "/api/runtime-profiles/:id/verify");
+  assert.equal(normalizeMetricPath("/api/adhoc-taskpacks/custom"), "/api/adhoc-taskpacks/:id");
+  assert.equal(normalizeMetricPath("/api/untrusted/random"), "/api/other");
+  assert.equal(normalizeMetricPath("/workbench/assets/app.js"), "/static");
 });
 
 test("checkRateLimit: blocks requests over the general limit", () => {

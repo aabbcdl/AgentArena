@@ -10,38 +10,63 @@ import {
   createTemplateLintCommand,
   createTemplateTestCommand,
 } from "../packages/cli/dist/templates.js";
+import { parseCommand, runCommandStep } from "../packages/judges/dist/command-runner.js";
 
-test("createNodeEvalCommand wraps source in node -e with JSON quoting", () => {
+function generatedSource(command) {
+  const [, args] = parseCommand(command, { allowEval: true });
+  const encoded = args[1]?.match(/^eval\(Buffer\.from\("([A-Za-z0-9+/=]+)", "base64"\)\.toString\("utf8"\)\)$/u)?.[1];
+  assert.ok(encoded, "generated command should contain an encoded Node source payload");
+  return Buffer.from(encoded, "base64").toString("utf8");
+}
+
+test("createNodeEvalCommand wraps source in node -e with encoded quoting", () => {
   const result = createNodeEvalCommand("console.log('hi')");
   assert.ok(result.startsWith("node -e "));
-  assert.ok(result.includes("console.log"));
+  assert.equal(generatedSource(result), "console.log('hi')");
 });
 
 test("createPackageScriptCommand produces a node -e command", () => {
   const result = createPackageScriptCommand("test");
   assert.ok(result.startsWith("node -e "));
-  assert.ok(result.includes("package.json"));
-  assert.ok(result.includes("test"));
+  const source = generatedSource(result);
+  assert.ok(source.includes("package.json"));
+  assert.ok(source.includes("test"));
+});
+
+test("generated node eval commands preserve multiline source through judge tokenization", async () => {
+  const result = await runCommandStep(
+    {
+      id: "multiline-script",
+      label: "Multiline script",
+      command: createNodeEvalCommand("console.log('line1\\nline2')"),
+    },
+    process.cwd(),
+    [],
+    undefined,
+    { allowEval: true }
+  );
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.stdout, "line1\nline2");
 });
 
 test("createAdhocTestCommand includes report file path", () => {
   const result = createAdhocTestCommand("report.json");
-  assert.ok(result.includes("report.json"));
+  assert.ok(generatedSource(result).includes("report.json"));
 });
 
 test("createTemplateTestCommand includes report file path", () => {
   const result = createTemplateTestCommand("report.json");
-  assert.ok(result.includes("report.json"));
+  assert.ok(generatedSource(result).includes("report.json"));
 });
 
 test("createAdhocLintCommand includes report file path", () => {
   const result = createAdhocLintCommand("lint-report.json");
-  assert.ok(result.includes("lint-report.json"));
+  assert.ok(generatedSource(result).includes("lint-report.json"));
 });
 
 test("createTemplateLintCommand includes report file path", () => {
   const result = createTemplateLintCommand("lint-report.json");
-  assert.ok(result.includes("lint-report.json"));
+  assert.ok(generatedSource(result).includes("lint-report.json"));
 });
 
 test("buildCiWorkflow generates valid YAML for nightly template", () => {

@@ -18,12 +18,27 @@ AgentArena classifies adapters by **support tier** and exposes a capability matr
 | `demo-thorough` | supported | Built-in AgentArena demo adapter | estimated | estimated | partial |
 | `demo-budget` | supported | Built-in AgentArena demo adapter | estimated | estimated | partial |
 
-### External Coding Agents
+### First-version External Harnesses
 
 | Adapter | Tier | Invocation | Tokens | Cost | Trace |
 | --- | --- | --- | --- | --- | --- |
 | `codex` | supported | Codex CLI JSON event stream | available | unavailable | full |
 | `claude-code` | experimental | Claude Code CLI stream-json mode | available | available | partial |
+
+These are the only external Harnesses shown by the default Workbench, `doctor`, `list-adapters`, detection, and install-guide surfaces. Demo adapters remain available for examples and tests but never enter a real Harness comparison.
+
+For the local pilot, install only the external CLI you intend to use and log
+that CLI in separately. AgentArena core does not require Android Studio, Docker,
+Xcode, or Playwright Chromium; Chromium is a browser-test prerequisite only.
+Unknown token or cost data remains unknown in the UI and reports; it is never
+presented as zero or free.
+
+### Legacy Explicit-only Adapters
+
+The following adapters remain registered for CLI compatibility and development. They are not part of the first-version product surface and must be selected explicitly by ID.
+
+| Adapter | Tier | Invocation | Tokens | Cost | Trace |
+| --- | --- | --- | --- | --- | --- |
 | `cursor` | experimental | Cursor internal claude-agent-sdk CLI bridge | available | available | partial |
 | `gemini-cli` | experimental | Gemini CLI JSON event stream | available | available | partial |
 | `aider` | experimental | Aider CLI with git integration | unavailable | unavailable | minimal |
@@ -35,18 +50,19 @@ AgentArena classifies adapters by **support tier** and exposes a capability matr
 | `augment` | experimental | Augment CLI JSON events | available | available | partial |
 | `windsurf` | blocked | Windsurf CLI (auth stability issues) | unavailable | unavailable | minimal |
 
-## Local Configuration Modes
+## RuntimeProfile Configuration Modes
 
-`codex` currently uses the official local CLI configuration. An empty model or reasoning override means “use the active local configuration at run time.” AgentArena respects `CODEX_HOME` when it is set and does not create or rewrite a personal Codex configuration.
+The Workbench persists AgentArena-owned `RuntimeProfile` metadata and Secrets without rewriting `~/.codex/config.toml`, `~/.claude/settings.json`, or the user's configured `CODEX_HOME` / `CLAUDE_CONFIG_DIR`.
 
-`claude-code` has two Profile-driven modes:
+- `inherit-local` uses the same command, host environment, login state, user/project instructions, Skills, MCP, Hooks, and settings sources that the normal CLI sees. AgentArena freezes their non-secret identities before a run.
+- Codex verification and execution clone the behaviorally relevant user inputs into a disposable shadow `CODEX_HOME`. Local mode copies `config.toml`, `auth.json`, `AGENTS.md`, `AGENTS.override.md`, `rules`, and `skills`; managed mode omits `auth.json`. Codex state writes remain in the shadow Home and the directory is removed after the child process exits. RuntimeProfile LaunchSpecs use `workspace-write` with `approval_policy=never` on Unix; Windows uses the existing `danger-full-access` bypass because the npm Codex sandbox helper is not reliable on all installations. Both modes remain bounded to AgentArena's disposable workspace.
+- `managed-provider` keeps the inherited Harness and overrides Provider URL, requested model, mappings, and Secret only in the task child process. It removes inherited Provider credentials and alternate cloud-routing switches before applying the selected Profile while preserving ordinary host environment fields. Codex uses task-scoped `-c` arguments and an in-memory Secret binding. Claude uses task-scoped environment overrides and `--setting-sources user,project,local`; it does not create a replacement `CLAUDE_CONFIG_DIR` or delete repository tool configuration.
+- Harness snapshots are scoped to the selected CLI: Codex changes do not invalidate Claude receipts and vice versa. Behavioral configuration and stable account/credential identity are tracked; launcher session IDs, usage counters, token refreshes, and unrelated repository history are ignored. Snapshot entries contain hashes and presence markers, never configuration, environment, or credential plaintext.
+- Claude background execution requires a CLI version that supports `--permission-mode dontAsk`. Tools that need interactive approval are denied. AgentArena never adds `--dangerously-skip-permissions` and ignores the removed `AGENTARENA_SKIP_PERMISSIONS` legacy variable.
+- Verification receipts keep bounded, redacted evidence. All frozen environment override values, task Secrets, Provider routes, network hosts, and runtime paths are removed; when a CLI emits a structured terminal error, the receipt stores that error instead of the complete event stream.
+- The old launcher/API for Claude-only Provider profiles remains a compatibility path and still uses temporary isolated configuration. New work should use Workbench RuntimeProfiles.
 
-- The built-in `official` Profile uses the current local Claude Code login and personal configuration, including `CLAUDE_CONFIG_DIR` when set. AgentArena does not create replacement workspace settings for this mode.
-- Any non-official Profile runs with a unique temporary `CLAUDE_CONFIG_DIR`, the Provider address/model/secret stored by AgentArena, isolated settings sources, and strict MCP loading. The auth probe and the real run use the same isolation policy. Provider secrets are passed only through the child-process environment and are not written into temporary launcher scripts. Temporary configuration is removed after success, failure, timeout, or cancellation.
-
-Third-party Claude workspaces keep project instruction files such as `AGENTS.md` and `CLAUDE.md`, but remove root `.claude/`, `.codex/`, and `.mcp.json` tool configuration before the Git baseline is created. If the installed Claude Code version cannot enforce isolated settings and strict MCP configuration, the third-party Profile is blocked instead of falling back to personal configuration.
-
-Claude Code also requires explicit permission for unattended repository changes. Start AgentArena with `AGENTARENA_SKIP_PERMISSIONS=1` (or `true`) when you intend to run Claude tasks. Without this opt-in, preflight is blocked before the agent starts instead of waiting indefinitely for an interactive approval prompt. The opt-in applies to both official and isolated Provider modes and grants Claude Code the permissions of the local operating-system account.
+Installation detection is not task readiness. A Profile becomes `Task Ready` only after installation, sentinel conversation, and exact disposable-repository edit stages all pass for the current repository identity.
 
 ## Capability Definitions
 

@@ -1,59 +1,51 @@
 schemaVersion: agentarena.taskpack/v1
 id: failing-test-fix
-title: Failing Test Fix
-description: Fix a failing test by correcting the implementation.
+title: Fix the Failing Arithmetic Test
+description: Correct one calculator operation while preserving the rest of the arithmetic API.
 metadata:
   source: official
   owner: AgentArena
-  difficulty: medium
-  objective: Test ability to diagnose and fix test failures.
-  judgeRationale: The agent must run tests, read failures, and fix the implementation.
-  repoTypes: ["node"]
-  tags: ["bugfix", "testing", "debugging"]
+  lifecycle: core
+  difficulty: easy
+  objective: Diagnose a focused failing test and repair the implementation without unrelated changes.
+  repoTypes: [node]
+  tags: [core, benchmark, bugfix, tests]
   dependencies: []
-  differentiator: Tests iterative debugging — good harnesses run tests and iterate.
+  judgeRationale: Direct edge cases and the complete calculator suite guard against a partial or compensating fix.
+  differentiator: A narrow fail-to-pass task with an explicit negative boundary for unrelated files.
   i18n:
     zh-CN:
-      title: 修复失败测试
-      description: 通过修正实现来修复失败的测试。
-      objective: 检验 Agent 诊断和修复测试失败的能力。
-      judgeRationale: Agent 必须运行测试、阅读失败信息，并修正真正的实现问题。
-
-repoSource: "builtin://nodejs-app"
-
+      title: 修复失败的算术测试
+      description: 修复一个计算器操作，同时保持其他算术 API 不变。
+      objective: 定位单一失败测试并进行最小实现修复。
+      judgeRationale: 直接边界检查和完整计算器测试会阻止局部或补偿式修复。
+repoSource: builtin://nodejs-core
 prompt: |
-  ## Task | 任务
-
-  There is a failing test. Fix the implementation to make it pass.
-
-  1. Run `node --test test/calculator.test.js` to see which tests fail
-  2. Read the failing test to understand what's expected
-  3. Read `src/calculator.js` to find the bug
-  4. Fix the bug (only change the buggy line, don't rewrite the function)
-  5. Run tests again to verify ALL pass
-
-  ## Constraints | 约束
-
-  - Only modify `src/calculator.js`
-  - Do NOT modify test files
-  - Only fix the specific bug — don't change working functions
-  - All tests must pass after your fix
-
-expectedChangedPaths:
-  - src/calculator.js
-
+  Fix the implementation behind the failing subtraction behavior in
+  `src/calculator.js`. Positive, negative, and zero results must be correct;
+  addition, multiplication, division (including its zero-divisor error), and
+  power must keep their current contracts. Do not edit tests or unrelated files.
+expectedChangedPaths: [src/calculator.js]
+changePolicy:
+  requireAgentChange: true
+  allowedPaths: [src/calculator.js]
+  forbiddenPaths: ["test/**", "scripts/**", package.json, "fixtures/**"]
+  minChangedFiles: 1
+  maxChangedFiles: 1
 envAllowList: []
-setupCommands: []
-teardownCommands: []
+setupCommands:
+  - id: inject-fault
+    label: Prepare the isolated arithmetic regression
+    command: node scripts/inject-task-fault.mjs failing-test-fix
+    timeoutMs: 10000
 judges:
-  - id: subtract-fixed
+  - id: behavior
     type: command
-    label: subtract returns correct result
-    command: |
-      node -e "var c=require('./src/calculator');var a=require('node:assert/strict');a.strictEqual(c.subtract(5,3),2);a.strictEqual(c.subtract(10,10),0);console.log('PASS: subtract fixed');"
+    label: Subtraction and neighboring operations are correct
+    command: node scripts/verify-core-task.mjs failing-test-fix
     timeoutMs: 10000
     critical: true
-  - id: tests-pass
+  - id: regression-tests
     type: command
     label: Calculator tests pass
     command: node --test test/calculator.test.js

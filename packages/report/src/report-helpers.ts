@@ -6,9 +6,12 @@ import {
   escapeHtml,
   formatDuration,
   isScoreMode,
+  type JobManifest,
   normalizePath,
   portableBasename,
   portableRelativePath,
+  redactSensitiveText,
+  relativizeWorkspacePathsInText,
   resolveCostQuality,
   type ScoreMode
 } from "@agentarena/core";
@@ -300,16 +303,71 @@ function sanitizeCommandForDiagnostics(command: string | undefined): string | un
   );
 }
 
+function sanitizeJobManifest(manifest: JobManifest | undefined): JobManifest | undefined {
+  if (!manifest) return undefined;
+  return {
+    schemaVersion: manifest.schemaVersion,
+    runId: manifest.runId,
+    status: manifest.status,
+    createdAt: manifest.createdAt,
+    updatedAt: manifest.updatedAt,
+    startedAt: manifest.startedAt,
+    finishedAt: manifest.finishedAt,
+    failureSummary: manifest.failureSummary
+      ? redactSensitiveText(manifest.failureSummary)
+      : undefined,
+    repositoryBaselineIdentity: manifest.repositoryBaselineIdentity,
+    taskIdentity: manifest.taskIdentity,
+    judgeIdentity: manifest.judgeIdentity,
+    scoreMode: manifest.scoreMode,
+    variants: manifest.variants.map((variant) => ({
+      order: variant.order,
+      variantId: variant.variantId,
+      agentKind: variant.agentKind,
+      profileId: variant.profileId,
+      profileRevision: variant.profileRevision,
+      secretRevision: variant.secretRevision,
+      launchSpecHash: variant.launchSpecHash,
+      verificationReceiptId: variant.verificationReceiptId,
+      installationFingerprint: variant.installationFingerprint,
+      installationVersion: variant.installationVersion,
+      harnessSnapshotId: variant.harnessSnapshotId,
+      providerKind: variant.providerKind,
+      requestedModel: variant.requestedModel,
+      canonicalModelIdentity: variant.canonicalModelIdentity,
+      modelIdentitySource: variant.modelIdentitySource,
+      reasoningEffort: variant.reasoningEffort,
+      providerPolicyIdentity: variant.providerPolicyIdentity,
+      modelParametersIdentity: variant.modelParametersIdentity,
+      permissionMode: variant.permissionMode,
+      fullPermissionBypass: variant.fullPermissionBypass,
+      riskFlags: [...variant.riskFlags],
+      harnessDrift: variant.harnessDrift
+        ? {
+            status: variant.harnessDrift.status,
+            checkedAt: variant.harnessDrift.checkedAt,
+            postRunSnapshotId: variant.harnessDrift.postRunSnapshotId,
+            summary: redactSensitiveText(variant.harnessDrift.summary)
+          }
+        : undefined
+    }))
+  };
+}
+
 export function sanitizeRun(run: BenchmarkRun): BenchmarkRun {
   return {
     ...run,
     repoPath: ".",
     outputPath: ".",
+    jobManifest: sanitizeJobManifest(run.jobManifest),
     preflights: run.preflights.map((preflight) => ({
       ...preflight,
     })),
     results: run.results.map((result) => ({
       ...result,
+      summary: redactSensitiveText(
+        relativizeWorkspacePathsInText(result.summary, result.workspacePath)
+      ),
       preflight: {
         ...result.preflight,
         command: undefined
@@ -353,6 +411,7 @@ export function summarizeRun(run: BenchmarkRun): {
   failedCount: number;
   scoreExcludedCount: number;
   totalTokens: number;
+  knownCostCount: number;
   knownCostUsd: number;
 } {
   const successCount = run.results.filter((result) => result.status === "success").length;
@@ -362,8 +421,8 @@ export function summarizeRun(run: BenchmarkRun): {
     (total, result) => total + (Number.isFinite(result.tokenUsage) ? result.tokenUsage : 0),
     0
   );
-  const knownCostUsd = run.results
-    .filter((result) => resolveCostQuality(result) === "known")
+  const knownCostResults = run.results.filter((result) => resolveCostQuality(result) === "known");
+  const knownCostUsd = knownCostResults
     .reduce((total, result) => total + (Number.isFinite(result.estimatedCostUsd) ? result.estimatedCostUsd : 0), 0);
 
   return {
@@ -372,6 +431,7 @@ export function summarizeRun(run: BenchmarkRun): {
     failedCount,
     scoreExcludedCount,
     totalTokens,
+    knownCostCount: knownCostResults.length,
     knownCostUsd
   };
 }
@@ -579,6 +639,17 @@ export function formatRuntimeIdentity(result: {
     source: result.resolvedRuntime?.source ?? "unknown",
     verification: result.resolvedRuntime?.verification ?? "unknown"
   };
+}
+
+export function usesThirdPartyProviderConfiguration(result: {
+  resolvedRuntime?: AgentResolvedRuntime;
+}): boolean {
+  const runtime = result.resolvedRuntime;
+  if (!runtime) return false;
+
+  return runtime.providerSource === "profile-config"
+    || runtime.source === "profile-config"
+    || (runtime.providerKind !== undefined && runtime.providerKind !== "official");
 }
 
 interface BadgePayload {

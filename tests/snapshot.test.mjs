@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 import { copyRepository, diffSnapshots } from "../packages/core/dist/snapshot.js";
-import { buildDiffPrecision } from "../packages/runner/dist/snapshot.js";
+import { buildDiffPrecision, evaluateChangePolicy } from "../packages/runner/dist/snapshot.js";
 
 describe("snapshot", () => {
   describe("buildDiffPrecision", () => {
@@ -49,6 +49,62 @@ describe("snapshot", () => {
       assert.ok(result);
       assert.equal(result.matchedFiles.length, 1);
       assert.deepEqual(result.matchedFiles, [".env"]);
+    });
+  });
+
+  describe("evaluateChangePolicy", () => {
+    it("rejects an empty submission when a change is required", () => {
+      const result = evaluateChangePolicy(
+        { requireAgentChange: true, allowedPaths: ["src/**/*.js"] },
+        []
+      );
+      assert.equal(result?.success, false);
+      assert.match(result?.reason ?? "", /No agent-authored file change/);
+    });
+
+    it("accepts changes inside the declared scope", () => {
+      const result = evaluateChangePolicy(
+        { requireAgentChange: true, allowedPaths: ["src/**/*.js"], minChangedFiles: 1, maxChangedFiles: 2 },
+        ["src/utils.js"]
+      );
+      assert.equal(result?.success, true);
+      assert.deepEqual(result?.changedFiles, ["src/utils.js"]);
+    });
+
+    it("rejects forbidden and out-of-scope files", () => {
+      const result = evaluateChangePolicy(
+        { requireAgentChange: true, allowedPaths: ["src/**/*.js"], forbiddenPaths: ["test/**"] },
+        ["src/utils.js", "test/utils.test.js", "README.md"]
+      );
+      assert.equal(result?.success, false);
+      assert.deepEqual(result?.unexpectedFiles, ["README.md", "test/utils.test.js"]);
+      assert.deepEqual(result?.forbiddenFiles, ["test/utils.test.js"]);
+    });
+
+    it("fails closed when snapshots are unreliable", () => {
+      const result = evaluateChangePolicy(
+        { requireAgentChange: true, allowedPaths: ["src/**/*.js"] },
+        ["src/utils.js"],
+        { reliable: false }
+      );
+      assert.equal(result?.success, false);
+      assert.equal(result?.reliable, false);
+    });
+
+    it("enforces minimum and maximum changed-file counts", () => {
+      const tooFew = evaluateChangePolicy({ minChangedFiles: 2 }, ["src/a.js"]);
+      const tooMany = evaluateChangePolicy({ maxChangedFiles: 1 }, ["src/a.js", "src/b.js"]);
+      assert.equal(tooFew?.success, false);
+      assert.equal(tooMany?.success, false);
+    });
+
+    it("ignores AgentArena-generated paths", () => {
+      const result = evaluateChangePolicy(
+        { requireAgentChange: true, allowedPaths: ["src/**/*.js"] },
+        [".agentarena/log.json", "src/utils.js"]
+      );
+      assert.equal(result?.success, true);
+      assert.deepEqual(result?.changedFiles, ["src/utils.js"]);
     });
   });
 

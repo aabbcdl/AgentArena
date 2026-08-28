@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
-import { reapStaleTempWorkspaces } from "../packages/cli/dist/commands/cleanup.js";
+import { reapStaleTempWorkspaces, runCleanup } from "../packages/cli/dist/commands/cleanup.js";
 import { cleanupWorkspace, debugLog, formatErrorDetails, formatErrorMessage } from "../packages/runner/dist/workspace.js";
 
 describe("reapStaleTempWorkspaces", () => {
@@ -26,6 +26,30 @@ describe("reapStaleTempWorkspaces", () => {
       await assert.rejects(() => fs.access(stale));
       await fs.access(recent); // recent workspace preserved
       await fs.access(unrelated); // non-workspace dir untouched
+    } finally {
+      await fs.rm(base, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("runCleanup", () => {
+  it("uses a custom output root instead of the repository default runs directory", async () => {
+    const base = await fs.mkdtemp(path.join(os.tmpdir(), "agentarena-cleanup-output-"));
+    const repoPath = path.join(base, "repo");
+    const defaultRuns = path.join(repoPath, ".agentarena", "runs");
+    const customRuns = path.join(base, "custom-runs");
+    try {
+      await fs.mkdir(path.join(defaultRuns, "default-run"), { recursive: true });
+      await fs.mkdir(path.join(customRuns, "old-run"), { recursive: true });
+      await fs.mkdir(path.join(customRuns, "new-run"), { recursive: true });
+      const old = new Date(Date.now() - 60_000);
+      await fs.utimes(path.join(customRuns, "old-run"), old, old);
+
+      await runCleanup({ repoPath, outputPath: customRuns, maxRuns: 1 });
+
+      await assert.rejects(() => fs.access(path.join(customRuns, "old-run")));
+      await fs.access(path.join(customRuns, "new-run"));
+      await fs.access(path.join(defaultRuns, "default-run"));
     } finally {
       await fs.rm(base, { recursive: true, force: true });
     }

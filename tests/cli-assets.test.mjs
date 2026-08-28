@@ -18,10 +18,22 @@ test("CLI package includes runtime assets needed after npm install", async () =>
 
   assert.ok(pkg.files.includes("dist"));
   assert.ok(pkg.files.includes("assets"));
+  assert.equal(pkg.dependencies?.["@agentarena/web-report"], undefined);
   assert.equal(await exists(path.join(CLI_ASSETS_ROOT, "web-report", "index.html")), true);
   assert.equal(await exists(path.join(CLI_ASSETS_ROOT, "taskpacks", "official", "repo-health.yaml")), true);
   assert.equal(await exists(path.join(CLI_ASSETS_ROOT, "taskpacks", "demo", "demo-ui-tour.yaml")), true);
+  assert.equal(await exists(path.join(CLI_ASSETS_ROOT, "taskpacks", "repos", "nodejs-core", "package.json")), true);
   assert.equal(await exists(path.join(CLI_ASSETS_ROOT, "taskpacks", "repos", "nodejs-monorepo", "package.json")), true);
+});
+
+test("CLI catalog exposes only the 10 first-release core task packs", async () => {
+  const { listOfficialTaskPacks } = await import("../packages/cli/dist/commands/init.js");
+  const taskPacks = await listOfficialTaskPacks();
+
+  assert.equal(taskPacks.length, 10);
+  assert.equal(taskPacks.every((taskPack) => taskPack.lifecycle === "core"), true);
+  assert.equal(taskPacks.some((taskPack) => taskPack.id === "repo-health"), true);
+  assert.equal(taskPacks.some((taskPack) => taskPack.id === "official-repo-health"), false);
 });
 
 test("CLI runtime resolves UI and official task packs from packaged assets", async () => {
@@ -31,6 +43,13 @@ test("CLI runtime resolves UI and official task packs from packaged assets", asy
   assert.equal(shared.OFFICIAL_TASKPACK_ROOT, path.join(CLI_ASSETS_ROOT, "taskpacks", "official"));
   assert.equal(shared.BUILTIN_REPOS_ROOT, path.join(CLI_ASSETS_ROOT, "taskpacks", "repos"));
   assert.equal(uiRoutes.WEB_REPORT_DIST_ROOT, path.join(CLI_ASSETS_ROOT, "web-report"));
+});
+
+test("CLI runtime version metadata matches the published CLI package", async () => {
+  const pkg = JSON.parse(await readFile(path.join(CLI_PACKAGE_ROOT, "package.json"), "utf8"));
+  const versionInfo = JSON.parse(await readFile(path.join(CLI_ASSETS_ROOT, "version-info.json"), "utf8"));
+
+  assert.equal(versionInfo.version, pkg.version);
 });
 
 

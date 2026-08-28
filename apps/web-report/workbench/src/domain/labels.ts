@@ -1,5 +1,7 @@
 import { type CopyKey, copy } from "../i18n.ts";
-import type { Locale } from "../types.ts";
+import type { Locale, TaskPackInfo } from "../types.ts";
+
+export type TaskDifficulty = NonNullable<TaskPackInfo["difficulty"]>;
 
 const reasonKeyByCode: Record<string, CopyKey> = {
   "cost-unknown": "reasonCostUnknown",
@@ -118,4 +120,26 @@ export function labelCostAvailability(locale: Locale, value: string): string {
     unavailable: "capCostUnavailable"
   };
   return resolve(locale, map, value, "capCostUnavailable");
+}
+
+export function labelTaskDifficulty(locale: Locale, difficulty: TaskDifficulty | undefined): string {
+  if (locale === "zh-CN") {
+    if (difficulty === "easy") return "简单";
+    if (difficulty === "medium") return "中等";
+    if (difficulty === "hard") return "困难";
+    return "未标注难度";
+  }
+  if (difficulty === "easy") return "Easy";
+  if (difficulty === "medium") return "Medium";
+  if (difficulty === "hard") return "Hard";
+  return "Difficulty not set";
+}
+
+export function taskDifficultyTone(
+  difficulty: TaskDifficulty | undefined
+): "success" | "info" | "warning" | "neutral" {
+  if (difficulty === "easy") return "success";
+  if (difficulty === "medium") return "info";
+  if (difficulty === "hard") return "warning";
+  return "neutral";
 }

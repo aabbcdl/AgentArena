@@ -458,6 +458,11 @@ test("JSON summary has correct schema and required fields", async () => {
   assert.equal(typeof summary.leaderboard.comparableRunCount, "number");
   assert.ok(Array.isArray(summary.leaderboard.rows));
   assert.ok(Array.isArray(summary.leaderboard.comparabilityRules));
+  const currentLeaderboardRow = summary.leaderboard.rows.find(
+    (row) => row.identity.baseAgentId === summary.results[0].baseAgentId
+  );
+  assert.ok(currentLeaderboardRow);
+  assert.equal(currentLeaderboardRow.stats.averageScore, summary.results[0].compositeScore);
 
   // core writeAtomic must not leave fixed-name .tmp siblings
   const outputEntries = await readdir(outputPath);
@@ -1270,6 +1275,8 @@ test("missing cost data renders n/a in all output formats", async () => {
   const md = await readFile(markdownPath, "utf8");
   // Cost should show n/a when costKnown is false
   assert.match(md, /n\/a/);
+  assert.match(md, /Known Cost: `n\/a`/);
+  assert.doesNotMatch(md, /Known Cost: `\$0\.00`/);
 
   const badge = JSON.parse(await readFile(badgePath, "utf8"));
   assert.equal(badge.message, "1/1 passing");
@@ -1286,6 +1293,7 @@ test("estimated cost is marked and excluded from known totals", async () => {
   });
   const reportHelpers = await import("../packages/report/dist/report-helpers.js");
   assert.equal(reportHelpers.summarizeRun(run).knownCostUsd, 0);
+  assert.equal(reportHelpers.summarizeRun(run).knownCostCount, 0);
   const { markdownPath, htmlPath } = await writeReport(run);
   const markdown = await readFile(markdownPath, "utf8");
   const html = await readFile(htmlPath, "utf8");

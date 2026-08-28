@@ -63,7 +63,7 @@ async function writeSourceRepository(sourcePath) {
   await writeFile(path.join(sourcePath, ".mcp.json"), "{}\n", "utf8");
 }
 
-test("third-party Claude workspace removes tool configuration before the git baseline", async () => {
+test("third-party Claude workspace preserves the normal project Harness before the git baseline", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-workspace-isolation-"));
   const sourcePath = path.join(tempDir, "source");
   const workspacePath = path.join(tempDir, "workspace");
@@ -88,9 +88,9 @@ test("third-party Claude workspace removes tool configuration before the git bas
     assert.equal(earlyResult, undefined);
     assert.equal(await readFile(path.join(workspacePath, "AGENTS.md"), "utf8"), "agent instructions\n");
     assert.equal(await readFile(path.join(workspacePath, "CLAUDE.md"), "utf8"), "claude instructions\n");
-    assert.equal(await exists(path.join(workspacePath, ".claude")), false);
-    assert.equal(await exists(path.join(workspacePath, ".codex")), false);
-    assert.equal(await exists(path.join(workspacePath, ".mcp.json")), false);
+    assert.equal(await readFile(path.join(workspacePath, ".claude", "settings.json"), "utf8"), "{}\n");
+    assert.equal(await readFile(path.join(workspacePath, ".codex", "config.toml"), "utf8"), "model = 'private'\n");
+    assert.equal(await readFile(path.join(workspacePath, ".mcp.json"), "utf8"), "{}\n");
     const { stdout } = await execFileAsync("git", ["status", "--porcelain"], { cwd: workspacePath });
     assert.equal(stdout.trim(), "");
   } finally {

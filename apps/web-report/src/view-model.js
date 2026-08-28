@@ -26,7 +26,8 @@ export {
   resultLabel,
   resultRecordKey,
   runtimeIdentity,
-  summarizeRun
+  summarizeRun,
+  usesThirdPartyProviderConfiguration
 } from "./view-model/comparison.js";
 export {
   buildPrTable,

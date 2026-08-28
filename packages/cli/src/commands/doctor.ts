@@ -1,6 +1,6 @@
 import {
   getInstallGuide,
-  listAvailableAdapters,
+  listProductAdapters,
   preflightAdapters,
 } from "@agentarena/adapters";
 import { createAgentSelection } from "@agentarena/core";
@@ -15,7 +15,7 @@ export async function runDoctor(parsed: ParsedArgs): Promise<void> {
   const selections =
     parsed.agentIds.length > 0
       ? normalizeCliSelections(parsed)
-      : listAvailableAdapters()
+      : listProductAdapters()
           .map((adapter) =>
             createAgentSelection({
               baseAgentId: adapter.id,

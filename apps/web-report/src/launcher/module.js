@@ -37,13 +37,13 @@ export function isCommunityTaskPack(taskPack) {
 export function claudeRuntimeModeDescription(profile, localText) {
   if ((profile?.kind ?? "official") === "official") {
     return localText(
-      "使用当前本地 Claude Code 登录和个人配置。AgentArena 不主动修改这些配置，但 Claude Code 自身可能正常更新缓存、历史或登录状态。无人值守修改临时仓库前，需在启动 AgentArena 时设置 AGENTARENA_SKIP_PERMISSIONS=1；未设置时会在运行前明确阻止。",
-      "Uses the current local Claude Code login and personal configuration. AgentArena does not modify it, although Claude Code may normally update caches, history, or login state. Before unattended work can edit the temporary repository, start AgentArena with AGENTARENA_SKIP_PERMISSIONS=1; otherwise the run is explicitly blocked before it starts."
+      "使用当前本地 Claude Code 登录和个人配置。AgentArena 不主动修改这些配置，但 Claude Code 自身可能正常更新缓存、历史或登录状态。后台任务使用 --permission-mode dontAsk；需要交互授权的工具会被拒绝，不会启用全权限绕过。",
+      "Uses the current local Claude Code login and personal configuration. AgentArena does not modify it, although Claude Code may normally update caches, history, or login state. Background tasks use --permission-mode dontAsk; tools that require interactive approval are denied and no full permission bypass is enabled."
     );
   }
   return localText(
-    "使用独立临时配置，不读取当前官方登录、个人规则、插件或 MCP。项目中的 AGENTS.md 和 CLAUDE.md 仍会保留；连接测试与正式运行使用同一隔离规则。无人值守修改临时仓库前，需在启动 AgentArena 时设置 AGENTARENA_SKIP_PERMISSIONS=1；未设置时会在运行前明确阻止。",
-    "Uses an isolated temporary configuration without reading the current official login, personal rules, plugins, or MCP. Project AGENTS.md and CLAUDE.md remain available, and connection tests use the same isolation policy as real runs. Before unattended work can edit the temporary repository, start AgentArena with AGENTARENA_SKIP_PERMISSIONS=1; otherwise the run is explicitly blocked before it starts."
+    "这是旧页面的兼容模式：使用独立临时配置，不读取当前官方登录、个人规则、插件或 MCP。新的 Workbench RuntimeProfile 会改为继承正常 Harness，并只在任务进程覆盖 Provider。兼容模式的后台任务也使用 --permission-mode dontAsk，不启用全权限绕过。",
+    "This is a legacy compatibility mode: it uses an isolated temporary configuration without the current official login, personal rules, plugins, or MCP. New Workbench RuntimeProfiles instead inherit the normal Harness and override only the task process Provider. Compatibility-mode background tasks also use --permission-mode dontAsk, without a full permission bypass."
   );
 }
 
@@ -1483,7 +1483,16 @@ export function createLauncherModule(deps) {
       state.runStatus = null;
     }
 
-    render();
+    // Service bootstrap only changes launcher/service state. If a report was
+    // loaded while the async probes were in flight, a full render here would
+    // replace its comparison DOM and detach elements currently being used by
+    // the user (or by an accessibility/browser interaction). Keep the loaded
+    // report stable and refresh only the launcher in that case.
+    if (state.run) {
+      renderLauncher();
+    } else {
+      render();
+    }
   }
 
   async function checkInstalledAgents() {

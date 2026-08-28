@@ -1,3 +1,4 @@
+import type { ResolvedLaunchSpec } from "../runtime-launch.js";
 import type { TraceEvent } from "./benchmark.js";
 import type { TaskPack } from "./task-pack.js";
 
@@ -15,7 +16,12 @@ export interface AgentSelection {
   displayLabel: string;
   config: AgentRequestedConfig;
   configSource?: "ui" | "cli";
+  runtimeProfileId?: string;
+  launchSpecHash?: string;
+  verificationReceiptId?: string;
 }
+
+export type RuntimeSecretValues = Readonly<Record<string, string>>;
 
 export type AgentRuntimeSource =
   | "ui"
@@ -30,10 +36,28 @@ export type AgentRuntimeSource =
 
 export type AgentRuntimeVerification = "confirmed" | "inferred" | "unknown";
 export type AgentVersionSource = "version-command" | "package-file" | "builtin" | "unknown";
+export type AgentRuntimeEvidence = "confirmed" | "declared" | "inferred" | "unknown";
+
+/**
+ * Token counters reported by a harness.  The total remains `tokenUsage` for
+ * backwards compatibility; these fields explain how that total was obtained
+ * when the CLI exposes a breakdown.
+ */
+export interface TokenUsageBreakdown {
+  inputTokens: number;
+  outputTokens: number;
+  reasoningTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+}
 
 export interface AgentResolvedRuntime {
   effectiveModel?: string;
   effectiveReasoningEffort?: string;
+  /** Evidence quality for the model identity, independent of runtime source. */
+  modelIdentitySource?: AgentRuntimeEvidence;
+  /** Evidence quality for the reasoning setting, when a harness reports it. */
+  reasoningEffortSource?: AgentRuntimeEvidence;
   effectiveAgentVersion?: string;
   agentVersionSource?: AgentVersionSource;
   providerProfileId?: string;
@@ -79,6 +103,8 @@ export interface AdapterExecutionContext {
   repoPath: string;
   workspacePath: string;
   environment: NodeJS.ProcessEnv;
+  resolvedLaunchSpec?: ResolvedLaunchSpec;
+  runtimeSecretValues?: RuntimeSecretValues;
   task: TaskPack;
   signal?: AbortSignal;
   trace: (event: Omit<TraceEvent, "agentId" | "timestamp">) => Promise<void>;
@@ -117,13 +143,7 @@ export interface AdapterExecutionResult {
    * Consumers must not derive a token-efficiency score from unreliable counts.
    */
   tokenUsageReliable?: boolean;
-  tokenUsageBreakdown?: {
-    inputTokens: number;
-    outputTokens: number;
-    reasoningTokens: number;
-    cacheReadTokens: number;
-    cacheWriteTokens: number;
-  };
+  tokenUsageBreakdown?: TokenUsageBreakdown;
   /**
    * Present when the adapter detected a likely CLI output format mismatch
    * (e.g. the CLI updated its JSON event schema and the parser could not
@@ -141,6 +161,18 @@ export interface AdapterExecutionResult {
 }
 
 export type AdapterPreflightStatus = "ready" | "unverified" | "blocked" | "missing";
+
+/**
+ * A preflight is runnable only when the adapter explicitly reports ready.
+ * Keep this predicate shared so callers do not accidentally treat warning
+ * states such as `unverified` as a successful check.
+ */
+export function isAdapterPreflightReady(
+  status: AdapterPreflightStatus | undefined
+): status is "ready" {
+  return status === "ready";
+}
+
 export type AdapterSupportTier = "supported" | "experimental" | "blocked";
 export type AdapterMetricAvailability = "available" | "estimated" | "unavailable";
 export type AdapterTraceRichness = "full" | "partial" | "minimal";
@@ -163,6 +195,9 @@ export interface AdapterCapability {
 export interface AdapterPreflightOptions {
   probeAuth?: boolean;
   selection?: AgentSelection;
+  resolvedLaunchSpec?: ResolvedLaunchSpec;
+  runtimeSecretValues?: RuntimeSecretValues;
+  repositoryPath?: string;
 }
 
 export interface AdapterPreflightResult {
@@ -179,6 +214,9 @@ export interface AdapterPreflightResult {
   capability: AdapterCapability;
   command?: string;
   details?: string[];
+  runtimeProfileId?: string;
+  launchSpecHash?: string;
+  verificationReceiptId?: string;
 }
 
 export interface AgentAdapter {

@@ -1,10 +1,12 @@
 import {
   type AgentLogStore,
   clearRunState,
+  isPathInsideWorkspace,
   loadRunState,
   logger,
   saveRunState
 } from "@agentarena/core";
+import { markJobManifestInterrupted } from "@agentarena/runner";
 import {
   fromUiRunState,
   toUiRunState,
@@ -133,7 +135,17 @@ export class UiRunStateController {
   async restore(): Promise<void> {
     try {
       const persistedState = await loadRunState(this.workingDirectory);
-      if (persistedState?.state === "running") {
+      if (persistedState?.state === "running" || persistedState?.state === "cancelling") {
+        const outputPath = persistedState.outputPath;
+        if (outputPath && await isPathInsideWorkspace(this.workingDirectory, outputPath)) {
+          await markJobManifestInterrupted(outputPath).catch((error: unknown) => {
+            logger.warn(
+              "server",
+              "job_manifest.interrupt_failed",
+              `Failed to mark the recovered JobManifest interrupted: ${error instanceof Error ? error.message : String(error)}`
+            );
+          });
+        }
         this.currentStatus = {
           ...fromUiRunState(persistedState),
           state: "error",

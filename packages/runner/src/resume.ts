@@ -1,15 +1,13 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { closeSync, promises as fs, lstatSync, openSync, readlinkSync, readSync } from "node:fs";
+import { closeSync, promises as fs, lstatSync, openSync, readdirSync, readlinkSync, readSync } from "node:fs";
 import path from "node:path";
 
-import {
-  type AgentRunResult,
-  type AgentSelection,
-  logger, 
-  RESULT_ARTIFACT_SCHEMA,
-  type ScoreMode,
-  type writeJsonAtomic
+import type {
+  AgentRunResult,
+  AgentSelection,
+  ScoreMode,
+  writeJsonAtomic
 } from "@agentarena/core";
 
 function stableSerialize(value: unknown): string {
@@ -65,39 +63,110 @@ function changedRepositoryPaths(status: string): string[] {
   return [...new Set(paths)].sort();
 }
 
-export function repositoryIdentity(repoPath: string): string {
-  try {
-    const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repoPath, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
-    const status = execFileSync("git", ["status", "--porcelain=v1", "-z", "--untracked-files=all"], { cwd: repoPath, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
-    if (!status) {
-      return `${head}\n`;
-    }
+const REPOSITORY_IDENTITY_IGNORED_NAMES = new Set([
+  ".aa-evidence",
+  ".agentarena",
+  ".git",
+  "agentarena-demo",
+  "node_modules"
+]);
+const MAX_NON_GIT_IDENTITY_FILES = 100_000;
+const MAX_NON_GIT_IDENTITY_BYTES = 1024 * 1024 * 1024;
 
-    const contentHash = createHash("sha256");
-    updateIdentityField(contentHash, "status", status);
+function nonGitRepositoryIdentity(repoPath: string): string {
+  const root = path.resolve(repoPath);
+  const hash = createHash("sha256");
+  let files = 0;
+  let totalBytes = 0;
 
-    for (const relativePath of changedRepositoryPaths(status)) {
-      updateIdentityField(contentHash, "path", relativePath);
-      const filePath = path.join(repoPath, relativePath);
-      try {
-        const stat = lstatSync(filePath);
-        if (stat.isFile()) {
-          updateFileContentHash(contentHash, filePath, stat.size);
-        } else if (stat.isSymbolicLink()) {
-          updateIdentityField(contentHash, "symlink", readlinkSync(filePath));
-        } else if (stat.isDirectory()) {
-          updateIdentityField(contentHash, "directory", repositoryIdentity(filePath));
-        } else {
-          updateIdentityField(contentHash, "other", `${stat.mode}:${stat.size}`);
+  const visit = (directoryPath: string, relativeDirectory: string): void => {
+    const entries = readdirSync(directoryPath, { withFileTypes: true })
+      .sort((left, right) => left.name.localeCompare(right.name));
+    for (const entry of entries) {
+      if (REPOSITORY_IDENTITY_IGNORED_NAMES.has(entry.name)) continue;
+      const relativePath = relativeDirectory
+        ? `${relativeDirectory}/${entry.name}`
+        : entry.name;
+      const absolutePath = path.join(directoryPath, entry.name);
+      const stat = lstatSync(absolutePath);
+      updateIdentityField(hash, "path", relativePath.replaceAll("\\", "/"));
+      if (stat.isSymbolicLink()) {
+        updateIdentityField(hash, "symlink", readlinkSync(absolutePath));
+      } else if (stat.isDirectory()) {
+        updateIdentityField(hash, "directory", relativePath);
+        visit(absolutePath, relativePath);
+      } else if (stat.isFile()) {
+        files += 1;
+        totalBytes += stat.size;
+        if (files > MAX_NON_GIT_IDENTITY_FILES || totalBytes > MAX_NON_GIT_IDENTITY_BYTES) {
+          throw new Error(
+            `Non-Git repository identity exceeds the supported limit (${MAX_NON_GIT_IDENTITY_FILES} files or ${MAX_NON_GIT_IDENTITY_BYTES} bytes).`
+          );
         }
-      } catch {
-        updateIdentityField(contentHash, "missing", relativePath);
+        updateFileContentHash(hash, absolutePath, stat.size);
+      } else {
+        updateIdentityField(hash, "other", `${stat.mode}:${stat.size}`);
       }
     }
+  };
 
-    return `${head}\ndirty-sha256:${contentHash.digest("hex")}\n`;
+  visit(root, "");
+  return `non-git-sha256:${hash.digest("hex")}\n`;
+}
+
+function gitTreeIdentity(repoPath: string): string {
+  const root = execFileSync("git", ["rev-parse", "--show-toplevel"], {
+    cwd: repoPath,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"]
+  }).trim();
+  const relativeScope = path.relative(root, path.resolve(repoPath));
+  if (relativeScope.startsWith("..") || path.isAbsolute(relativeScope)) {
+    throw new Error(`Repository path resolves outside Git worktree ${root}.`);
+  }
+  const treeish = relativeScope
+    ? `HEAD:${relativeScope.replaceAll("\\", "/")}`
+    : "HEAD^{tree}";
+  const tree = execFileSync("git", ["rev-parse", treeish], {
+    cwd: repoPath,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"]
+  }).trim();
+  const status = execFileSync(
+    "git",
+    ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--", "."],
+    { cwd: repoPath, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }
+  );
+  if (!status) return `git-tree:${tree}\n`;
+
+  const contentHash = createHash("sha256");
+  updateIdentityField(contentHash, "status", status);
+  for (const relativePath of changedRepositoryPaths(status)) {
+    updateIdentityField(contentHash, "path", relativePath);
+    const filePath = path.join(repoPath, relativePath);
+    try {
+      const stat = lstatSync(filePath);
+      if (stat.isFile()) {
+        updateFileContentHash(contentHash, filePath, stat.size);
+      } else if (stat.isSymbolicLink()) {
+        updateIdentityField(contentHash, "symlink", readlinkSync(filePath));
+      } else if (stat.isDirectory()) {
+        updateIdentityField(contentHash, "directory", nonGitRepositoryIdentity(filePath));
+      } else {
+        updateIdentityField(contentHash, "other", `${stat.mode}:${stat.size}`);
+      }
+    } catch {
+      updateIdentityField(contentHash, "missing", relativePath);
+    }
+  }
+  return `git-tree:${tree}\ndirty-sha256:${contentHash.digest("hex")}\n`;
+}
+
+export function repositoryIdentity(repoPath: string): string {
+  try {
+    return gitTreeIdentity(repoPath);
   } catch {
-    return `non-git:${path.resolve(repoPath)}`;
+    return nonGitRepositoryIdentity(repoPath);
   }
 }
 
@@ -105,29 +174,54 @@ function hashFingerprint(payload: unknown): string {
   return createHash("sha256").update(stableSerialize(payload)).digest("hex");
 }
 
-export function createRunContractFingerprint(repoPath: string, task: unknown, scoreMode: ScoreMode): string {
+export function createRunContractFingerprint(
+  repoPath: string,
+  task: unknown,
+  scoreMode: ScoreMode,
+  repositoryBaselineIdentity = repositoryIdentity(repoPath)
+): string {
   return hashFingerprint({
     schema: "agentarena.run-contract/v1",
-    repository: repositoryIdentity(repoPath),
+    repository: repositoryBaselineIdentity,
     task,
     scoreMode
   });
 }
 
-export function createSelectionFingerprint(selection: Pick<AgentSelection, "baseAgentId" | "variantId" | "displayLabel" | "config">): string {
+type SelectionFingerprintInput = Pick<
+  AgentSelection,
+  | "baseAgentId"
+  | "variantId"
+  | "displayLabel"
+  | "config"
+  | "runtimeProfileId"
+  | "launchSpecHash"
+  | "verificationReceiptId"
+>;
+
+export function createSelectionFingerprint(selection: SelectionFingerprintInput): string {
   return hashFingerprint({
-    schema: "agentarena.agent-selection/v1",
+    schema: "agentarena.agent-selection/v2",
     baseAgentId: selection.baseAgentId,
     variantId: selection.variantId,
     displayLabel: selection.displayLabel,
-    config: selection.config
+    config: selection.config,
+    runtimeProfileId: selection.runtimeProfileId,
+    launchSpecHash: selection.launchSpecHash,
+    verificationReceiptId: selection.verificationReceiptId
   });
 }
 
-export function createRunFingerprint(repoPath: string, task: unknown, selections: AgentSelection[], scoreMode: ScoreMode): string {
+export function createRunFingerprint(
+  repoPath: string,
+  task: unknown,
+  selections: AgentSelection[],
+  scoreMode: ScoreMode,
+  repositoryBaselineIdentity = repositoryIdentity(repoPath)
+): string {
   return hashFingerprint({
-    schema: "agentarena.run-fingerprint/v2",
-    contract: createRunContractFingerprint(repoPath, task, scoreMode),
+    schema: "agentarena.run-fingerprint/v3",
+    contract: createRunContractFingerprint(repoPath, task, scoreMode, repositoryBaselineIdentity),
     selections: selections.map(createSelectionFingerprint),
   });
 }
@@ -137,7 +231,10 @@ export function createResultSelectionFingerprint(result: AgentRunResult): string
     baseAgentId: result.baseAgentId,
     variantId: result.variantId,
     displayLabel: result.displayLabel,
-    config: result.requestedConfig
+    config: result.requestedConfig,
+    runtimeProfileId: result.preflight.runtimeProfileId,
+    launchSpecHash: result.preflight.launchSpecHash,
+    verificationReceiptId: result.preflight.verificationReceiptId
   });
 }
 

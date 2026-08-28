@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createLogEntry } from "../packages/core/dist/index.js";
+import { createLogEntry, redactSensitiveStrings, redactSensitiveText } from "../packages/core/dist/index.js";
 
 // All level/component values match the TypeScript types in
 // packages/core/src/logging.ts:
@@ -74,6 +74,34 @@ test("createLogEntry redacts sensitive data", () => {
   assert.equal(entry.metadata.normal, "visible");
   assert.notEqual(entry.metadata.password, "secret123");
   assert.ok(entry.metadata.password.includes("****") || entry.metadata.password === "***");
+});
+
+test("free-text redaction removes full credential values instead of preserving regex captures", () => {
+  const openAiToken = ["sk-", "abcdefghijklmnopqrstuvwxyz", "123456"].join("");
+  const githubToken = ["ghp_", "abcdefghijklmnopqrstuvwxyz", "123456"].join("");
+  const knownProviderSecret = "provider-secret-without-a-known-prefix";
+  const text = `Bearer ${openAiToken} api_key=${knownProviderSecret} github=${githubToken}`;
+
+  const redacted = redactSensitiveText(text, [knownProviderSecret]);
+  assert.doesNotMatch(redacted, new RegExp(openAiToken));
+  assert.doesNotMatch(redacted, new RegExp(githubToken));
+  assert.doesNotMatch(redacted, new RegExp(knownProviderSecret));
+  assert.match(redacted, /Bearer \[redacted\]/);
+
+  const nested = redactSensitiveStrings({ message: text, values: [knownProviderSecret] }, [knownProviderSecret]);
+  assert.doesNotMatch(JSON.stringify(nested), /provider-secret-without-a-known-prefix/);
+});
+
+test("createLogEntry scrubs credential text from the message, error message, and stack", () => {
+  const token = ["sk-", "abcdefghijklmnopqrstuvwxyz", "123456"].join("");
+  const entry = createLogEntry(
+    "ERROR",
+    "adapter",
+    "provider.failure",
+    `Provider rejected token=${token}`,
+    { error: new Error(`Provider rejected ${token}`) }
+  );
+  assert.doesNotMatch(JSON.stringify(entry), new RegExp(token));
 });
 
 test("createLogEntry works without optional fields", () => {

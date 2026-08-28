@@ -1,7 +1,6 @@
-import { promises as fs } from "node:fs";
 import path from "node:path";
 
-import { preflightAdapters } from "@agentarena/adapters";
+import { preflightAdapters, resolveRuntimeProfileLaunch } from "@agentarena/adapters";
 import {
   AgentLogStore,
   type AgentRunResult,
@@ -21,6 +20,15 @@ import {
 } from "@agentarena/core";
 import { runAgent } from "./agent-lifecycle.js";
 import { agentConcurrency, mapWithConcurrency } from "./concurrency.js";
+import {
+  createJobManifest,
+  type JobManifestHarnessDriftRecord,
+  type RuntimeExecutionBindings,
+  runtimeBindingForSelection,
+  updateJobManifestHarnessDrift,
+  updateJobManifestStatus,
+  writeJobManifest
+} from "./job-manifest.js";
 import { normalizeSelections } from "./normalize-selections.js";
 import { resolveAndValidateRepo } from "./repo-resolution.js";
 import {
@@ -35,7 +43,6 @@ import {
   createRunContractFingerprint,
   createRunFingerprint,
   createSelectionFingerprint,
-  isAgentRunResult,
   loadResumeState,
   repositoryIdentity,
   writeAgentResult,
@@ -48,9 +55,27 @@ export type { AgentRunContext } from "./agent-lifecycle.js";
 export { runAgent } from "./agent-lifecycle.js";
 export type { MapWithConcurrencyResult } from "./concurrency.js";
 export { agentConcurrency, agentExecuteTimeoutMs, DEFAULT_AGENT_CONCURRENCY, mapWithConcurrency, resolvePositiveInt } from "./concurrency.js";
+export type {
+  CreateJobManifestOptions,
+  RuntimeExecutionBinding,
+  RuntimeExecutionBindings
+} from "./job-manifest.js";
+export {
+  assertFrozenRuntimeSelection,
+  createJobManifest,
+  jobManifestPath,
+  markJobManifestInterrupted,
+  readJobManifest,
+  runtimeBindingForSelection,
+  updateJobManifestHarnessDrift,
+  updateJobManifestStatus,
+  writeJobManifest
+} from "./job-manifest.js";
 export { normalizeSelections } from "./normalize-selections.js";
 export type { RepoResolution, RepoResolutionOptions } from "./repo-resolution.js";
-export { buildDiffPrecision, collectChangedFiles } from "./snapshot.js";
+export { resolveAndValidateRepo } from "./repo-resolution.js";
+export { repositoryIdentity } from "./resume.js";
+export { buildDiffPrecision, collectChangedFiles, evaluateChangePolicy } from "./snapshot.js";
 export type { CompatibilityCheck, CompatibilityCheckResult } from "./task-compatibility.js";
 export { checkTaskCompatibility } from "./task-compatibility.js";
 export { wrapWithTimeout } from "./timeout-utils.js";
@@ -95,6 +120,8 @@ export interface BenchmarkOptions {
    * to serve /api/agent-logs.
    */
   agentLogStore?: AgentLogStore;
+  /** Frozen task-ready runtime bindings keyed by variant or RuntimeProfile ID. */
+  runtimeBindings?: RuntimeExecutionBindings;
 }
 
 export interface BenchmarkProgressEvent {
@@ -154,11 +181,6 @@ async function writeRunMarker(
     logger.warn("runner", "run_marker.write_failed", `Failed to write run marker for ${outputPath}: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
-
-function agentResultPath(outputPath: string, variantId: string): string {
-  return path.join(outputPath, "agents", variantId, "result.json");
-}
-
 
 function createTaskIncompatibleResult(
   preflight: Awaited<ReturnType<typeof preflightAdapters>>[number],
@@ -280,9 +302,24 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
 
   const selections = normalizeSelections(options);
   const scoreMode = options.scoreMode ?? "practical";
-  const fairComparison = createFairComparisonMetadata(task, repositoryIdentity(repoPath));
-  const runContractFingerprint = createRunContractFingerprint(repoPath, task, scoreMode);
-  const runFingerprint = createRunFingerprint(repoPath, task, selections, scoreMode);
+  const repositoryBaselineIdentity = repositoryIdentity(repoPath);
+  const fairComparison = createFairComparisonMetadata(task, repositoryBaselineIdentity);
+  if (!fairComparison.taskIdentity || !fairComparison.judgeIdentity) {
+    throw new Error("Cannot create a frozen job without task and judge identities.");
+  }
+  const runContractFingerprint = createRunContractFingerprint(
+    repoPath,
+    task,
+    scoreMode,
+    repositoryBaselineIdentity
+  );
+  const runFingerprint = createRunFingerprint(
+    repoPath,
+    task,
+    selections,
+    scoreMode,
+    repositoryBaselineIdentity
+  );
   const resumeState = await loadResumeState(options.resumeFrom, runFingerprint, runContractFingerprint);
   const resumeResults =
     resumeState.taskId && resumeState.taskId !== task.id
@@ -308,6 +345,89 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
     repoPath: options.repoPath
   });
 
+  // Ownership of the temporary root transfers from prepareWorkspace only after
+  // it returns. From this point, every failure must pass through this finalizer.
+  const workspacePaths = new Set<string>();
+  let jobManifest: ReturnType<typeof createJobManifest> | undefined;
+  let completedNormally = false;
+  let terminalError: unknown;
+
+  const capturePostRunHarnessDrift = async (): Promise<void> => {
+    if (!jobManifest || !options.runtimeBindings) return;
+    const checkedAt = new Date().toISOString();
+    const records: JobManifestHarnessDriftRecord[] = [];
+    for (const selection of selections) {
+      const binding = runtimeBindingForSelection(selection, options.runtimeBindings);
+      if (!binding) continue;
+      if (!binding.registryBacked) {
+        records.push({
+          variantId: selection.variantId,
+          evidence: {
+            status: "check-failed",
+            checkedAt,
+            summary: "This programmatic runtime binding is not registry-backed, so post-run Harness drift could not be re-resolved."
+          }
+        });
+        continue;
+      }
+      try {
+        const currentRepositoryBaseline = repositoryIdentity(repoPath);
+        const current = await resolveRuntimeProfileLaunch({
+          profileId: binding.launchSpec.profile.id,
+          repositoryPath: repoPath,
+          repositoryBaselineIdentity: currentRepositoryBaseline,
+          environment: process.env,
+          resolveSecrets: false
+        });
+        const unchanged = current.launchSpec.launchSpecHash === binding.launchSpec.launchSpecHash;
+        records.push({
+          variantId: selection.variantId,
+          evidence: {
+            status: unchanged ? "unchanged" : "changed",
+            checkedAt,
+            postRunSnapshotId: current.harnessSnapshot.snapshotId,
+            summary: unchanged
+              ? "Known Profile, installation, environment, repository, and Harness inputs were unchanged after the run."
+              : "Known Profile, installation, environment, repository, or Harness inputs changed during the run."
+          }
+        });
+      } catch (error) {
+        records.push({
+          variantId: selection.variantId,
+          evidence: {
+            status: "check-failed",
+            checkedAt,
+            summary: `Post-run Harness drift check failed: ${formatErrorMessage(error)}`
+          }
+        });
+      }
+    }
+    jobManifest = await updateJobManifestHarnessDrift(outputPath, records);
+  };
+
+  const usesFrozenRuntime = options.runtimeBindings !== undefined
+    || selections.some((selection) =>
+      selection.runtimeProfileId !== undefined
+      || selection.launchSpecHash !== undefined
+      || selection.verificationReceiptId !== undefined
+    );
+  try {
+  jobManifest = usesFrozenRuntime
+    ? createJobManifest({
+        runId,
+        status: "queued",
+        repositoryBaselineIdentity,
+        taskIdentity: fairComparison.taskIdentity,
+        judgeIdentity: fairComparison.judgeIdentity,
+        scoreMode,
+        selections,
+        runtimeBindings: options.runtimeBindings ?? {}
+      })
+    : undefined;
+  if (jobManifest) {
+    await writeJobManifest(outputPath, jobManifest);
+  }
+
   await writeRunMarker(outputPath, "in-progress", {
     runId,
     taskId: task.id,
@@ -332,12 +452,7 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
   // if runAgent throws, the path is in the Set for the finally-block cleanup.
   // If the entire benchmark is aborted before a callback runs, that workspace
   // was never created so no cleanup is needed.
-  const workspacePaths = new Set<string>();
-
   let taskCompatibility: TaskCompatibilityResult | undefined;
-  let completedNormally = false;
-  let terminalError: unknown;
-  try {
   throwIfAborted(cancellation?.signal, createCancellationSummary("startup"));
   await emitProgress({
     phase: "starting",
@@ -408,7 +523,23 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
   let preflights: Awaited<ReturnType<typeof preflightAdapters>>;
   try {
     throwIfAborted(cancellation?.signal, createCancellationSummary("preflight"));
-    preflights = await preflightAdapters(selections, { probeAuth: options.probeAuth });
+    preflights = await Promise.all(selections.map(async (selection) => {
+      const binding = runtimeBindingForSelection(selection, options.runtimeBindings);
+      const [preflight] = await preflightAdapters([selection], {
+        probeAuth: options.probeAuth,
+        resolvedLaunchSpec: binding?.launchSpec,
+        runtimeSecretValues: binding?.runtimeSecretValues,
+        repositoryPath: repoPath
+      });
+      return binding
+        ? {
+            ...preflight,
+            runtimeProfileId: selection.runtimeProfileId,
+            launchSpecHash: selection.launchSpecHash,
+            verificationReceiptId: selection.verificationReceiptId
+          }
+        : preflight;
+    }));
   } catch (error) {
     if (isAbortError(error)) {
       throw error;
@@ -434,7 +565,10 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
       baseAgentId: preflight.baseAgentId,
       variantId: preflight.variantId,
       displayLabel: preflight.displayLabel,
-      config: preflight.requestedConfig
+      config: preflight.requestedConfig,
+      runtimeProfileId: preflight.runtimeProfileId,
+      launchSpecHash: preflight.launchSpecHash,
+      verificationReceiptId: preflight.verificationReceiptId
     });
     if (currentSelectionFingerprint !== createResultSelectionFingerprint(cachedResult)) {
       logger.warn(
@@ -466,7 +600,6 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
       }
     });
 
-    completedNormally = true;
     await writeRunMarker(outputPath, "complete", {
       runId,
       taskId: task.id,
@@ -478,6 +611,11 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
       cancelledResults: 0,
       taskCompatibility: incompatibleCompatibility
     });
+    if (jobManifest) {
+      await capturePostRunHarnessDrift();
+      jobManifest = await updateJobManifestStatus(outputPath, "completed");
+    }
+    completedNormally = true;
 
     // Telemetry: run ended because the task pack was incompatible with the repo.
     void recordTelemetryEvent("run_completed", {
@@ -499,6 +637,7 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
       scoreMode: options.scoreMode ?? "practical",
       scoreWeights: getDefaultWeights(options.scoreMode ?? "practical"),
       fairComparison,
+      jobManifest,
       task,
       taskCompatibility: incompatibleCompatibility,
       preflights,
@@ -507,6 +646,9 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
   }
 
   // Step 4: Execute agents concurrently
+  if (jobManifest) {
+    jobManifest = await updateJobManifestStatus(outputPath, "running");
+  }
   let persistenceFailure: AgentResultPersistenceError | undefined;
   const { results: rawResults, aborted } = await mapWithConcurrency(
     preflights,
@@ -540,6 +682,16 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
       }
       const workspacePath = path.join(workspaceRootPath, preflight.variantId);
       workspacePaths.add(workspacePath);
+      const selection = selections.find(
+        (candidate) => candidate.variantId === preflight.variantId
+      );
+      if (!selection) {
+        throw new Error(`Missing selection for preflight variant ${preflight.variantId}.`);
+      }
+      const runtimeBinding = runtimeBindingForSelection(
+        selection,
+        options.runtimeBindings
+      );
 
       // Mark as running; `deriveSnapshot()` recomputes the running array.
       statusByAgent.set(preflight.variantId, "running");
@@ -564,6 +716,9 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
           enableActivityEvents: enableActivity,
           agentLogStore: enableActivity ? agentLogStore : undefined,
           nextActivitySeq: enableActivity ? nextActivitySeq : undefined,
+          resolvedLaunchSpec: runtimeBinding?.launchSpec,
+          runtimeSecretValues: runtimeBinding?.runtimeSecretValues,
+          hostEnvironment: runtimeBinding?.hostEnvironment,
           onActivity: enableActivity
             ? (line, stream, seq) => {
                 const eventLine = line.slice(0, 500);
@@ -674,7 +829,6 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
     }
   });
 
-  completedNormally = true;
   // A run that completed with one or more cancelled agents (but also successes)
   // must NOT be folded into "failed" — that would misrepresent an otherwise
   // successful run. Use a distinct "cancelled" marker so callers/consumers can
@@ -689,6 +843,14 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
     runFingerprint,
     runContractFingerprint
   });
+  if (jobManifest) {
+    await capturePostRunHarnessDrift();
+    jobManifest = await updateJobManifestStatus(
+      outputPath,
+      completedWithCancellation ? "cancelled" : "completed"
+    );
+  }
+  completedNormally = true;
   // Telemetry: run finished (success or cancelled-with-successes).
   void recordTelemetryEvent("run_completed", {
     agentCount: results.length,
@@ -708,6 +870,7 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
     scoreMode: options.scoreMode ?? "practical",
     scoreWeights: getDefaultWeights(options.scoreMode ?? "practical"),
     fairComparison,
+    jobManifest,
     task,
     taskCompatibility,
     preflights,
@@ -727,17 +890,68 @@ export async function runBenchmark(options: BenchmarkOptions): Promise<Benchmark
         resultIntegrity: "unavailable",
         outcome: terminalState,
       });
-      await writeRunMarker(outputPath, terminalState, {
-        runId,
-        taskId: task.id,
-        taskTitle: task.title,
-        runFingerprint,
-        runContractFingerprint
-      });
-      for (const workspacePath of workspacePaths) {
-        await cleanupWorkspace(workspacePath).catch(() => {});
+      try {
+        await writeRunMarker(outputPath, terminalState, {
+          runId,
+          taskId: task.id,
+          taskTitle: task.title,
+          runFingerprint,
+          runContractFingerprint
+        });
+      } catch (finalizationError) {
+        logger.warn(
+          "runner",
+          "run_marker.finalization_failed",
+          `Failed to persist the ${terminalState} run marker: ${formatErrorMessage(finalizationError)}`
+        );
       }
-      await cleanupWorkspace(workspaceRootPath, 1).catch(() => {});
+      if (jobManifest) {
+        try {
+          await capturePostRunHarnessDrift();
+        } catch (finalizationError) {
+          logger.warn(
+            "runner",
+            "job_manifest.drift_finalization_failed",
+            `Failed to persist post-run Harness drift: ${formatErrorMessage(finalizationError)}`
+          );
+        }
+        try {
+          jobManifest = await updateJobManifestStatus(
+            outputPath,
+            terminalState,
+            () => new Date().toISOString(),
+            terminalError === undefined ? undefined : formatErrorMessage(terminalError)
+          );
+        } catch (finalizationError) {
+          logger.warn(
+            "runner",
+            "job_manifest.status_finalization_failed",
+            `Failed to persist the ${terminalState} JobManifest status: ${formatErrorMessage(finalizationError)}`
+          );
+        }
+      }
+      for (const workspacePath of workspacePaths) {
+        const cleanupResult = await cleanupWorkspace(workspacePath).catch((cleanupError) => ({
+          success: false,
+          path: workspacePath,
+          error: formatErrorMessage(cleanupError)
+        }));
+        if (!cleanupResult.success) {
+          logger.warn("runner", "cleanup.finalization_failed", `Failed to cleanup workspace ${workspacePath}: ${cleanupResult.error}`);
+        }
+      }
+      const rootCleanupResult = await cleanupWorkspace(workspaceRootPath, 1).catch((cleanupError) => ({
+        success: false,
+        path: workspaceRootPath,
+        error: formatErrorMessage(cleanupError)
+      }));
+      if (!rootCleanupResult.success) {
+        logger.warn(
+          "runner",
+          "cleanup.root_finalization_failed",
+          `Failed to cleanup workspace root ${workspaceRootPath}: ${rootCleanupResult.error}`
+        );
+      }
     }
   }
 }

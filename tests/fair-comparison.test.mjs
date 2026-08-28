@@ -93,3 +93,51 @@ test("repositoryIdentity distinguishes dirty repositories by file content", asyn
     await rm(repoPath, { recursive: true, force: true });
   }
 });
+
+test("repositoryIdentity scopes Git dirty state to a selected monorepo subdirectory", async () => {
+  const repoRoot = await mkdtemp(path.join(os.tmpdir(), "agentarena-fair-monorepo-"));
+  const selectedPath = path.join(repoRoot, "packages", "selected");
+  const siblingPath = path.join(repoRoot, "packages", "sibling");
+  try {
+    await mkdir(selectedPath, { recursive: true });
+    await mkdir(siblingPath, { recursive: true });
+    await execFileAsync("git", ["init"], { cwd: repoRoot });
+    await execFileAsync("git", ["config", "user.email", "agentarena@example.test"], { cwd: repoRoot });
+    await execFileAsync("git", ["config", "user.name", "AgentArena Test"], { cwd: repoRoot });
+    await writeFile(path.join(selectedPath, "tracked.txt"), "selected baseline\n", "utf8");
+    await writeFile(path.join(siblingPath, "tracked.txt"), "sibling baseline\n", "utf8");
+    await execFileAsync("git", ["add", "."], { cwd: repoRoot });
+    await execFileAsync("git", ["commit", "-m", "baseline"], { cwd: repoRoot });
+
+    const baseline = repositoryIdentity(selectedPath);
+    await writeFile(path.join(siblingPath, "tracked.txt"), "sibling changed\n", "utf8");
+    await writeFile(path.join(siblingPath, "untracked.txt"), "outside selected scope\n", "utf8");
+    assert.equal(repositoryIdentity(selectedPath), baseline);
+
+    await writeFile(path.join(selectedPath, "tracked.txt"), "selected changed\n", "utf8");
+    const trackedChange = repositoryIdentity(selectedPath);
+    assert.notEqual(trackedChange, baseline);
+    await writeFile(path.join(selectedPath, "untracked.txt"), "inside selected scope\n", "utf8");
+    assert.notEqual(repositoryIdentity(selectedPath), trackedChange);
+  } finally {
+    await rm(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("repositoryIdentity hashes non-Git content and ignores AgentArena outputs", async () => {
+  const repoPath = await mkdtemp(path.join(os.tmpdir(), "agentarena-non-git-repo-"));
+  try {
+    await writeFile(path.join(repoPath, "README.md"), "first\n", "utf8");
+    const first = repositoryIdentity(repoPath);
+    await writeFile(path.join(repoPath, "README.md"), "second\n", "utf8");
+    const second = repositoryIdentity(repoPath);
+    assert.match(first, /^non-git-sha256:/);
+    assert.notEqual(first, second);
+
+    await mkdir(path.join(repoPath, ".agentarena"), { recursive: true });
+    await writeFile(path.join(repoPath, ".agentarena", "run.json"), "changing output\n", "utf8");
+    assert.equal(repositoryIdentity(repoPath), second);
+  } finally {
+    await rm(repoPath, { recursive: true, force: true });
+  }
+});

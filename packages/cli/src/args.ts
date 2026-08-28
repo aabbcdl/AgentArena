@@ -3,6 +3,7 @@ import { isScoreMode, SCORE_MODES, type ScoreMode } from "@agentarena/core";
 export interface ParsedArgs {
   command?: string;
   repoPath?: string;
+  workspaceRoot?: string;
   taskPath?: string;
   agentIds: string[];
   codexModel?: string;
@@ -78,6 +79,7 @@ Quick start:
 
 Options:
   --json              Output as JSON (for scripting)
+  --workspace-root <path>  Set the local UI workspace boundary (defaults to current directory)
   --verbose, -v       Show full error traces
   --debug             Verbose + debug logs
   -V                  Show version
@@ -132,6 +134,12 @@ export function parseArgs(argv: string[]): ParsedArgs {
         parsed.repoPath = args.shift();
         if (!parsed.repoPath) {
           throw new Error("--repo requires a path argument. Example: --repo . or --repo /path/to/repo");
+        }
+        break;
+      case "--workspace-root":
+        parsed.workspaceRoot = args.shift();
+        if (!parsed.workspaceRoot?.trim()) {
+          throw new Error("--workspace-root requires a directory path. Example: --workspace-root /path/to/workspace");
         }
         break;
       case "--task":

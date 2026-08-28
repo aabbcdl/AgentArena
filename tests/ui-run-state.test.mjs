@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { UiRunStateController } from "../packages/cli/dist/commands/ui-run-state.js";
+import { JOB_MANIFEST_SCHEMA_V1, saveRunState } from "../packages/core/dist/index.js";
 
 test("UiRunStateController owns start reservation, bounded logs, and restart recovery", async () => {
   const workingDirectory = await mkdtemp(path.join(os.tmpdir(), "agentarena-ui-state-"));
@@ -73,6 +74,44 @@ test("UiRunStateController serializes an in-flight debounced save before flush",
     assert.deepEqual(savedStates, ["running", "done"]);
   } finally {
     releaseFirstSave?.();
+    await rm(workingDirectory, { recursive: true, force: true });
+  }
+});
+
+test("UiRunStateController marks the exact recovered JobManifest interrupted", async () => {
+  const workingDirectory = await mkdtemp(path.join(os.tmpdir(), "agentarena-ui-state-"));
+  const outputPath = path.join(workingDirectory, ".agentarena", "ui-runs", "recovered-run");
+  try {
+    await mkdir(outputPath, { recursive: true });
+    await writeFile(path.join(outputPath, "job-manifest.json"), JSON.stringify({
+      schemaVersion: JOB_MANIFEST_SCHEMA_V1,
+      runId: "recovered-run",
+      status: "running",
+      createdAt: "2026-08-12T00:00:00.000Z",
+      updatedAt: "2026-08-12T00:00:00.000Z",
+      startedAt: "2026-08-12T00:00:00.000Z",
+      repositoryBaselineIdentity: "repo:recovered",
+      taskIdentity: "task:recovered",
+      judgeIdentity: "judge:recovered",
+      scoreMode: "practical",
+      variants: []
+    }), "utf8");
+    await saveRunState(workingDirectory, {
+      state: "running",
+      phase: "benchmark",
+      logs: [],
+      updatedAt: "2026-08-12T00:01:00.000Z",
+      runId: "recovered-run",
+      outputPath
+    });
+
+    const restored = new UiRunStateController(workingDirectory);
+    await restored.restore();
+    const manifest = JSON.parse(await readFile(path.join(outputPath, "job-manifest.json"), "utf8"));
+    assert.equal(manifest.status, "interrupted");
+    assert.match(manifest.failureSummary, /not resumed/i);
+    assert.equal(restored.status.state, "error");
+  } finally {
     await rm(workingDirectory, { recursive: true, force: true });
   }
 });

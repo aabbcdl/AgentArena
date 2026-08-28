@@ -1,79 +1,55 @@
 schemaVersion: agentarena.taskpack/v1
 id: input-validation
-title: Add Input Validation
-description: Add HTML sanitization and path traversal protection.
+title: Restore Input Validation Boundaries
+description: Block script injection and path traversal while preserving useful input errors.
 metadata:
   source: official
   owner: AgentArena
+  lifecycle: core
   difficulty: medium
-  objective: Add security-critical sanitization functions.
-  judgeRationale: Behavioral tests verify XSS payloads are escaped and path traversal is blocked.
-  repoTypes: ["node"]
-  tags: ["validation", "security"]
+  objective: Restore security-relevant validation behavior with deterministic local checks.
+  repoTypes: [node]
+  tags: [core, benchmark, validation, security]
   dependencies: []
-  differentiator: Good agents implement real sanitization; weak agents add comments.
+  judgeRationale: Behavioral checks cover sanitization, traversal, and empty values; no source-pattern shortcut is accepted.
+  differentiator: A practical boundary task with clear safe and unsafe examples.
   i18n:
     zh-CN:
-      title: 添加输入验证
-      description: 添加 HTML 清理和路径遍历防护。
-      objective: 添加安全关键的清理和验证函数。
-      judgeRationale: 行为测试验证 XSS 载荷被转义，且路径遍历被阻止。
-
-repoSource: "builtin://nodejs-app"
-
+      title: 恢复输入校验边界
+      description: 阻止脚本注入和路径穿越，同时保留有用的输入错误。
+      objective: 用确定性的本地检查恢复安全相关校验行为。
+      judgeRationale: 行为检查覆盖清理、穿越和空值，不接受只改源码文字的捷径。
+repoSource: builtin://nodejs-core
 prompt: |
-  ## Task | 任务
+  Restore the validation behavior in `src/validator.js`.
 
-  Edit `src/validator.js` to add two security functions:
-
-  1. `sanitizeHtml(input)` — escapes dangerous HTML characters:
-     - `<` → `&lt;`
-     - `>` → `&gt;`
-     - `"` → `&quot;`
-     - `'` → `&#x27;`
-     - `&` → `&amp;`
-     - Throws if input is not a string
-     - Safe text (no special chars) must pass through unchanged
-
-  2. `safePath(input)` — validates file paths:
-     - Rejects paths containing `..`
-     - Rejects absolute paths (starting with `/` or `C:\`)
-     - Throws if input is not a string
-     - Returns the cleaned path on success
-
-  3. Export both functions from `src/index.js`
-
-  ## Constraints | 约束
-
-  - Only modify `src/validator.js` and `src/index.js`
-  - Do NOT add new dependencies
-  - Functions must actually work (not just exist as stubs)
-
-expectedChangedPaths:
-  - src/validator.js
-  - src/index.js
-
+  HTML input must return readable text without script or markup tags, paths must
+  stay inside the supplied root (including traversal attempts), and empty names
+  must be rejected by `requireNonEmptyString`. Keep the existing exports and
+  modify only this implementation file.
+expectedChangedPaths: [src/validator.js]
+changePolicy:
+  requireAgentChange: true
+  allowedPaths: [src/validator.js]
+  forbiddenPaths: ["test/**", "scripts/**", package.json, "fixtures/**"]
+  minChangedFiles: 1
+  maxChangedFiles: 1
 envAllowList: []
-setupCommands: []
-teardownCommands: []
+setupCommands:
+  - id: inject-fault
+    label: Prepare the isolated validation regression
+    command: node scripts/inject-task-fault.mjs input-validation
+    timeoutMs: 10000
 judges:
-  - id: sanitize-html-works
+  - id: behavior
     type: command
-    label: sanitizeHtml escapes dangerous characters
-    command: |
-      node -e "var v=require('./src/validator');var a=require('node:assert/strict');a.strictEqual(typeof v.sanitizeHtml,'function');a.ok(v.sanitizeHtml('<script>alert(1)</script>').includes('&lt;'),'escapes <');a.ok(v.sanitizeHtml('<script>alert(1)</script>').includes('&gt;'),'escapes >');a.ok(!v.sanitizeHtml('<script>alert(1)</script>').includes('<script>'),'no raw script');a.strictEqual(v.sanitizeHtml('hello world'),'hello world','safe unchanged');a.ok(v.sanitizeHtml('a&b').includes('&amp;'),'escapes &');console.log('PASS: sanitizeHtml works');"
+    label: Input validation boundaries are enforced
+    command: node scripts/verify-core-task.mjs input-validation
     timeoutMs: 10000
     critical: true
-  - id: safe-path-works
+  - id: regression-tests
     type: command
-    label: safePath blocks path traversal
-    command: |
-      node -e "var v=require('./src/validator');var a=require('node:assert/strict');a.strictEqual(typeof v.safePath,'function');a.throws(function(){v.safePath('../etc/passwd')},'dot-dot');a.throws(function(){v.safePath('/etc/passwd')},'absolute unix');a.throws(function(){v.safePath('C:\\\\Windows')},'absolute windows');a.strictEqual(v.safePath('src/utils.js'),'src/utils.js','valid path');console.log('PASS: safePath works');"
-    timeoutMs: 10000
+    label: Existing validator behavior test passes
+    command: node --test test/validator.behavior.test.js
+    timeoutMs: 30000
     critical: true
-  - id: exported
-    type: command
-    label: Functions exported from index
-    command: |
-      node -e "var m=require('./src/index');var a=require('node:assert/strict');a.strictEqual(typeof m.sanitizeHtml,'function');a.strictEqual(typeof m.safePath,'function');console.log('PASS: exported');"
-    timeoutMs: 10000

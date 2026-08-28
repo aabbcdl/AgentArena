@@ -4,15 +4,15 @@
 
 import {
   detectInstalledAgents,
-  listAvailableAdapters,
   listInstallGuides,
+  listProductAdapters,
 } from "@agentarena/adapters";
 import { logger } from "@agentarena/core";
 import { jsonResponse } from "../../server/index.js";
 import type { ApiResponse } from "./types.js";
 
 export async function handleAdaptersList(): Promise<ApiResponse> {
-  const adapters = listAvailableAdapters().map((adapter) => ({
+  const adapters = listProductAdapters().map((adapter) => ({
     id: adapter.id,
     title: adapter.title,
     kind: adapter.kind,
@@ -30,7 +30,10 @@ export async function handleAdaptersList(): Promise<ApiResponse> {
  */
 export async function handleAgentDetection(): Promise<ApiResponse> {
   try {
-    const results = await detectInstalledAgents();
+    const adapterIds = listProductAdapters()
+      .filter((adapter) => adapter.kind !== "demo")
+      .map((adapter) => adapter.id);
+    const results = await detectInstalledAgents({ adapterIds });
     return jsonResponse(results);
   } catch (error) {
     logger.error("server", "agent_detection.error", "Agent detection failed", { error });
@@ -45,5 +48,6 @@ export async function handleAgentDetection(): Promise<ApiResponse> {
  * install instructions for uninstalled agents without additional requests.
  */
 export async function handleInstallGuides(): Promise<ApiResponse> {
-  return jsonResponse(listInstallGuides());
+  const productIds = new Set(listProductAdapters().map((adapter) => adapter.id));
+  return jsonResponse(listInstallGuides().filter((guide) => productIds.has(guide.id)));
 }

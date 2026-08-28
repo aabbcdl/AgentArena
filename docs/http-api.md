@@ -8,17 +8,27 @@ The `agentarena ui` command starts a local HTTP server that exposes a REST API f
 |---------|---------|
 | Host | `127.0.0.1` |
 | Port | `4320` |
-| Auth | Token-based (auto-generated or `--auth-token` / `AGENTARENA_AUTH_TOKEN`) |
+| Auth | 本地首次启动使用密码设置；底层 API 继续使用 Bearer Token |
 
 ## Authentication
 
-All mutating (non-GET) API requests and all sensitive endpoints require a Bearer token:
+All mutating (non-GET) API requests and all sensitive endpoints require a Bearer token internally:
 
 ```
 Authorization: Bearer <token>
 ```
 
-For safety, the token itself is not printed to stdout. The server prints `auth_token_file=...`; read that file to retrieve the token. It is saved at `.agentarena/last-auth-token` by default.
+Workbench 用户通过本地服务密码换取当前进程的 Bearer Token，不需要手动读取 token 文件。密码哈希保存在工作区 `.agentarena/ui-auth.json`，密码本身不会写入日志或浏览器持久存储。自动打开浏览器仍可使用一次性 bootstrap。
+
+认证辅助接口：
+
+- `GET /api/auth/status`：返回当前是否需要首次设置密码。
+- `POST /api/auth/setup`：首次设置密码，JSON body 为 `{ "password": "..." }`。
+- `POST /api/auth/login`：用已设置的密码换取当前进程 token，JSON body 为 `{ "password": "..." }`。
+
+服务仍会把当前进程 token 写入每监听端口独立的 `.agentarena/last-auth-token-<port>` 文件，供脚本和旧客户端使用；token 本身不会打印到 stdout。
+
+For an intentional local development password, set `AGENTARENA_LOCAL_AUTH_TOKEN` before starting the UI. For example, PowerShell uses `$env:AGENTARENA_LOCAL_AUTH_TOKEN="admin"`; this setting is only useful with AgentArena's loopback-only UI. `--auth-token` takes precedence, followed by `AGENTARENA_LOCAL_AUTH_TOKEN`, `AGENTARENA_AUTH_TOKEN`, a saved local password, and finally a generated per-process token awaiting first-time password setup.
 
 On localhost, read-only GET requests to non-sensitive paths are allowed without authentication.
 
@@ -62,7 +72,9 @@ Server metadata and configuration for the frontend.
   "riskNotice": "...",
   "host": "127.0.0.1",
   "port": 4320,
-  "authRequired": false
+  "authRequired": false,
+  "authTokenFilePath": ".agentarena/last-auth-token-4320",
+  "authTokenSource": "generated"
 }
 ```
 
@@ -373,8 +385,9 @@ By default, the server binds to `127.0.0.1` only — it is not reachable from ot
 
 - **Read-only GET** requests from localhost do not require a token. This allows the browser to load the UI without extra configuration.
 - **All mutations** (POST, PUT, DELETE) and **sensitive GET** paths require a Bearer token, even from localhost.
+- **Local password mode** exposes only status/setup/login helpers on the loopback UI origin; the password is stored as a salted `scrypt` digest and exchanges for the per-process Bearer token.
 - The token is generated with `randomBytes(32)` (256 bits) and compared using `timingSafeEqual` to prevent timing attacks.
-- The token is written to `.agentarena/last-auth-token` (not printed to stdout) to prevent accidental leakage in CI logs.
+- The token is written to the per-listener `.agentarena/last-auth-token-<port>` file (not printed to stdout) to prevent accidental leakage in CI logs and cross-process token-file races.
 
 ### Path Traversal Protection
 

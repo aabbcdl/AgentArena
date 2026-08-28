@@ -407,7 +407,7 @@ export async function verifyRepoAccess(
     );
   }
 
-  if (body && body.permissions && body.permissions.push === false) {
+  if (body?.permissions?.push === false) {
     throw new Error(
       `The GitHub token does not have write access to "${owner}/${repo}".\n` +
       `Ensure the token has the "repo" scope (or "public_repo" for public repos) and that\n` +

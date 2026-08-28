@@ -3,6 +3,9 @@
  * Tests the StreamJsonTransport → TextTransport fallback chain.
  */
 import assert from "node:assert/strict";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { describe, it } from "node:test";
 
 // Verify the public API by checking class construction and properties that do
@@ -75,6 +78,38 @@ describe("StreamJsonTransport", () => {
     const transport = new StreamJsonTransport(mockInvocation);
     assert.equal(transport.id, "stream-json");
     assert.ok(transport.description.includes("Stream JSON"));
+  });
+
+  it("never appends the legacy full-permission bypass from the environment", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-transport-permissions-"));
+    const capturePath = path.join(tempDir, "args.json");
+    const scriptPath = path.join(tempDir, "capture.mjs");
+    const previous = process.env.AGENTARENA_SKIP_PERMISSIONS;
+    try {
+      await writeFile(scriptPath, [
+        'import { writeFileSync } from "node:fs";',
+        'writeFileSync(process.env.AGENTARENA_ARGS_CAPTURE, JSON.stringify(process.argv.slice(2)));',
+        'console.log(JSON.stringify({ type: "result", subtype: "success", result: "READY", usage: { input_tokens: 1, output_tokens: 1 }, total_cost_usd: 0 }));'
+      ].join("\n"), "utf8");
+      process.env.AGENTARENA_SKIP_PERMISSIONS = "1";
+      const transport = new StreamJsonTransport({
+        command: process.execPath,
+        argsPrefix: [scriptPath],
+        displayCommand: process.execPath
+      }, ["--permission-mode", "dontAsk"]);
+
+      await transport.send("READY", tempDir, {
+        ...process.env,
+        AGENTARENA_ARGS_CAPTURE: capturePath
+      });
+      const args = JSON.parse(await readFile(capturePath, "utf8"));
+      assert.equal(args.includes("dontAsk"), true);
+      assert.equal(args.includes("--dangerously-skip-permissions"), false);
+    } finally {
+      if (previous === undefined) delete process.env.AGENTARENA_SKIP_PERMISSIONS;
+      else process.env.AGENTARENA_SKIP_PERMISSIONS = previous;
+      await rm(tempDir, { recursive: true, force: true });
+    }
   });
 });
 

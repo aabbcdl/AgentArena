@@ -1,8 +1,8 @@
 import type { ComponentChildren } from "preact";
-import { useMemo } from "preact/hooks";
+import { useEffect, useMemo, useRef } from "preact/hooks";
 import { deriveRunOutcome } from "../domain/run";
 import { useWorkbench } from "../hooks/useWorkbench";
-import { localizeTaskPack, type PageId } from "../types";
+import { localizeTaskPack, type PageId, resolveTaskRepositorySource } from "../types";
 import { Icon, StatusPill, t } from "./ui";
 
 const mainNav: Array<{ id: PageId; icon: "runs" | "compare" | "library" | "environment" | "settings"; label: "runs" | "compare" | "library" | "environment" | "settings" }> = [
@@ -24,21 +24,56 @@ export function Shell({ children }: { children: ComponentChildren }) {
   const { locale, page, setPage, selectedRun, runStatus, environment, plan, notice, clearNotice } = useWorkbench();
   const outcome = selectedRun ? deriveRunOutcome(selectedRun) : null;
   const serviceHealthy = !environment.error && environment.uiInfo !== null;
-  const planTaskTitle = useMemo(() => {
-    const match = environment.taskPacks.map((task) => localizeTaskPack(task, locale)).find((task) => task.path === plan.taskPath);
-    return match?.title ?? plan.taskPath;
-  }, [environment.taskPacks, locale, plan.taskPath]);
+  const serviceState = environment.loading ? "checking" : serviceHealthy ? "online" : "offline";
+  const serviceLabel = environment.loading
+    ? t(locale, "environmentChecking")
+    : serviceHealthy
+      ? t(locale, "environmentHealthy")
+      : t(locale, "offline");
+  const localizedTaskPacks = useMemo(() => environment.taskPacks.map((task) => localizeTaskPack(task, locale)), [environment.taskPacks, locale]);
+  const planTask = localizedTaskPacks.find((task) => task.path === plan.taskPath);
+  const activeTask = localizedTaskPacks.find((task) => task.path === runStatus.taskPath);
 
   const onPlan = page === "plan";
+  const activeRun = runStatus.state === "running" || runStatus.state === "cancelling";
   const draftRepo = plan.repoPath || environment.uiInfo?.repoPath || "";
-  const draftTask = planTaskTitle || environment.uiInfo?.defaultTaskPath || "";
+  const draftTask = planTask?.title || plan.taskPath || environment.uiInfo?.defaultTaskPath || "";
+  const planRepoSource = resolveTaskRepositorySource(planTask, draftRepo);
+  const activeRepoSource = resolveTaskRepositorySource(activeTask, runStatus.repoPath ?? "");
+  const selectedRepoSource = selectedRun?.task.repoSource?.startsWith("builtin://")
+    ? selectedRun.task.repoSource
+    : selectedRun?.repository.path;
   const repoLabel = onPlan
-    ? (draftRepo || t(locale, "notSelected"))
-    : (selectedRun?.repository.path ?? runStatus.repoPath ?? t(locale, "notSelected"));
+    ? (planRepoSource.value || t(locale, "notSelected"))
+    : activeRun
+      ? (activeRepoSource.value || runStatus.repoPath || t(locale, "notSelected"))
+      : (selectedRepoSource ?? runStatus.repoPath ?? t(locale, "notSelected"));
   const taskLabel = onPlan
     ? (draftTask || t(locale, "notSelected"))
-    : (selectedRun?.task.title ?? runStatus.taskPath ?? t(locale, "notSelected"));
+    : activeRun
+      ? (activeTask?.title ?? runStatus.taskPath ?? t(locale, "notSelected"))
+      : (selectedRun?.task.title ?? runStatus.taskPath ?? t(locale, "notSelected"));
   const showPlanDraft = onPlan && Boolean(draftRepo || draftTask);
+  const hasStage = Boolean(selectedRun || runStatus.state !== "idle");
+  const workspaceRef = useRef<HTMLDivElement>(null);
+  const mainRef = useRef<HTMLElement>(null);
+  const stageRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0 });
+    workspaceRef.current?.scrollTo({ top: 0, left: 0 });
+    requestAnimationFrame(() => mainRef.current?.focus({ preventScroll: true }));
+  }, [page]);
+
+  useEffect(() => {
+    const stage = stageRef.current;
+    const active = stage?.querySelector<HTMLElement>("button.active");
+    if (!stage || !active) return;
+    const left = active.offsetLeft;
+    const right = left + active.offsetWidth;
+    if (left < stage.scrollLeft) stage.scrollTo({ left: Math.max(0, left - 12) });
+    else if (right > stage.scrollLeft + stage.clientWidth) stage.scrollTo({ left: right - stage.clientWidth + 12 });
+  }, [hasStage, locale, page]);
 
   return (
     <div class="app-shell">
@@ -62,15 +97,15 @@ export function Shell({ children }: { children: ComponentChildren }) {
           ))}
         </nav>
         <div class="sidebar-footer">
-          <div class="service-state">
-            <span class={`service-dot ${serviceHealthy ? "online" : "offline"}`} />
-            <span>{serviceHealthy ? t(locale, "environmentHealthy") : t(locale, "offline")}</span>
+          <div class="service-state" role="status" aria-live="polite">
+            <span class={`service-dot ${serviceState}`} />
+            <span>{serviceLabel}</span>
           </div>
-          <a href="../legacy/" class="legacy-link"><Icon name="external" /><span>{t(locale, "legacyView")}</span></a>
+          <a href="../legacy/" class="legacy-link" title={locale === "zh-CN" ? "仅在新版缺少所需内容时使用" : "Use only when the new workbench does not expose the needed content"}><Icon name="external" /><span>{locale === "zh-CN" ? "兼容视图" : "Compatibility view"}</span></a>
         </div>
       </aside>
 
-      <div class="workspace">
+      <div ref={workspaceRef} class={`workspace ${hasStage ? "has-stage" : ""}`}>
         <header class="mobile-bar">
           <button class="brand compact" type="button" onClick={() => setPage("runs")}>
             <span class="brand-mark"><span>A</span></span><strong>AgentArena</strong>
@@ -84,7 +119,7 @@ export function Shell({ children }: { children: ComponentChildren }) {
             <div class="context-item context-repo">
               <Icon name="repo" />
               <span>
-                <small>{t(locale, "repo")}{showPlanDraft ? ` · ${t(locale, "planDraft")}` : ""}</small>
+                <small>{t(locale, "executionRepository")}{showPlanDraft ? ` · ${t(locale, "planDraft")}` : ""}</small>
                 <strong>{repoLabel}</strong>
               </span>
             </div>
@@ -115,8 +150,8 @@ export function Shell({ children }: { children: ComponentChildren }) {
             )}
           </div>
         </div>
-        {(selectedRun || runStatus.state !== "idle") && (
-          <nav class="stage-nav" aria-label={locale === "zh-CN" ? "实验阶段" : "Experiment stages"}>
+        {hasStage && (
+          <nav ref={stageRef} class="stage-nav" aria-label={locale === "zh-CN" ? "实验阶段" : "Experiment stages"}>
             {stages.map((item, index) => (
               <button
                 type="button"
@@ -134,11 +169,11 @@ export function Shell({ children }: { children: ComponentChildren }) {
         {notice && (
           <div class={`global-notice global-${notice.kind}`} role={notice.kind === "danger" ? "alert" : "status"}>
             <Icon name={notice.kind === "success" ? "check" : notice.kind} />
-            <span>{notice.message}</span>
+            <span>{notice.messageKey ? t(locale, notice.messageKey, notice.params) : notice.message ?? ""}</span>
             <button type="button" onClick={clearNotice} aria-label={t(locale, "clear")}><Icon name="cancel" /></button>
           </div>
         )}
-        <main id="main" class="page-content" tabindex={-1}>{children}</main>
+        <main ref={mainRef} id="main" class="page-content" tabindex={-1}>{children}</main>
         <nav class="mobile-nav" aria-label={locale === "zh-CN" ? "移动导航" : "Mobile navigation"}>
           {mainNav.map((item) => (
             <button type="button" class={page === item.id ? "active" : ""} onClick={() => setPage(item.id)}>

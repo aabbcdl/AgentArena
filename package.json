@@ -6,10 +6,12 @@
   "description": "Open-source benchmark and replay tool for comparing AI coding agents in real repositories.",
   "repository": {
     "type": "git",
-    "url": "https://github.com/aabbcdl/AgentArena.git"
+    "url": "git+https://github.com/aabbcdl/AgentArena.git"
   },
   "homepage": "https://github.com/aabbcdl/AgentArena#readme",
-  "bugs": "https://github.com/aabbcdl/AgentArena/issues",
+  "bugs": {
+    "url": "https://github.com/aabbcdl/AgentArena/issues"
+  },
   "keywords": [
     "ai",
     "coding-agent",
@@ -36,14 +38,15 @@
     "demo:arena": "pnpm build && node packages/cli/dist/index.js run --repo . --task examples/taskpacks/demo-repo-health.json --agents demo-fast,codex,claude-code,cursor,gemini-cli,aider,kilo-cli,opencode",
     "doctor": "pnpm build && node packages/cli/dist/index.js doctor --agents codex,claude-code,cursor,gemini-cli,aider,kilo-cli,opencode,demo-fast --probe-auth",
     "lint": "biome check .",
-    "test": "pnpm build && node --test --test-concurrency=1 tests/*.test.mjs",
+    "test": "pnpm build && node scripts/run-tests.mjs",
     "test:quick": "node scripts/run-quick-tests.mjs",
     "test:quick:build": "pnpm build && node scripts/run-quick-tests.mjs",
     "test:coverage": "pnpm build && node --experimental-test-coverage --test tests/*.test.mjs",
     "test:web-report:e2e": "pnpm build && node scripts/run-web-report-e2e.mjs",
     "typecheck": "pnpm -r --if-present typecheck",
     "taskpacks:sync": "node scripts/sync-taskpack-catalog.mjs",
-    "taskpacks:check": "node scripts/sync-taskpack-catalog.mjs --check"
+    "taskpacks:validate": "node scripts/validate-core-taskpacks.mjs",
+    "taskpacks:check": "node scripts/sync-taskpack-catalog.mjs --check && pnpm taskpacks:validate"
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.8",
@@ -51,5 +54,12 @@
     "@types/node": "24.12.0",
     "playwright": "1.58.2",
     "typescript": "5.9.3"
-  }
+  },
+  "main": "index.js",
+  "directories": {
+    "doc": "docs",
+    "example": "examples",
+    "test": "tests"
+  },
+  "license": "ISC"
 }

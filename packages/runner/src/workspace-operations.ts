@@ -1,6 +1,4 @@
 import { execFile } from "node:child_process";
-import { promises as fs } from "node:fs";
-import path from "node:path";
 import { promisify } from "node:util";
 import type {
   AdapterPreflightResult,
@@ -23,22 +21,6 @@ import type { AgentRunContext } from "./types.js";
 import { formatErrorDetails, formatErrorMessage } from "./workspace.js";
 
 const execFileAsync = promisify(execFile);
-const THIRD_PARTY_CLAUDE_TOOL_CONFIG_PATHS = [".claude", ".codex", ".mcp.json"] as const;
-
-function requiresThirdPartyClaudeWorkspaceIsolation(preflight: AdapterPreflightResult): boolean {
-  return (
-    preflight.baseAgentId === "claude-code" &&
-    preflight.resolvedRuntime?.providerKind != null &&
-    preflight.resolvedRuntime.providerKind !== "official"
-  );
-}
-
-async function isolateThirdPartyClaudeWorkspace(workspacePath: string): Promise<void> {
-  for (const relativePath of THIRD_PARTY_CLAUDE_TOOL_CONFIG_PATHS) {
-    await fs.rm(path.join(workspacePath, relativePath), { recursive: true, force: true });
-  }
-}
-
 export async function setupWorkspaceAndPrechecks(
   repoPath: string,
   preflight: AdapterPreflightResult,
@@ -90,25 +72,6 @@ export async function setupWorkspaceAndPrechecks(
       ...createSkippedRunResult(preflight, context.tracePath, workspacePath),
       summary: `Failed to copy repository: ${errorDetails.message}`
     };
-  }
-
-  if (requiresThirdPartyClaudeWorkspaceIsolation(preflight)) {
-    try {
-      await isolateThirdPartyClaudeWorkspace(workspacePath);
-    } catch (error) {
-      const errorDetails = formatErrorDetails(error);
-      await traceRecorder.record({
-        agentId: preflight.agentId,
-        timestamp: new Date().toISOString(),
-        type: "setup.error",
-        message: "Failed to isolate third-party Claude tool configuration.",
-        metadata: errorDetails
-      });
-      return {
-        ...createSkippedRunResult(preflight, context.tracePath, workspacePath),
-        summary: `Failed to isolate third-party Claude tool configuration: ${errorDetails.message}`
-      };
-    }
   }
 
   // Initialize git in workspace so command judges relying on `git diff`

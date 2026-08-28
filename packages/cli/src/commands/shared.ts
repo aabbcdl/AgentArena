@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { listAvailableAdapters } from "@agentarena/adapters";
+import { listAvailableAdapters, listProductAdapters } from "@agentarena/adapters";
 import { createAgentSelection, type ScoreMode } from "@agentarena/core";
 import type { Locale as ReportLocale, writeReport } from "@agentarena/report";
 import type { BenchmarkProgressEvent } from "@agentarena/runner";
@@ -58,17 +58,23 @@ export function isTrustedBuiltinTaskPack(taskPath: string): boolean {
 export interface UiRunPayload {
   repoPath: string;
   taskPath: string;
-  agents?: Array<{
-    baseAgentId: string;
-    variantId?: string;
-    displayLabel?: string;
-    config?: {
-      model?: string;
-      reasoningEffort?: string;
-      providerProfileId?: string;
-    };
-    configSource?: "ui" | "cli";
-  }>;
+  agents?: Array<
+    | string
+    | {
+        baseAgentId: string;
+        variantId?: string;
+        displayLabel?: string;
+        runtimeProfileId?: string;
+        launchSpecHash?: string;
+        verificationReceiptId?: string;
+        config?: {
+          model?: string;
+          reasoningEffort?: string;
+          providerProfileId?: string;
+        };
+        configSource?: "ui" | "cli";
+      }
+  >;
   agentIds?: string[];
   outputPath?: string;
   probeAuth?: boolean;
@@ -90,6 +96,10 @@ export interface ParsedAdhocTaskPackFile {
   id?: unknown;
   title?: unknown;
   prompt?: unknown;
+  expectedChangedPaths?: unknown;
+  metadata?: {
+    adhocRepositoryPath?: unknown;
+  };
 }
 
 export function resolveReportLocale(value?: string): ReportLocale {
@@ -142,14 +152,25 @@ export function normalizeCliSelections(
 
 export function normalizeUiSelections(payload: UiRunPayload): import("@agentarena/core").AgentSelection[] {
   if (payload.agents && payload.agents.length > 0) {
-    return payload.agents.map((agent) =>
-      createAgentSelection({
+    return payload.agents.map((agent) => {
+      if (typeof agent === "string") {
+        return createAgentSelection({
+          baseAgentId: agent,
+          displayLabel:
+            listAvailableAdapters().find((entry) => entry.id === agent)?.title ??
+            agent
+        });
+      }
+      return createAgentSelection({
         baseAgentId: agent.baseAgentId,
         displayLabel: agent.displayLabel,
         config: agent.config,
         configSource: agent.configSource ?? "ui",
-      }),
-    );
+        runtimeProfileId: agent.runtimeProfileId,
+        launchSpecHash: agent.launchSpecHash,
+        verificationReceiptId: agent.verificationReceiptId
+      });
+    });
   }
 
   return (payload.agentIds ?? []).map((agentId) =>
@@ -330,7 +351,7 @@ export function groupByTier<T extends { capability: { supportTier: string } }>(
 }
 
 export async function hasAvailableAdapters(): Promise<boolean> {
-  const adapters = listAvailableAdapters().filter((a) => a.kind !== "demo");
+  const adapters = listProductAdapters().filter((a) => a.kind !== "demo");
   if (adapters.length === 0) {
     return false;
   }
@@ -356,7 +377,7 @@ export function showWelcomeMessage(): void {
   console.log("  agentarena ui                 Start web UI / 启动 Web 界面");
   console.log("  agentarena run --help         Run a benchmark / 运行基准测试");
   console.log("");
-  console.log("First time? Install an adapter first:");
+  console.log("First time? Use Node.js 22+ with the checked-out project dependencies, then install only the adapter you intend to run:");
   console.log("  npm install -g @openai/codex@latest    (for Codex)");
   console.log("  npm install -g @anthropic-ai/claude-code  (for Claude Code)");
   console.log("  Then run: agentarena doctor --probe-auth");

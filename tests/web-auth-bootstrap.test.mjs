@@ -88,3 +88,24 @@ test("Legacy client clears obsolete token fragments and exchanges bootstrap once
   assert.equal(calls[1].options.headers.Authorization, "Bearer legacy-real-token");
   assert.equal(calls[2].options.headers.Authorization, "Bearer legacy-real-token");
 });
+
+test("Workbench exchanges a local service password without persisting the password", async () => {
+  const browser = installBrowserGlobals("");
+  const calls = [];
+  globalThis.fetch = async (url, options = {}) => {
+    calls.push({ url, options });
+    return new Response(JSON.stringify({ token: "session-token" }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    });
+  };
+
+  const client = await import("../apps/web-report/workbench/src/api/client.ts?password-auth-test");
+  await client.authenticateWithPassword("admin", "login");
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, "/api/auth/login");
+  assert.deepEqual(JSON.parse(calls[0].options.body), { password: "admin" });
+  assert.equal(browser.stored.get("agentarena-auth-token"), "session-token");
+  assert.equal(browser.stored.has("password"), false);
+});

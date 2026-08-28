@@ -1,4 +1,4 @@
-import { validateSummaryArtifact } from "../../../../../packages/core/src/artifact-contract.ts";
+import { validateSummaryArtifact } from "@agentarena/core/artifact-contract";
 import { deriveEvaluationStatus, getQualifiedResults } from "../../../src/core/result-contract.js";
 import { normalizeScoreMode } from "./score-mode.ts";
 export type RunSourceKind = "generated" | "imported" | "demo" | "legacy" | "unknown";
@@ -6,6 +6,14 @@ export type IntegrityLevel = "complete" | "partial" | "degraded" | "damaged";
 export type EvaluationStatus = "pass" | "partial" | "fail" | "incomplete";
 export type CostQuality = "known" | "estimated" | "unavailable";
 export type ExecutionStatus = "completed" | "cancelled" | "interrupted" | "running" | "unknown";
+
+export interface NormalizedTokenUsageBreakdown {
+  inputTokens: number;
+  outputTokens: number;
+  reasoningTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+}
 
 export interface NormalizedJudgeResult {
   judgeId: string;
@@ -31,10 +39,13 @@ export interface NormalizedAgentResult {
   status: string;
   durationMs: number | null;
   tokenUsage: number | null;
+  tokenUsageBreakdown: NormalizedTokenUsageBreakdown | null;
   estimatedCostUsd: number | null;
   costKnown: boolean;
   costQuality: CostQuality;
   compositeScore: number | null;
+  scoreComponents: Record<string, number>;
+  scoreReasons: string[];
   scoreExcluded: boolean;
   changedFiles: string[];
   /** Line-level diffs, when the runner persisted them. Undefined today — the
@@ -54,7 +65,15 @@ export interface NormalizedRun {
   runId: string;
   createdAt: string | null;
   repository: { path: string | null; revision: string | null };
-  task: { id: string | null; title: string; schemaVersion: string | null };
+  task: {
+    id: string | null;
+    title: string;
+    schemaVersion: string | null;
+    repoSource: string | null;
+    difficulty: "easy" | "medium" | "hard" | null;
+    objective: string | null;
+    judgeRationale: string | null;
+  };
   scoreMode: string;
   fairComparison: {
     taskIdentity: string;
@@ -93,6 +112,26 @@ function finiteNumber(value: unknown): number | null {
 
 function stringList(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function normalizeTokenUsageBreakdown(value: unknown): NormalizedTokenUsageBreakdown | null {
+  const item = record(value);
+  const keys = ["inputTokens", "outputTokens", "reasoningTokens", "cacheReadTokens", "cacheWriteTokens"] as const;
+  if (!keys.some((key) => finiteNumber(item[key]) !== null)) return null;
+  return {
+    inputTokens: finiteNumber(item.inputTokens) ?? 0,
+    outputTokens: finiteNumber(item.outputTokens) ?? 0,
+    reasoningTokens: finiteNumber(item.reasoningTokens) ?? 0,
+    cacheReadTokens: finiteNumber(item.cacheReadTokens) ?? 0,
+    cacheWriteTokens: finiteNumber(item.cacheWriteTokens) ?? 0
+  };
+}
+
+function normalizeScoreComponents(value: unknown): Record<string, number> {
+  const item = record(value);
+  return Object.fromEntries(
+    Object.entries(item).filter(([, entry]) => typeof entry === "number" && Number.isFinite(entry))
+  ) as Record<string, number>;
 }
 
 function normalizeJudge(value: unknown, index: number): NormalizedJudgeResult {
@@ -137,10 +176,13 @@ function normalizeResult(value: unknown, index: number): NormalizedAgentResult {
     status: text(item.status) ?? "unknown",
     durationMs: finiteNumber(item.durationMs),
     tokenUsage: finiteNumber(item.tokenUsage),
+    tokenUsageBreakdown: normalizeTokenUsageBreakdown(item.tokenUsageBreakdown),
     estimatedCostUsd: costQuality !== "unavailable" ? finiteNumber(item.estimatedCostUsd) : null,
     costKnown,
     costQuality,
     compositeScore: finiteNumber(item.compositeScore) ?? finiteNumber(item.score),
+    scoreComponents: normalizeScoreComponents(item.scoreComponents),
+    scoreReasons: stringList(item.scoreReasons),
     scoreExcluded: item.scoreExcluded === true,
     changedFiles: stringList(item.changedFiles),
     fileDiffs: fileDiffs.length > 0 ? fileDiffs : undefined,
@@ -178,6 +220,8 @@ export function normalizeRun(value: unknown): NormalizedRun {
   const judgeIdentity = text(fairComparison.judgeIdentity);
   const repoBaselineIdentity = text(fairComparison.repoBaselineIdentity);
   const task = record(raw.task);
+  const taskMetadata = record(task.metadata);
+  const difficultyValue = text(taskMetadata.difficulty) ?? text(task.difficulty);
   const source = inferSource(raw);
   const rawResults: unknown[] | null = Array.isArray(raw.results) ? raw.results : null;
   const resultsValid = rawResults !== null;
@@ -215,12 +259,21 @@ export function normalizeRun(value: unknown): NormalizedRun {
     createdAt: text(raw.createdAt),
     repository: {
       path: text(repository.path) ?? text(raw.repoPath) ?? text(fairComparison.repositoryPath),
-      revision: text(repository.revision) ?? text(repository.snapshot) ?? text(fairComparison.repositoryRevision)
+      revision: text(repository.revision)
+        ?? text(repository.snapshot)
+        ?? text(fairComparison.repositoryRevision)
+        ?? repoBaselineIdentity
     },
     task: {
       id: text(task.id) ?? text(raw.taskId) ?? text(fairComparison.taskId),
       title: text(task.title) ?? text(raw.taskTitle) ?? "Untitled task",
-      schemaVersion: text(task.schemaVersion) ?? text(fairComparison.taskSchemaVersion)
+      schemaVersion: text(task.schemaVersion) ?? text(fairComparison.taskSchemaVersion),
+      repoSource: text(task.repoSource) ?? text(raw.repoSource),
+      difficulty: difficultyValue === "easy" || difficultyValue === "medium" || difficultyValue === "hard"
+        ? difficultyValue
+        : null,
+      objective: text(taskMetadata.objective) ?? text(task.objective),
+      judgeRationale: text(taskMetadata.judgeRationale) ?? text(task.judgeRationale)
     },
     scoreMode: normalizeScoreMode(text(raw.scoreMode) ?? "practical"),
     fairComparison: taskIdentity && judgeIdentity && repoBaselineIdentity

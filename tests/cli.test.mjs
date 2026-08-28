@@ -413,6 +413,27 @@ test("agentarena doctor exits with code 1 in strict mode when any adapter is not
   assert.match(result.stdout, /✗ missing|✗ blocked|≈ unverified/);
 });
 
+test("agentarena init keeps unready agents out of the runnable command", { timeout: 60_000 }, async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-init-readiness-"));
+  try {
+    const result = await runCli(
+      ["init", "--repo", tempDir],
+      REPO_ROOT,
+      {
+        AGENTARENA_CODEX_BIN: path.join(tempDir, "missing-codex.cmd"),
+        AGENTARENA_CLAUDE_BIN: path.join(tempDir, "missing-claude.cmd")
+      }
+    );
+
+    assert.equal(result.code, 0);
+    assert.match(result.stdout, /No agents are ready to run/i);
+    assert.match(result.stdout, /codex: (missing|blocked|unverified)/i);
+    assert.doesNotMatch(result.stdout, /Ready to run! Execute:/i);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("agentarena run can update snapshots from the CLI", { timeout: 60_000 }, async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-cli-"));
   try {
@@ -543,7 +564,7 @@ test("agentarena ui creates Node-oriented adhoc taskpacks without fallback echo 
     assert.match(yaml, /source: community/);
     assert.match(yaml, /repoTypes:\s*\n\s*- node-js/);
     assert.match(yaml, /tags:\s*\n\s*- adhoc\n\s*- custom\n\s*- node-js/);
-    assert.match(yaml, /judgeRationale: These default checks assume a node-js repository with appropriate build, test, and lint commands\./);
+    assert.match(yaml, /judgeRationale: These generated checks are basic node-js repository-health evidence; they do not prove task-specific business correctness\./);
     assert.match(yaml, /label: Node package manifest still exists/);
     assert.match(yaml, /label: Node project still builds/);
     assert.match(yaml, /label: Node tests still pass/);
@@ -621,6 +642,10 @@ test("agentarena list-adapters supports JSON output", async () => {
   assert.equal(payload.some((adapter) => adapter.id === "demo-fast"), true);
   assert.equal(payload.find((adapter) => adapter.id === "codex").capability.supportTier, "supported");
   assert.equal(payload.find((adapter) => adapter.id === "codex").capability.configurableRuntime.model, true);
+  assert.deepEqual(
+    payload.filter((adapter) => adapter.kind !== "demo").map((adapter) => adapter.id),
+    ["claude-code", "codex"]
+  );
 });
 
 test("agentarena init-taskpack writes a starter YAML file", async () => {
@@ -1031,6 +1056,8 @@ test("agentarena ui exposes metadata and adapter APIs", { timeout: 60_000 }, asy
     assert.equal(adapters.some((adapter) => adapter.id === "demo-fast"), true);
     assert.equal(adapters.find((adapter) => adapter.id === "codex").capability.configurableRuntime.reasoningEffort, true);
     assert.equal(Array.isArray(taskPacks), true);
+    assert.equal(taskPacks.length, 10);
+    assert.equal(taskPacks.every((taskPack) => taskPack.lifecycle === "core"), true);
     assert.equal(typeof taskPacks[0].objective, "string");
     assert.equal(runStatus.state, "idle");
     assert.equal(runStatus.phase, "idle");

@@ -31,6 +31,9 @@ importers:
 
   apps/web-report:
     dependencies:
+      '@agentarena/core':
+        specifier: workspace:*
+        version: link:../../packages/core
       preact:
         specifier: 10.29.7
         version: 10.29.7

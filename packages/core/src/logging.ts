@@ -64,29 +64,69 @@ function redactSensitiveValue(key: string, value: unknown): unknown {
  * redact explicit credential patterns while leaving file paths intact for
  * debuggability.
  */
-const STACK_SECRET_PATTERNS: RegExp[] = [
-  /(bearer\s+)[A-Za-z0-9._-]+/gi,
-  /(api[_-]?key\s*[=:]\s*)[^\s"'`,}]+/gi,
-  /(secret\s*[=:]\s*)[^\s"'`,}]+/gi,
-  /(password\s*[=:]\s*)[^\s"'`,}]+/gi,
-  /(token\s*[=:]\s*)[^\s"'`,}]+/gi,
-  /\b(sk-[A-Za-z0-9]{20,})\b/g,
-  /\b(pk-[A-Za-z0-9]{20,})\b/g,
-  /\b(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}\b/g,
+const TEXT_SECRET_PATTERNS: Array<{ pattern: RegExp; replacement: string }> = [
+  {
+    pattern: /(bearer\s+)[A-Za-z0-9._~+/-]+=*/gi,
+    replacement: "$1[redacted]"
+  },
+  {
+    pattern: /((?:api[_-]?key|auth[_-]?token|access[_-]?token|private[_-]?key|secret|password|token)\s*[=:]\s*)[^\s"'`,;}]+/gi,
+    replacement: "$1[redacted]"
+  },
+  {
+    pattern: /\b(?:sk|pk)-[A-Za-z0-9_-]{16,}\b/g,
+    replacement: "[redacted]"
+  },
+  {
+    pattern: /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}\b/g,
+    replacement: "[redacted]"
+  }
 ];
 
-function scrubStackTrace(stack: string | undefined): string | undefined {
-  if (!stack) return stack;
-  let out = stack;
-  for (const re of STACK_SECRET_PATTERNS) {
-    out = out.replace(re, (_m, p1) => (p1 ? `${p1}****` : "****"));
+export function redactSensitiveText(value: string, knownSecrets: readonly string[] = []): string {
+  let output = value;
+  const secrets = [...new Set(knownSecrets.filter(Boolean))]
+    .sort((left, right) => right.length - left.length);
+  for (const secret of secrets) {
+    output = output.split(secret).join("[redacted]");
   }
-  return out;
+  for (const { pattern, replacement } of TEXT_SECRET_PATTERNS) {
+    output = output.replace(pattern, replacement);
+  }
+  return output;
+}
+
+export function redactSensitiveStrings<T>(
+  value: T,
+  knownSecrets: readonly string[] = [],
+  depth = 0
+): T {
+  if (typeof value === "string") {
+    return redactSensitiveText(value, knownSecrets) as T;
+  }
+  if (value === null || value === undefined || depth > 20) return value;
+  if (Array.isArray(value)) {
+    return value.map((entry) => redactSensitiveStrings(entry, knownSecrets, depth + 1)) as T;
+  }
+  if (typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype) {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, entry]) => [
+        key,
+        redactSensitiveStrings(entry, knownSecrets, depth + 1)
+      ])
+    ) as T;
+  }
+  return value;
+}
+
+function scrubStackTrace(stack: string | undefined): string | undefined {
+  return stack ? redactSensitiveText(stack) : stack;
 }
 
 function redactObject(obj: unknown, depth = 0): unknown {
   if (depth > 10) return "[max depth]";
   if (obj === null || obj === undefined) return obj;
+  if (typeof obj === "string") return redactSensitiveText(obj);
   if (typeof obj !== "object") return obj;
   if (Buffer.isBuffer(obj)) return "[Buffer]";
   if (obj instanceof Error) {
@@ -126,7 +166,7 @@ export function createLogEntry(
     level,
     component,
     action,
-    message,
+    message: redactSensitiveText(message),
   };
 
   if (options?.runId) entry.runId = options.runId;
@@ -141,7 +181,7 @@ export function createLogEntry(
     const err = options.error instanceof Error ? options.error : new Error(String(options.error));
     entry.error = {
       name: err.name,
-      message: err.message,
+      message: redactSensitiveText(err.message),
       code: (err as NodeJS.ErrnoException).code,
       stack: scrubStackTrace(err.stack),
     };

@@ -12,6 +12,8 @@ export * from "./metrics.js";
 export * from "./paths.js";
 export * from "./ring-buffer.js";
 export * from "./run-state.js";
+export * from "./runtime-launch.js";
+export * from "./runtime-profile.js";
 export * from "./sandbox.js";
 export * from "./scoring-weights.js";
 export * from "./snapshot.js";

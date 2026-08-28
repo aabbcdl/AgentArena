@@ -80,3 +80,4 @@ test-ux-*.png
 # Local scratch (build logs, ad-hoc artifacts)
 .tmp/
 .arts/
+.playwright-cli/

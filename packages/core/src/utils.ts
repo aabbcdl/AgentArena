@@ -310,9 +310,15 @@ export function createAgentSelection(input: {
   displayLabel?: string;
   config?: AgentRequestedConfig;
   configSource?: "ui" | "cli";
+  runtimeProfileId?: string;
+  launchSpecHash?: string;
+  verificationReceiptId?: string;
 }): AgentSelection {
   const config = input.config ?? {};
   const variantParts = [input.baseAgentId];
+  if (input.runtimeProfileId) {
+    variantParts.push(slugifyVariantPart(input.runtimeProfileId) || "runtime-profile");
+  }
   if (config.providerProfileId) {
     variantParts.push(slugifyVariantPart(config.providerProfileId) || "profile");
   }
@@ -328,6 +334,15 @@ export function createAgentSelection(input: {
     variantId: variantParts.join("-"),
     displayLabel: input.displayLabel ?? input.baseAgentId,
     config,
-    configSource: input.configSource
+    configSource: input.configSource,
+    ...(input.runtimeProfileId !== undefined
+      ? { runtimeProfileId: input.runtimeProfileId }
+      : {}),
+    ...(input.launchSpecHash !== undefined
+      ? { launchSpecHash: input.launchSpecHash }
+      : {}),
+    ...(input.verificationReceiptId !== undefined
+      ? { verificationReceiptId: input.verificationReceiptId }
+      : {})
   };
 }

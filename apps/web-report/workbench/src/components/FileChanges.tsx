@@ -50,7 +50,7 @@ export function FileChanges({ locale, files, diffs, runId, variantId }: FileChan
       {hasInlineDiffs && (
         <div class="file-diff-list">
           <h3 class="file-diff-title">{t(locale, "fileDiffTitle")}</h3>
-          {diffs!.map((diff) => <DiffBlock diff={diff} key={diff.path} />)}
+          {diffs?.map((diff) => <DiffBlock diff={diff} key={diff.path} />)}
         </div>
       )}
       {namedFiles.length > 0 && (

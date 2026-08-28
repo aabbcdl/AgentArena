@@ -1,6 +1,6 @@
 {
   "name": "@agentarena/taskpacks",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Task pack loader and validator for AgentArena",
   "type": "module",
   "main": "dist/index.js",
