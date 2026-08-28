@@ -5,6 +5,13 @@
 
 ---
 
+## [2026-08-28] Windows UI 测试清理必须等待子进程退出
+
+- 现象/目标：Windows CI 的 `/api/run-status` 测试断言通过，但临时目录清理报 `EBUSY`。
+- 根因/思路：UI 子进程被发送终止信号后仍可能持有自己的工作目录，teardown 没等待进程退出就删除目录。
+- 解法：清理临时目录前等待子进程发出 `exit` 事件，并用 Windows CI 回归确认。
+- 教训/可复用点：跨平台测试 teardown 必须先等待子进程生命周期结束，再删除其 cwd 或相关资源。
+
 ## [2026-08-28] Settings 移动端操作区不能依赖字体宽度刚好放下
 
 - 现象/目标：本地 Chromium 的 390px 页面通过，但 GitHub Chromium 在 Settings 页出现 16px 横向溢出。
