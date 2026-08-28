@@ -61,6 +61,13 @@
 .install-guide-links{display:flex;flex-wrap:wrap;gap:8px}
 .link-button{display:inline-flex;align-items:center;gap:5px;padding:5px 10px;border:1px solid var(--border);border-radius:999px;color:var(--info);background:var(--info-soft);font-size:12px;font-weight:700;text-decoration:none}
 .link-button:hover{filter:brightness(.97)}
+
+@media(max-width:600px){
+  .settings-layout .section-header{align-items:flex-start;flex-direction:column;gap:10px}
+  .settings-layout .section-header>div:first-child{width:100%;min-width:0}
+  .settings-layout .section-actions{width:100%;min-width:0}
+  .settings-layout .row-actions{max-width:100%;margin-left:0;flex-wrap:wrap}
+}
 /* Results table restacks into labelled cards on phones so score/cost/duration
    are readable at a glance instead of requiring a horizontal scroll. The
    <table>/scope/caption semantics are preserved; the header is only visually
