@@ -551,6 +551,7 @@ test("GET /api/run-status returns idle when no run active", { timeout: 60_000 },
     assert.equal(res.body.state, "idle");
   } finally {
     child.kill("SIGTERM");
+    await new Promise((resolve) => child.once("exit", resolve));
     await fs.rm(tempDir, { recursive: true, force: true });
   }
 });
