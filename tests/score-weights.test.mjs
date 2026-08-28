@@ -80,7 +80,7 @@ test("filterApplicableWeights keeps precision when expectedChangedPaths exist", 
   run.task.expectedChangedPaths = ["src/index.ts"];
   const result = filterApplicableWeights(
     { tests: 0.5, precision: 0.3, lint: 0.2 },
-    makeResult(),
+    makeResult({ diff: { added: [], changed: [], removed: [], skippedLargeFiles: [], reliable: true }, diffPrecision: { score: 0.8 } }),
     run
   );
   assert.equal(result.precision, 0.3);
@@ -154,4 +154,26 @@ test("normalizeApplicableWeights full pipeline: migrate + filter + normalize", (
   // remaining keys normalized to sum to 1
   const sum = Object.values(result).reduce((a, b) => a + b, 0);
   assert.ok(Math.abs(sum - 1.0) < 0.001);
+});
+
+
+test("filterApplicableWeights removes cost when cost is not confirmed", () => {
+  const result = filterApplicableWeights(
+    { status: 0.5, cost: 0.5 },
+    makeResult({ costKnown: false, costQuality: "estimated" }),
+    makeRun()
+  );
+  assert.equal(result.cost, undefined);
+  assert.equal(result.status, 0.5);
+});
+
+test("filterApplicableWeights removes precision when diff is unreliable", () => {
+  const run = makeRun();
+  run.task.expectedChangedPaths = ["src/**"];
+  const result = filterApplicableWeights(
+    { status: 0.5, precision: 0.5 },
+    makeResult({ diff: { added: [], changed: [], removed: [], skippedLargeFiles: [], reliable: false }, diffPrecision: { score: 0, expectedScopeCount: 1, totalChangedFiles: 0, matchedFiles: [], unexpectedFiles: [], missingExpectedScopes: [] } }),
+    run
+  );
+  assert.equal(result.precision, undefined);
 });

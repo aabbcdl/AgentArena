@@ -1,13 +1,14 @@
-import type { AgentRunResult, BenchmarkRun } from "@agentarena/core";
+import { type AgentRunResult, type BenchmarkRun, type CostQuality, resolveCostQuality } from "@agentarena/core";
 import { diagnoseResultFailure, type FailureDiagnostic, isResultScoreExcluded } from "./report-helpers.js";
 
 export interface DecisionRecommendation {
-  rank: number;
+  rank: number | null;
   agentId: string;
   displayLabel: string;
   recommendation: "recommended" | "alternative" | "not-recommended";
   successRate: number;
   avgCostPerRun: number;
+  costQuality?: CostQuality;
   avgDurationMs: number;
   strengths: string[];
   weaknesses: string[];
@@ -115,23 +116,27 @@ function inferScenario(run: BenchmarkRun): string {
  * Compute recommendations with confidence levels
  */
 function computeRecommendations(results: AgentRunResult[]): DecisionRecommendation[] {
-  // Sort by composite score (descending)
-  const sorted = [...results].sort(
-    (a, b) =>
-      Number(isResultScoreExcluded(a)) - Number(isResultScoreExcluded(b)) ||
-      (b.compositeScore ?? 0) - (a.compositeScore ?? 0) ||
-      (a.displayLabel ?? a.agentId).localeCompare(b.displayLabel ?? b.agentId)
-  );
+  const qualified = results
+    .filter((result) => result.status === "success" && !isResultScoreExcluded(result))
+    .sort((a, b) => (b.compositeScore ?? 0) - (a.compositeScore ?? 0) || a.durationMs - b.durationMs);
+  const qualifiedRank = new Map(qualified.map((result, index) => [result.variantId ?? result.agentId, index + 1]));
+  const sorted = [...results].sort((a, b) => {
+    const rankA = qualifiedRank.get(a.variantId ?? a.agentId) ?? Number.POSITIVE_INFINITY;
+    const rankB = qualifiedRank.get(b.variantId ?? b.agentId) ?? Number.POSITIVE_INFINITY;
+    return rankA - rankB || (a.displayLabel ?? a.agentId).localeCompare(b.displayLabel ?? b.agentId);
+  });
 
-  return sorted.map((result, index) => {
+  return sorted.map((result) => {
+    const rank = qualifiedRank.get(result.variantId ?? result.agentId) ?? null;
     if (isResultScoreExcluded(result)) {
       return {
-        rank: index + 1,
+        rank: null,
         agentId: result.agentId,
         displayLabel: result.displayLabel,
         recommendation: "not-recommended",
         successRate: 0,
         avgCostPerRun: result.estimatedCostUsd,
+        costQuality: resolveCostQuality(result),
         avgDurationMs: result.durationMs,
         strengths: [],
         weaknesses: [result.scoreExclusionReason ?? "Result was not scored because it is not comparable."],
@@ -141,11 +146,12 @@ function computeRecommendations(results: AgentRunResult[]): DecisionRecommendati
     }
 
     const recommendation: DecisionRecommendation["recommendation"] =
-      index === 0 && result.compositeScore != null && result.compositeScore >= 50
+      rank === 1 && result.compositeScore != null && result.compositeScore >= 50
         ? "recommended"
-        : result.status === "success" && result.compositeScore != null && result.compositeScore >= 30
+        : rank !== null && result.compositeScore != null && result.compositeScore >= 30
           ? "alternative"
           : "not-recommended";
+    const costQuality = resolveCostQuality(result);
 
     const strengths: string[] = [];
     const weaknesses: string[] = [];
@@ -166,7 +172,7 @@ function computeRecommendations(results: AgentRunResult[]): DecisionRecommendati
     if (result.durationMs < 60000) {
       strengths.push(`Fast execution (${(result.durationMs / 1000).toFixed(0)}s)`);
     }
-    if (result.costKnown && result.estimatedCostUsd < 0.5) {
+    if (costQuality === "known" && result.estimatedCostUsd < 0.5) {
       strengths.push(`Low cost ($${result.estimatedCostUsd.toFixed(2)})`);
     }
 
@@ -177,8 +183,10 @@ function computeRecommendations(results: AgentRunResult[]): DecisionRecommendati
     if (result.status === "cancelled") {
       weaknesses.push("Task was cancelled");
     }
-    if (!result.costKnown) {
-      weaknesses.push("Cost unknown - may be higher than expected");
+    if (costQuality === "unavailable") {
+      weaknesses.push("Cost unavailable");
+    } else if (costQuality === "estimated") {
+      weaknesses.push("Cost is an estimate, not a confirmed charge");
     }
     if (result.changedFiles.length > 10) {
       weaknesses.push(
@@ -187,8 +195,10 @@ function computeRecommendations(results: AgentRunResult[]): DecisionRecommendati
     }
 
     // Analyze risks
-    if (!result.costKnown) {
-      riskFactors.push("Actual cost may significantly exceed estimate");
+    if (costQuality === "unavailable") {
+      riskFactors.push("Actual cost is unavailable");
+    } else if (costQuality === "estimated") {
+      riskFactors.push("Estimated cost may differ from the actual charge");
     }
     if (
       result.status === "success" &&
@@ -205,25 +215,26 @@ function computeRecommendations(results: AgentRunResult[]): DecisionRecommendati
     let confidence: "high" | "medium" | "low" = "medium";
     if (
       result.status === "success" &&
-      result.costKnown &&
+      costQuality === "known" &&
       result.compositeScore != null &&
       result.compositeScore >= 70
     ) {
       confidence = "high";
     }
-    if (result.status === "failed" || result.status === "cancelled" || !result.costKnown) {
+    if (result.status === "failed" || result.status === "cancelled" || costQuality === "unavailable") {
       confidence = "low";
     }
 
     const successRate = result.status === "success" ? 1 : 0;
 
     return {
-      rank: index + 1,
+      rank,
       agentId: result.agentId,
       displayLabel: result.displayLabel,
       recommendation,
       successRate,
       avgCostPerRun: result.estimatedCostUsd,
+      costQuality,
       avgDurationMs: result.durationMs,
       strengths,
       weaknesses,
@@ -245,18 +256,16 @@ function computeTeamCostEstimates(
   const monthlyMultiplier = teamSize * dailyRuns * workingDays;
 
   const successfulResults = results
-    .filter((r) => !isResultScoreExcluded(r))
-    .filter((r) => r.costKnown && r.estimatedCostUsd > 0)
+    .filter((r) => !isResultScoreExcluded(r) && r.status === "success")
+    .filter((r) => resolveCostQuality(r) === "known" && r.estimatedCostUsd > 0)
     .sort((a, b) => a.estimatedCostUsd - b.estimatedCostUsd);
 
   const cheapest = successfulResults[0]?.estimatedCostUsd ?? 0;
 
   return results
-    .filter((result) => !isResultScoreExcluded(result))
+    .filter((result) => !isResultScoreExcluded(result) && result.status === "success" && resolveCostQuality(result) === "known")
     .map((result) => {
-      const monthlyCost = result.costKnown
-        ? result.estimatedCostUsd * monthlyMultiplier
-        : 0;
+      const monthlyCost = result.estimatedCostUsd * monthlyMultiplier;
 
       return {
         agentId: result.agentId,
@@ -291,19 +300,26 @@ function extractKeyInsights(results: AgentRunResult[]): string[] {
   }
 
   if (successful.length > 0) {
-    const best = successful.reduce((a, b) =>
-      (a.compositeScore ?? 0) > (b.compositeScore ?? 0) ? a : b
+    const scoredSuccessful = successful.filter(
+      (result) => typeof result.compositeScore === "number" && Number.isFinite(result.compositeScore)
     );
-    insights.push(
-      `${best.displayLabel} achieved the highest score (${best.compositeScore?.toFixed(0)}/100)`
-    );
+    if (scoredSuccessful.length > 0) {
+      const best = scoredSuccessful.reduce((a, b) =>
+        (a.compositeScore ?? 0) > (b.compositeScore ?? 0) ? a : b
+      );
+      insights.push(
+        `${best.displayLabel} achieved the highest score (${best.compositeScore?.toFixed(0)}/100)`
+      );
+    } else {
+      insights.push(`${successful.length} agent(s) completed the task successfully`);
+    }
   }
 
   if (failed.length > 0) {
     insights.push(`${failed.length} agent(s) failed to complete the task`);
   }
 
-  const costKnown = comparable.filter((r) => r.costKnown);
+  const costKnown = comparable.filter((r) => resolveCostQuality(r) === "known");
   if (costKnown.length > 1) {
     const cheapest = costKnown.reduce((a, b) =>
       a.estimatedCostUsd < b.estimatedCostUsd ? a : b
@@ -337,12 +353,10 @@ function extractWarnings(results: AgentRunResult[]): string[] {
   const warnings: string[] = [];
   const comparable = results.filter((r) => !isResultScoreExcluded(r));
 
-  const unknownCost = comparable.filter((r) => !r.costKnown);
-  if (unknownCost.length > 0) {
-    warnings.push(
-      `${unknownCost.length} agent(s) have unknown costs - actual costs may be higher than expected`
-    );
-  }
+  const estimatedCost = comparable.filter((r) => resolveCostQuality(r) === "estimated");
+  const unavailableCost = comparable.filter((r) => resolveCostQuality(r) === "unavailable");
+  if (estimatedCost.length > 0) warnings.push(`${estimatedCost.length} agent(s) have estimated costs that are not confirmed charges`);
+  if (unavailableCost.length > 0) warnings.push(`${unavailableCost.length} agent(s) have unavailable costs`);
 
   const manyChanges = comparable.filter((r) => r.changedFiles.length > 10);
   if (manyChanges.length > 0) {
@@ -390,7 +404,7 @@ export function formatDecisionReport(report: DecisionReport, locale?: string): s
           ? "🥈"
           : "❌";
 
-    lines.push(`### ${emoji} #${rec.rank} ${rec.displayLabel}`);
+    lines.push(`### ${emoji} ${rec.rank === null ? "\u2014" : `#${rec.rank}`} ${rec.displayLabel}`);
     lines.push(``);
     lines.push(
       zh
@@ -398,7 +412,12 @@ export function formatDecisionReport(report: DecisionReport, locale?: string): s
         : `- **Recommendation**: ${rec.recommendation}`
     );
     lines.push(zh ? `- **成功率**: ${(rec.successRate * 100).toFixed(0)}%` : `- **Success rate**: ${(rec.successRate * 100).toFixed(0)}%`);
-    lines.push(zh ? `- **平均成本**: $${rec.avgCostPerRun.toFixed(2)}/次` : `- **Avg cost**: $${rec.avgCostPerRun.toFixed(2)}/run`);
+    const costQuality = rec.costQuality ?? "known";
+    const costText =
+      costQuality === "unavailable"
+        ? "n/a"
+        : `${costQuality === "estimated" ? "\u2248" : ""}$${rec.avgCostPerRun.toFixed(2)}`;
+    lines.push(zh ? `- **平均成本**: ${costText}/次` : `- **Avg cost**: ${costText}/run`);
     lines.push(zh ? `- **平均耗时**: ${(rec.avgDurationMs / 1000).toFixed(0)}s` : `- **Avg duration**: ${(rec.avgDurationMs / 1000).toFixed(0)}s`);
     lines.push(
       zh

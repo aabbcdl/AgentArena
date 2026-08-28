@@ -12,6 +12,11 @@ export const CLAUDE_ISOLATION_ARGS = [
   "--strict-mcp-config"
 ] as const;
 
+export const CLAUDE_SAFE_UNATTENDED_ARGS = [
+  "--permission-mode",
+  "dontAsk"
+] as const;
+
 const HOST_CLAUDE_ENV_NAMES = [
   "ANTHROPIC_API_KEY",
   "ANTHROPIC_AUTH_TOKEN",
@@ -72,6 +77,12 @@ function removeInheritedClaudeEnvironment(baseEnvironment: NodeJS.ProcessEnv): N
 
 export function claudeIsolationArgsSupported(helpOutput: string): boolean {
   return ["--setting-sources", "--strict-mcp-config", "--no-session-persistence"].every((flag) =>
+    helpOutput.includes(flag)
+  );
+}
+
+export function claudeSafeUnattendedArgsSupported(helpOutput: string): boolean {
+  return ["--permission-mode", "dontAsk", "--no-session-persistence"].every((flag) =>
     helpOutput.includes(flag)
   );
 }

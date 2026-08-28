@@ -19,7 +19,7 @@ class ErrorBoundary extends Component<{ children: ComponentChildren }, { error: 
   static getDerivedStateFromError(error: Error) { return { error }; }
   componentDidCatch(error: Error) { console.error("[workbench] page render failed", error); }
   render() {
-    if (this.state.error) return <div class="fatal-error"><Notice kind="danger"><strong>Page unavailable</strong><span>{this.state.error.message}</span></Notice><button class="button secondary" type="button" onClick={() => { this.setState({ error: null }); window.location.hash = "/runs"; }}>Return to Runs</button></div>;
+    if (this.state.error) return <div class="fatal-error"><Notice kind="danger"><strong>Page unavailable / 页面不可用</strong><span>{this.state.error.message}</span></Notice><button class="button secondary" type="button" onClick={() => { this.setState({ error: null }); window.location.hash = "/runs"; }}>Return to Runs / 返回运行</button></div>;
     return this.props.children;
   }
 }

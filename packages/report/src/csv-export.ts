@@ -1,4 +1,4 @@
-import type { BenchmarkRun } from "@agentarena/core";
+import { type BenchmarkRun, resolveCostQuality } from "@agentarena/core";
 import { formatCompositeScoreValue, type ScoredResult, type ScoredRun } from "./report-helpers.js";
 import { enrichRunWithScores } from "./scoring.js";
 
@@ -31,6 +31,7 @@ export function generateCsv(run: BenchmarkRun): string {
     "Token Usage",
     "Cost (USD)",
     "Cost Known",
+    "Cost Quality",
     "Files Changed",
     "Judges Passed",
     "Judges Total",
@@ -60,8 +61,9 @@ export function generateCsv(run: BenchmarkRun): string {
       formatCompositeScoreValue(result),
       result.durationMs,
       result.tokenUsage,
-      result.costKnown && Number.isFinite(result.estimatedCostUsd) ? result.estimatedCostUsd.toFixed(4) : "n/a",
-      result.costKnown ? "yes" : "no",
+      resolveCostQuality(result) !== "unavailable" && Number.isFinite(result.estimatedCostUsd) ? result.estimatedCostUsd.toFixed(4) : "n/a",
+      resolveCostQuality(result) === "known" ? "yes" : "no",
+      resolveCostQuality(result),
       result.changedFiles.length,
       judgesPassed,
       judgesTotal,

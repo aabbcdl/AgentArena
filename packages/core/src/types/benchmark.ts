@@ -1,7 +1,10 @@
+import type { JobManifest } from "../runtime-launch.js";
 import type {
   AdapterPreflightResult,
   AgentRequestedConfig,
   AgentResolvedRuntime,
+  CostQuality,
+  TokenUsageBreakdown,
 } from "./agent.js";
 import type { TaskJudge } from "./judge.js";
 import type { TaskPack } from "./task-pack.js";
@@ -42,6 +45,7 @@ export type TraceEventType =
   | "adapter.transport_fallback"
   // Agent runner lifecycle
   | "agent.copy_failed"
+  | "agent.cancelled"
   | "agent.skipped"
   // Phase events
   | "setup.error"
@@ -59,6 +63,8 @@ export type TraceEventType =
   | "sandbox.violation";
 
 export interface TraceEvent {
+  /** Artifact schema version written by new trace recorders; absent on legacy traces. */
+  schemaVersion?: string;
   timestamp: string;
   agentId: string;
   runId?: string;
@@ -136,6 +142,18 @@ export interface DiffSummary {
   unreliableReason?: string;
 }
 
+/**
+ * Per-file unified diff persisted for Workbench Evidence and report consumers.
+ * Optional on historical runs — consumers must degrade to file names when absent.
+ */
+export interface FileDiffArtifact {
+  path: string;
+  /** Raw unified-diff text (e.g. `git diff HEAD -- <path>`). */
+  text?: string;
+  /** Pre-split hunks when the source provides them instead of raw text. */
+  hunks?: string[];
+}
+
 export interface SweBenchMetrics {
   patchValidationResult?: {
     resolved: boolean;
@@ -186,13 +204,31 @@ export interface AgentRunResult {
   resolvedRuntime?: AgentResolvedRuntime;
   agentTitle: string;
   status: "success" | "failed" | "cancelled";
+  /**
+   * Whether the execution pipeline itself completed independently of validation.
+   * Missing on historical results; consumers must fall back to `status`.
+   */
+  executionStatus?: "completed" | "failed" | "cancelled" | "not-run";
+  /**
+   * Outcome of judge validation after a completed agent execution.
+   * `partial` means only non-critical judges failed.
+   */
+  validationStatus?: "passed" | "partial" | "failed" | "error" | "not-run";
   adapterKind: "demo" | "external";
   preflight: AdapterPreflightResult;
   summary: string;
   durationMs: number;
   tokenUsage: number;
   estimatedCostUsd: number;
+  /**
+   * @deprecated Use `costQuality` instead. `costKnown` is a boolean that
+   * cannot distinguish "estimated" from "unavailable"; `costQuality` provides
+   * three states ("known" | "estimated" | "unavailable"). This field is kept
+   * for backward compatibility — new code must prefer `costQuality`.
+   */
   costKnown: boolean;
+  /** Three-state cost confidence. Missing values use costKnown for historical compatibility. */
+  costQuality?: CostQuality;
   /**
    * False when the reported tokenUsage is from an unreliable source (fallback
    * transport / missing authoritative total / suspicious count). Absent means
@@ -200,8 +236,35 @@ export interface AgentRunResult {
    * computed.
    */
   tokenUsageReliable?: boolean;
+  /**
+   * Present when the adapter detected a likely CLI output format mismatch.
+   * Consumers SHOULD surface this in reports and exclude affected metrics
+   * from scoring. Propagated from AdapterExecutionResult.dataQualityWarning.
+   */
+  dataQualityWarning?: string;
+  /**
+   * Names of critical events expected but not seen in the CLI output stream.
+   * Propagated from AdapterExecutionResult.missingCriticalEvents.
+   * When non-empty, tokenUsage and cost may be inaccurate.
+   */
+  missingCriticalEvents?: string[];
+  /**
+   * True when the JSONL trace recorder failed a write and stopped recording.
+   * Consumers SHOULD treat the trace as incomplete for audit purposes.
+   */
+  traceWriteFailed?: boolean;
+  /**
+   * Number of trace events dropped due to write-queue backpressure.
+   * Present only when at least one write was dropped.
+   */
+  traceDroppedWrites?: number;
   changedFiles: string[];
   changedFilesHint: string[];
+  /**
+   * Line-level diffs for changed files when the runner could collect them.
+   * Absent on legacy results — UI must fall back to the file name list.
+   */
+  fileDiffs?: FileDiffArtifact[];
   setupResults: CommandStepResult[];
   judgeResults: JudgeResult[];
   teardownResults: CommandStepResult[];
@@ -209,6 +272,11 @@ export interface AgentRunResult {
   workspacePath: string;
   diff: DiffSummary;
   diffPrecision?: DiffPrecisionSummary;
+  /**
+   * False when before/after snapshots were not both reliable. Absent means
+   * legacy results, which remain compatible with existing consumers.
+   */
+  diffReliable?: boolean;
   compositeScore?: number;
   scoreReasons?: string[];
   /**
@@ -236,13 +304,7 @@ export interface AgentRunResult {
   /** Signal name if the agent was terminated by a signal (e.g. "SIGTERM"). */
   signal?: string | null;
 
-  tokenUsageBreakdown?: {
-    inputTokens: number;
-    outputTokens: number;
-    reasoningTokens: number;
-    cacheReadTokens: number;
-    cacheWriteTokens: number;
-  };
+  tokenUsageBreakdown?: TokenUsageBreakdown;
   tokenEfficiencyScore?: number;
 
   sweBench?: SweBenchMetrics;
@@ -272,6 +334,7 @@ export interface BenchmarkRun {
   scoreScope?: "run-local";
   scoreValidityNote?: string;
   fairComparison?: FairComparisonMetadata;
+  jobManifest?: JobManifest;
   task: TaskPack;
   taskCompatibility?: TaskCompatibilityResult;
   preflights: AdapterPreflightResult[];

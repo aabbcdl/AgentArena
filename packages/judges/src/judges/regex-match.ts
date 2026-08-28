@@ -22,9 +22,13 @@ export async function runRegexMatchJudge(
       throw new Error(`Invalid regex flags: "${flags}". Only g, i, m, s, u, y are allowed.`);
     }
 
-    const effectiveFlags = (judge.minMatches && judge.minMatches > 1 && !flags.includes("g"))
-      ? flags + "g"
-      : flags;
+    // Counting more than one match requires the global flag. This is needed
+    // whenever a lower bound above 1 OR any upper bound (maxMatches) is set —
+    // without `g` the count caps at 1 and a maxMatches ceiling silently passes.
+    const needsGlobalCount =
+      (judge.minMatches !== undefined && judge.minMatches > 1) ||
+      (judge.maxMatches !== undefined && judge.maxMatches > 0);
+    const effectiveFlags = needsGlobalCount && !flags.includes("g") ? flags + "g" : flags;
 
     if (judge.pattern.length > 2000) {
       throw new Error(

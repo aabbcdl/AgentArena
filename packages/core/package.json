@@ -1,14 +1,34 @@
 {
   "name": "@agentarena/core",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Shared types and utilities for AgentArena",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
     ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./artifact-contract": {
+      "types": "./dist/artifact-contract.d.ts",
+      "import": "./dist/artifact-contract.js"
+    },
+    "./metrics": {
+      "types": "./dist/metrics.d.ts",
+      "import": "./dist/metrics.js"
+    },
+    "./telemetry": {
+      "types": "./dist/telemetry.d.ts",
+      "import": "./dist/telemetry.js"
+    },
+    "./scoring-weights": {
+      "types": "./dist/scoring-weights.d.ts",
+      "import": "./dist/scoring-weights.js"
+    },
+    "./snapshot": {
+      "types": "./dist/snapshot.d.ts",
+      "import": "./dist/snapshot.js"
     }
   },
   "files": [

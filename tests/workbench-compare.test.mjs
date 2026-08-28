@@ -5,7 +5,8 @@ import {
   getComparableRuns,
   getCrossRunCompareRows,
   getCrossRunRecommendation,
-  getSelectionTrust
+  getSelectionTrust,
+  recordKey
 } from "../apps/web-report/workbench/src/domain/compare.ts";
 import { normalizeRun } from "../apps/web-report/workbench/src/domain/run.ts";
 
@@ -21,7 +22,7 @@ function result(overrides = {}) {
     costKnown: true,
     changedFiles: ["src/a.ts"],
     judgeResults: [{ judgeId: "tests", label: "Tests", type: "test-result", success: true }],
-    resolvedRuntime: { version: "1.0" },
+    resolvedRuntime: { effectiveAgentVersion: "1.0" },
     ...overrides
   };
 }
@@ -42,10 +43,38 @@ test("getComparableRuns matches same task and score mode only", () => {
   const base = run();
   const sameTask = run({ runId: "run-002", createdAt: "2026-07-16T00:00:00.000Z" });
   const otherTask = run({ runId: "run-003", task: { id: "task-2", title: "Other", schemaVersion: "agentarena.taskpack/v1" } });
-  const otherMode = run({ runId: "run-004", scoreMode: "speed" });
+  // Must use a real ScoreMode — phantom labels like "speed" normalize to practical.
+  const otherMode = run({ runId: "run-004", scoreMode: "efficiency-first" });
+  const phantomMode = run({ runId: "run-005", scoreMode: "speed" });
 
-  const comparable = getComparableRuns([base, sameTask, otherTask, otherMode], base);
-  assert.deepEqual(comparable.map((item) => item.runId).sort(), ["run-001", "run-002"]);
+  const comparable = getComparableRuns([base, sameTask, otherTask, otherMode, phantomMode], base);
+  // phantom "speed" collapses to practical and remains comparable by design.
+  assert.deepEqual(comparable.map((item) => item.runId).sort(), ["run-001", "run-002", "run-005"]);
+  assert.ok(!comparable.some((item) => item.runId === "run-004"));
+});
+
+test("getComparableRuns applies persisted judge and repository identities", () => {
+  const identity = {
+    taskIdentity: "task:a",
+    judgeIdentity: "judge:a",
+    repoBaselineIdentity: "repo:a"
+  };
+  const base = run({ fairComparison: identity });
+  const same = run({ runId: "run-002", fairComparison: { ...identity } });
+  const differentJudge = run({
+    runId: "run-003",
+    fairComparison: { ...identity, judgeIdentity: "judge:b" }
+  });
+  const differentRepo = run({
+    runId: "run-004",
+    fairComparison: { ...identity, repoBaselineIdentity: "repo:b" }
+  });
+  const legacy = run({ runId: "run-005", fairComparison: undefined });
+
+  assert.deepEqual(
+    getComparableRuns([base, same, differentJudge, differentRepo, legacy], base).map((item) => item.runId),
+    ["run-001", "run-002", "run-005"]
+  );
 });
 
 test("getAgentTrendRows orders by time and computes deltas", () => {
@@ -56,7 +85,7 @@ test("getAgentTrendRows orders by time and computes deltas", () => {
     results: [result({ variantId: "demo-fast", durationMs: 1500, tokenUsage: 200 })]
   });
 
-  const rows = getAgentTrendRows([base, later], base, "demo-fast@@1.0");
+  const rows = getAgentTrendRows([base, later], base, recordKey(base.results[0]));
   assert.equal(rows.length, 2);
   assert.equal(rows[1].durationDeltaMs, 500);
   assert.equal(rows[1].tokenDelta, 100);

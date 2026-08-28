@@ -1,5 +1,7 @@
+process.env.AGENTARENA_ALLOW_EVAL_IN_JUDGES = "1";
+
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -61,9 +63,6 @@ test("cancellation during execution produces results with cancelled or failed st
   const outputDir = await mkdtemp(path.join(tmpdir(), "agentarena-cancel-during-"));
   const controller = new AbortController();
 
-  // Cancel after a short delay (during adapter execution)
-  const cancelTimer = setTimeout(() => controller.abort(), 500);
-
   try {
     const result = await runBenchmark({
       repoPath: REPO_ROOT,
@@ -72,7 +71,8 @@ test("cancellation during execution produces results with cancelled or failed st
       outputPath: outputDir,
       maxConcurrency: 1,
       cancellation: createCancellation(controller.signal),
-      cleanupWorkspaces: true
+      cleanupWorkspaces: true,
+      onProgress: (event) => { if (event.phase === "agent-start") controller.abort(); }
     });
 
     assert.ok(result.results.length > 0, "should have at least one result");
@@ -82,7 +82,6 @@ test("cancellation during execution produces results with cancelled or failed st
       `all statuses should be valid, got: ${statuses.join(", ")}`
     );
   } finally {
-    clearTimeout(cancelTimer);
     await rm(outputDir, { recursive: true, force: true }).catch(() => {});
   }
 });
@@ -98,4 +97,52 @@ test("isAbortError correctly identifies cancellation errors", async () => {
   assert.equal(isAbortError(null), false);
   assert.equal(isAbortError(undefined), false);
   assert.equal(isAbortError("string"), false);
+});
+
+
+test("startup cancellation writes a cancelled run marker", async () => {
+  const outputDir = await mkdtemp(path.join(tmpdir(), "agentarena-cancel-marker-"));
+  const controller = new AbortController();
+  controller.abort();
+  try {
+    await assert.rejects(() => runBenchmark({
+      repoPath: REPO_ROOT,
+      taskPath: DEMO_TASK,
+      agentIds: ["demo-fast"],
+      outputPath: outputDir,
+      cancellation: createCancellation(controller.signal),
+      cleanupWorkspaces: true
+    }), (error) => error.name === "BenchmarkCancelledError");
+    const runDir = (await import("node:fs/promises")).readdir(outputDir, { withFileTypes: true });
+    const run = (await runDir).find((entry) => entry.isDirectory());
+    assert.ok(run);
+    const marker = JSON.parse(await readFile(path.join(outputDir, run.name, "run-state.json"), "utf8"));
+    assert.equal(marker.state, "cancelled");
+  } finally {
+    await rm(outputDir, { recursive: true, force: true });
+  }
+});
+
+test("cancelled agent keeps the trace referenced by its result", async () => {
+  const outputDir = await mkdtemp(path.join(tmpdir(), "agentarena-cancel-trace-"));
+  const controller = new AbortController();
+  try {
+    const result = await runBenchmark({
+      repoPath: REPO_ROOT,
+      taskPath: DEMO_TASK,
+      agentIds: ["demo-fast"],
+      outputPath: outputDir,
+      cancellation: createCancellation(controller.signal),
+      cleanupWorkspaces: true,
+      onProgress: (event) => { if (event.phase === "agent-start") controller.abort(); }
+    });
+    assert.equal(result.results[0].status, "cancelled");
+    await stat(result.results[0].tracePath);
+    const trace = await readFile(result.results[0].tracePath, "utf8");
+    const events = trace.trim().split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line));
+    assert.ok(events.length > 0);
+    assert.ok(events.some((event) => event.type === "agent.cancelled"));
+  } finally {
+    await rm(outputDir, { recursive: true, force: true });
+  }
 });

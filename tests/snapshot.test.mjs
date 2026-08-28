@@ -1,7 +1,11 @@
 import assert from "node:assert";
+import { execFileSync } from "node:child_process";
+import { promises as fs } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { describe, it } from "node:test";
-import { diffSnapshots } from "../packages/core/dist/snapshot.js";
-import { buildDiffPrecision } from "../packages/runner/dist/snapshot.js";
+import { copyRepository, diffSnapshots } from "../packages/core/dist/snapshot.js";
+import { buildDiffPrecision, evaluateChangePolicy } from "../packages/runner/dist/snapshot.js";
 
 describe("snapshot", () => {
   describe("buildDiffPrecision", () => {
@@ -45,6 +49,62 @@ describe("snapshot", () => {
       assert.ok(result);
       assert.equal(result.matchedFiles.length, 1);
       assert.deepEqual(result.matchedFiles, [".env"]);
+    });
+  });
+
+  describe("evaluateChangePolicy", () => {
+    it("rejects an empty submission when a change is required", () => {
+      const result = evaluateChangePolicy(
+        { requireAgentChange: true, allowedPaths: ["src/**/*.js"] },
+        []
+      );
+      assert.equal(result?.success, false);
+      assert.match(result?.reason ?? "", /No agent-authored file change/);
+    });
+
+    it("accepts changes inside the declared scope", () => {
+      const result = evaluateChangePolicy(
+        { requireAgentChange: true, allowedPaths: ["src/**/*.js"], minChangedFiles: 1, maxChangedFiles: 2 },
+        ["src/utils.js"]
+      );
+      assert.equal(result?.success, true);
+      assert.deepEqual(result?.changedFiles, ["src/utils.js"]);
+    });
+
+    it("rejects forbidden and out-of-scope files", () => {
+      const result = evaluateChangePolicy(
+        { requireAgentChange: true, allowedPaths: ["src/**/*.js"], forbiddenPaths: ["test/**"] },
+        ["src/utils.js", "test/utils.test.js", "README.md"]
+      );
+      assert.equal(result?.success, false);
+      assert.deepEqual(result?.unexpectedFiles, ["README.md", "test/utils.test.js"]);
+      assert.deepEqual(result?.forbiddenFiles, ["test/utils.test.js"]);
+    });
+
+    it("fails closed when snapshots are unreliable", () => {
+      const result = evaluateChangePolicy(
+        { requireAgentChange: true, allowedPaths: ["src/**/*.js"] },
+        ["src/utils.js"],
+        { reliable: false }
+      );
+      assert.equal(result?.success, false);
+      assert.equal(result?.reliable, false);
+    });
+
+    it("enforces minimum and maximum changed-file counts", () => {
+      const tooFew = evaluateChangePolicy({ minChangedFiles: 2 }, ["src/a.js"]);
+      const tooMany = evaluateChangePolicy({ maxChangedFiles: 1 }, ["src/a.js", "src/b.js"]);
+      assert.equal(tooFew?.success, false);
+      assert.equal(tooMany?.success, false);
+    });
+
+    it("ignores AgentArena-generated paths", () => {
+      const result = evaluateChangePolicy(
+        { requireAgentChange: true, allowedPaths: ["src/**/*.js"] },
+        [".agentarena/log.json", "src/utils.js"]
+      );
+      assert.equal(result?.success, true);
+      assert.deepEqual(result?.changedFiles, ["src/utils.js"]);
     });
   });
 
@@ -120,6 +180,36 @@ describe("snapshot", () => {
       assert.deepEqual(result.changed, ["mod.txt"]);
       assert.deepEqual(result.added, ["new.txt"]);
       assert.deepEqual(result.removed, []);
+    });
+  });
+
+  describe("copyRepository", () => {
+    it("copies a repo that has a staged (uncommitted) deletion without crashing", async () => {
+      const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarena-copy-"));
+      const source = path.join(root, "src");
+      const dest = path.join(root, "dest");
+      await fs.mkdir(source, { recursive: true });
+      const git = (...args) => execFileSync("git", ["-C", source, ...args], { stdio: "pipe" });
+      try {
+        git("init", "-q");
+        git("config", "user.email", "t@t.t");
+        git("config", "user.name", "t");
+        await fs.writeFile(path.join(source, "keep.txt"), "keep", "utf8");
+        await fs.writeFile(path.join(source, "gone.txt"), "gone", "utf8");
+        git("add", ".");
+        git("commit", "-q", "-m", "init");
+        // Delete a tracked file from the worktree but do NOT stage the deletion:
+        // `git ls-files --cached` still lists gone.txt though it no longer exists.
+        await fs.rm(path.join(source, "gone.txt"));
+
+        await copyRepository(source, dest);
+
+        // The present file is copied; the deleted one is skipped, not fatal.
+        assert.equal(await fs.readFile(path.join(dest, "keep.txt"), "utf8"), "keep");
+        await assert.rejects(() => fs.access(path.join(dest, "gone.txt")));
+      } finally {
+        await fs.rm(root, { recursive: true, force: true });
+      }
     });
   });
 });

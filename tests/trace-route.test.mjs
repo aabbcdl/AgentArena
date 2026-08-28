@@ -108,3 +108,24 @@ test("handleTraceGet truncates very large traces", async () => {
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+test("handleTraceGet does not mark an exactly full page as truncated", async () => {
+  const root = await makeWorkspace();
+  try {
+    const traceDir = path.join(root, ".agentarena", "runs", "run-exact", "agents", "agent-a");
+    await fs.mkdir(traceDir, { recursive: true });
+    const lines = [];
+    for (let i = 0; i < 10_000; i++) {
+      lines.push(JSON.stringify({ agentId: "agent-a", runId: "run-exact", timestamp: "2026-07-15T08:00:00.000Z", type: "adapter.tool_use", message: `event ${i}` }));
+    }
+    await fs.writeFile(path.join(traceDir, "trace.jsonl"), lines.join("\n") + "\n");
+    const res = await handleTraceGet(root, "run-exact", "agent-a");
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.equal(body.totalEvents, 10_000);
+    assert.equal(body.returnedEvents, 10_000);
+    assert.equal(body.truncated, false);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});

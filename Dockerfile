@@ -39,4 +39,8 @@ USER agentarena
 
 EXPOSE 4320
 ENTRYPOINT ["node", "packages/cli/dist/index.js"]
-CMD ["ui", "--host", "0.0.0.0"]
+# UI is local-only (127.0.0.1 / localhost / ::1). Binding 0.0.0.0 is rejected.
+# Default to help; run doctor/run/ui explicitly, e.g.:
+#   docker run ... agentarena doctor
+#   docker run ... agentarena ui --host 127.0.0.1
+CMD ["--help"]

@@ -142,12 +142,15 @@ const EVAL_INTERPRETERS = new Set([
  *   `/\s-(?:e|c)\s/` regex.
  * - For node/nodejs, `-c` is a syntax-check (not code execution) so only `-e`
  *   is treated as eval; for other interpreters `-c` IS eval.
+ * - For node/nodejs, `-p`/`--print` evaluate an expression just like `-e`.
+ * - For python/python3/py, `-m` executes an arbitrary importable module.
  */
 function hasEvalFlag(commandBasename: string, commandArgs: string[]): boolean {
   if (!EVAL_INTERPRETERS.has(commandBasename)) {
     return false;
   }
   const nodeLike = commandBasename === "node" || commandBasename === "nodejs";
+  const pythonLike = commandBasename === "python" || commandBasename === "python3" || commandBasename === "py";
   return commandArgs.some((arg) => {
     if (arg === "-e" || arg === "--eval" || arg.startsWith("--eval=")) {
       return true;
@@ -156,6 +159,14 @@ function hasEvalFlag(commandBasename: string, commandArgs: string[]): boolean {
       return true;
     }
     if (!nodeLike && (arg === "-c" || /^-c.+/u.test(arg))) {
+      return true;
+    }
+    // node -p / --print evaluate an expression and print the result.
+    if (nodeLike && (arg === "-p" || arg === "--print" || arg.startsWith("--print=") || /^-p.+/u.test(arg))) {
+      return true;
+    }
+    // python -m runs an arbitrary module's __main__, bypassing the allowlist.
+    if (pythonLike && (arg === "-m" || /^-m.+/u.test(arg))) {
       return true;
     }
     return false;
@@ -168,6 +179,38 @@ interface CommandSpawnSpec {
   command: string;
   args: string[];
   windowsVerbatimArguments?: boolean;
+}
+
+function terminateProcessTree(
+  child: ReturnType<typeof spawn>,
+  signal: NodeJS.Signals
+): void {
+  if (!child.pid) return;
+
+  if (process.platform === "win32") {
+    const killer = spawn("taskkill.exe", ["/pid", String(child.pid), "/t", "/f"], {
+      windowsHide: true,
+      stdio: "ignore"
+    });
+    killer.on("error", () => {
+      try {
+        child.kill(signal);
+      } catch {
+        // The process may already have exited.
+      }
+    });
+    return;
+  }
+
+  try {
+    process.kill(-child.pid, signal);
+  } catch {
+    try {
+      child.kill(signal);
+    } catch {
+      // The process group may already have exited.
+    }
+  }
 }
 
 export interface CommandSecurityOptions {
@@ -436,6 +479,7 @@ export async function executeCommand(
     const child = spawn(spawnSpec.command, spawnSpec.args, {
       cwd,
       env: environment,
+      detached: process.platform !== "win32",
       shell: false,
       windowsHide: true,
       windowsVerbatimArguments: spawnSpec.windowsVerbatimArguments ?? false,
@@ -464,7 +508,18 @@ export async function executeCommand(
 
     const cleanup = () => {
       clearTimeout(timeoutHandle);
-      clearTimeout(killHandle);
+      if (killHandle) {
+        let processGroupAlive = false;
+        if (process.platform !== "win32" && child.pid) {
+          try {
+            process.kill(-child.pid, 0);
+            processGroupAlive = true;
+          } catch {
+            processGroupAlive = false;
+          }
+        }
+        if (!processGroupAlive) clearTimeout(killHandle);
+      }
       signal?.removeEventListener("abort", cancelExecution);
     };
 
@@ -473,13 +528,9 @@ export async function executeCommand(
     const scheduleForceKill = () => {
       if (killHandle) return; // prevent duplicate timers
       killHandle = setTimeout(() => {
-        if (!child.killed && child.pid) {
+        if (child.pid) {
           try {
-            if (process.platform !== "win32") {
-              process.kill(-child.pid, "SIGKILL");
-            } else {
-              child.kill("SIGKILL");
-            }
+            terminateProcessTree(child, "SIGKILL");
           } catch (killError) {
             logger.warn("judge", "process.sigkill_failed", `Failed to SIGKILL process ${child.pid}: ${killError instanceof Error ? killError.message : String(killError)}`, {
               metadata: { pid: child.pid }
@@ -491,18 +542,14 @@ export async function executeCommand(
 
     const cancelExecution = () => {
       cancelled = true;
-      if (!child.killed) {
-        child.kill();
-        scheduleForceKill();
-      }
+      terminateProcessTree(child, "SIGTERM");
+      scheduleForceKill();
     };
 
     const timeoutHandle = setTimeout(() => {
       timedOut = true;
-      if (!child.killed) {
-        child.kill();
-        scheduleForceKill();
-      }
+      terminateProcessTree(child, "SIGTERM");
+      scheduleForceKill();
     }, timeoutMs);
 
     signal?.addEventListener("abort", cancelExecution, { once: true });

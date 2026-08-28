@@ -12,6 +12,12 @@ metadata:
   tags: ["refactor", "testing", "code-quality"]
   dependencies: []
   differentiator: Tests discipline — weak agents refactor and break things, strong agents verify after each change.
+  i18n:
+    zh-CN:
+      title: 带测试的重构
+      description: 在保持所有测试通过的前提下重构函数。
+      objective: 检验 Agent 在不破坏功能的情况下重构代码的能力。
+      judgeRationale: 行为测试验证重构后的代码产生与之前完全一致的输出。
 
 repoSource: "builtin://nodejs-app"
 

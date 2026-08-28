@@ -32,6 +32,9 @@ test("JsonlTraceRecorder records and reads events", async () => {
   assert.equal(events[0].message, "hello");
   assert.equal(events[1].type, "error");
 
+  await recorder.close();
+  assert.deepEqual(recorder.getIntegrity(), { writeFailed: false, droppedWrites: 0 });
+
   // Cleanup
   await fs.rm(dir, { recursive: true, force: true });
 });

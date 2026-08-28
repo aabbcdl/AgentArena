@@ -3,6 +3,7 @@ import type {
   AgentAdapter,
   AgentResolvedRuntime
 } from "@agentarena/core";
+import { UNATTENDED_ACCESS_DISCLOSURE } from "./adapter-capabilities.js";
 import { createCliAdapter } from "./base-cli-adapter.js";
 
 export const AUGMENT_CAPABILITY: AdapterCapability = {
@@ -17,6 +18,7 @@ export const AUGMENT_CAPABILITY: AdapterCapability = {
     reasoningEffort: false
   },
   knownLimitations: [
+    UNATTENDED_ACCESS_DISCLOSURE,
     "Augment CLI output format may change across releases.",
     "Token usage is best-effort and depends on JSON event compatibility.",
     "Changed files are inferred from workspace diff."

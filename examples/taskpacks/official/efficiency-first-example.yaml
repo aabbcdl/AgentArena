@@ -7,6 +7,8 @@ metadata:
     zh-CN:
       title: "效率优先示例（CursorBench 风格）"
       description: "以 token 效率为核心评估编码代理"
+      objective: 在 token 预算内完成重构任务。
+      judgeRationale: 将 token 效率作为主要衡量指标。
   source: official
   owner: AgentArena
   difficulty: medium

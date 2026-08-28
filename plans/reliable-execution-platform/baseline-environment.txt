@@ -1,0 +1,9 @@
+﻿Baseline date: 2026-07-16
+Commit: 726ec6524588d78314005d819be5c47ae1bbb465
+Branch: codex/reliable-execution-platform
+Node: v24.13.0
+pnpm: 10.6.1
+Platform: Microsoft Windows NT 10.0.26200.0
+Architecture: AMD64
+Git status:
+Docker: 29.2.1|29.2.1

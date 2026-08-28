@@ -1,14 +1,14 @@
 {
   "name": "@agentarena/judges",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Judge implementations for AgentArena — 15 types: command, test-result, lint-check, file-exists/contains/count, json-value/schema, glob, snapshot, directory-exists, regex-match, patch-validation, compilation, token-efficiency",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
     ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
     }
   },
   "files": [

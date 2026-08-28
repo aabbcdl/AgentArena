@@ -1,30 +1,10 @@
-import { promises as fs } from "node:fs";
 import path from "node:path";
-import { type BenchmarkRun, ensureDirectory } from "@agentarena/core";
+import { type BenchmarkRun, ensureDirectory, SUMMARY_ARTIFACT_SCHEMA, writeAtomic } from "@agentarena/core";
 import { renderHtml } from "./html-template.js";
 import { buildLeaderboard, } from "./leaderboard.js";
 import { renderMarkdown, renderPrComment } from "./markdown-template.js";
 import { buildBadgePayload, type Locale, sanitizeRun } from "./report-helpers.js";
 import { enrichRunWithScores } from "./scoring.js";
-
-async function atomicWriteFile(filePath: string, content: string, retries = 3, delayMs = 100): Promise<void> {
-  const tmpPath = `${filePath}.tmp`;
-  await fs.writeFile(tmpPath, content, "utf8");
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      await fs.rename(tmpPath, filePath);
-      return;
-    } catch (err: unknown) {
-      if (attempt < retries && err instanceof Error && "code" in err && (err.code === "EBUSY" || err.code === "EPERM" || err.code === "EACCES")) {
-        await new Promise((resolve) => setTimeout(resolve, delayMs));
-        continue;
-      }
-      // Clean up temp file on final failure
-      await fs.unlink(tmpPath).catch(() => {});
-      throw err;
-    }
-  }
-}
 
 export { getDefaultWeights } from "@agentarena/core";
 export type { RunConclusion } from "./conclusion.js";
@@ -39,6 +19,7 @@ export {
 } from "./decision-report.js";
 export {
   buildLeaderboard,
+  getComparableRuns,
   getLeaderboardExplanation,
   type LeaderboardData,
   type LeaderboardIdentity,
@@ -84,13 +65,18 @@ export async function writeReport(
   options: WriteReportOptions = {}
 ): Promise<{ htmlPath: string; jsonPath: string; markdownPath: string; badgePath: string; prCommentPath: string }> {
   const locale = options.locale ?? "en";
-  const allRuns = options.allRuns ?? [run];
+  const allRuns = options.allRuns ?? [];
   
   await ensureDirectory(run.outputPath);
-  const publicRun = sanitizeRun(enrichRunWithScores(run));
+  const scoredRun = enrichRunWithScores(run);
+  const publicRun = sanitizeRun(scoredRun);
 
-  // Build historical leaderboard from prior runs.
-  const leaderboard = buildLeaderboard(allRuns, run);
+  // Score historical and current runs through the same pipeline before aggregation.
+  const leaderboardRuns = allRuns
+    .filter((candidate) => candidate.runId !== run.runId)
+    .map((candidate) => enrichRunWithScores(candidate));
+  leaderboardRuns.push(scoredRun);
+  const leaderboard = buildLeaderboard(leaderboardRuns, scoredRun);
 
   const jsonPath = path.join(run.outputPath, "summary.json");
   const htmlPath = path.join(run.outputPath, "report.html");
@@ -100,6 +86,7 @@ export async function writeReport(
 
   // Export JSON that includes leaderboard data alongside the run.
   const exportData = {
+    artifactSchemaVersion: SUMMARY_ARTIFACT_SCHEMA,
     ...publicRun,
     leaderboard: {
       taskId: leaderboard.taskId,
@@ -117,12 +104,14 @@ export async function writeReport(
     }
   };
   
+  // Use core writeAtomic (fsync + Windows rename recovery) — same contract as
+  // agent result.json and UI run-state.json.
   await Promise.all([
-    atomicWriteFile(jsonPath, JSON.stringify(exportData, null, 2)),
-    atomicWriteFile(htmlPath, renderHtml(publicRun, locale, leaderboard)),
-    atomicWriteFile(markdownPath, renderMarkdown(publicRun, locale, leaderboard)),
-    atomicWriteFile(badgePath, JSON.stringify(buildBadgePayload(publicRun), null, 2)),
-    atomicWriteFile(prCommentPath, renderPrComment(publicRun, locale, leaderboard))
+    writeAtomic(jsonPath, JSON.stringify(exportData, null, 2)),
+    writeAtomic(htmlPath, renderHtml(publicRun, locale, leaderboard)),
+    writeAtomic(markdownPath, renderMarkdown(publicRun, locale, leaderboard)),
+    writeAtomic(badgePath, JSON.stringify(buildBadgePayload(publicRun), null, 2)),
+    writeAtomic(prCommentPath, renderPrComment(publicRun, locale, leaderboard))
   ]);
 
   return { htmlPath, jsonPath, markdownPath, badgePath, prCommentPath };

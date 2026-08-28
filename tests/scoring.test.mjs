@@ -403,6 +403,38 @@ test("backend and frontend computeCompositeScore produce identical scores", () =
   );
 });
 
+test("backend and frontend Rule-2 (critical-fail) scores match across all modes", () => {
+  // Regression: the critical-fail band diverged because the backend put
+  // mode-specific weights in the denominator while summing only six
+  // components. This asserts parity for a failing critical judge in every mode.
+  const modes = ["practical", "balanced", "issue-resolution", "efficiency-first", "rotating-tasks", "comprehensive"];
+  const result = createResult({
+    status: "success",
+    durationMs: 1500,
+    estimatedCostUsd: 0.08,
+    costKnown: true,
+    judgeResults: [
+      { success: false, critical: true },
+      { success: true, critical: false },
+      { success: true, type: "test-result", totalCount: 5, passedCount: 4, failedCount: 1 },
+      { success: true, type: "lint-check", errorCount: 0, warningCount: 2 }
+    ]
+  });
+  const otherResult = createResult({ durationMs: 800, estimatedCostUsd: 0.02, costKnown: true });
+  const run = createRun({ results: [result, otherResult], expectedChangedPaths: ["src/a.ts"] });
+
+  for (const mode of modes) {
+    const backendScore = computeCompositeScore(result, run, undefined, mode);
+    const frontendScore = getCompositeScoreDetails(result, run, getScoreWeightPreset(mode)).total;
+    assert.ok(
+      Math.abs(backendScore - frontendScore) < 0.2,
+      `Rule-2 score mismatch for mode='${mode}': backend=${backendScore} frontend=${frontendScore}`
+    );
+    // Sanity: a critical-fail score must land in the critical-fail band.
+    assert.ok(backendScore >= 50 && backendScore <= 70, `mode='${mode}' backend=${backendScore} not in [50,70]`);
+  }
+});
+
 test("frontend SCORE_WEIGHT_PRESETS match backend getDefaultWeights for all modes", () => {
   const modes = ["practical", "balanced", "issue-resolution", "efficiency-first", "rotating-tasks", "comprehensive"];
   for (const mode of modes) {
@@ -511,6 +543,21 @@ test("FAILED_SCORE_BAND: failed run score is within [10, 40]", () => {
   assert.ok(score <= FAILED_SCORE_BAND.max, `Score ${score} above max ${FAILED_SCORE_BAND.max}`);
 });
 
+test("FAILED_SCORE_BAND: legacy failed run without executionStatus keeps legacy behavior", () => {
+  const result = createResult({
+    status: "failed",
+    judgeResults: [
+      { success: false, critical: true, type: "command" }
+    ]
+  });
+  delete result.executionStatus;
+  const run = createRun({ results: [result] });
+
+  const score = computeCompositeScore(result, run);
+  assert.ok(score >= FAILED_SCORE_BAND.min);
+  assert.ok(score <= FAILED_SCORE_BAND.max);
+});
+
 test("FAILED_SCORE_BAND: failed run with fast duration and low cost still capped at 40", () => {
   const fastResult = createResult({ status: "error", durationMs: 100 });
   const cheapResult = createResult({ status: "success", durationMs: 500, estimatedCostUsd: 0.01, costKnown: true });
@@ -522,7 +569,9 @@ test("FAILED_SCORE_BAND: failed run with fast duration and low cost still capped
 
 test("CRITICAL_FAIL_SCORE_BAND: critical judge failure produces score in [50, 70]", () => {
   const result = createResult({
-    status: "success",
+    status: "failed",
+    executionStatus: "completed",
+    validationStatus: "failed",
     durationMs: 1000,
     estimatedCostUsd: 0.05,
     costKnown: true,

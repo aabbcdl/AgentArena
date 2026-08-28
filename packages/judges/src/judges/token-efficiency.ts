@@ -3,10 +3,32 @@ import type { JudgeResult, TokenEfficiencyJudge } from "@agentarena/core";
 export async function runTokenEfficiencyJudge(
   judge: TokenEfficiencyJudge,
   tokenUsage: number | undefined,
-  tokenBudget: number | undefined
+  tokenBudget: number | undefined,
+  tokenUsageReliable?: boolean
 ): Promise<JudgeResult> {
   const startedAt = Date.now();
   const effectiveBudget = tokenBudget ?? judge.tokenBudget;
+
+  // When the adapter flags its token count as unreliable (format mismatch,
+  // missing result event, or a pure char-based estimate) we must not derive a
+  // pass/fail from it. `@agentarena/core` states "Consumers must not derive a
+  // token-efficiency score from unreliable counts." Return a neutral result so
+  // the run is neither rewarded nor penalized on untrustworthy data.
+  if (tokenUsageReliable === false) {
+    return {
+      judgeId: judge.id,
+      label: judge.label,
+      type: "token-efficiency",
+      target: "tokenUsage",
+      expectation: effectiveBudget ? `budget=${effectiveBudget}` : "no budget",
+      exitCode: 0,
+      success: true,
+      stdout: "Token usage reported as unreliable; efficiency not scored (neutral).",
+      stderr: "",
+      durationMs: Date.now() - startedAt,
+      critical: false
+    };
+  }
 
   if (tokenUsage === undefined || tokenUsage === null) {
     return {

@@ -13,6 +13,7 @@ export {
   getAgentTrendRows,
   getComparableRuns,
   getCompareResults,
+  getCostQuality,
   getCrossRunCompareRows,
   getCrossRunRecommendation,
   getFairComparisonExclusionReasons,
@@ -25,7 +26,8 @@ export {
   resultLabel,
   resultRecordKey,
   runtimeIdentity,
-  summarizeRun
+  summarizeRun,
+  usesThirdPartyProviderConfiguration
 } from "./view-model/comparison.js";
 export {
   buildPrTable,

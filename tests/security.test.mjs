@@ -179,7 +179,7 @@ test("safe command: echo with dangerous words is allowed", () => {
 });
 
 test("dangerous command: node -e is rejected when allowEval is false", () => {
-  // node -e is allowed by default for task pack commands, but rejected when explicitly disabled
+  // node -e is rejected by default and can only be enabled explicitly
   assert.throws(() => parseCommand('node -e "console.log(1)"', { allowEval: false }), /not allowed/i);
 });
 
@@ -189,6 +189,32 @@ test("dangerous command: node --eval is rejected when allowEval is false", () =>
 
 test("dangerous command: bun -e is rejected when allowEval is false", () => {
   assert.throws(() => parseCommand('bun -e "console.log(1)"', { allowEval: false }), /not allowed/i);
+});
+
+test("dangerous command: node -p is rejected when allowEval is false", () => {
+  // node -p / --print evaluate an expression just like -e (eval bypass fix)
+  assert.throws(() => parseCommand('node -p "require(\'child_process\').execSync(\'id\')"', { allowEval: false }), /not allowed/i);
+});
+
+test("dangerous command: node --print is rejected when allowEval is false", () => {
+  assert.throws(() => parseCommand('node --print "1+1"', { allowEval: false }), /not allowed/i);
+});
+
+test("dangerous command: python -m is rejected when allowEval is false", () => {
+  // python -m runs an arbitrary importable module, bypassing the allowlist
+  assert.throws(() => parseCommand("python -m http.server", { allowEval: false }), /not allowed/i);
+});
+
+test("dangerous command: python3 -m is rejected when allowEval is false", () => {
+  assert.throws(() => parseCommand("python3 -mhttp.server", { allowEval: false }), /not allowed/i);
+});
+
+test("node -p and python -m are permitted only when allowEval is true", () => {
+  // The gate — not a blanket ban. Trusted builtin packs may opt in.
+  const [nodeCmd] = parseCommand('node -p "1+1"', { allowEval: true });
+  assert.equal(nodeCmd, "node");
+  const [pyCmd] = parseCommand("python -m http.server", { allowEval: true });
+  assert.equal(pyCmd, "python");
 });
 
 test("safe command: npm test is allowed", () => {
@@ -219,9 +245,7 @@ test("AGENTARENA_ALLOW_EVAL_IN_JUDGES bypass is not set by default", () => {
   const original = process.env.AGENTARENA_ALLOW_EVAL_IN_JUDGES;
   try {
     delete process.env.AGENTARENA_ALLOW_EVAL_IN_JUDGES;
-    // node -e is now allowed by default for task pack commands;
-    // only rejected when explicitly passing allowEval: false
-    assert.throws(() => parseCommand('node -e "console.log(1)"', { allowEval: false }), /not allowed/i);
+    assert.throws(() => parseCommand('node -e "console.log(1)"'), /not allowed/i);
   } finally {
     if (original !== undefined) {
       process.env.AGENTARENA_ALLOW_EVAL_IN_JUDGES = original;

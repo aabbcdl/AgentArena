@@ -14,6 +14,7 @@ export {
   getClientIp,
   HttpError,
   jsonResponse,
+  normalizeMetricPath,
   readRequestBody,
   setTrustProxy,
   startRateLimitCleanup,

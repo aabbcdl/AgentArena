@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
-import { t } from "../components/ui";
+import { Icon, t } from "../components/ui";
 import { safeCategoryClass, type TraceStep, type TraceTimeline } from "../domain/trace";
 import type { Locale } from "../types";
 
@@ -97,9 +97,9 @@ export function TraceReplay({ locale, timeline, truncated, hasMore, onLoadFull }
       </div>
 
       <div class="trace-controls">
-        <button type="button" class="icon-button" onClick={() => setIndex((i) => Math.max(0, i - 1))} disabled={index <= 0} aria-label={t(locale, "tracePrev")}><span aria-hidden="true">‹</span></button>
+        <button type="button" class="icon-button trace-prev" onClick={() => setIndex((i) => Math.max(0, i - 1))} disabled={index <= 0} aria-label={t(locale, "tracePrev")}><Icon name="chevron" /></button>
         <button type="button" class={`button ${playing ? "secondary" : "primary"}`} onClick={() => setPlaying((p) => !p)}>{playing ? t(locale, "tracePause") : t(locale, "tracePlay")}</button>
-        <button type="button" class="icon-button" onClick={() => setIndex((i) => Math.min(total - 1, i + 1))} disabled={index >= total - 1} aria-label={t(locale, "traceNext")}><span aria-hidden="true">›</span></button>
+        <button type="button" class="icon-button" onClick={() => setIndex((i) => Math.min(total - 1, i + 1))} disabled={index >= total - 1} aria-label={t(locale, "traceNext")}><Icon name="chevron" /></button>
         <span class="trace-progress-label">{t(locale, "traceStepProgress")?.replace("{current}", String(index + 1)).replace("{total}", String(total)) ?? `${index + 1} / ${total}`}</span>
         {hasMore && onLoadFull && (
           <button type="button" class="button ghost compact-button" onClick={onLoadFull}>{t(locale, "traceLoadFull")}</button>

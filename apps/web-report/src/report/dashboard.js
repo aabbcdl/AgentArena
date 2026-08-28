@@ -8,7 +8,7 @@ import { createVirtualList } from "../utils/virtual-list.js";
 import {baseAgentLabel,
   findPreviousComparableRun, getAgentTrendRows,getCompareResults,getRunCompareRows, getRunToRunAgentDiff,
   getRunVerdict, getSelectionTrustSummary, resultLabel, runtimeIdentity,
-  summarizeRun
+  summarizeRun, usesThirdPartyProviderConfiguration
 } from "../view-model/comparison.js";
 import { formatCompositeScore } from "../view-model/scoring.js";
 
@@ -560,7 +560,7 @@ function renderAgentTrendTableV2(run) {
             <td><span class="status-badge ${row.result.status === "success" ? "status-success" : "status-failed"}">${escapeHtml(translateStatus(row.result.status, t))}</span></td>
             <td>${escapeHtml(formatDuration(row.result.durationMs))}</td>
             <td>${typeof row.result.tokenUsage === "number" && !Number.isNaN(row.result.tokenUsage) ? row.result.tokenUsage.toLocaleString() : "—"}</td>
-            <td>${row.result.costKnown ? "$" + row.result.estimatedCostUsd.toFixed(4) : "n/a"}</td>
+            <td>${formatCost(row.result)}</td>
             <td>${row.judgeDelta !== null ? escapeHtml(formatDelta(row.judgeDelta)) : "-"}</td>
           </tr>
         `).join("")}
@@ -1179,6 +1179,8 @@ function renderCompareTableV2(run) {
   const fastestKey = verdict.fastest ? recordKey(verdict.fastest) : null;
   const cheapestKey = verdict.lowestKnownCost ? recordKey(verdict.lowestKnownCost) : null;
   const medals = ["🥇", "🥈", "🥉"];
+  const rankedResults = results.filter((result) => result.status === "success" && result.scoreExcluded !== true);
+  const rankByKey = new Map(rankedResults.map((result, index) => [recordKey(result), index + 1]));
 
   // Pagination: show first 25 rows, then "show all" button
   const COMPARE_PAGE_SIZE = 25;
@@ -1190,7 +1192,7 @@ function renderCompareTableV2(run) {
   const failedResults = displayResults.filter(r => r.status !== "success");
 
   // ── Build the simplified compare table (6 core columns) ──
-  function buildCompareRow(result, index, allResults) {
+  function buildCompareRow(result) {
     const passedJudges = result.judgeResults.filter((judge) => judge.success).length;
     const totalJudges = result.judgeResults.length;
     const passRatio = totalJudges > 0 ? passedJudges / totalJudges : 0;
@@ -1198,9 +1200,10 @@ function renderCompareTableV2(run) {
     const isActive = recordKey(result) === state.selectedAgentId ? "active" : "";
     const key = recordKey(result);
     const runtime = runtimeIdentity(result);
+    const rank = rankByKey.get(key) ?? null;
     const isBest = key === bestKey;
-    const rowClass = [isActive, isBest ? "compare-row-best" : "", result.status === "failed" ? "compare-row-failed" : ""].filter(Boolean).join(" ");
-    const medal = index < 3 && allResults.length > 1 ? medals[index] : "";
+    const rowClass = [isActive, isBest ? "compare-row-best" : "", result.status !== "success" ? "compare-row-failed" : ""].filter(Boolean).join(" ");
+    const medal = rank !== null && rank <= 3 && rankedResults.length > 1 ? medals[rank - 1] : "";
 
     // Score with grade
     let scoreCell = "—";
@@ -1235,7 +1238,7 @@ function renderCompareTableV2(run) {
 
     return `
       <tr class="compare-row ${rowClass}" data-compare-agent-id="${escapeHtml(key)}" tabindex="0" role="button" aria-label="${escapeHtml(localText("展开详情", "Expand details") + " " + resultLabel(result))}">
-        <td class="compare-rank">${medal || index + 1}</td>
+        <td class="compare-rank">${medal || rank || "\u2014"}</td>
         <td class="compare-variant">
           <strong>${escapeHtml(resultLabel(result))}</strong>
           ${tags.length > 0 ? `<div class="compare-tags-inline">${tags.join("")}</div>` : ""}
@@ -1269,8 +1272,8 @@ function renderCompareTableV2(run) {
   `;
 
   // Passed results first
-  passedResults.forEach((result, i) => {
-    tableHtml += buildCompareRow(result, i, displayResults);
+  passedResults.forEach((result) => {
+    tableHtml += buildCompareRow(result);
   });
 
   // Failed results in a separate section if any exist
@@ -1295,12 +1298,12 @@ function renderCompareTableV2(run) {
         </thead>
         <tbody>
     `;
-    failedResults.forEach((result, i) => {
-      tableHtml += buildCompareRow(result, passedResults.length + i, displayResults);
+    failedResults.forEach((result) => {
+      tableHtml += buildCompareRow(result);
     });
   } else if (failedResults.length > 0) {
-    failedResults.forEach((result, i) => {
-      tableHtml += buildCompareRow(result, i, displayResults);
+    failedResults.forEach((result) => {
+      tableHtml += buildCompareRow(result);
     });
   }
 
@@ -1406,7 +1409,7 @@ function renderSelectedAgentV2() {
           <div class="summary-row"><span>${escapeHtml(localText("来源", "Source"))}</span><strong>${escapeHtml(runtime.source)}</strong></div>
           <div class="summary-row"><span>${escapeHtml(localText("Provider", "Provider"))}</span><strong>${escapeHtml(runtime.provider)} (${escapeHtml(runtime.providerKind)})</strong></div>
         </div>
-        ${runtime.providerKind !== "official" && runtime.provider !== "official" ? `<p class="warning-text" style="font-size:0.78rem;">${escapeHtml(localText("此结果通过非官方 Provider 生成。", "This result was produced through a provider-switched configuration."))}</p>` : ""}
+        ${usesThirdPartyProviderConfiguration(result) ? `<p class="warning-text" style="font-size:0.78rem;">${escapeHtml(localText("此结果通过非官方 Provider 生成。", "This result was produced through a managed third-party Provider configuration."))}</p>` : ""}
         ${renderStepCards(localText("准备步骤", "Setup"), result.setupResults)}
         ${renderStepCards(localText("收尾步骤", "Teardown"), result.teardownResults)}
         <div class="summary-grid" style="font-size:0.78rem;margin-top:8px;">

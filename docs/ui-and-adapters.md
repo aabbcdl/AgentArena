@@ -10,7 +10,7 @@
   - `/api/preflight`
   - `/api/create-adhoc-taskpack`
   - `/api/provider-profiles` 及其子路径（含密钥相关）
-- **令牌**：默认进程启动时生成随机 UUID；也可用 **`--auth-token <secret>`** 固定。浏览器侧由前端存储并在 `apiFetch` 中附加（参见 web-report `app-helpers`）。
+- **本地服务密码**：首次打开 Workbench 时可直接设置密码；密码哈希保存在工作区 `.agentarena/ui-auth.json`，浏览器只保存当前会话的 Bearer Token。密码由每个用户自行设置，不存在通用默认值。自动打开浏览器仍通过一次性 bootstrap 连接；脚本和旧客户端仍可使用 **`--auth-token <secret>`**、**`AGENTARENA_AUTH_TOKEN`** 或端口对应的 `.agentarena/last-auth-token-<port>` 文件。
 
 ## 任务包的本地信任边界
 
@@ -21,12 +21,24 @@
 
 ## Codex / Claude Code 本地配置边界
 
-- Codex 的模型和推理等级留空时，运行会直接使用当时的本地登录与配置；如果设置了 `CODEX_HOME`，检查和正式运行都会使用该目录。页面里检测到的默认值只用于说明，不会自动固定成一次运行覆盖。
-- Claude Code 内置官方 Profile 直接使用当前本地登录和个人配置；如果设置了 `CLAUDE_CONFIG_DIR`，正式运行会沿用它。AgentArena 不主动修改个人配置，但 Claude Code 自身仍可能正常更新缓存、历史或登录状态。
-- Claude Code 第三方 Profile 使用每次新建的临时配置目录，不读取当前官方登录、个人规则、插件或 MCP。连接测试与正式运行使用同一隔离规则，结束后清理临时配置。
-- 第三方临时仓库仍保留 `AGENTS.md`、`CLAUDE.md`，但在建立 Git 基线前移除根目录 `.claude/`、`.codex/` 和 `.mcp.json`，因此隔离动作不会被算成智能体修改。
-- Claude Code 的官方与第三方模式都要求操作者在启动 AgentArena 时明确设置 `AGENTARENA_SKIP_PERMISSIONS=1`，才允许无人值守修改临时仓库；未设置时页面和正式预检都会在运行前阻止并说明原因。
-- Provider 的 `extraEnv` 不能覆盖隔离目录、系统启动路径、专用地址、模型或密钥字段。已有 Profile 如果包含这些冲突字段，会在修正前被阻止运行。
+- Workbench 的内置 `codex-local` / `claude-local` RuntimeProfile 继承当前终端能使用的命令、环境变量、登录态、个人/项目规则、Skills、MCP 和 Hooks。AgentArena 不改写 `~/.codex/config.toml`、`~/.claude/settings.json` 或用户配置的 `CODEX_HOME` / `CLAUDE_CONFIG_DIR`。
+- Codex 的验证和正式任务会从用户 Home 复制 `config.toml`、本地模式所需的 `auth.json`、`AGENTS.md`、`AGENTS.override.md`、`rules` 和 `skills` 到一次性的影子 `CODEX_HOME`。CLI 自己产生的 trust、缓存和状态只写入影子目录，子进程退出后清理；Managed Provider 模式不复制本地 `auth.json`。RuntimeProfile LaunchSpec 在 Unix 使用 `workspace-write` 与 `approval_policy=never`；Windows 使用 `danger-full-access` 回退，避免部分 npm Codex 安装中无法加载的 sandbox helper，但仍只在 AgentArena 一次性工作区内执行。
+- Managed Provider RuntimeProfile 仍继承上述 Harness，只在当次任务子进程中覆盖 Provider、模型和 Secret。Codex 使用任务级 `-c` 参数，Claude 使用任务级环境变量和 `--setting-sources user,project,local`；不会删除临时仓库里的 `.claude/`、`.codex/` 或 `.mcp.json`。
+- Profile、Secret、CLI、相关环境、仓库基线或 Harness 配置发生变化时，旧 Task Receipt 失效，但 Profile 本身保留，用户只需重新验证。
+- Claude 后台任务使用 `--permission-mode dontAsk`。需要交互确认的工具调用会被拒绝；AgentArena 不会追加 `--dangerously-skip-permissions`，也不读取已废弃的 `AGENTARENA_SKIP_PERMISSIONS`。
+- 旧 launcher 的 Claude-only Provider Profile API 仍作为兼容路径保留，并继续使用临时隔离配置；首版正式配置和任务入口是 Workbench RuntimeProfile。
+- Provider 的 `extraEnv` 不能覆盖运行控制、系统启动路径、Provider 地址、模型或密钥专用字段。已有 Profile 如果包含这些冲突字段，会在修正前被阻止运行。
+- Verification Receipt 只保存有界且脱敏的失败证据。任务 Secret、全部冻结环境覆盖值、Provider 路由、网络地址和运行路径不会返回网页；CLI 已提供结构化终止错误时，不再附带完整事件流。
+
+## 三阶段就绪语义
+
+| 状态 | 含义 |
+|------|------|
+| `Installed` | CLI 可执行并能返回版本；不证明已登录。 |
+| `Conversation Ready` | 当前冻结 Provider/模型能返回随机 sentinel；不证明能修改仓库。 |
+| `Task Ready` | 在所选仓库的一次性副本中完成了唯一预期修改，并签发与 Profile、Secret、CLI、Harness 和仓库身份绑定的 Receipt。 |
+
+只有 `Task Ready` 且 Receipt 仍精确匹配的 RuntimeProfile 可以启动任务。
 
 ## `doctor` 与 `preflight`：失败语义
 
@@ -38,7 +50,7 @@
 | `status: "unverified"` | 适配器未报错但未完成认证探测（例如未使用 `--probe-auth`）；**不代表已登录**。 |
 | `status: "missing"` | 未找到 Agent CLI 或可执行入口。 |
 | `status: "blocked"` | 版本/配置不满足要求，或认证探测失败；**不应理解为「agent 已可用」**。 |
-| UI 返回 500 + `"Internal server error"` | 服务端捕获未预期异常；查看终端日志中的 `[agentarena] Preflight failed:`。 |
+| 单个 Harness 返回 `blocked` + `preflight failed` | 该 Harness 预检异常或超时；其他 Harness 的结果仍会返回。 |
 | `doctor --strict` | 任一选中适配器未就绪则 **进程退出码非 0**，适合 CI。 |
 
 **注意**：外部 CLI（Codex、Claude Code、Cursor 等）随厂商升级行为会变；**同一退出码在不同版本下含义可能不同**。合约测试保障 JSON 形状稳定，**不保障**第三方 CLI 长期行为不变。

@@ -1,82 +1,56 @@
 schemaVersion: agentarena.taskpack/v1
 id: add-feature-with-tests
-title: Add Feature with Tests
-description: Add a memoization feature to a function and write tests for it.
+title: Add a Memoization Helper
+description: Add a small reusable memoization feature and cover its observable contract.
 metadata:
   source: official
   owner: AgentArena
-  difficulty: hard
-  objective: Test ability to add a feature, write tests, and verify everything works.
-  judgeRationale: Behavioral tests verify the feature works correctly and tests pass.
-  repoTypes: ["node"]
-  tags: ["feature", "testing", "implementation"]
+  lifecycle: core
+  difficulty: medium
+  objective: Complete a narrowly scoped feature addition with caching semantics and focused tests.
+  repoTypes: [node]
+  tags: [core, benchmark, feature, tests]
   dependencies: []
-  differentiator: Tests end-to-end implementation — weak agents add code but don't test it.
-
-repoSource: "builtin://nodejs-app"
-
+  judgeRationale: The behavior verifier checks cache reuse and the task-specific test file proves the feature is exercised.
+  differentiator: Requires implementation, public export, and tests without changing existing helpers.
+  i18n:
+    zh-CN:
+      title: 添加记忆化工具
+      description: 添加可复用的记忆化功能并覆盖可观察契约。
+      objective: 完成带缓存语义和聚焦测试的小型功能。
+      judgeRationale: 行为验证器检查缓存复用，任务测试文件证明功能确实被覆盖。
+repoSource: builtin://nodejs-core
 prompt: |
-  ## Task | 任务
+  Complete the memoization feature exposed by `src/index.js`.
 
-  Add a `memoize` function to `src/utils.js` that caches function results:
-
-  1. Add `memoize(fn)` to `src/utils.js`:
-     - Returns a new function that caches results based on the first argument
-     - If called with the same first argument again, returns the cached result
-     - The cached function must have a `cache` property that exposes the cache object
-     - The cache object must have `size()` and `clear()` methods
-
-  2. Create `test/memoize.test.js` with at least 5 test cases:
-     - Test that memoize returns the correct result
-     - Test that repeated calls with the same argument use the cache
-     - Test that `cache.size()` reports the correct count
-     - Test that `cache.clear()` empties the cache
-     - Test that different arguments produce different results
-
-  3. Export `memoize` from `src/index.js`
-
-  4. All tests must pass: `node --test test/memoize.test.js`
-
-  ## Constraints | 约束
-
-  - Only modify `src/utils.js` and `src/index.js`
-  - Create `test/memoize.test.js` (new file)
-  - Do NOT modify existing test files
-  - Do NOT add new dependencies
-  - The memoize function must be generic (work with any function)
-
-expectedChangedPaths:
-  - src/utils.js
-  - src/index.js
-  - test/memoize.test.js
-
+  Implement `memoize(fn)` in `src/memoize.js`: repeated calls with the same
+  primitive arguments should reuse the first result, while a different argument
+  tuple should compute a new result. Preserve the existing module exports and
+  add a focused `test/memoize.test.js` file. Do not edit the fixture scripts or
+  unrelated modules.
+expectedChangedPaths: [src/memoize.js, src/index.js, test/memoize.test.js]
+changePolicy:
+  requireAgentChange: true
+  allowedPaths: [src/memoize.js, src/index.js, test/memoize.test.js]
+  forbiddenPaths: ["scripts/**", package.json, "fixtures/**"]
+  minChangedFiles: 2
+  maxChangedFiles: 3
 envAllowList: []
-setupCommands: []
-teardownCommands: []
+setupCommands:
+  - id: inject-fault
+    label: Prepare the isolated memoization stub
+    command: node scripts/inject-task-fault.mjs add-feature-with-tests
+    timeoutMs: 10000
 judges:
-  - id: memoize-works
+  - id: behavior
     type: command
-    label: memoize function works correctly
-    command: |
-      node -e "var u=require('./src/utils');var a=require('node:assert/strict');a.strictEqual(typeof u.memoize,'function');var callCount=0;var fn=u.memoize(function(x){callCount++;return x*2});a.strictEqual(fn(5),10);a.strictEqual(fn(5),10);a.strictEqual(callCount,1);console.log('PASS: memoize works');"
+    label: Memoization behavior and export are correct
+    command: node scripts/verify-core-task.mjs add-feature-with-tests
     timeoutMs: 10000
     critical: true
-  - id: cache-exposed
+  - id: feature-tests
     type: command
-    label: memoize exposes cache with size and clear
-    command: |
-      node -e "var u=require('./src/utils');var a=require('node:assert/strict');var fn=u.memoize(function(x){return x});fn(1);fn(2);a.strictEqual(typeof fn.cache,'object');a.strictEqual(typeof fn.cache.size,'function');a.strictEqual(typeof fn.cache.clear,'function');a.strictEqual(fn.cache.size(),2);fn.cache.clear();a.strictEqual(fn.cache.size(),0);console.log('PASS: cache exposed');"
-    timeoutMs: 10000
-    critical: true
-  - id: tests-pass
-    type: command
-    label: memoize tests pass
+    label: Feature tests pass
     command: node --test test/memoize.test.js
     timeoutMs: 30000
     critical: true
-  - id: exported
-    type: command
-    label: memoize exported from index
-    command: |
-      node -e "var m=require('./src/index');var a=require('node:assert/strict');a.strictEqual(typeof m.memoize,'function');console.log('PASS: exported');"
-    timeoutMs: 10000

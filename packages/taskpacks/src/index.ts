@@ -4,6 +4,7 @@ import {
   type CommandExecutionSpec,
   judgeTypeRegistry,
   TASK_PACK_SCHEMA_V1,
+  type TaskChangePolicy,
   type TaskJudge,
   type TaskPack,
   type TaskPackMetadata,
@@ -17,6 +18,7 @@ import {
   assertOptionalBoolean,
   assertOptionalNonNegativeInteger,
   assertOptionalNumber,
+  assertOptionalPositiveNumber,
   assertOptionalString,
   assertString,
   assertStringArray,
@@ -38,6 +40,14 @@ function normalizeMetadata(value: unknown): TaskPackMetadata | undefined {
     throw new Error(
       `Task pack field "metadata.source" must be "official" or "community". ` +
       `Received: "${source}".`
+    );
+  }
+
+  const lifecycle = assertOptionalString(metadata.lifecycle, "metadata.lifecycle");
+  if (lifecycle !== undefined && !["core", "legacy", "experimental"].includes(lifecycle)) {
+    throw new Error(
+      `Task pack field "metadata.lifecycle" must be "core", "legacy", or "experimental". ` +
+      `Received: "${lifecycle}".`
     );
   }
 
@@ -68,6 +78,7 @@ function normalizeMetadata(value: unknown): TaskPackMetadata | undefined {
   return {
     source: source as "official" | "community",
     owner: assertString(metadata.owner, "metadata.owner"),
+    lifecycle: lifecycle as "core" | "legacy" | "experimental" | undefined,
     difficulty: difficulty as "easy" | "medium" | "hard" | undefined,
     objective: assertOptionalString(metadata.objective, "metadata.objective"),
     repoTypes: assertStringArray(metadata.repoTypes, "metadata.repoTypes"),
@@ -127,6 +138,44 @@ function normalizeDifficultyEvolution(value: unknown): NonNullable<TaskPackMetad
   };
 }
 
+function normalizeChangePolicy(value: unknown): TaskChangePolicy | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const policy = assertObject(value, "changePolicy");
+  const requireAgentChange = assertOptionalBoolean(policy.requireAgentChange, "changePolicy.requireAgentChange");
+  const allowedPaths = assertStringArray(policy.allowedPaths, "changePolicy.allowedPaths");
+  const forbiddenPaths = assertStringArray(policy.forbiddenPaths, "changePolicy.forbiddenPaths");
+  const minChangedFiles = assertOptionalNonNegativeInteger(policy.minChangedFiles, "changePolicy.minChangedFiles");
+  const maxChangedFiles = assertOptionalNonNegativeInteger(policy.maxChangedFiles, "changePolicy.maxChangedFiles");
+
+  if (
+    requireAgentChange === undefined &&
+    allowedPaths.length === 0 &&
+    forbiddenPaths.length === 0 &&
+    minChangedFiles === undefined &&
+    maxChangedFiles === undefined
+  ) {
+    throw new Error(
+      `Task pack field "changePolicy" must define at least one constraint.`
+    );
+  }
+  if (minChangedFiles !== undefined && maxChangedFiles !== undefined && minChangedFiles > maxChangedFiles) {
+    throw new Error(
+      `Task pack changePolicy minChangedFiles (${minChangedFiles}) must be <= maxChangedFiles (${maxChangedFiles}).`
+    );
+  }
+
+  return {
+    requireAgentChange,
+    allowedPaths: allowedPaths.length > 0 ? allowedPaths : undefined,
+    forbiddenPaths: forbiddenPaths.length > 0 ? forbiddenPaths : undefined,
+    minChangedFiles,
+    maxChangedFiles
+  };
+}
+
 function normalizeJudge(
   value: Record<string, unknown>,
   index: number,
@@ -157,7 +206,12 @@ function normalizeJudge(
 
   const normalizer = JUDGE_NORMALIZERS[type];
   if (normalizer) {
-    return normalizer(value, index, id, label, critical);
+    const normalized = normalizer(value, index, id, label, critical);
+    // `weight` is validated as a common field but the per-type normalizers do
+    // not carry it through, so attach it centrally. Without this the value is
+    // silently dropped and weightedJudgePassRatio degrades to equal weighting.
+    const weight = assertOptionalPositiveNumber(value.weight, `judges[${index}].weight`);
+    return weight === undefined ? normalized : { ...normalized, weight };
   }
 
   const supportedTypes = judgeTypeRegistry.getAllTypes();
@@ -248,7 +302,7 @@ export async function loadTaskPack(taskPath: string): Promise<TaskPack> {
 
   const ALLOWED_TOP_LEVEL_FIELDS = new Set([
     "schemaVersion", "id", "title", "description", "prompt", "metadata",
-    "repoSource", "expectedChangedPaths", "envAllowList", "setupCommands",
+    "repoSource", "expectedChangedPaths", "changePolicy", "envAllowList", "setupCommands",
     "judges", "teardownCommands", "successCommands"
   ]);
 
@@ -294,6 +348,7 @@ export async function loadTaskPack(taskPath: string): Promise<TaskPack> {
     metadata: normalizeMetadata(parsed.metadata),
     repoSource,
     expectedChangedPaths: assertStringArray(parsed.expectedChangedPaths, "expectedChangedPaths"),
+    changePolicy: normalizeChangePolicy(parsed.changePolicy),
     envAllowList: assertStringArray(parsed.envAllowList, "envAllowList"),
     setupCommands: setupCommandsInput.map((value, index) => {
       if (!value || typeof value !== "object") {

@@ -273,6 +273,18 @@ export function isScoreExcluded(result) {
   return result?.scoreExcluded === true;
 }
 
+function isExecutionCompleted(result) {
+  return result?.executionStatus === undefined
+    ? result?.status === "success"
+    : result.executionStatus === "completed";
+}
+
+function resolveCostQuality(result) {
+  if (["known", "estimated", "unavailable"].includes(result?.costQuality)) return result.costQuality;
+  return result?.costKnown === true ? "known" : "unavailable";
+}
+
+
 /**
  * Weighted pass ratio for a set of judges: Σ(weightᵢ·passedᵢ) / Σ(weightᵢ),
  * using `weight ?? 1`. Returns 1 for an empty set (vacuously true).
@@ -363,20 +375,28 @@ export function computeScoreComponents(result, run) {
 
   // precisionScore
   const hasExpectedPaths = run.task?.expectedChangedPaths && run.task.expectedChangedPaths.length > 0;
-  const precisionScoreVal = hasExpectedPaths ? Math.max(result.diffPrecision?.score ?? 0, 0) : 0;
+  const precisionScoreVal = hasExpectedPaths && result.diff?.reliable !== false && typeof result.diffPrecision?.score === "number"
+    ? Math.max(result.diffPrecision.score, 0)
+    : 0;
 
-  // durationEfficiencyScore
-  const durations = run.results.map(entry => entry.durationMs).filter(v => v > 0);
-  let durationScore = 0;
+  // durationEfficiencyScore — matches packages/report/src/score-metrics.ts:
+  // when no successful result has a positive duration, everyone is equally efficient (1).
+  const durations = run.results
+    .filter(entry => entry.status === "success" && entry.scoreExcluded !== true)
+    .map(entry => entry.durationMs)
+    .filter(v => v > 0);
+  let durationScore = 1;
   if (durations.length > 0) {
     const fastest = Math.min(...durations);
     durationScore = fastest / Math.max(result.durationMs, fastest);
   }
 
   // costEfficiencyScore
-  const costs = run.results.filter(entry => entry.costKnown && entry.estimatedCostUsd > 0).map(entry => entry.estimatedCostUsd);
+  const costs = run.results
+    .filter(entry => entry.status === "success" && entry.scoreExcluded !== true && resolveCostQuality(entry) === "known" && entry.estimatedCostUsd > 0)
+    .map(entry => entry.estimatedCostUsd);
   let costScore = 0;
-  if (result.costKnown && result.estimatedCostUsd > 0 && costs.length > 0) {
+  if (resolveCostQuality(result) === "known" && result.estimatedCostUsd > 0 && costs.length > 0) {
     const cheapest = Math.min(...costs);
     costScore = cheapest / Math.max(result.estimatedCostUsd, cheapest);
   }
@@ -435,7 +455,12 @@ export function normalizeApplicableWeights(weights, result, run) {
 
   /** @type {Record<string, number>} */
   const applicableWeights = {};
-  const isPrecisionApplicable = run.task?.expectedChangedPaths && run.task.expectedChangedPaths.length > 0;
+  const isPrecisionApplicable = Boolean(
+    run.task?.expectedChangedPaths?.length &&
+    result.diff?.reliable !== false &&
+    typeof result.diffPrecision?.score === "number"
+  );
+  const isCostApplicable = resolveCostQuality(result) === "known" && result.estimatedCostUsd > 0;
   const hasTokenEfficiency = result.tokenEfficiencyScore !== undefined;
   const hasResolutionRate = result.sweBench?.resolutionRate !== undefined;
   const hasAcceptanceRate = result.cursorBench?.acceptanceRate !== undefined;
@@ -450,6 +475,7 @@ export function normalizeApplicableWeights(weights, result, run) {
     if (key === "tests" && !hasTestJudge) continue;
     if (key === "lint" && !hasLintJudge) continue;
     if (key === "precision" && !isPrecisionApplicable) continue;
+    if (key === "cost" && !isCostApplicable) continue;
     if (key === "tokenEfficiency" && !hasTokenEfficiency) continue;
     if (key === "resolutionRate" && !hasResolutionRate) continue;
     if (key === "acceptanceRate" && !hasAcceptanceRate) continue;
@@ -494,7 +520,7 @@ export function getCompositeScoreDetails(result, run, weights = DEFAULT_SCORE_WE
   }
 
   // Rule 1: Failed run → failed band
-  if (result.status !== "success") {
+  if (!isExecutionCompleted(result)) {
     const baseScore = FAILED_SCORE_BAND.min;
     const efficiencyBonus = components.duration * 0.3 + components.cost * 0.2;
     // MUST match backend FAILED_EFFICIENCY_SCALE = 100
@@ -612,7 +638,7 @@ export function getCompositeScoreReasons(result, run, weights = DEFAULT_SCORE_WE
   const components = getScoreComponents(result, run);
   const reasons = [];
 
-  if (result.status !== "success") {
+  if (!isExecutionCompleted(result)) {
     reasons.push("failed");
     return reasons;
   }

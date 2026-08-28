@@ -12,6 +12,12 @@ metadata:
   tags: ["error-handling", "defensive-coding"]
   dependencies: []
   differentiator: Tests code understanding — weak agents add generic try/catch, strong agents add specific validation.
+  i18n:
+    zh-CN:
+      title: 添加缓存验证
+      description: 为缓存函数添加输入验证和错误处理。
+      objective: 检验 Agent 为现有函数增加防御性处理的能力。
+      judgeRationale: 行为测试验证函数能正确处理错误。
 
 repoSource: "builtin://nodejs-app"
 

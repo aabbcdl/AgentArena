@@ -12,10 +12,34 @@ import {
   setTrustProxy,
   startRateLimitCleanup,
 } from "../server/index.js";
+import {
+  readUiAuthPassword,
+  resolveUiAuthToken,
+  type UiAuthMode,
+  uiAuthPasswordFilePath,
+  uiAuthTokenFilePath,
+  uiAuthValuesMatch,
+  validateUiAuthPassword,
+  verifyUiAuthPassword,
+  writeUiAuthPassword,
+} from "./ui-auth.js";
+import { createUiAuthBootstrap } from "./ui-auth-bootstrap.js";
 import { createRequestHandler } from "./ui-routes.js";
 import { UiRunStateController } from "./ui-run-state.js";
 
 const DEFAULT_UI_PORT = 4320;
+
+async function resolveUiWorkspaceRoot(value?: string): Promise<string> {
+  const candidate = path.resolve(process.cwd(), value?.trim() || ".");
+  try {
+    const stat = await fs.stat(candidate);
+    if (!stat.isDirectory()) throw new Error(`Workspace root is not a directory: ${candidate}`);
+    return await fs.realpath(candidate);
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("Workspace root is not a directory:")) throw error;
+    throw new Error(`Workspace root does not exist or cannot be read: ${candidate}`);
+  }
+}
 
 /**
  * Validate a host string for safe use in a browser URL / `start` invocation.
@@ -59,15 +83,51 @@ function maybeOpenBrowser(url: string): void {
 export async function runUi(parsed: ParsedArgs): Promise<void> {
   const host = parsed.host ?? "127.0.0.1";
   const port = parsed.port ?? DEFAULT_UI_PORT;
+  const workspaceRoot = await resolveUiWorkspaceRoot(parsed.workspaceRoot);
   if (!isLocalUiHost(host)) {
     throw new Error("AgentArena UI only supports local addresses: 127.0.0.1, localhost, ::1, or ::ffff:127.0.0.1.");
   }
   if (!isValidPort(port)) {
     throw new Error(`Invalid port: "${port}". Port must be an integer in 1-65535.`);
   }
-  // Token priority: --auth-token > AGENTARENA_AUTH_TOKEN env > auto-generated
-  const authToken = parsed.authToken?.trim() || process.env.AGENTARENA_AUTH_TOKEN?.trim() || generateAuthToken();
-  const runState = new UiRunStateController(process.cwd());
+  // Token priority: --auth-token > AGENTARENA_LOCAL_AUTH_TOKEN > AGENTARENA_AUTH_TOKEN > auto-generated.
+  const resolvedAuth = resolveUiAuthToken(parsed.authToken, process.env, generateAuthToken);
+  const authToken = resolvedAuth.token;
+  const authMode: UiAuthMode = resolvedAuth.source === "cli" || resolvedAuth.source === "env" ? "token" : "password";
+  const authPasswordPath = uiAuthPasswordFilePath(workspaceRoot);
+  let storedPassword = resolvedAuth.source === "generated"
+    ? await readUiAuthPassword(authPasswordPath)
+    : null;
+  let passwordSetupInProgress = false;
+  const passwordConfigured = () => authMode === "token"
+    || resolvedAuth.source === "local-env"
+    || storedPassword !== null;
+  const promptForPasswordSetup = authMode === "password" && !passwordConfigured();
+  const setupAuthPassword = async (password: string): Promise<string | null> => {
+    if (authMode !== "password" || passwordConfigured() || passwordSetupInProgress) return null;
+    passwordSetupInProgress = true;
+    try {
+      const normalized = validateUiAuthPassword(password);
+      const existing = await readUiAuthPassword(authPasswordPath);
+      if (existing) {
+        storedPassword = existing;
+        return null;
+      }
+      storedPassword = await writeUiAuthPassword(authPasswordPath, normalized);
+      return authToken;
+    } finally {
+      passwordSetupInProgress = false;
+    }
+  };
+  const loginWithAuthPassword = async (password: string): Promise<string | null> => {
+    if (authMode !== "password" || !password.trim()) return null;
+    const matches = resolvedAuth.source === "local-env"
+      ? uiAuthValuesMatch(authToken, password.trim())
+      : verifyUiAuthPassword(storedPassword, password);
+    return matches ? authToken : null;
+  };
+  const authBootstrap = parsed.noOpen || promptForPasswordSetup ? undefined : createUiAuthBootstrap(authToken);
+  const runState = new UiRunStateController(workspaceRoot);
   await runState.restore();
   const codexDefaults = await getCodexDefaultResolvedRuntime();
 
@@ -80,10 +140,18 @@ export async function runUi(parsed: ParsedArgs): Promise<void> {
   const rateLimitCleanupInterval = startRateLimitCleanup();
 
   const requestHandler = createRequestHandler({
+    workspaceRoot,
     host,
     port,
     isLocalhost: true,
     authToken,
+    authTokenSource: resolvedAuth.source,
+    authTokenFilePath: uiAuthTokenFilePath(workspaceRoot, port),
+    authMode,
+    authSetupRequired: () => !passwordConfigured(),
+    setupAuthPassword,
+    loginWithAuthPassword,
+    exchangeAuthBootstrap: authBootstrap?.exchange,
     codexDefaults,
     get activeRun() { return runState.activeRun; },
     setActiveRun: (run) => runState.setActiveRun(run),
@@ -131,8 +199,8 @@ export async function runUi(parsed: ParsedArgs): Promise<void> {
   const url = formatLocalUiOrigin(host, port);
   console.log(`\nAgentArena UI server running`);
   console.log(`url=${url}`);
-  console.log(`repo=${process.cwd()}`);
-  const authTokenFilePath = path.join(process.cwd(), ".agentarena", "last-auth-token");
+  console.log(`workspace=${workspaceRoot}`);
+  const authTokenFilePath = uiAuthTokenFilePath(workspaceRoot, port);
   await fs.mkdir(path.dirname(authTokenFilePath), { recursive: true });
   await fs.writeFile(authTokenFilePath, authToken, { encoding: "utf8", mode: 0o600 });
   // Restrict file permissions to owner-only.
@@ -158,15 +226,25 @@ export async function runUi(parsed: ParsedArgs): Promise<void> {
   } else {
     await fs.chmod(authTokenFilePath, 0o600).catch(() => {});
   }
-  // Never print the token (or any prefix of it) to stdout — CI logs and terminal
-  // scrollback capture stdout, and even a partial prefix narrows brute force.
-  // Don't include the token in the URL fragment either: browser history persists it.
-  // Operators retrieve the token by reading the file path printed below.
-  console.log(`auth_token_file=${authTokenFilePath}`);
-  console.log(`  WARNING: The token in ${authTokenFilePath} grants full API access. Do not share it.`);
+  console.log(`auth_mode=${authMode}`);
+  if (authMode === "password") {
+    console.log(promptForPasswordSetup
+      ? "  Workbench will open the local service password setup page on first startup."
+      : "  Workbench will ask for the local service password when it needs to reconnect.");
+  } else {
+    // Never print the token (or any prefix of it) to stdout — CI logs and terminal
+    // scrollback capture stdout, and even a partial prefix narrows brute force.
+    // The real token is never included in the opened URL.
+    // Operators retrieve the token by reading the file path printed below.
+    console.log(`auth_token_file=${authTokenFilePath}`);
+    console.log(`  WARNING: The token in ${authTokenFilePath} grants full API access. Do not share it.`);
+  }
 
   if (!parsed.noOpen) {
-    maybeOpenBrowser(url);
+    const browserUrl = promptForPasswordSetup
+      ? `${url}/workbench/#/environment`
+      : `${url}/workbench/#bootstrap=${encodeURIComponent(authBootstrap?.code ?? "")}`;
+    maybeOpenBrowser(browserUrl);
   }
 
   await new Promise<void>((resolve) => {

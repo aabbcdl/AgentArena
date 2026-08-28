@@ -1,66 +1,53 @@
 schemaVersion: agentarena.taskpack/v1
-id: official-snapshot-fix
-title: Snapshot Fix
-description: Fix a generator script to match its expected output.
+id: snapshot-fix
+title: Restore Deterministic Snapshot Output
+description: Fix a generator so its stable text output matches the fixture contract.
 metadata:
   source: official
   owner: AgentArena
+  lifecycle: core
   difficulty: easy
-  objective: Fix a bug in a generator so its output matches the snapshot.
-  judgeRationale: Behavioral test verifies generator output matches expected exactly.
-  repoTypes: ["node"]
-  tags: ["snapshot", "regression", "bugfix"]
+  objective: Restore exact deterministic output without introducing time or environment dependencies.
+  repoTypes: [node]
+  tags: [core, benchmark, snapshot, deterministic]
   dependencies: []
-  differentiator: Tests precision — weak agents modify the snapshot instead of the generator.
+  judgeRationale: The generator is executed directly and through its regression test with an exact output assertion.
+  differentiator: Rewards precise output repair and avoids timing-sensitive snapshots.
   i18n:
     zh-CN:
-      title: 快照修复
-      description: 修复生成器脚本以匹配其预期输出。
-      objective: 修复生成器中的 bug，使其输出与快照匹配。
-      judgeRationale: 行为测试验证生成器输出与预期完全匹配。
-
+      title: 恢复确定性快照输出
+      description: 修复生成器，使稳定文本输出符合契约。
+      objective: 恢复精确且不依赖时间或环境的输出。
+      judgeRationale: 生成器会直接执行并通过回归测试进行精确断言。
+repoSource: builtin://nodejs-core
 prompt: |
-  ## Task | 任务
-
-  The generator script `scripts/generate.mjs` produces output that doesn't match
-  the expected snapshot in `fixtures/expected.txt`.
-
-  1. Read `fixtures/expected.txt` to see the correct output
-  2. Run `node scripts/generate.mjs` to see the current (broken) output
-  3. Compare and find the bug in `scripts/generate.mjs`
-  4. Fix the generator — do NOT modify `fixtures/expected.txt`!
-
-  The bug is: the generator uses "done" instead of "complete" in the status line.
-
-  ## Constraints | 约束
-
-  - Only modify `scripts/generate.mjs`
-  - Do NOT modify `fixtures/expected.txt`
-  - Output must match EXACTLY (including whitespace and newlines)
-
-expectedChangedPaths:
-  - scripts/generate.mjs
-
+  Restore the deterministic output contract for `src/generator.js`. Running
+  `node scripts/generate.mjs` must produce the documented report heading and
+  item count exactly, including line breaks. Keep the generator API and input
+  validation intact; modify only the generator implementation.
+expectedChangedPaths: [src/generator.js]
+changePolicy:
+  requireAgentChange: true
+  allowedPaths: [src/generator.js]
+  forbiddenPaths: ["test/**", "scripts/**", package.json, "fixtures/**"]
+  minChangedFiles: 1
+  maxChangedFiles: 1
 envAllowList: []
 setupCommands:
-  - id: create-fixtures
-    label: Create snapshot fixtures
-    command: |
-      node -e "var f=require('node:fs');f.mkdirSync('fixtures',{recursive:true});f.mkdirSync('scripts',{recursive:true});var expected='Header: Report 2024\n================\n\nItems:\n  1. Alpha (10)\n  2. Beta (20)\n  3. Gamma (30)\n\nTotal: 60\nStatus: complete\n';f.writeFileSync('fixtures/expected.txt',expected);var buggy='var items=[{name:\"Alpha\",value:10},{name:\"Beta\",value:20},{name:\"Gamma\",value:30}];\nvar lines=[];\nlines.push(\"Header: Report 2024\");\nlines.push(\"================\");\nlines.push(\"\");\nlines.push(\"Items:\");\nitems.forEach(function(item,i){lines.push(\"  \"+(i+1)+\". \"+item.name+\" (\"+item.value+\")\")});\nlines.push(\"\");\nvar total=items.reduce(function(s,item){return s+item.value},0);\nlines.push(\"Total: \"+total);\nlines.push(\"Status: done\");\nprocess.stdout.write(lines.join(\"\\n\")+\"\\n\");\n';f.writeFileSync('scripts/generate.mjs',buggy);console.log('Fixtures created');"
+  - id: inject-fault
+    label: Prepare the isolated generator regression
+    command: node scripts/inject-task-fault.mjs snapshot-fix
     timeoutMs: 10000
-teardownCommands: []
 judges:
-  - id: snapshot-match
+  - id: behavior
     type: command
-    label: Generator output matches snapshot exactly
-    command: |
-      node scripts/generate.mjs | node -e "var d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{var e=require('node:fs').readFileSync('fixtures/expected.txt','utf8');if(d!==e){console.error('MISMATCH');console.error('Expected '+e.length+' chars, got '+d.length);process.exit(1)}console.log('PASS: output matches snapshot')})"
-    timeoutMs: 15000
-    critical: true
-  - id: expected-unchanged
-    type: command
-    label: expected.txt was not modified
-    command: |
-      node -e "var {execFileSync}=require('node:child_process');var out=execFileSync('git',['diff','--name-only'],{encoding:'utf8'});if(out.includes('expected.txt')){console.error('expected.txt was modified!');process.exit(1)}console.log('PASS: expected.txt unchanged');"
+    label: Generator output matches exactly
+    command: node scripts/verify-core-task.mjs snapshot-fix
     timeoutMs: 10000
+    critical: true
+  - id: regression-tests
+    type: command
+    label: Generator test passes
+    command: node --test test/generator.test.js
+    timeoutMs: 30000
     critical: true

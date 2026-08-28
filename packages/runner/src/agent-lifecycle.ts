@@ -12,8 +12,13 @@ import {
   type DiffSummary,
   diffSnapshots,
   isAbortError,
+  type JudgeResult,
   logger,
   metrics,
+  type ResolvedLaunchSpec,
+  type RuntimeSecretValues,
+  redactSensitiveStrings,
+  redactSensitiveText,
   snapshotDirectory,
   type TraceEvent,
   throwIfAborted,
@@ -22,12 +27,13 @@ import { runJudges } from "@agentarena/judges";
 import type { loadTaskPack } from "@agentarena/taskpacks";
 import { JsonlTraceRecorder } from "@agentarena/trace";
 import { agentExecuteTimeoutMs } from "./concurrency.js";
+import { collectFileDiffs } from "./file-diffs.js";
 import { buildFinalResult } from "./result-assembly.js";
 import {
   buildChangedFiles,
   createCancellationSummary,
 } from "./result-builder.js";
-import { buildDiffPrecision } from "./snapshot.js";
+import { buildDiffPrecision, evaluateChangePolicy } from "./snapshot.js";
 import { wrapWithTimeout } from "./timeout-utils.js";
 import type { AgentRunContext } from "./types.js";
 import { debugLog, formatErrorDetails, formatErrorMessage } from "./workspace.js";
@@ -54,7 +60,15 @@ export async function createAgentRunContext(
   workspaceRootPath: string,
   task: Awaited<ReturnType<typeof loadTaskPack>>,
   preflight: AdapterPreflightResult & { adapter?: AgentRunContext["adapter"] },
-  options: { updateSnapshots?: boolean; cancellation?: BenchmarkCancellation; debug?: boolean }
+  options: {
+    updateSnapshots?: boolean;
+    cancellation?: BenchmarkCancellation;
+    debug?: boolean;
+    allowEvalInTaskCommands?: boolean;
+    resolvedLaunchSpec?: ResolvedLaunchSpec;
+    runtimeSecretValues?: RuntimeSecretValues;
+    hostEnvironment?: NodeJS.ProcessEnv;
+  }
 ): Promise<AgentRunContext> {
   // Prefer an already-resolved adapter injected via preflight (M12),
   // falling back to the registry lookup for backward compatibility.
@@ -62,8 +76,16 @@ export async function createAgentRunContext(
   const agentOutputPath = path.join(outputPath, "agents", preflight.variantId);
   const workspacePath = path.join(workspaceRootPath, preflight.variantId);
   const tracePath = path.join(agentOutputPath, "trace.jsonl");
-  const traceRecorder = new JsonlTraceRecorder(tracePath);
-  const executionEnvironment = buildExecutionEnvironment(task.envAllowList);
+  const knownSecrets = Object.values(options.runtimeSecretValues ?? {}).filter(Boolean);
+  const redactRuntimeValue = <T>(value: T): T => redactSensitiveStrings(value, knownSecrets);
+  const traceRecorder = new JsonlTraceRecorder(
+    tracePath,
+    0,
+    (event) => redactRuntimeValue(event)
+  );
+  const executionEnvironment = options.resolvedLaunchSpec
+    ? { ...(options.hostEnvironment ?? process.env) }
+    : buildExecutionEnvironment(task.envAllowList);
   const cancellation = options.cancellation;
   const throwIfCancelled = (stage: string) => {
     throwIfAborted(cancellation?.signal, createCancellationSummary(stage));
@@ -76,9 +98,13 @@ export async function createAgentRunContext(
     tracePath,
     traceRecorder,
     executionEnvironment,
+    resolvedLaunchSpec: options.resolvedLaunchSpec,
+    runtimeSecretValues: options.runtimeSecretValues,
+    redactRuntimeValue,
     cancellation,
     throwIfCancelled,
-    debug: options.debug ?? false
+    debug: options.debug ?? false,
+    allowEvalInTaskCommands: options.allowEvalInTaskCommands
   };
 }
 
@@ -122,7 +148,7 @@ export async function executeAgent(
   const startedAt = Date.now();
   let adapterResult: Awaited<ReturnType<typeof adapter.execute>> | undefined;
   let adapterError: unknown;
-  const adapterTimeoutMs = agentExecuteTimeoutMs();
+  const adapterTimeoutMs = context.resolvedLaunchSpec?.timeouts.totalMs ?? agentExecuteTimeoutMs();
   const adapterAbortController = new AbortController();
   let adapterTimedOut = false;
   let adapterTimeoutHandle: ReturnType<typeof setTimeout> | undefined;
@@ -161,11 +187,22 @@ export async function executeAgent(
         baseAgentId: preflight.baseAgentId,
         variantId: preflight.variantId,
         displayLabel: preflight.displayLabel,
-        config: preflight.requestedConfig
+        config: preflight.requestedConfig,
+        ...(preflight.runtimeProfileId !== undefined
+          ? { runtimeProfileId: preflight.runtimeProfileId }
+          : {}),
+        ...(preflight.launchSpecHash !== undefined
+          ? { launchSpecHash: preflight.launchSpecHash }
+          : {}),
+        ...(preflight.verificationReceiptId !== undefined
+          ? { verificationReceiptId: preflight.verificationReceiptId }
+          : {})
       },
       repoPath,
       workspacePath,
       environment: executionEnvironment,
+      resolvedLaunchSpec: context.resolvedLaunchSpec,
+      runtimeSecretValues: context.runtimeSecretValues,
       task,
       signal: adapterAbortController.signal,
       // Pass activity callback so real CLI adapters can stream stdout/stderr
@@ -257,33 +294,8 @@ export async function runJudgesAndAfterSnapshot(
 ): Promise<{ judgeResults: Awaited<ReturnType<typeof runJudges>>; judgeError: unknown; afterSnapshot: Map<string, { relativePath: string; hash: string }>; diff: DiffSummary; changedFiles: string[]; diffPrecision: DiffPrecisionSummary | undefined; diffReliable: boolean }> {
   const { task, workspacePath, traceRecorder, throwIfCancelled, cancellation } = context;
 
-  let judgeResults: Awaited<ReturnType<typeof runJudges>> = [];
+  const judgeResults: Awaited<ReturnType<typeof runJudges>> = [];
   let judgeError: unknown;
-
-  if (adapterResult && adapterResult.status === "success") {
-    try {
-      throwIfCancelled("judges");
-      judgeResults = await runJudges(task.judges, workspacePath, task.envAllowList, {
-        updateSnapshots: options.updateSnapshots,
-        signal: cancellation?.signal,
-        tokenUsage: adapterResult.tokenUsage,
-        tokenBudget: task.metadata?.tokenBudget
-      });
-
-    } catch (error) {
-      judgeError = error;
-      if (!isAbortError(error)) {
-        const errorDetails = formatErrorDetails(error);
-        await traceRecorder.record({
-          agentId: preflight.agentId,
-          timestamp: new Date().toISOString(),
-          type: "judge.error",
-          message: "Judges execution failed.",
-          metadata: errorDetails
-        });
-      }
-    }
-  }
 
   let afterSnapshot: Map<string, { relativePath: string; hash: string }>;
   let afterReliable = true;
@@ -315,8 +327,65 @@ export async function runJudgesAndAfterSnapshot(
     reliable: diffReliable,
     unreliableReason
   });
-  const changedFiles = buildChangedFiles(diff, adapterResult?.changedFilesHint ?? []);
+  // A task with an explicit change policy must be judged from the actual
+  // before/after snapshot. Adapter hints are advisory and can be fabricated by
+  // an adapter that did not change the workspace, so they are deliberately not
+  // included in the policy input (or the result's changedFiles for core packs).
+  const snapshotChangedFiles = buildChangedFiles(diff, []);
+  const changedFiles = task.changePolicy
+    ? snapshotChangedFiles
+    : buildChangedFiles(diff, adapterResult?.changedFilesHint ?? []);
   const diffPrecision = buildDiffPrecision(task.expectedChangedPaths, changedFiles, { reliable: diffReliable });
+
+  const policyReliable = diffReliable && diff.skippedLargeFiles.length === 0;
+  const changePolicyResult = evaluateChangePolicy(task.changePolicy, snapshotChangedFiles, {
+    reliable: policyReliable
+  });
+  if (changePolicyResult) {
+    const policyJudge: JudgeResult = {
+      judgeId: "agentarena-change-policy",
+      label: "Task change policy",
+      type: "command",
+      critical: true,
+      command: "AgentArena change policy",
+      exitCode: changePolicyResult.success ? 0 : 1,
+      success: changePolicyResult.success,
+      stdout: changePolicyResult.success ? changePolicyResult.reason : "",
+      stderr: changePolicyResult.success ? "" : changePolicyResult.reason,
+      durationMs: 0,
+      cwd: workspacePath
+    };
+    judgeResults.push(policyJudge);
+  }
+
+  // Evaluate normal judges only after the agent diff is frozen. This prevents
+  // test runners or snapshot tools from becoming accidental agent changes.
+  if (adapterResult && adapterResult.status === "success") {
+    try {
+      throwIfCancelled("judges");
+      const normalJudgeResults = await runJudges(task.judges, workspacePath, task.envAllowList, {
+        updateSnapshots: options.updateSnapshots,
+        signal: cancellation?.signal,
+        tokenUsage: adapterResult.tokenUsage,
+        tokenBudget: task.metadata?.tokenBudget,
+        tokenUsageReliable: adapterResult.tokenUsageReliable,
+        allowEval: context.allowEvalInTaskCommands
+      });
+      judgeResults.push(...normalJudgeResults);
+    } catch (error) {
+      judgeError = error;
+      if (!isAbortError(error)) {
+        const errorDetails = formatErrorDetails(error);
+        await traceRecorder.record({
+          agentId: preflight.agentId,
+          timestamp: new Date().toISOString(),
+          type: "judge.error",
+          message: "Judges execution failed.",
+          metadata: errorDetails
+        });
+      }
+    }
+  }
 
   return { judgeResults, judgeError, afterSnapshot, diff, changedFiles, diffPrecision, diffReliable };
 }
@@ -327,15 +396,23 @@ export async function recordFinalEvents(
   judgeError: unknown,
   teardownResults: CommandStepResult[],
   teardownError: unknown,
-  success: boolean,
+  validationStatus: NonNullable<AgentRunResult["validationStatus"]>,
   context: AgentRunContext
 ): Promise<void> {
+  const validationMessage = {
+    passed: "All judges passed",
+    partial: "One or more non-critical judges failed",
+    failed: "One or more critical judges failed",
+    error: "Judges execution failed",
+    "not-run": "Judges were not run"
+  }[validationStatus];
   await context.traceRecorder.record({
     agentId: preflight.agentId,
     timestamp: new Date().toISOString(),
     type: "judge.finish",
-    message: success ? "All judges passed" : "One or more judges failed",
+    message: validationMessage,
     metadata: {
+      validationStatus,
       judgeResults: judgeResults.map((value) => ({
         label: value.label,
         type: value.type,
@@ -388,7 +465,8 @@ export async function recordFinalEvents(
  *
  * **Pipeline phases:** createAgentRunContext -> setupWorkspaceAndPrechecks ->
  * runSetupCommands -> createBeforeSnapshot -> executeAgent ->
- * runJudgesAndAfterSnapshot -> runTeardownCommands -> buildFinalResult.
+ * runJudgesAndAfterSnapshot -> collectFileDiffs -> runTeardownCommands ->
+ * buildFinalResult.
  *
  * **Critical behaviors:**
  * - Teardown failure marks the ENTIRE run as failed (intentional: environment problem).
@@ -414,6 +492,10 @@ export async function runAgent(
     onActivity?: (line: string, stream: "stdout" | "stderr", seq: number) => void;
     /** External monotonic seq provider (from runner). Falls back to local counter. */
     nextActivitySeq?: () => number;
+    allowEvalInTaskCommands?: boolean;
+    resolvedLaunchSpec?: ResolvedLaunchSpec;
+    runtimeSecretValues?: RuntimeSecretValues;
+    hostEnvironment?: NodeJS.ProcessEnv;
   }
 ): Promise<AgentRunResult> {
   const context = await createAgentRunContext(outputPath, workspaceRootPath, task, preflight, options);
@@ -445,21 +527,22 @@ export async function runAgent(
   };
 
   const pushActivityLine = (line: string, stream: "stdout" | "stderr") => {
+    const safeLine = redactSensitiveText(line, Object.values(context.runtimeSecretValues ?? {}));
     const seq = getNextSeq();
     // Always store in AgentLogStore if provided (full fidelity)
     options.agentLogStore?.append(preflight.variantId, {
       seq,
       ts: Date.now(),
       stream,
-      text: line
+      text: safeLine
     });
     // Keep last 30 lines for failureTail (sliding window)
-    pendingLines.push(`[${stream}] ${line}`);
+    pendingLines.push(`[${stream}] ${safeLine}`);
     if (pendingLines.length > MAX_FAILURE_TAIL) pendingLines.shift();
     // Debounce the emitted event (high-frequency output shouldn't flood the bus).
     // Capture seq at push time so the streamed SSE order exactly matches the
     // AgentLogStore order (critical for Last-Event-ID reconnect resync).
-    debouncedLines.push({ line, stream, seq });
+    debouncedLines.push({ line: safeLine, stream, seq });
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
       const batch = spliceDebouncedLines(debouncedLines);
@@ -486,10 +569,14 @@ export async function runAgent(
   // genuinely cancelled (never when it succeeded or failed), so a late-arriving
   // cancel signal cannot destroy evidence for an already-completed run.
   let runStatus: string | undefined;
+  // Held so finally can attach trace integrity after close() without losing it
+  // on early returns (same object reference is returned to the caller).
+  let outgoingResult: AgentRunResult | undefined;
   try {
   const earlyResult1 = await setupWorkspaceAndPrechecks(repoPath, preflight, context);
   if (earlyResult1) {
     runStatus = earlyResult1.status;
+    outgoingResult = earlyResult1;
     return earlyResult1;
   }
 
@@ -514,12 +601,15 @@ export async function runAgent(
           setupCancelTeardownController.signal
         );
         runStatus = earlyResult2.status;
-        return { ...earlyResult2, teardownResults: cancelTeardownResults };
+        const cancelledWithTeardown = { ...earlyResult2, teardownResults: cancelTeardownResults };
+        outgoingResult = cancelledWithTeardown;
+        return cancelledWithTeardown;
       } finally {
         clearTimeout(setupCancelTeardownHandle);
       }
     }
     runStatus = earlyResult2.status;
+    outgoingResult = earlyResult2;
     return earlyResult2;
   }
 
@@ -530,13 +620,19 @@ export async function runAgent(
     onActivity: enableActivity ? pushActivityLine : undefined
   });
 
-    const { judgeResults, judgeError, diff, changedFiles, diffPrecision } = await runJudgesAndAfterSnapshot(
+    const { judgeResults, judgeError, diff, changedFiles, diffPrecision, diffReliable } = await runJudgesAndAfterSnapshot(
     preflight,
     adapterResult,
     beforeSnapshotResult,
     options,
     context
   );
+
+  // Capture agent-produced evidence before teardown commands can modify or
+  // remove the files that were evaluated.
+  const fileDiffs = changedFiles.length > 0
+    ? await collectFileDiffs(context.workspacePath, changedFiles)
+    : [];
 
   let teardownResults: CommandStepResult[] = [];
   let teardownError: unknown;
@@ -585,16 +681,46 @@ export async function runAgent(
     isAbortError(judgeError) ||
     isAbortError(teardownError) ||
     context.cancellation?.signal?.aborted === true;
+  const criticalJudgeFailed = judgeResults.some(
+    (value) => value.critical === true && !value.success
+  );
+  const nonCriticalJudgeFailed = judgeResults.some(
+    (value) => value.critical !== true && !value.success
+  );
+  const validationStatus: NonNullable<AgentRunResult["validationStatus"]> =
+    adapterResult?.status !== "success" || adapterError
+      ? "not-run"
+      : judgeError
+        ? "error"
+        : criticalJudgeFailed
+          ? "failed"
+          : nonCriticalJudgeFailed
+            ? "partial"
+            : "passed";
+  const executionStatus: NonNullable<AgentRunResult["executionStatus"]> =
+    cancelled
+      ? "cancelled"
+      : adapterResult?.status !== "success" ||
+          adapterError ||
+          judgeError ||
+          teardownError ||
+          teardownResults.some((value) => !value.success)
+        ? "failed"
+        : "completed";
   const success =
-    !cancelled &&
-    adapterResult?.status === "success" &&
-    !adapterError &&
-    !judgeError &&
-    judgeResults.every((value) => value.success) &&
-    !teardownError &&
-    teardownResults.every((value) => value.success);
+    executionStatus === "completed" &&
+    validationStatus !== "failed" &&
+    validationStatus !== "error";
 
-  await recordFinalEvents(preflight, judgeResults, judgeError, teardownResults, teardownError, success, context);
+  await recordFinalEvents(
+    preflight,
+    judgeResults,
+    judgeError,
+    teardownResults,
+    teardownError,
+    validationStatus,
+    context
+  );
 
   // Extract the assembled prompt for inclusion in the result.
   // Three-layer fallback (any layer may silently produce undefined):
@@ -624,7 +750,7 @@ export async function runAgent(
     }
   }
 
-  const runResult = buildFinalResult(
+  const runResult = context.redactRuntimeValue(buildFinalResult(
     preflight,
     context,
     adapterResult,
@@ -638,8 +764,12 @@ export async function runAgent(
     diffPrecision,
     cancelled,
     success,
-    assembledPrompt
-  );
+    assembledPrompt,
+    diffReliable,
+    fileDiffs,
+    executionStatus,
+    validationStatus
+  ));
 
   // Attach failureTail when the run failed (opt-in: only when activity capture was enabled)
   if (enableActivity && (runResult.status === "failed") && pendingLines.length > 0) {
@@ -647,39 +777,47 @@ export async function runAgent(
   }
 
   runStatus = runResult.status;
+  outgoingResult = runResult;
   return runResult;
+  } catch (error) {
+    // Preserve the cancellation reason for the finally block even when the
+    // cancellation arrives before the pipeline can construct a result.
+    if (isAbortError(error)) {
+      runStatus = "cancelled";
+    }
+    throw error;
   } finally {
+    // A cancellation can happen before the first normal trace event (for
+    // example, between agent scheduling and workspace setup). Keep a minimal
+    // replayable event in that case and for all normal cancelled results.
+    if (runStatus === "cancelled") {
+      await context.traceRecorder.record({
+        agentId: preflight.agentId,
+        timestamp: new Date().toISOString(),
+        type: "agent.cancelled",
+        message: "Agent run cancelled.",
+        metadata: { variantId: preflight.variantId }
+      });
+    }
     // Flush any pending debounced activity lines before exiting
     flushActivity();
-    // Clean up intermediate files only when the run was genuinely cancelled.
-    // A succeeded/failed run keeps its trace and snapshots as evidence; a
-    // late-arriving cancel signal on a finished run must not purge them.
-    if (runStatus === "cancelled") {
-      try {
-        const intermediateFiles = [
-          context.tracePath,
-          path.join(context.agentOutputPath, "before-snapshot.json"),
-          path.join(context.agentOutputPath, "after-snapshot.json"),
-        ];
-        for (const filePath of intermediateFiles) {
-          try {
-            await fs.unlink(filePath);
-          } catch (error) {
-            const errCode = (error as NodeJS.ErrnoException | undefined)?.code;
-            if (errCode !== "ENOENT") {
-              logger.debug("runner", "cleanup.intermediate_failed", `Failed to delete intermediate file: ${error instanceof Error ? error.message : String(error)}`, {
-                metadata: { filePath }
-              });
-            }
-          }
-        }
-      } catch (error) {
-        logger.debug("runner", "cleanup.intermediate_failed", `Intermediate file cleanup failed: ${error instanceof Error ? error.message : String(error)}`);
-      }
-    }
+    // Trace and snapshots are evidence, including when execution is cancelled.
+    // Only the outer runner may remove temporary workspaces; never delete the
+    // files referenced by AgentRunResult.tracePath here.
 
     await context.traceRecorder.close().catch((closeError: unknown) => {
       logger.warn("runner", "trace.close_failed", `Failed to close trace recorder: ${closeError instanceof Error ? closeError.message : String(closeError)}`);
     });
+
+    // Surface incomplete traces on the result object after close drains the queue.
+    if (outgoingResult) {
+      const integrity = context.traceRecorder.getIntegrity();
+      if (integrity.writeFailed) {
+        outgoingResult.traceWriteFailed = true;
+      }
+      if (integrity.droppedWrites > 0) {
+        outgoingResult.traceDroppedWrites = integrity.droppedWrites;
+      }
+    }
   }
 }

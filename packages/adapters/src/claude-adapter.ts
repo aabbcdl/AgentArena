@@ -16,15 +16,21 @@ import { formatAdapterError } from "./adapter-diagnostics.js";
 import { buildAgentPrompt, createPreflightResult, getChangedFilesFromGit, savePromptArtifact } from "./adapter-helpers.js";
 import { getClaudeProviderProfileSecret } from "./claude-provider-profiles.js";
 import {
+  CLAUDE_SAFE_UNATTENDED_ARGS,
   claudeIsolationArgsSupported,
+  claudeSafeUnattendedArgsSupported,
   prepareClaudeRuntimeEnvironment
 } from "./claude-runtime-environment.js";
 import { probeClaudeLikeAuth, probeClaudeLikeAuthFast, probeHelp, probeInvocationVersion } from "./invocation-probes.js";
+import {
+  materializeRuntimeLaunchArguments,
+  materializeRuntimeLaunchEnvironment,
+  resolvedAgentRuntimeFromLaunchSpec
+} from "./launch-resolver.js";
 import { findExecutableOnPath, preflightTimeoutMs, type RunProcessCallbacks, transportTimeoutMs } from "./process-utils.js";
 import { resolveClaudeRuntime } from "./runtime-resolution.js";
 import {
   createClaudeTransportChain,
-  shouldSkipClaudePermissions,
   type TransportChainResult
 } from "./transport.js";
 
@@ -53,6 +59,42 @@ abstract class ClaudeLikeAdapter implements AgentAdapter {
   abstract execute(context: AdapterExecutionContext): Promise<AdapterExecutionResult>;
 
   async preflight(options?: AdapterPreflightOptions): Promise<AdapterPreflightResult> {
+    if (options?.resolvedLaunchSpec) {
+      const spec = options.resolvedLaunchSpec;
+      if (spec.agentKind !== "claude-code") {
+        return createPreflightResult(
+          options.selection,
+          this.id,
+          this.title,
+          this.kind,
+          this.capability,
+          "blocked",
+          `Frozen LaunchSpec belongs to ${spec.agentKind}, not Claude Code.`,
+          undefined,
+          spec.command.executable
+        );
+      }
+      const missingSecret = spec.environment.secretBindings.find(
+        (binding) => !options.runtimeSecretValues?.[binding.secretRef]
+      );
+      return {
+        ...createPreflightResult(
+          options.selection,
+          this.id,
+          this.title,
+          this.kind,
+          this.capability,
+          missingSecret ? "blocked" : "ready",
+          missingSecret
+            ? "The frozen Claude launch is missing its task-scoped Provider Secret."
+            : "Task-ready frozen Claude launch accepted.",
+          resolvedAgentRuntimeFromLaunchSpec(spec),
+          spec.command.executable
+        ),
+        runtimeProfileId: spec.profile.id,
+        launchSpecHash: spec.launchSpecHash
+      };
+    }
     const invocation = await this.resolveInvocation();
     const versionProbe = await probeInvocationVersion(invocation, process.cwd());
     const resolvedRuntime = versionProbe.version
@@ -134,37 +176,48 @@ abstract class ClaudeLikeAdapter implements AgentAdapter {
       extraEnvironment?: NodeJS.ProcessEnv;
       executionEnvironment?: NodeJS.ProcessEnv;
       resolvedRuntime?: AgentResolvedRuntime;
+      invocation?: InvocationSpec;
+      exactArguments?: boolean;
+      skipVersionProbe?: boolean;
+      launchSpecHash?: string;
       /** Whether this is a third-party provider (enables transport fallback) */
       isThirdPartyProvider?: boolean;
     }
   ): Promise<AdapterExecutionResult> {
     const prompt = buildAgentPrompt(context);
     await savePromptArtifact(prompt, context.workspacePath, context);
-    const invocation = await this.resolveInvocation();
+    const invocation = options?.invocation ?? await this.resolveInvocation();
     const executionEnvironment = options?.executionEnvironment ?? {
       ...context.environment,
       ...options?.extraEnvironment
     };
-    const versionProbe = await probeInvocationVersion(invocation, context.workspacePath, executionEnvironment);
-    const resolvedRuntime = {
-      ...(options?.resolvedRuntime ?? {
-        source: "unknown" as const,
-        verification: "unknown" as const
-      }),
-      effectiveAgentVersion:
-        versionProbe.version ?? options?.resolvedRuntime?.effectiveAgentVersion,
-      agentVersionSource:
-        versionProbe.source !== "unknown"
-          ? versionProbe.source
-          : options?.resolvedRuntime?.agentVersionSource
+    const baseRuntime = options?.resolvedRuntime ?? {
+      source: "unknown" as const,
+      verification: "unknown" as const
     };
+    const resolvedRuntime = options?.skipVersionProbe
+      ? baseRuntime
+      : await (async () => {
+          const versionProbe = await probeInvocationVersion(invocation, context.workspacePath, executionEnvironment);
+          return {
+            ...baseRuntime,
+            effectiveAgentVersion: versionProbe.version ?? baseRuntime.effectiveAgentVersion,
+            agentVersionSource: versionProbe.source !== "unknown"
+              ? versionProbe.source
+              : baseRuntime.agentVersionSource
+          };
+        })();
 
     // Create transport chain with fallback for third-party providers
     const transportChain = createClaudeTransportChain(
       invocation,
       options?.isThirdPartyProvider ?? false,
       options?.extraArgs ?? [],
-      { transportTimeoutMs: transportTimeoutMs(), logFallbacks: true }
+      {
+        transportTimeoutMs: context.resolvedLaunchSpec?.timeouts.totalMs ?? transportTimeoutMs(),
+        logFallbacks: true,
+        argumentsMode: options?.exactArguments ? "exact" : "augment"
+      }
     );
 
     const startedAt = Date.now();
@@ -175,12 +228,14 @@ abstract class ClaudeLikeAdapter implements AgentAdapter {
       metadata: {
         command: invocation.displayCommand,
         transportChain: transportChain.transportIds,
-        resolvedRuntime
+        resolvedRuntime,
+        launchSpecHash: options?.launchSpecHash
       }
     });
 
-    const activityCallbacks: RunProcessCallbacks | undefined = context.onActivity
+    const activityCallbacks: RunProcessCallbacks | undefined = context.onActivity || context.resolvedLaunchSpec
       ? {
+          idleTimeoutMs: context.resolvedLaunchSpec?.timeouts.idleMs,
           onStdout: (chunk: string) => {
             for (const line of chunk.split(/\r?\n/).filter((value) => value.trim())) {
               context.onActivity?.(line, "stdout", 0);
@@ -273,6 +328,7 @@ abstract class ClaudeLikeAdapter implements AgentAdapter {
         error: execution.error,
         sessionId: parsed?.sessionId,
         tokenUsage: parsed?.tokenUsage ?? 0,
+        tokenUsageBreakdown: parsed?.tokenUsageBreakdown,
         estimatedCostUsd: parsed?.estimatedCostUsd ?? 0,
         costKnown: parsed?.costKnown ?? false,
         resolvedRuntime,
@@ -341,10 +397,29 @@ abstract class ClaudeLikeAdapter implements AgentAdapter {
     // suspicious (result event seen but zero tokens), AND an authoritative
     // cumulative total was present (the "result" event; without it the
     // per-message sum can double-count cache-read tokens across turns).
+    // Additionally, format mismatch (CLI changed event schema) makes all
+    // parsed data untrustworthy.
     const tokenUsageReliable =
       !usedFallback &&
       !(parsed?.tokenCountSuspicious ?? false) &&
+      !(parsed?.formatMismatch ?? false) &&
+      !((parsed?.missingCriticalEvents?.length ?? 0) > 0) &&
       (parsed ? parsed.tokenUsageFromResultEvent !== false : true);
+
+    const qualityWarnings: string[] = [];
+    if (parsed?.formatMismatch) {
+      qualityWarnings.push(
+        `${this.title} output format changed — token usage, cost, and tool-call data may be inaccurate.`
+      );
+    }
+    if (parsed?.missingCriticalEvents?.length) {
+      qualityWarnings.push(
+        `${this.title} missing critical events: ${parsed.missingCriticalEvents.join(", ")} — token and cost data may be incomplete.`
+      );
+    }
+    const dataQualityWarning = qualityWarnings.length > 0 ? qualityWarnings.join(" ") : undefined;
+
+    const hasMissingCritical = (parsed?.missingCriticalEvents?.length ?? 0) > 0;
 
     return {
       status,
@@ -352,7 +427,10 @@ abstract class ClaudeLikeAdapter implements AgentAdapter {
       tokenUsage: parsed?.tokenUsage ?? 0,
       estimatedCostUsd: parsed?.estimatedCostUsd ?? 0,
       costKnown: parsed?.costKnown ?? false,
+      costQuality: hasMissingCritical ? "unavailable" : undefined,
       tokenUsageReliable,
+      dataQualityWarning,
+      missingCriticalEvents: parsed?.missingCriticalEvents,
       changedFilesHint: changed.files,
       resolvedRuntime
     };
@@ -388,24 +466,6 @@ export class ClaudeCodeAdapter extends ClaudeLikeAdapter {
         resolvedRuntime,
         invocation.displayCommand,
         ["Store a secret for this profile before running Claude Code against a third-party provider."]
-      );
-    }
-
-    if (!shouldSkipClaudePermissions()) {
-      return createPreflightResult(
-        options?.selection,
-        this.id,
-        this.title,
-        this.kind,
-        this.capability,
-        "blocked",
-        "Claude Code unattended permissions are not enabled for AgentArena tasks.",
-        resolvedRuntime,
-        invocation.displayCommand,
-        [
-          "Set AGENTARENA_SKIP_PERMISSIONS=1 before starting AgentArena to allow Claude Code to work without interactive approval prompts.",
-          "This gives Claude Code the permissions of your local operating-system account, so only run trusted task packs and repositories."
-        ]
       );
     }
 
@@ -489,6 +549,21 @@ export class ClaudeCodeAdapter extends ClaudeLikeAdapter {
           );
         }
 
+        if (!claudeSafeUnattendedArgsSupported(helpOutput)) {
+          return createPreflightResult(
+            options?.selection,
+            this.id,
+            this.title,
+            this.kind,
+            this.capability,
+            "blocked",
+            "This Claude Code version cannot run safely in the background without a full permission bypass.",
+            resolvedRuntime,
+            invocation.displayCommand,
+            ["Upgrade Claude Code to a version that supports --permission-mode dontAsk."]
+          );
+        }
+
         if (resolved.profile.kind !== "official" && !claudeIsolationArgsSupported(helpOutput)) {
           return createPreflightResult(
             options?.selection,
@@ -517,7 +592,8 @@ export class ClaudeCodeAdapter extends ClaudeLikeAdapter {
                 endpoint: resolved.profile.baseUrl,
                 useCache: true,
                 forceProbe: false,
-                extraArgs: prepared.extraArgs
+                extraArgs: prepared.extraArgs,
+                permissionMode: "dontAsk"
               }
             );
             return createPreflightResult(
@@ -539,7 +615,8 @@ export class ClaudeCodeAdapter extends ClaudeLikeAdapter {
             probeWorkspace,
             prepared.environment,
             preflightTimeoutMs(),
-            prepared.extraArgs
+            prepared.extraArgs,
+            "dontAsk"
           );
           return createPreflightResult(
             options?.selection,
@@ -598,21 +675,12 @@ export class ClaudeCodeAdapter extends ClaudeLikeAdapter {
   }
 
   async execute(context: AdapterExecutionContext): Promise<AdapterExecutionResult> {
+    if (context.resolvedLaunchSpec) {
+      return await this.executeFrozenLaunch(context);
+    }
     const { runtime: runtimeBase, profile } = await resolveClaudeRuntime({
       requestedConfig: context.selection.config
     });
-    if (!shouldSkipClaudePermissions()) {
-      return {
-        status: "failed",
-        summary:
-          "Claude Code unattended permissions are not enabled. Set AGENTARENA_SKIP_PERMISSIONS=1 before starting AgentArena, then retry the task.",
-        tokenUsage: 0,
-        estimatedCostUsd: 0,
-        costKnown: false,
-        changedFilesHint: [],
-        resolvedRuntime: runtimeBase
-      };
-    }
     const invocation = await this.resolveInvocation();
     let prepared: Awaited<ReturnType<typeof prepareClaudeRuntimeEnvironment>>;
     try {
@@ -638,9 +706,22 @@ export class ClaudeCodeAdapter extends ClaudeLikeAdapter {
     let resolvedRuntime: AgentResolvedRuntime = runtimeBase;
     try {
       result = await (async () => {
+        const help = await probeHelp(invocation, context.workspacePath, prepared.environment);
+        const helpOutput = `${help.stdout}\n${help.stderr}`;
+        if (help.exitCode !== 0 || !claudeSafeUnattendedArgsSupported(helpOutput)) {
+          return {
+            status: "failed" as const,
+            summary:
+              "Claude Code cannot run safely in the background. Upgrade to a version that supports --permission-mode dontAsk.",
+            tokenUsage: 0,
+            estimatedCostUsd: 0,
+            costKnown: false,
+            changedFilesHint: [],
+            resolvedRuntime: runtimeBase
+          };
+        }
         if (profile.kind !== "official") {
-          const help = await probeHelp(invocation, context.workspacePath, prepared.environment);
-          if (help.exitCode !== 0 || !claudeIsolationArgsSupported(`${help.stdout}\n${help.stderr}`)) {
+          if (!claudeIsolationArgsSupported(helpOutput)) {
             return {
               status: "failed" as const,
               summary:
@@ -671,6 +752,7 @@ export class ClaudeCodeAdapter extends ClaudeLikeAdapter {
         };
         const extraArgs = [
           ...prepared.extraArgs,
+          ...CLAUDE_SAFE_UNATTENDED_ARGS,
           ...(resolvedRuntime.effectiveModel ? ["--model", resolvedRuntime.effectiveModel] : [])
         ];
         const profileRiskNote =
@@ -743,6 +825,60 @@ export class ClaudeCodeAdapter extends ClaudeLikeAdapter {
       throw new Error("Claude Code execution completed without a result.");
     }
     return result;
+  }
+
+  private async executeFrozenLaunch(context: AdapterExecutionContext): Promise<AdapterExecutionResult> {
+    const spec = context.resolvedLaunchSpec;
+    if (!spec || spec.agentKind !== "claude-code") {
+      throw new Error("Claude Code requires a Claude frozen LaunchSpec.");
+    }
+    const executionEnvironment = await materializeRuntimeLaunchEnvironment(
+      spec,
+      context.environment,
+      async (secretRef) => context.runtimeSecretValues?.[secretRef]
+    );
+    const args = materializeRuntimeLaunchArguments(spec, {
+      workspacePath: context.workspacePath,
+      prompt: context.task.prompt,
+      outputPath: path.join(context.workspacePath, "agentarena-claude", "last-message.txt"),
+      sessionId: context.selection.variantId
+    });
+    const resolvedRuntime = resolvedAgentRuntimeFromLaunchSpec(spec);
+    const isThirdPartyProvider = spec.runtime.providerKind !== "inherited-local";
+
+    await context.trace({
+      type: "adapter.claude.profile",
+      message: isThirdPartyProvider
+        ? "Using a frozen task-scoped Provider while inheriting the normal Claude Code Harness."
+        : "Using the frozen current local Claude Code Harness.",
+      metadata: {
+        runtimeProfileId: spec.profile.id,
+        launchSpecHash: spec.launchSpecHash,
+        configIsolated: false,
+        permissionMode: spec.permissions.mode,
+        effectiveModel: spec.runtime.requestedModel
+      }
+    });
+
+    return await this.executeClaudeLike(
+      context,
+      "adapter.claude.result",
+      "Claude Code",
+      {
+        invocation: {
+          command: spec.command.executable,
+          argsPrefix: [],
+          displayCommand: spec.command.executable
+        },
+        extraArgs: args,
+        executionEnvironment,
+        resolvedRuntime,
+        isThirdPartyProvider,
+        exactArguments: true,
+        skipVersionProbe: true,
+        launchSpecHash: spec.launchSpecHash
+      }
+    );
   }
 }
 

@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { isAdapterPreflightReady } from "@agentarena/core";
 import {
   buildCiWorkflow,
   TASKPACK_TEMPLATES,
@@ -12,6 +13,7 @@ type OfficialTaskPackSummary = {
   description?: string;
   path: string;
   source: string;
+  lifecycle?: string;
   objective?: string;
   judgeRationale?: string;
   repoTypes: string[];
@@ -203,19 +205,24 @@ export async function runInit(parsed: {
   await fs.writeFile(taskPackPath, yamlContent, "utf8");
   console.log(`\n✓ Generated demo task pack: ${taskPackPath}`);
 
-  const { listAvailableAdapters } = await import("@agentarena/adapters");
+  const { listProductAdapters } = await import("@agentarena/adapters");
 
-  const allAdapters = listAvailableAdapters().filter((a) => a.kind !== "demo");
+  const allAdapters = listProductAdapters().filter((a) => a.kind !== "demo");
   const detectedAgents: string[] = [];
+  const readiness = new Map<string, { status: string; summary: string }>();
 
   for (const adapter of allAdapters) {
     try {
       const preflight = await adapter.preflight({ probeAuth: false });
-      if (preflight.status !== "missing") {
+      readiness.set(adapter.id, { status: preflight.status, summary: preflight.summary });
+      if (isAdapterPreflightReady(preflight.status)) {
         detectedAgents.push(adapter.id);
       }
     } catch {
-      // Agent not available
+      readiness.set(adapter.id, {
+        status: "blocked",
+        summary: `${adapter.title} preflight failed before readiness could be determined.`
+      });
     }
   }
 
@@ -224,21 +231,29 @@ export async function runInit(parsed: {
 
   if (requestedAgents.length === 0) {
     console.log(
-      "\n⚠ No agents detected. Install at least one agent CLI to run benchmarks.",
+      "\n⚠ No agents are ready to run. Install or verify an agent CLI before starting a benchmark.",
     );
-    console.log("\nSupported agents:");
+    console.log("\nAgent diagnostics:");
     for (const adapter of allAdapters) {
-      console.log(`  - ${adapter.id}: ${adapter.title}`);
+      const state = readiness.get(adapter.id);
+      console.log(`  - ${adapter.id}: ${state?.status ?? "unverified"} - ${state?.summary ?? "Readiness was not confirmed."}`);
     }
-    console.log("\nAfter installing an agent, run: agentarena init");
+    console.log("\nAfter fixing an agent, run: agentarena init");
     return;
   }
 
   if (parsed.agentIds.length > 0) {
-    console.log(`\n✓ Using requested agents: ${requestedAgents.join(", ")}`);
-    console.log(
-      `  (${detectedAgents.length} agent(s) detected on this machine)`,
-    );
+    const notReady = requestedAgents.filter((id) => readiness.get(id)?.status !== "ready");
+    if (notReady.length > 0) {
+      console.log(`\n⚠ Requested agents are not ready: ${notReady.join(", ")}`);
+      for (const id of notReady) {
+        const state = readiness.get(id);
+        console.log(`  - ${id}: ${state?.status ?? "unknown"} - ${state?.summary ?? "Readiness was not confirmed."}`);
+      }
+      console.log("\nNo runnable command was generated. Fix the diagnostics, then run: agentarena init");
+      return;
+    }
+    console.log(`\n✓ Using requested ready agents: ${requestedAgents.join(", ")}`);
   } else {
     console.log(
       `\n✓ Detected ${detectedAgents.length} available agent(s): ${detectedAgents.join(", ")}`,
@@ -290,6 +305,7 @@ export async function listOfficialTaskPacks(): Promise<OfficialTaskPackSummary[]
           description: taskPack.description,
           path: filePath,
           source: taskPack.metadata?.source ?? "official",
+          lifecycle: taskPack.metadata?.lifecycle ?? "legacy",
           objective: taskPack.metadata?.objective,
           judgeRationale: taskPack.metadata?.judgeRationale,
           repoTypes: taskPack.metadata?.repoTypes ?? [],
@@ -315,7 +331,8 @@ export async function listOfficialTaskPacks(): Promise<OfficialTaskPackSummary[]
         }
         return r.status === "fulfilled";
       })
-      .map((r) => (r as PromiseFulfilledResult<OfficialTaskPackSummary>).value);
+      .map((r) => (r as PromiseFulfilledResult<OfficialTaskPackSummary>).value)
+      .filter((taskPack) => taskPack.lifecycle === "core");
 
     const difficultyOrder: Record<string, number> = {
       easy: 0,

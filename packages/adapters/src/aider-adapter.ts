@@ -6,6 +6,7 @@ import type {
   AgentAdapter,
   AgentResolvedRuntime
 } from "@agentarena/core";
+import { UNATTENDED_ACCESS_DISCLOSURE } from "./adapter-capabilities.js";
 import { adapterWarn } from "./adapter-diagnostics.js";
 import { createCliAdapter } from "./base-cli-adapter.js";
 import { runProcess } from "./process-utils.js";
@@ -22,6 +23,7 @@ export const AIDER_CAPABILITY: AdapterCapability = {
     reasoningEffort: false
   },
   knownLimitations: [
+    UNATTENDED_ACCESS_DISCLOSURE,
     "Aider does not report token usage or cost natively.",
     "Changed files are inferred from workspace diff, not emitted directly by the adapter.",
     "Aider relies on git for change tracking; non-git workspaces may have incomplete results."

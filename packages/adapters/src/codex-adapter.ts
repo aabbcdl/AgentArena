@@ -11,8 +11,14 @@ import {
 import { CODEX_CAPABILITY, type InvocationSpec } from "./adapter-capabilities.js";
 import { formatAdapterError } from "./adapter-diagnostics.js";
 import { buildAgentPrompt, createPreflightResult, savePromptArtifact } from "./adapter-helpers.js";
+import { prepareCodexRuntimeHome } from "./codex-runtime-home.js";
 import { parseCodexEvents } from "./event-parsers.js";
 import { probeHelp, probeInvocationVersion } from "./invocation-probes.js";
+import {
+  materializeRuntimeLaunchArguments,
+  materializeRuntimeLaunchEnvironment,
+  resolvedAgentRuntimeFromLaunchSpec
+} from "./launch-resolver.js";
 import { agentTimeoutMs, type RunProcessCallbacks, runProcess } from "./process-utils.js";
 import { resolveCodexRuntime } from "./runtime-resolution.js";
 
@@ -91,6 +97,42 @@ export class CodexCliAdapter implements AgentAdapter {
   readonly capability = CODEX_CAPABILITY;
 
   async preflight(options?: AdapterPreflightOptions): Promise<AdapterPreflightResult> {
+    if (options?.resolvedLaunchSpec) {
+      const spec = options.resolvedLaunchSpec;
+      if (spec.agentKind !== "codex") {
+        return createPreflightResult(
+          options.selection,
+          this.id,
+          this.title,
+          this.kind,
+          this.capability,
+          "blocked",
+          `Frozen LaunchSpec belongs to ${spec.agentKind}, not Codex.`,
+          undefined,
+          spec.command.executable
+        );
+      }
+      const missingSecret = spec.environment.secretBindings.find(
+        (binding) => !options.runtimeSecretValues?.[binding.secretRef]
+      );
+      return {
+        ...createPreflightResult(
+          options.selection,
+          this.id,
+          this.title,
+          this.kind,
+          this.capability,
+          missingSecret ? "blocked" : "ready",
+          missingSecret
+            ? "The frozen Codex launch is missing its task-scoped Provider Secret."
+            : "Task-ready frozen Codex launch accepted.",
+          resolvedAgentRuntimeFromLaunchSpec(spec),
+          spec.command.executable
+        ),
+        runtimeProfileId: spec.profile.id,
+        launchSpecHash: spec.launchSpecHash
+      };
+    }
     const invocation = await resolveCodexInvocation();
     const runtimeDefaults = await resolveCodexRuntime({
       requestedConfig: options?.selection?.config,
@@ -190,49 +232,76 @@ export class CodexCliAdapter implements AgentAdapter {
 
     const prompt = buildAgentPrompt(context);
     await savePromptArtifact(prompt, context.workspacePath, context);
-    const invocation = await resolveCodexInvocation();
-    const activeCodexHome = process.env.CODEX_HOME?.trim();
-    const executionEnvironment = {
-      ...context.environment,
-      ...(activeCodexHome ? { CODEX_HOME: activeCodexHome } : {})
-    };
-    const sandboxMode = resolveCodexSandboxMode(context.environment);
-    const args = [
-      ...invocation.argsPrefix,
-      "exec",
-      "--skip-git-repo-check",
-      "--ephemeral",
-      // Respect the resolved sandbox mode instead of always running yolo.
-      // Only `danger-full-access` bypasses the seatbelt sandbox and approval
-      // prompts; every other mode keeps the sandbox enabled for safer runs.
-      ...(sandboxMode === "danger-full-access"
-        ? ["--dangerously-bypass-approvals-and-sandbox"]
-        : ["--sandbox", sandboxMode]),
-      "--cd",
-      context.workspacePath,
-      "--output-last-message",
-      outputLastMessagePath,
-      "--json",
-    ];
-    const resolvedRuntime = await resolveCodexRuntime({
-      requestedConfig: context.selection.config,
-      configSource: context.selection.configSource
-    });
-    const versionProbe = await probeInvocationVersion(invocation, context.workspacePath, executionEnvironment);
-    const runtimeWithVersion = {
-      ...resolvedRuntime,
-      effectiveAgentVersion: versionProbe.version ?? resolvedRuntime.effectiveAgentVersion,
-      agentVersionSource: versionProbe.source !== "unknown"
-        ? versionProbe.source
-        : resolvedRuntime.agentVersionSource
-    };
-    let insertIndex = invocation.argsPrefix.length + 1;
-    if (resolvedRuntime.effectiveReasoningEffort) {
-      args.splice(insertIndex, 0, "-c", `model_reasoning_effort="${resolvedRuntime.effectiveReasoningEffort}"`);
-      insertIndex += 2;
+    const frozenSpec = context.resolvedLaunchSpec;
+    if (frozenSpec && frozenSpec.agentKind !== "codex") {
+      throw new Error(`Codex adapter cannot execute ${frozenSpec.agentKind} LaunchSpec ${frozenSpec.launchSpecHash}.`);
     }
-    if (resolvedRuntime.effectiveModel) {
-      args.splice(insertIndex, 0, "--model", resolvedRuntime.effectiveModel);
+    const invocation = frozenSpec
+      ? {
+          command: frozenSpec.command.executable,
+          argsPrefix: [],
+          displayCommand: frozenSpec.command.executable
+        }
+      : await resolveCodexInvocation();
+    const executionEnvironment = frozenSpec
+      ? await materializeRuntimeLaunchEnvironment(
+          frozenSpec,
+          context.environment,
+          async (secretRef) => context.runtimeSecretValues?.[secretRef]
+        )
+      : {
+          ...context.environment,
+          ...(process.env.CODEX_HOME?.trim() ? { CODEX_HOME: process.env.CODEX_HOME.trim() } : {})
+        };
+    const sandboxMode = frozenSpec?.permissions.mode ?? resolveCodexSandboxMode(context.environment);
+    const args = frozenSpec
+      ? materializeRuntimeLaunchArguments(frozenSpec, {
+          workspacePath: context.workspacePath,
+          prompt,
+          outputPath: outputLastMessagePath,
+          sessionId: context.selection.variantId
+        })
+      : [
+          ...invocation.argsPrefix,
+          "exec",
+          "--skip-git-repo-check",
+          "--ephemeral",
+          ...(sandboxMode === "danger-full-access"
+            ? ["--dangerously-bypass-approvals-and-sandbox"]
+            : ["--sandbox", sandboxMode]),
+          "--cd",
+          context.workspacePath,
+          "--output-last-message",
+          outputLastMessagePath,
+          "--json"
+        ];
+    const resolvedRuntime = frozenSpec
+      ? resolvedAgentRuntimeFromLaunchSpec(frozenSpec)
+      : await resolveCodexRuntime({
+          requestedConfig: context.selection.config,
+          configSource: context.selection.configSource
+        });
+    const runtimeWithVersion = frozenSpec
+      ? resolvedRuntime
+      : await (async () => {
+          const versionProbe = await probeInvocationVersion(invocation, context.workspacePath, executionEnvironment);
+          return {
+            ...resolvedRuntime,
+            effectiveAgentVersion: versionProbe.version ?? resolvedRuntime.effectiveAgentVersion,
+            agentVersionSource: versionProbe.source !== "unknown"
+              ? versionProbe.source
+              : resolvedRuntime.agentVersionSource
+          };
+        })();
+    if (!frozenSpec) {
+      let insertIndex = invocation.argsPrefix.length + 1;
+      if (resolvedRuntime.effectiveReasoningEffort) {
+        args.splice(insertIndex, 0, "-c", `model_reasoning_effort="${resolvedRuntime.effectiveReasoningEffort}"`);
+        insertIndex += 2;
+      }
+      if (resolvedRuntime.effectiveModel) {
+        args.splice(insertIndex, 0, "--model", resolvedRuntime.effectiveModel);
+      }
     }
 
     await context.trace({
@@ -241,14 +310,16 @@ export class CodexCliAdapter implements AgentAdapter {
       metadata: {
         command: invocation.displayCommand,
         args,
-        sandboxMode, // Configured sandbox mode (actual execution uses --dangerously-bypass-approvals-and-sandbox)
+        sandboxMode,
+        launchSpecHash: frozenSpec?.launchSpecHash,
         requestedConfig: context.selection.config,
         resolvedRuntime: runtimeWithVersion
       }
     });
 
-    const activityCallbacks: RunProcessCallbacks | undefined = context.onActivity
+    const activityCallbacks: RunProcessCallbacks | undefined = context.onActivity || frozenSpec
       ? {
+          idleTimeoutMs: frozenSpec?.timeouts.idleMs,
           onStdout: (chunk: string) => {
             for (const line of chunk.split(/\r?\n/).filter((value) => value.trim())) {
               context.onActivity?.(line, "stdout", 0);
@@ -264,16 +335,26 @@ export class CodexCliAdapter implements AgentAdapter {
 
     let execution: Awaited<ReturnType<typeof runProcess>>;
     try {
-      execution = await runProcess(
-        invocation.command,
-        args,
-        context.workspacePath,
-        agentTimeoutMs(),
-        executionEnvironment,
-        context.signal,
-        prompt,
-        activityCallbacks
-      );
+      const codexRuntimeHome = await prepareCodexRuntimeHome({
+        environment: executionEnvironment,
+        includeLocalAuth: frozenSpec?.runtime.providerKind !== undefined
+          ? frozenSpec.runtime.providerKind === "inherited-local"
+          : true
+      });
+      try {
+        execution = await runProcess(
+          invocation.command,
+          args,
+          context.workspacePath,
+          frozenSpec?.timeouts.totalMs ?? agentTimeoutMs(),
+          codexRuntimeHome.environment,
+          context.signal,
+          prompt,
+          activityCallbacks
+        );
+      } finally {
+        await codexRuntimeHome.cleanup();
+      }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       const actionableMessage = formatAdapterError(errorMessage, "Codex CLI", "codex");
@@ -301,6 +382,8 @@ export class CodexCliAdapter implements AgentAdapter {
       summary = `Codex CLI process error: ${execution.error}`;
     } else if (execution.timedOut) {
       summary = "Codex CLI timed out before producing a final message.";
+    } else if (execution.exitCode !== 0 && parsed.failureMessage) {
+      summary = `Codex CLI failed: ${formatAdapterError(parsed.failureMessage, "Codex CLI", "codex")}`;
     } else if (lastMessage.trim()) {
       summary = lastMessage.trim();
     } else if (parsed.summaryFromEvents) {
@@ -319,21 +402,55 @@ export class CodexCliAdapter implements AgentAdapter {
         timedOut: execution.timedOut,
         signal: execution.signal,
         error: execution.error,
+        cliError: execution.exitCode === 0 ? undefined : parsed.failureMessage,
         threadId: parsed.threadId,
         tokenUsage: parsed.tokenUsage,
+        tokenUsageBreakdown: parsed.tokenUsageBreakdown,
         changedFilesHint: parsed.changedFilesHint,
         resolvedRuntime: parsed.resolvedRuntime ?? runtimeWithVersion,
         stderr: execution.stderr.trim()
       }
     });
 
+    const qualityWarnings: string[] = [];
+    if (parsed.formatMismatch) {
+      qualityWarnings.push(
+        "Codex CLI output format changed — token usage and changed-files data may be inaccurate."
+      );
+    }
+    if (parsed.tokenCountSuspicious) {
+      qualityWarnings.push(
+        "Codex CLI reported turn completion with zero token usage — token counts may be inaccurate."
+      );
+    }
+    if (parsed.missingCriticalEvents.length > 0) {
+      qualityWarnings.push(
+        `Codex CLI missing critical events: ${parsed.missingCriticalEvents.join(", ")} — token and cost data may be incomplete.`
+      );
+    }
+    if (parsed.usageIncomplete) {
+      qualityWarnings.push(
+        "Codex CLI usage did not include a complete recognized breakdown — token and cost data are unavailable."
+      );
+    }
+    const dataQualityWarning = qualityWarnings.length > 0 ? qualityWarnings.join(" ") : undefined;
+
+    const executionSucceeded = execution.exitCode === 0 && !execution.error;
+
     return {
-      status: execution.exitCode === 0 && !execution.error ? "success" : "failed",
+      status: executionSucceeded ? "success" : "failed",
       summary,
       tokenUsage: parsed.tokenUsage,
+      tokenUsageBreakdown: parsed.tokenUsageBreakdown,
       estimatedCostUsd: 0,
       costKnown: false,
+      // Codex CLI 0.145.0 does not report billing cost. Keep this explicit so
+      // report consumers render unavailable/null instead of compatibility zero.
+      costQuality: "unavailable",
       changedFilesHint: parsed.changedFilesHint,
+      dataQualityWarning,
+      missingCriticalEvents: parsed.missingCriticalEvents.length > 0 ? parsed.missingCriticalEvents : undefined,
+      tokenUsageReliable: !executionSucceeded || dataQualityWarning ? false : undefined,
       resolvedRuntime: parsed.resolvedRuntime
         ? {
             effectiveModel: parsed.resolvedRuntime.effectiveModel ?? resolvedRuntime.effectiveModel,
@@ -343,8 +460,22 @@ export class CodexCliAdapter implements AgentAdapter {
               parsed.resolvedRuntime.effectiveAgentVersion ?? runtimeWithVersion.effectiveAgentVersion,
             agentVersionSource:
               parsed.resolvedRuntime.agentVersionSource ?? runtimeWithVersion.agentVersionSource,
-            source: "event-stream",
-            verification: "confirmed",
+            ...(parsed.resolvedRuntime.effectiveModel
+              ? { modelIdentitySource: "confirmed" as const }
+              : runtimeWithVersion.modelIdentitySource
+                ? { modelIdentitySource: runtimeWithVersion.modelIdentitySource }
+                : {}),
+            ...(parsed.resolvedRuntime.effectiveReasoningEffort
+              ? { reasoningEffortSource: "confirmed" as const }
+              : runtimeWithVersion.reasoningEffortSource
+                ? { reasoningEffortSource: runtimeWithVersion.reasoningEffortSource }
+                : {}),
+            source: parsed.resolvedRuntime.effectiveModel || parsed.resolvedRuntime.effectiveReasoningEffort
+              ? "event-stream"
+              : runtimeWithVersion.source,
+            verification: parsed.resolvedRuntime.effectiveModel || parsed.resolvedRuntime.effectiveReasoningEffort
+              ? "confirmed"
+              : runtimeWithVersion.verification,
             notes: runtimeWithVersion.notes
           }
         : runtimeWithVersion

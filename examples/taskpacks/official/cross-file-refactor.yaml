@@ -1,77 +1,54 @@
 schemaVersion: agentarena.taskpack/v1
 id: cross-file-refactor
-title: Cross-File Refactor
-description: Move a function to a new module and update all references.
+title: Extract the Slugify Module
+description: Move a shared string helper into its own module without changing callers.
 metadata:
   source: official
   owner: AgentArena
-  difficulty: hard
-  objective: Test multi-file coordination and import management.
-  judgeRationale: Behavioral tests verify the function works in its new location and all references are updated.
-  repoTypes: ["node"]
-  tags: ["refactor", "multi-file", "coordination"]
+  lifecycle: core
+  difficulty: medium
+  objective: Perform a behavior-preserving extraction and update the public import path.
+  repoTypes: [node]
+  tags: [core, benchmark, refactor, modules]
   dependencies: []
-  differentiator: Tests multi-file coordination — weak agents miss references or break imports.
-
-repoSource: "builtin://nodejs-app"
-
+  judgeRationale: Runtime identity, public exports, and the existing utility suite verify the extraction end to end.
+  differentiator: Requires a real module boundary rather than a no-op or duplicate implementation.
+  i18n:
+    zh-CN:
+      title: 提取 slugify 模块
+      description: 将共享字符串工具移到独立模块，同时保持调用方行为。
+      objective: 完成不改变行为的模块提取并更新公共导出。
+      judgeRationale: 运行时身份、公共导出和现有工具测试共同验证提取结果。
+repoSource: builtin://nodejs-core
 prompt: |
-  ## Task | 任务
-
-  The `slugify` function in `src/utils.js` should be moved to a new file `src/slugify.js`
-  because it's a self-contained utility used by multiple modules.
-
-  Steps:
-  1. Create `src/slugify.js` — move the `slugify` function there, export it
-  2. Edit `src/utils.js` — remove `slugify`, import it from `./slugify.js` and re-export it
-     so existing consumers (`require("./utils").slugify`) still work
-  3. Edit `src/index.js` — make sure `slugify` is still exported
-  4. Run `node --test test/*.test.js` to verify ALL tests pass
-  5. If any test fails, fix the issue and run tests again
-  6. Repeat until ALL tests pass
-
-  IMPORTANT: The test suite checks ALL functions in utils.js, not just slugify.
-  Make sure your changes don't break `capitalize`, `reverse`, `truncate`, `memoize`, etc.
-
-  ## Constraints | 约束
-
-  - `require("./utils").slugify` must still work (backward compatible)
-  - `require("./slugify").slugify` must also work
-  - All existing tests must pass — run `node --test test/*.test.js` to verify
-  - Do NOT add new dependencies
-
-expectedChangedPaths:
-  - src/slugify.js
-  - src/utils.js
-  - src/index.js
-
+  Extract `slugify` into `src/slugify.js` and update the existing utility/public
+  exports to use that single implementation. The helper must continue to turn
+  punctuation and whitespace into a stable lowercase hyphenated slug. Do not
+  leave a second function definition in `src/utils.js`, and do not edit tests or
+  setup scripts except for the implementation files named below.
+expectedChangedPaths: [src/slugify.js, src/utils.js, src/index.js]
+changePolicy:
+  requireAgentChange: true
+  allowedPaths: [src/slugify.js, src/utils.js, src/index.js]
+  forbiddenPaths: ["test/**", "scripts/**", package.json, "fixtures/**"]
+  minChangedFiles: 1
+  maxChangedFiles: 3
 envAllowList: []
-setupCommands: []
-teardownCommands: []
+setupCommands:
+  - id: inject-fault
+    label: Prepare the isolated duplicated-helper state
+    command: node scripts/inject-task-fault.mjs cross-file-refactor
+    timeoutMs: 10000
 judges:
-  - id: slugify-in-new-file
+  - id: behavior
     type: command
-    label: slugify works from new file
-    command: |
-      node -e "var m=require('./src/slugify');var a=require('node:assert/strict');a.strictEqual(typeof m.slugify,'function');a.strictEqual(m.slugify('Hello World!'),'hello-world');console.log('PASS: slugify in new file');"
+    label: Extracted module and public exports agree
+    command: node scripts/verify-core-task.mjs cross-file-refactor
     timeoutMs: 10000
     critical: true
-  - id: slugify-backward-compatible
+  - id: regression-tests
     type: command
-    label: slugify still works from utils
-    command: |
-      node -e "var m=require('./src/utils');var a=require('node:assert/strict');a.strictEqual(typeof m.slugify,'function');a.strictEqual(m.slugify('Hello World!'),'hello-world');console.log('PASS: backward compatible');"
-    timeoutMs: 10000
-    critical: true
-  - id: utils-tests-pass
-    type: command
-    label: Utils tests pass
+    label: Utility tests pass after extraction
     command: node --test test/utils.test.js
     timeoutMs: 30000
     critical: true
-  - id: no-duplicate-code
-    type: command
-    label: slugify not duplicated in utils.js
-    command: |
-      node -e "var c=require('node:fs').readFileSync('src/utils.js','utf8');if(c.indexOf('function slugify')!==-1){console.error('slugify function still in utils.js');process.exit(1)}console.log('PASS: no duplicate');"
-    timeoutMs: 10000

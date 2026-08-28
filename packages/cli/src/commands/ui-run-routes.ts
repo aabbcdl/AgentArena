@@ -1,19 +1,88 @@
 import { promises as fs } from "node:fs";
 import type http from "node:http";
 import path from "node:path";
+import type { TaskPack } from "@agentarena/core";
 import { AgentLogStore, createCancellation, createRunId, isAbortError } from "@agentarena/core";
 import { writeReport } from "@agentarena/report";
-import { type BenchmarkProgressEvent, runBenchmark } from "@agentarena/runner";
+import {
+  type BenchmarkProgressEvent,
+  checkTaskCompatibility,
+  resolveAndValidateRepo,
+  runBenchmark
+} from "@agentarena/runner";
 import { TraceTailer } from "@agentarena/trace";
 import { jsonResponse, readRequestBody } from "../server/index.js";
-import { validateRunPayload, validateRunPayloadPaths } from "./run-payload-validator.js";
-import { BUILTIN_REPOS_ROOT, normalizeUiSelections, OFFICIAL_TASKPACK_ROOT, resolveReportLocale, type UiRunPayload, type UiRunStatus } from "./shared.js";
+import { createAdhocLintCommand, createAdhocTestCommand, createPackageScriptCommand } from "../templates.js";
+import { resolveRunPayloadPaths, validateRunPayload, validateRunPayloadPaths } from "./run-payload-validator.js";
+import { BUILTIN_REPOS_ROOT, isTrustedBuiltinTaskPack, normalizeUiSelections, OFFICIAL_TASKPACK_ROOT, resolveReportLocale, type UiRunPayload, type UiRunStatus } from "./shared.js";
 import { SseConnection } from "./sse.js";
 import { sendApiResponse } from "./ui-http.js";
 import type { UiRunRequestContext } from "./ui-run-types.js";
+import { prepareUiRuntimeAdmission } from "./ui-runtime-admission.js";
 
 const GET_RUN_ROUTES = new Set(["/api/run-status", "/api/agent-logs", "/api/run-stream"]);
 const POST_RUN_ROUTES = new Set(["/api/run", "/api/run/cancel"]);
+
+/**
+ * Generated adhoc checks use fixed inline Node helpers because they need to
+ * create machine-readable test/lint reports without asking the user to edit
+ * the target repository. Keep eval enabled only when the complete task shape
+ * still matches those exact helpers. A hand-edited adhoc YAML falls back to
+ * the normal command security policy.
+ */
+function isGeneratedAdhocTaskPack(task: TaskPack): boolean {
+  const tags = task.metadata?.tags ?? [];
+  if (
+    task.repoSource !== "user" ||
+    task.metadata?.owner !== "user" ||
+    !tags.includes("adhoc") ||
+    !tags.includes("custom") ||
+    task.id.length === 0 ||
+    task.setupCommands.length > 0 ||
+    task.teardownCommands.length > 0 ||
+    task.judges.length !== 5
+  ) {
+    return false;
+  }
+
+  const expectedTestReport = `.agentarena/${task.id}-test-results.json`;
+  const expectedLintReport = `.agentarena/${task.id}-lint-results.json`;
+  const judgeIds = new Set<string>();
+  for (const judge of task.judges) {
+    if (judgeIds.has(judge.id)) return false;
+    judgeIds.add(judge.id);
+    if (judge.type === "file-exists") {
+      if (
+        !((judge.id === "repo-not-broken" && judge.path === "package.json") ||
+          (judge.id === "readme-exists" && judge.path === "README.md"))
+      ) {
+        return false;
+      }
+      continue;
+    }
+    if (judge.type === "command") {
+      if (judge.id !== "build-passes" || judge.command !== createPackageScriptCommand("build")) {
+        return false;
+      }
+      continue;
+    }
+    if (judge.type === "test-result") {
+      if (judge.id !== "tests-pass" || judge.reportFile !== expectedTestReport || judge.command !== createAdhocTestCommand(expectedTestReport)) {
+        return false;
+      }
+      continue;
+    }
+    if (judge.type === "lint-check") {
+      if (judge.id !== "lint-clean" || judge.reportFile !== expectedLintReport || judge.command !== createAdhocLintCommand(expectedLintReport)) {
+        return false;
+      }
+      continue;
+    }
+    return false;
+  }
+
+  return ["repo-not-broken", "readme-exists", "build-passes", "tests-pass", "lint-clean"].every((id) => judgeIds.has(id));
+}
 
 export function isUiRunRoute(method: string | undefined, pathname: string): boolean {
   return method === "GET" ? GET_RUN_ROUTES.has(pathname) : method === "POST" && POST_RUN_ROUTES.has(pathname);
@@ -92,7 +161,8 @@ export async function handleUiRunRequest(
       return;
     }
 
-    const workingDirectory = process.cwd();
+    const workingDirectory = ctx.workspaceRoot ?? process.cwd();
+    runPayload = resolveRunPayloadPaths(runPayload, workingDirectory);
     const trustedTaskRoots = [workingDirectory, OFFICIAL_TASKPACK_ROOT];
     const validationError = validateRunPayload(runPayload, workingDirectory, trustedTaskRoots);
     if (validationError) {
@@ -110,12 +180,40 @@ export async function handleUiRunRequest(
       return;
     }
 
-    const selections = normalizeUiSelections(runPayload);
-    if (selections.length === 0) {
+    const requestedSelections = normalizeUiSelections(runPayload);
+    if (requestedSelections.length === 0) {
       ctx.releaseStartReservation();
       sendApiResponse(response, jsonResponse({ error: "At least one agent selection is required." }, 400));
       return;
     }
+    let admission: Awaited<ReturnType<typeof prepareUiRuntimeAdmission>>;
+    let allowEvalInTaskCommands = isTrustedBuiltinTaskPack(runPayload.taskPath) || process.env.AGENTARENA_ALLOW_EVAL_IN_JUDGES === "1";
+    try {
+      const resolvedRepository = await resolveAndValidateRepo({
+        repoPath: runPayload.repoPath,
+        taskPath: runPayload.taskPath,
+        builtinReposRoot: BUILTIN_REPOS_ROOT,
+        userRepoRoot: workingDirectory
+      });
+      const compatibility = await checkTaskCompatibility(resolvedRepository.task, resolvedRepository.repoPath);
+      if (compatibility.status === "incompatible") {
+        ctx.releaseStartReservation();
+        sendApiResponse(response, jsonResponse({
+          error: compatibility.summary,
+          compatibility
+        }, 409));
+        return;
+      }
+      allowEvalInTaskCommands ||= isGeneratedAdhocTaskPack(resolvedRepository.task);
+      admission = await prepareUiRuntimeAdmission(requestedSelections, resolvedRepository.repoPath);
+    } catch (error) {
+      ctx.releaseStartReservation();
+      sendApiResponse(response, jsonResponse({
+        error: error instanceof Error ? error.message : String(error)
+      }, 409));
+      return;
+    }
+    const selections = admission.selections;
     const outputPath = path.resolve(runPayload.outputPath || path.join(workingDirectory, ".agentarena", "ui-runs"));
 
     // Reset status to clean state before starting a new run
@@ -161,6 +259,7 @@ export async function handleUiRunRequest(
 
     // Trace tailers — one per running agent, emits real-time trace records via SSE
     const traceTailers = new Map<string, { tailer: TraceTailer; variantId: string }>();
+    let activeOutputPath = outputPath;
 
     const activeRun = {
       cancel: () => cancellationController.abort(),
@@ -176,19 +275,22 @@ export async function handleUiRunRequest(
           taskPath: runPayload.taskPath,
           agentIds: selections.map((selection) => selection.baseAgentId),
           agents: selections,
+          runtimeBindings: admission.runtimeBindings,
           outputPath,
           builtinReposRoot: BUILTIN_REPOS_ROOT,
           userRepoRoot: workingDirectory,
           probeAuth: runPayload.probeAuth,
           updateSnapshots: runPayload.updateSnapshots,
           cleanupWorkspaces: runPayload.cleanupWorkspaces,
-          maxConcurrency: runPayload.maxConcurrency,
+          maxConcurrency: admission.runtimeBindings ? 1 : runPayload.maxConcurrency,
           scoreMode: runPayload.scoreMode,
+          entryPoint: runPayload.entryPoint ?? "legacy-launcher",
           tokenBudget: runPayload.tokenBudget ? (Number(runPayload.tokenBudget) || undefined) : undefined,
+          allowEvalInTaskCommands,
           cancellation,
           enableActivityEvents: true,
           agentLogStore,
-          onProgress: (event: BenchmarkProgressEvent) => {
+          onProgress: async (event: BenchmarkProgressEvent) => {
             const phase =
               event.phase === "starting" || event.phase === "preflight"
                 ? event.phase
@@ -197,8 +299,15 @@ export async function handleUiRunRequest(
                   : event.phase === "agent-activity"
                     ? "benchmark"
                     : "benchmark";
+            const eventRunId = typeof event.metadata?.runId === "string" ? event.metadata.runId : undefined;
+            const eventOutputPath = typeof event.metadata?.outputPath === "string"
+              ? event.metadata.outputPath
+              : undefined;
+            if (eventOutputPath) activeOutputPath = eventOutputPath;
             ctx.setRunStatus({
               phase,
+              ...(eventRunId ? { runId: eventRunId } : {}),
+              ...(eventOutputPath ? { outputPath: eventOutputPath } : {}),
               currentAgentId:
                 event.phase === "agent-start" || event.phase === "agent-finish"
                   ? event.agentId
@@ -213,6 +322,9 @@ export async function handleUiRunRequest(
                   : ctx.activeRunStatus.currentDisplayLabel,
               snapshot: event.snapshot ?? ctx.activeRunStatus.snapshot
             });
+            if (event.phase === "starting" && eventRunId && eventOutputPath) {
+              await ctx.flushSaveRunState();
+            }
             ctx.appendRunLog({
               phase,
               message: event.message,
@@ -256,8 +368,8 @@ export async function handleUiRunRequest(
             }
 
             // Trace tailer lifecycle — start on agent-start, stop on agent-finish
-            if (event.phase === "agent-start" && event.variantId && outputPath) {
-              const tracePath = path.join(outputPath, "agents", event.variantId, "trace.jsonl");
+            if (event.phase === "agent-start" && event.variantId) {
+              const tracePath = path.join(activeOutputPath, "agents", event.variantId, "trace.jsonl");
               // Only start if not already tailing this variant
               if (!traceTailers.has(event.variantId)) {
                 const tailer = new TraceTailer(tracePath, (record) => {

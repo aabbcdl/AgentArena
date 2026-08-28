@@ -1,3 +1,4 @@
+import { getQualifiedResults } from "../core/result-contract.js";
 import {
   DEFAULT_SCORE_WEIGHTS,
   diffPrecisionScore,
@@ -6,6 +7,11 @@ import {
   resultQualitySort
 } from "./scoring.js";
 
+export function getCostQuality(result) {
+  if (["known", "estimated", "unavailable"].includes(result?.costQuality)) return result.costQuality;
+  return result?.costKnown === true ? "known" : "unavailable";
+}
+
 // NOTE: summarizeRun is also defined in packages/report/src/report-helpers.ts
 // (returns a slightly different shape: knownCostUsd vs knownCost).
 export function summarizeRun(run) {
@@ -13,7 +19,7 @@ export function summarizeRun(run) {
   const failedCount = run.results.filter((result) => result.status === "failed").length;
   const totalTokens = run.results.reduce((total, result) => total + result.tokenUsage, 0);
   const knownCost = run.results
-    .filter((result) => result.costKnown)
+    .filter((result) => getCostQuality(result) === "known")
     .reduce((total, result) => total + result.estimatedCostUsd, 0);
 
   return {
@@ -42,9 +48,23 @@ export function runtimeIdentity(result) {
   };
 }
 
+export function usesThirdPartyProviderConfiguration(result) {
+  const runtime = result?.resolvedRuntime;
+  if (!runtime) return false;
+
+  return runtime.providerSource === "profile-config"
+    || runtime.source === "profile-config"
+    || (runtime.providerKind !== undefined && runtime.providerKind !== "official");
+}
+
 export function resultRecordKey(result) {
   const runtime = runtimeIdentity(result);
-  return `${result.variantId ?? result.agentId}@@${runtime.version}`;
+  return JSON.stringify([
+    result.baseAgentId ?? result.agentId ?? "unknown-agent",
+    runtime.provider || "official",
+    runtime.model || "unknown",
+    runtime.version || "unknown"
+  ]);
 }
 
 export function fairComparisonIdentity(run) {
@@ -79,22 +99,32 @@ export function missingCoreComparisonData(run) {
 }
 
 export function getFairComparisonExclusionReasons(candidateRun, anchorRun) {
+  const reasons = [];
   const candidate = fairComparisonIdentity(candidateRun);
   const anchor = fairComparisonIdentity(anchorRun);
-  const reasons = [];
-  const candidateHasFairMetadata = Boolean(candidateRun?.fairComparison);
-  const anchorHasFairMetadata = Boolean(anchorRun?.fairComparison);
+  const candidateHasFairMetadata = Boolean(
+    candidateRun?.fairComparison?.taskIdentity &&
+    candidateRun?.fairComparison?.judgeIdentity &&
+    candidateRun?.fairComparison?.repoBaselineIdentity
+  );
+  const anchorHasFairMetadata = Boolean(
+    anchorRun?.fairComparison?.taskIdentity &&
+    anchorRun?.fairComparison?.judgeIdentity &&
+    anchorRun?.fairComparison?.repoBaselineIdentity
+  );
 
-  if (!candidate.taskIdentity || candidate.taskIdentity !== anchor.taskIdentity) {
-    reasons.push("different-task-pack");
-  }
   if (candidateHasFairMetadata && anchorHasFairMetadata) {
+    if (candidate.taskIdentity !== anchor.taskIdentity) {
+      reasons.push("different-task-pack");
+    }
     if (!candidate.judgeIdentity || candidate.judgeIdentity !== anchor.judgeIdentity) {
       reasons.push("different-judge-logic");
     }
     if (!candidate.repoBaselineIdentity || candidate.repoBaselineIdentity !== anchor.repoBaselineIdentity) {
       reasons.push("different-repo-baseline");
     }
+  } else if (taskIdentity(candidateRun) !== taskIdentity(anchorRun)) {
+    reasons.push("different-task-pack");
   }
   if (missingCoreComparisonData(candidateRun)) {
     reasons.push("missing-core-data");
@@ -113,16 +143,15 @@ export function baseAgentLabel(result) {
 
 export function getRunVerdict(run, options = {}) {
   const scoreWeights = options.scoreWeights ?? DEFAULT_SCORE_WEIGHTS;
-  const successfulResults = run.results.filter((result) => result.status === "success");
-  const candidates = successfulResults.length > 0 ? successfulResults : run.results;
+  const candidates = getQualifiedResults(run.results);
   const fastest = [...candidates].sort((left, right) => left.durationMs - right.durationMs)[0] ?? null;
   const lowestKnownCost =
-    [...run.results.filter((result) => result.costKnown)].sort(
+    [...candidates.filter((result) => getCostQuality(result) === "known")].sort(
       (left, right) => left.estimatedCostUsd - right.estimatedCostUsd
     )[0] ?? null;
   const highestJudgePassRate =
-    [...run.results].sort((left, right) => judgePassRatio(right) - judgePassRatio(left))[0] ?? null;
-  const bestAgent = [...run.results].sort((left, right) => {
+    [...candidates].sort((left, right) => judgePassRatio(right) - judgePassRatio(left))[0] ?? null;
+  const bestAgent = [...candidates].sort((left, right) => {
     const scoreDelta = getCompositeScoreDetails(right, run, scoreWeights).total - getCompositeScoreDetails(left, run, scoreWeights).total;
     if (scoreDelta !== 0) {
       return scoreDelta;
@@ -214,8 +243,8 @@ export function getCompareResults(run, options = {}) {
       case "tokens":
         return right.tokenUsage - left.tokenUsage;
       case "cost":
-        return (left.costKnown ? left.estimatedCostUsd : Number.POSITIVE_INFINITY) -
-          (right.costKnown ? right.estimatedCostUsd : Number.POSITIVE_INFINITY);
+        return (getCostQuality(left) === "known" ? left.estimatedCostUsd : Number.POSITIVE_INFINITY) -
+          (getCostQuality(right) === "known" ? right.estimatedCostUsd : Number.POSITIVE_INFINITY);
       case "changed":
         return right.changedFiles.length - left.changedFiles.length;
       case "judges":
@@ -335,13 +364,16 @@ export function getAgentTrendRows(runs, currentRun, agentId) {
 }
 
 export function getComparableRuns(runs, currentRun) {
-  const currentTaskId = currentRun.task?.id || currentRun.task?.title;
-  const currentScoreMode = currentRun.scoreMode || "balanced";
+  const currentScoreMode = currentRun.scoreMode || "practical";
 
   return runs.filter((run) => {
-    const taskId = run.task?.id || run.task?.title;
-    const scoreMode = run.scoreMode || "balanced";
-    return taskId === currentTaskId && scoreMode === currentScoreMode;
+    const scoreMode = run.scoreMode || "practical";
+    const fairnessReasons = getFairComparisonExclusionReasons(run, currentRun)
+      .filter((reason) => reason !== "missing-core-data");
+    return (
+      scoreMode === currentScoreMode &&
+      fairnessReasons.length === 0
+    );
   });
 }
 

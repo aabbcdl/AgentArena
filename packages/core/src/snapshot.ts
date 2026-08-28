@@ -9,12 +9,23 @@ import { logger } from "./logging.js";
 import { normalizePath } from "./paths.js";
 import type { DiffSummary, FileSnapshotEntry } from "./types/index.js";
 
-export const INTERNAL_IGNORED_NAMES = new Set([
+export const AGENTARENA_ADAPTER_METADATA_DIRECTORY_NAMES = new Set([
+  "agentarena-claude",
+  "agentarena-codex",
+  "agentarena-copilot",
+  "agentarena-qwen"
+]);
+
+export const AGENTARENA_GENERATED_DIRECTORY_NAMES = new Set([
   ".aa-evidence",
   ".agentarena",
-  ".claude",
+  ...AGENTARENA_ADAPTER_METADATA_DIRECTORY_NAMES,
+  "agentarena-demo"
+]);
+
+export const INTERNAL_IGNORED_NAMES = new Set([
+  ...AGENTARENA_GENERATED_DIRECTORY_NAMES,
   ".git",
-  "agentarena-demo",
   "node_modules"
 ]);
 const INTERNAL_IGNORED_FILES = new Set(["agent-stderr.log", "agent-stdout.jsonl", "prompt.txt"]);
@@ -59,11 +70,28 @@ export async function ensureDirectory(dirPath: string): Promise<void> {
   await fs.mkdir(dirPath, { recursive: true });
 }
 
-function isInternalPath(relativePath: string): boolean {
-  const parts = relativePath.split("/");
+export function isAgentArenaGeneratedPath(relativePath: string): boolean {
+  const normalized = normalizePath(relativePath).replace(/^\.\/+/, "");
+  const parts = normalized.split("/");
   return (
-    parts.some((part) => INTERNAL_IGNORED_NAMES.has(part)) ||
+    parts.some((part) => AGENTARENA_GENERATED_DIRECTORY_NAMES.has(part)) ||
     (parts.length === 1 && INTERNAL_IGNORED_FILES.has(parts[0]))
+  );
+}
+
+export function isAgentArenaAdapterMetadataPath(relativePath: string): boolean {
+  const normalized = normalizePath(relativePath).replace(/^\.\/+/, "");
+  return normalized
+    .split("/")
+    .some((part) => AGENTARENA_ADAPTER_METADATA_DIRECTORY_NAMES.has(part));
+}
+
+function isInternalPath(relativePath: string): boolean {
+  const normalized = normalizePath(relativePath).replace(/^\.\/+/, "");
+  const parts = normalized.split("/");
+  return (
+    isAgentArenaGeneratedPath(normalized) ||
+    parts.some((part) => INTERNAL_IGNORED_NAMES.has(part))
   );
 }
 
@@ -138,9 +166,36 @@ async function gitListCopyableFiles(sourcePath: string): Promise<string[] | null
       maxBuffer: 100 * 1024 * 1024,
       timeout: 30_000
     });
-    return stdout.split("\0").filter(Boolean).map(normalizePath);
+    const files = stdout.split("\0").filter(Boolean).map(normalizePath);
+    if (files.length === 0) {
+      try {
+        await execFileAsync("git", ["-C", sourcePath, "check-ignore", "-q", "."], {
+          encoding: "utf8",
+          timeout: 30_000
+        });
+        // Packaged builtin repositories can live inside a generated directory
+        // ignored by the parent checkout. In that case Git reports zero files
+        // even though the source directory is populated, so use the guarded
+        // filesystem copy below instead of producing an empty workspace.
+        return null;
+      } catch {
+        // Exit code 1 means the source directory itself is not ignored.
+      }
+    }
+    return files;
   } catch {
     return null;
+  }
+}
+
+async function lstatExists(targetPath: string): Promise<boolean> {
+  try {
+    // lstat (not stat) so a present-but-broken symlink still counts as existing
+    // and is copied verbatim; only a truly absent path returns false.
+    await fs.lstat(targetPath);
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -150,6 +205,11 @@ async function copyListedFiles(sourcePath: string, destinationPath: string, file
     const normalized = normalizePath(relativePath);
     if (isInternalPath(normalized) || isDefaultSecretPath(normalized)) continue;
     const sourceFile = path.join(sourcePath, normalized);
+    // `git ls-files --cached` lists tracked files that have been deleted from
+    // the worktree but not yet committed. Those sources no longer exist, so
+    // skip them rather than letting a single ENOENT abort the whole copy and
+    // strand every agent with "Failed to copy repository".
+    if (!(await lstatExists(sourceFile))) continue;
     const destinationFile = path.join(destinationPath, normalized);
     await ensureDirectory(path.dirname(destinationFile));
     await fs.cp(sourceFile, destinationFile, {

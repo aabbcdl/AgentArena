@@ -1,5 +1,10 @@
 export function createNodeEvalCommand(source: string): string {
-  return `node -e ${JSON.stringify(source)}`;
+  // The judge command tokenizer intentionally treats backslashes as shell-style
+  // escapes. Encode the source first so JSON's escaped newlines are not reduced
+  // to the literal character sequence "n" before Node receives the script.
+  const encodedSource = Buffer.from(source, "utf8").toString("base64");
+  const runner = `eval(Buffer.from(${JSON.stringify(encodedSource)}, "base64").toString("utf8"))`;
+  return `node -e ${JSON.stringify(runner)}`;
 }
 
 export function createPackageScriptCommand(scriptName: string): string {

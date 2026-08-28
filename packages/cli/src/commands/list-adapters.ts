@@ -1,5 +1,5 @@
 import {
-  listAvailableAdapters,
+  listProductAdapters,
   preflightAdapters,
 } from "@agentarena/adapters";
 import { createAgentSelection } from "@agentarena/core";
@@ -12,7 +12,7 @@ export async function runListAdapters(parsed: {
   format?: string;
   detect?: boolean;
 }): Promise<void> {
-  const adapters = listAvailableAdapters()
+  const adapters = listProductAdapters()
     .map((adapter) => ({
       id: adapter.id,
       title: adapter.title,

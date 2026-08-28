@@ -3,6 +3,7 @@ import type {
   AgentAdapter,
   AgentResolvedRuntime
 } from "@agentarena/core";
+import { UNATTENDED_ACCESS_DISCLOSURE } from "./adapter-capabilities.js";
 import { createCliAdapter } from "./base-cli-adapter.js";
 import { parseGeminiEvents } from "./event-parsers.js";
 
@@ -18,6 +19,7 @@ export const GEMINI_CAPABILITY: AdapterCapability = {
     reasoningEffort: false
   },
   knownLimitations: [
+    UNATTENDED_ACCESS_DISCLOSURE,
     "Gemini CLI JSON output format may change across versions.",
     "Changed files are inferred from workspace diff, not emitted directly by the adapter.",
     "Authentication relies on local gcloud or Google account login."
@@ -36,6 +38,20 @@ function parseGeminiSummary(stdout: string, stderr: string, exitCode: number | n
   return stderr.trim() || `Gemini CLI failed with exit code ${exitCode}.`;
 }
 
+function parseGeminiDataQualityWarning(stdout: string): string | undefined {
+  const parsed = parseGeminiEvents(stdout);
+  const warnings: string[] = [];
+  if (parsed.formatMismatch) {
+    warnings.push("Gemini CLI output format changed — token usage and cost data may be inaccurate.");
+  }
+  if (parsed.missingCriticalEvents.length > 0) {
+    warnings.push(
+      `Gemini CLI missing critical events: ${parsed.missingCriticalEvents.join(", ")} — token and cost data may be incomplete.`
+    );
+  }
+  return warnings.length > 0 ? warnings.join(" ") : undefined;
+}
+
 export function createGeminiAdapter(): AgentAdapter {
   return createCliAdapter({
     id: "gemini-cli",
@@ -47,6 +63,7 @@ export function createGeminiAdapter(): AgentAdapter {
     extraArgs: (runtime: AgentResolvedRuntime) =>
       runtime.effectiveModel ? ["--model", runtime.effectiveModel] : [],
     parseTokenUsage: parseGeminiTokenUsage,
-    parseSummary: parseGeminiSummary
+    parseSummary: parseGeminiSummary,
+    parseDataQualityWarning: parseGeminiDataQualityWarning
   });
 }

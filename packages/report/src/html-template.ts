@@ -4,6 +4,7 @@ import type { LeaderboardData } from "./leaderboard.js";
 import {
   escapeHtml,
   formatCompositeScoreValue,
+  formatCostUsd,
   formatDiffPrecisionMetric,
   formatLintMetric,
   formatRuntimeIdentity,
@@ -13,7 +14,8 @@ import {
   type Locale,
   type ScoredResult,
   type ScoredRun,
-  statusTone
+  statusTone,
+  usesThirdPartyProviderConfiguration
 } from "./report-helpers.js";
 
 function renderJudgeList(run: BenchmarkRun["results"][number]): string {
@@ -159,18 +161,28 @@ function renderAgentCards(run: BenchmarkRun): string {
         <section class="card">
           <h2>${escapeHtml(result.displayLabel ?? result.agentTitle ?? result.agentId)} <span>${escapeHtml(result.variantId ?? result.agentId)}</span></h2>
           <p>${escapeHtml(result.summary)}</p>
+          ${
+            result.dataQualityWarning
+              ? `<p class="meta" style="color:#b45309"><strong>Data quality:</strong> ${escapeHtml(result.dataQualityWarning)}</p>`
+              : ""
+          }
           <p class="meta">Preflight: ${escapeHtml(result.preflight.status)} - ${escapeHtml(
             result.preflight.summary
           )}</p>
           <p class="meta">Model: ${escapeHtml(runtime.model)} | Reasoning: ${escapeHtml(
             runtime.reasoning
           )} | Version: ${escapeHtml(runtime.version)} | Verification: ${escapeHtml(runtime.verification)} | Source: ${escapeHtml(runtime.source)}</p>
+          ${
+            usesThirdPartyProviderConfiguration(result)
+              ? `<p class="meta" style="color:#b45309"><strong>Provider risk:</strong> This result was produced through a managed third-party Provider configuration.</p>`
+              : ""
+          }
           <div class="stats">
             <div><strong>Status</strong><span>${escapeHtml(result.status)}</span></div>
             <div><strong>Composite Score</strong><span>${escapeHtml(formatCompositeScoreValue(result))}</span></div>
             <div><strong>Duration</strong><span>${escapeHtml(formatDuration(result.durationMs))}</span></div>
             <div><strong>Tokens</strong><span>${escapeHtml(String(result.tokenUsage ?? "N/A"))}</span></div>
-            <div><strong>Cost</strong><span>${escapeHtml(result.costKnown ? `$${result.estimatedCostUsd.toFixed(4)}` : "n/a")}</span></div>
+            <div><strong>Cost</strong><span>${escapeHtml(formatCostUsd(result.estimatedCostUsd, result.costKnown, result.costQuality))}</span></div>
             <div><strong>Tests</strong><span>${escapeHtml(formatTestMetric(result))}</span></div>
             <div><strong>Lint</strong><span>${escapeHtml(formatLintMetric(result))}</span></div>
             <div><strong>Diff Precision</strong><span>${escapeHtml(formatDiffPrecisionMetric(result))}</span></div>
@@ -203,6 +215,47 @@ function renderAgentCards(run: BenchmarkRun): string {
       `;
     })
     .join("");
+}
+
+function renderExecutionIntegrity(run: BenchmarkRun, locale: Locale): string {
+  const manifest = run.jobManifest;
+  if (!manifest) return "";
+  const title = locale === "zh-CN" ? "执行完整性" : "Execution Integrity";
+  const rows = manifest.variants.map((variant) => `
+    <tr>
+      <td><strong>${escapeHtml(variant.agentKind)}</strong></td>
+      <td>${escapeHtml(`${variant.profileId} r${variant.profileRevision}/s${variant.secretRevision}`)}</td>
+      <td>${escapeHtml(variant.canonicalModelIdentity ?? "unknown")}</td>
+      <td><code>${escapeHtml(variant.launchSpecHash)}</code></td>
+      <td><code>${escapeHtml(variant.verificationReceiptId)}</code></td>
+      <td><code>${escapeHtml(variant.providerPolicyIdentity)}</code></td>
+      <td><code>${escapeHtml(variant.modelParametersIdentity)}</code></td>
+      <td><code>${escapeHtml(variant.harnessSnapshotId)}</code></td>
+      <td><strong>${escapeHtml(variant.harnessDrift?.status ?? "not-checked")}</strong></td>
+    </tr>
+  `).join("");
+  return `
+    <section class="integrity">
+      <h2 class="section-title">${escapeHtml(title)}</h2>
+      <div class="integrity-identities">
+        <p><strong>${escapeHtml(locale === "zh-CN" ? "任务状态" : "Job status")}:</strong> ${escapeHtml(manifest.status)}</p>
+        <p><strong>${escapeHtml(locale === "zh-CN" ? "任务身份" : "Task identity")}:</strong> <code>${escapeHtml(manifest.taskIdentity)}</code></p>
+        <p><strong>${escapeHtml(locale === "zh-CN" ? "仓库基线" : "Repository baseline")}:</strong> <code>${escapeHtml(manifest.repositoryBaselineIdentity)}</code></p>
+        <p><strong>${escapeHtml(locale === "zh-CN" ? "裁判身份" : "Judge identity")}:</strong> <code>${escapeHtml(manifest.judgeIdentity)}</code></p>
+      </div>
+      <div class="table-scroll">
+        <table class="integrity-table">
+          <thead><tr>
+            <th>Harness</th><th>Profile</th><th>${escapeHtml(locale === "zh-CN" ? "规范模型" : "Canonical model")}</th>
+            <th>LaunchSpec</th><th>Receipt</th><th>${escapeHtml(locale === "zh-CN" ? "Provider 策略" : "Provider policy")}</th>
+            <th>${escapeHtml(locale === "zh-CN" ? "模型参数" : "Model parameters")}</th><th>Harness snapshot</th><th>${escapeHtml(locale === "zh-CN" ? "运行后漂移" : "Post-run drift")}</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      ${manifest.failureSummary ? `<p class="meta"><strong>${escapeHtml(locale === "zh-CN" ? "失败摘要" : "Failure summary")}:</strong> ${escapeHtml(manifest.failureSummary)}</p>` : ""}
+    </section>
+  `;
 }
 
 function renderLeaderboardSection(_run: BenchmarkRun, leaderboard: LeaderboardData, locale: Locale): string {
@@ -448,6 +501,32 @@ export function renderHtml(run: BenchmarkRun, locale: Locale, leaderboard?: Lead
         border-collapse: collapse;
         font-size: 0.9rem;
       }
+      .table-scroll { overflow-x: auto; }
+      .integrity-identities {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px 20px;
+      }
+      .integrity-identities p { margin: 0; word-break: break-word; }
+      .integrity-table {
+        width: 100%;
+        min-width: 1120px;
+        margin-top: 16px;
+        border-collapse: collapse;
+        font-size: 0.82rem;
+      }
+      .integrity-table th, .integrity-table td {
+        padding: 9px 8px;
+        text-align: left;
+        vertical-align: top;
+        border-bottom: 1px solid var(--border);
+      }
+      .integrity-table th { color: var(--muted); }
+      .integrity-table code { overflow-wrap: anywhere; }
+      @media (max-width: 640px) {
+        main { padding: 28px 14px 48px; }
+        .integrity-identities { grid-template-columns: 1fr; }
+      }
       .leaderboard-table th,
       .leaderboard-table td {
         padding: 10px 8px;
@@ -503,6 +582,7 @@ export function renderHtml(run: BenchmarkRun, locale: Locale, leaderboard?: Lead
         }
         <p class="lede">${escapeHtml(copy.comparesModelConfigurations)} ${escapeHtml(copy.baselineRepoHealthNote)}</p>
       </header>
+      ${renderExecutionIntegrity(run, locale)}
       <h2 class="section-title">${escapeHtml(copy.adapterPreflightTitle)}</h2>
       <section class="preflights">
         ${renderPreflights(run)}

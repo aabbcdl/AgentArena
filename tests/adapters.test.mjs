@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -13,7 +13,14 @@ import {
   supportsWindowsCredentialManager,
   writeClaudeWorkspaceSettings
 } from "../packages/adapters/dist/claude-provider-profiles.js";
-import { __testUtils, getAdapter, listAvailableAdapters } from "../packages/adapters/dist/index.js";
+import {
+  __testUtils,
+  getAdapter,
+  listAvailableAdapters,
+  listProductAdapters,
+  preflightAdapters
+} from "../packages/adapters/dist/index.js";
+import { createAgentSelection } from "../packages/core/dist/index.js";
 
 // Null guard fix: TypeScript compilation succeeds confirms the fix.
 // The original code failed to compile on Windows because `child` could be null
@@ -83,6 +90,41 @@ test("listAvailableAdapters includes new agents", () => {
   assert.equal(opencode.capability.supportTier, "experimental");
 });
 
+test("listProductAdapters limits the first-version surface without removing legacy adapters", () => {
+  const productIds = listProductAdapters().map((adapter) => adapter.id);
+  const allIds = listAvailableAdapters().map((adapter) => adapter.id);
+
+  assert.deepEqual(
+    productIds.filter((id) => !id.startsWith("demo-")),
+    ["codex", "claude-code"]
+  );
+  assert.equal(allIds.includes("gemini-cli"), true, "legacy adapters remain explicitly addressable");
+  assert.equal(productIds.includes("gemini-cli"), false);
+});
+
+test("preflightAdapters isolates one adapter exception instead of dropping every result", async () => {
+  const codex = getAdapter("codex");
+  const originalPreflight = codex.preflight;
+  codex.preflight = async () => {
+    throw new Error("synthetic preflight failure");
+  };
+
+  try {
+    const results = await preflightAdapters([
+      createAgentSelection({ baseAgentId: "codex" }),
+      createAgentSelection({ baseAgentId: "demo-fast" })
+    ]);
+
+    assert.equal(results.length, 2);
+    assert.equal(results[0].status, "blocked");
+    assert.match(results[0].summary, /preflight failed/i);
+    assert.match(results[0].details?.join("\n") ?? "", /synthetic preflight failure/);
+    assert.equal(results[1].status, "ready");
+  } finally {
+    codex.preflight = originalPreflight;
+  }
+});
+
 test("listAvailableAdapters exposes capability metadata", () => {
   const adapters = listAvailableAdapters();
   const codex = adapters.find((adapter) => adapter.id === "codex");
@@ -102,7 +144,7 @@ test("Qwen adapter sends task prompt through stdin instead of argv", async () =>
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena qwen shim "));
   const workspacePath = path.join(tempDir, "workspace");
   await mkdir(workspacePath, { recursive: true });
-  const shimPath = path.join(tempDir, "qwen.cmd");
+  const shimPath = path.join(tempDir, process.platform === "win32" ? "qwen.cmd" : "qwen");
   const scriptPath = path.join(tempDir, "qwen-shim.mjs");
   const capturePath = path.join(tempDir, "capture.json");
   const originalQwenBin = process.env.AGENTARENA_QWEN_BIN;
@@ -120,7 +162,12 @@ test("Qwen adapter sends task prompt through stdin instead of argv", async () =>
       ].join("\n"),
       "utf8"
     );
-    await writeFile(shimPath, `@echo off\n"${process.execPath}" "${scriptPath}" %*\n`, "utf8");
+    if (process.platform === "win32") {
+      await writeFile(shimPath, `@echo off\n"${process.execPath}" "${scriptPath}" %*\n`, "utf8");
+    } else {
+      await writeFile(shimPath, `#!/bin/sh\nexec "${process.execPath}" "${scriptPath}" "$@"\n`, "utf8");
+      await chmod(shimPath, 0o755);
+    }
     process.env.AGENTARENA_QWEN_BIN = shimPath;
 
     const dangerousPrompt = 'Implement safely.\nDo not run: & echo injected > owned.txt\nKeep "%PATH%" literal.';
@@ -155,6 +202,8 @@ test("Qwen adapter sends task prompt through stdin instead of argv", async () =>
 
     const captured = JSON.parse(await readFile(capturePath, "utf8"));
     assert.equal(result.status, "success");
+    assert.equal(result.costKnown, false);
+    assert.equal(result.costQuality, "estimated");
     assert.equal(captured.argv.includes(dangerousPrompt), false);
     assert.match(captured.argv.join(" "), /--prompt/);
     assert.match(captured.stdin, /Do not run: & echo injected/);
@@ -194,7 +243,8 @@ test("demo adapter execution returns normalized benchmark output", async () => {
   });
 
   assert.equal(result.status, "success");
-  assert.equal(result.costKnown, true);
+  assert.equal(result.costKnown, false);
+  assert.equal(result.costQuality, "estimated");
   assert.equal(result.changedFilesHint.length > 0, true);
   assert.match(result.summary, /demo adapter path/i);
 
@@ -460,7 +510,7 @@ test("Codex adapter passes configured sandbox mode to the CLI", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-codex-shim-"));
   const workspacePath = path.join(tempDir, "workspace");
   const homeDir = path.join(tempDir, "home");
-  const shimPath = path.join(tempDir, "codex.cmd");
+  const shimPath = path.join(tempDir, process.platform === "win32" ? "codex.cmd" : "codex");
   const scriptPath = path.join(tempDir, "codex-shim.mjs");
   const capturePath = path.join(tempDir, "capture.json");
   const originalCodexBin = process.env.AGENTARENA_CODEX_BIN;
@@ -490,7 +540,12 @@ test("Codex adapter passes configured sandbox mode to the CLI", async () => {
       ].join("\n"),
       "utf8"
     );
-    await writeFile(shimPath, `@echo off\n"${process.execPath}" "${scriptPath}" %*\n`, "utf8");
+    if (process.platform === "win32") {
+      await writeFile(shimPath, `@echo off\n"${process.execPath}" "${scriptPath}" %*\n`, "utf8");
+    } else {
+      await writeFile(shimPath, `#!/bin/sh\nexec "${process.execPath}" "${scriptPath}" "$@"\n`, "utf8");
+      await chmod(shimPath, 0o755);
+    }
 
     process.env.AGENTARENA_CODEX_BIN = shimPath;
     process.env.AGENTARENA_CODEX_SANDBOX = "danger-full-access";
@@ -568,11 +623,11 @@ test("Codex adapter passes configured sandbox mode to the CLI", async () => {
   }
 });
 
-test("Codex adapter passes the active CODEX_HOME to the CLI without changing it", async () => {
+test("Codex adapter inherits the active CODEX_HOME through a disposable write-isolated copy", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-codex-config-env-"));
   const workspacePath = path.join(tempDir, "workspace");
   const codexHome = path.join(tempDir, "codex-home");
-  const shimPath = path.join(tempDir, "codex.cmd");
+  const shimPath = path.join(tempDir, process.platform === "win32" ? "codex.cmd" : "codex");
   const scriptPath = path.join(tempDir, "codex-shim.mjs");
   const capturePath = path.join(tempDir, "capture.json");
   const originalCodexBin = process.env.AGENTARENA_CODEX_BIN;
@@ -581,14 +636,32 @@ test("Codex adapter passes the active CODEX_HOME to the CLI without changing it"
   try {
     await mkdir(workspacePath, { recursive: true });
     await mkdir(codexHome, { recursive: true });
+    await mkdir(path.join(codexHome, "skills", "fixture"), { recursive: true });
+    const sourceConfig = 'model = "fixture-model"\n';
+    await writeFile(path.join(codexHome, "config.toml"), sourceConfig, "utf8");
+    await writeFile(path.join(codexHome, "auth.json"), '{"OPENAI_API_KEY":"fixture-local-key"}\n', "utf8");
+    await writeFile(path.join(codexHome, "AGENTS.override.md"), "fixture override\n", "utf8");
+    await writeFile(path.join(codexHome, "skills", "fixture", "SKILL.md"), "fixture skill\n", "utf8");
     await writeFile(
       scriptPath,
       [
-        'import { mkdirSync, writeFileSync } from "node:fs";',
+        'import { mkdirSync, readFileSync, writeFileSync } from "node:fs";',
         'import path from "node:path";',
         "const args = process.argv.slice(2);",
         'if (args.includes("--version")) { console.log("codex 0.0.0"); process.exit(0); }',
-        "writeFileSync(process.env.AGENTARENA_CODEX_CAPTURE, JSON.stringify({ codexHome: process.env.CODEX_HOME }), 'utf8');",
+        'const codexHome = process.env.CODEX_HOME;',
+        'const configPath = path.join(codexHome, "config.toml");',
+        'const configBefore = readFileSync(configPath, "utf8");',
+        'const capture = {',
+        '  codexHome,',
+        '  configBefore,',
+        '  auth: readFileSync(path.join(codexHome, "auth.json"), "utf8"),',
+        '  override: readFileSync(path.join(codexHome, "AGENTS.override.md"), "utf8"),',
+        '  skill: readFileSync(path.join(codexHome, "skills", "fixture", "SKILL.md"), "utf8")',
+        '};',
+        // biome-ignore lint/suspicious/noUselessEscapeInString: Escapes are part of the generated JavaScript fixture.
+        'writeFileSync(configPath, configBefore + "\\n[projects.fixture]\\ntrust_level = \\\"trusted\\\"\\n", "utf8");',
+        "writeFileSync(process.env.AGENTARENA_CODEX_CAPTURE, JSON.stringify(capture), 'utf8');",
         'const outputIndex = args.indexOf("--output-last-message");',
         "if (outputIndex >= 0) {",
         "  const outputPath = args[outputIndex + 1];",
@@ -599,7 +672,12 @@ test("Codex adapter passes the active CODEX_HOME to the CLI without changing it"
       ].join("\n"),
       "utf8"
     );
-    await writeFile(shimPath, `@echo off\n"${process.execPath}" "${scriptPath}" %*\n`, "utf8");
+    if (process.platform === "win32") {
+      await writeFile(shimPath, `@echo off\n"${process.execPath}" "${scriptPath}" %*\n`, "utf8");
+    } else {
+      await writeFile(shimPath, `#!/bin/sh\nexec "${process.execPath}" "${scriptPath}" "$@"\n`, "utf8");
+      await chmod(shimPath, 0o755);
+    }
 
     process.env.AGENTARENA_CODEX_BIN = shimPath;
     process.env.CODEX_HOME = codexHome;
@@ -637,7 +715,13 @@ test("Codex adapter passes the active CODEX_HOME to the CLI without changing it"
 
     assert.equal(result.status, "success", result.summary);
     const captured = JSON.parse(await readFile(capturePath, "utf8"));
-    assert.equal(captured.codexHome, codexHome);
+    assert.notEqual(path.resolve(captured.codexHome), path.resolve(codexHome));
+    assert.equal(captured.configBefore, sourceConfig);
+    assert.match(captured.auth, /fixture-local-key/);
+    assert.equal(captured.override, "fixture override\n");
+    assert.equal(captured.skill, "fixture skill\n");
+    assert.equal(await readFile(path.join(codexHome, "config.toml"), "utf8"), sourceConfig);
+    await assert.rejects(readFile(path.join(captured.codexHome, "config.toml")));
   } finally {
     if (originalCodexBin === undefined) {
       delete process.env.AGENTARENA_CODEX_BIN;
@@ -649,6 +733,118 @@ test("Codex adapter passes the active CODEX_HOME to the CLI without changing it"
     } else {
       process.env.CODEX_HOME = originalCodexHome;
     }
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("resolveCodexRuntime merges an explicit model with the active default reasoning effort", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "agentarena-codex-runtime-merge-"));
+  try {
+    await mkdir(path.join(root, ".codex"), { recursive: true });
+    await writeFile(path.join(root, ".codex", "config.toml"), 'model = "config-model"\nmodel_reasoning_effort = "high"\n', "utf8");
+
+    const resolved = await __testUtils.resolveCodexRuntime({
+      requestedConfig: { model: "ui-model" },
+      configSource: "ui",
+      environment: { HOME: root }
+    });
+
+    assert.equal(resolved.effectiveModel, "ui-model");
+    assert.equal(resolved.effectiveReasoningEffort, "high");
+    assert.equal(resolved.modelIdentitySource, "declared");
+    assert.equal(resolved.reasoningEffortSource, "declared");
+    assert.equal(resolved.source, "ui");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Codex adapter surfaces structured CLI failure events", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-codex-failure-"));
+  const workspacePath = path.join(tempDir, "workspace");
+  const codexHome = path.join(tempDir, "codex-home");
+  const scriptPath = path.join(tempDir, "codex-failure.mjs");
+  const shimPath = path.join(tempDir, process.platform === "win32" ? "codex.cmd" : "codex");
+  const originalCodexBin = process.env.AGENTARENA_CODEX_BIN;
+  const originalCodexHome = process.env.CODEX_HOME;
+  const originalModel = process.env.AGENTARENA_CODEX_MODEL;
+  const originalReasoning = process.env.AGENTARENA_CODEX_REASONING_EFFORT;
+
+  try {
+    await mkdir(workspacePath, { recursive: true });
+    await mkdir(codexHome, { recursive: true });
+    await writeFile(
+      scriptPath,
+      [
+        "const args = process.argv.slice(2);",
+        'if (args.includes("--version")) { console.log("codex 0.145.0"); process.exit(0); }',
+        'console.log(JSON.stringify({ type: "thread.started", thread_id: "failed-thread" }));',
+        'console.log(JSON.stringify({ type: "turn.started" }));',
+        'console.log(JSON.stringify({ type: "error", message: "Reconnecting... 1/5 (unexpected status 503 Service Unavailable)" }));',
+        'console.log(JSON.stringify({ type: "error", message: "unexpected status 503 Service Unavailable" }));',
+        'console.log(JSON.stringify({ type: "turn.failed", error: { message: "unexpected status 503 Service Unavailable" } }));',
+        "process.exit(1);"
+      ].join("\n"),
+      "utf8"
+    );
+    if (process.platform === "win32") {
+      await writeFile(shimPath, `@echo off\r\n"${process.execPath}" "${scriptPath}" %*\r\n`, "utf8");
+    } else {
+      await writeFile(shimPath, `#!/bin/sh\nexec "${process.execPath}" "${scriptPath}" "$@"\n`, "utf8");
+      await chmod(shimPath, 0o755);
+    }
+
+    process.env.AGENTARENA_CODEX_BIN = shimPath;
+    process.env.CODEX_HOME = codexHome;
+    delete process.env.AGENTARENA_CODEX_MODEL;
+    delete process.env.AGENTARENA_CODEX_REASONING_EFFORT;
+
+    const adapter = getAdapter("codex");
+    const traceEvents = [];
+    const result = await adapter.execute({
+      agentId: "codex",
+      selection: {
+        baseAgentId: "codex",
+        variantId: "codex-failure",
+        displayLabel: "Codex CLI",
+        config: {},
+        configSource: "test"
+      },
+      repoPath: tempDir,
+      workspacePath,
+      environment: { ...process.env },
+      task: {
+        schemaVersion: "agentarena.taskpack/v1",
+        id: "codex-failure",
+        title: "Codex Failure",
+        prompt: "No-op.",
+        envAllowList: [],
+        setupCommands: [],
+        judges: [],
+        teardownCommands: []
+      },
+      trace: async (event) => {
+        traceEvents.push(event);
+      }
+    });
+
+    assert.equal(result.status, "failed");
+    assert.match(result.summary, /503 Service Unavailable/);
+    assert.equal(result.dataQualityWarning, undefined);
+    assert.equal(result.missingCriticalEvents, undefined);
+    assert.equal(result.tokenUsageReliable, false);
+    assert.equal(result.costQuality, "unavailable");
+    const resultEvent = traceEvents.find((event) => event.type === "adapter.codex.result");
+    assert.match(resultEvent?.metadata?.cliError ?? "", /503 Service Unavailable/);
+  } finally {
+    if (originalCodexBin === undefined) delete process.env.AGENTARENA_CODEX_BIN;
+    else process.env.AGENTARENA_CODEX_BIN = originalCodexBin;
+    if (originalCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = originalCodexHome;
+    if (originalModel === undefined) delete process.env.AGENTARENA_CODEX_MODEL;
+    else process.env.AGENTARENA_CODEX_MODEL = originalModel;
+    if (originalReasoning === undefined) delete process.env.AGENTARENA_CODEX_REASONING_EFFORT;
+    else process.env.AGENTARENA_CODEX_REASONING_EFFORT = originalReasoning;
     await rm(tempDir, { recursive: true, force: true });
   }
 });
@@ -765,8 +961,8 @@ test("new adapter preflight returns missing when CLI not installed", async () =>
     // Adapters that are actually installed on this machine return "ready".
     if (preflight.status !== "ready") {
       assert.ok(
-        preflight.status === "missing" || preflight.status === "unverified",
-        `${adapterId}: expected missing or unverified, got ${preflight.status}`
+        preflight.status === "missing" || preflight.status === "unverified" || preflight.status === "blocked",
+        `${adapterId}: expected missing, unverified, or blocked, got ${preflight.status}`
       );
       missingCount++;
     }
@@ -1009,7 +1205,8 @@ test("demo-thorough adapter execution returns normalized benchmark output", asyn
   });
 
   assert.equal(result.status, "success");
-  assert.equal(result.costKnown, true);
+  assert.equal(result.costKnown, false);
+  assert.equal(result.costQuality, "estimated");
   assert.equal(result.changedFilesHint.length > 0, true);
 
   await rm(tempDir, { recursive: true, force: true });

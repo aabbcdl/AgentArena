@@ -42,6 +42,18 @@ test("computeScoreComponents returns all expected keys", () => {
   assert.ok("precision" in components);
 });
 
+test("computeScoreComponents: duration is 1 when no successful result has positive duration", () => {
+  const result = makeResult({ durationMs: 0 });
+  const run = makeRun({
+    results: [
+      makeResult({ status: "success", durationMs: 0, scoreExcluded: false }),
+      makeResult({ status: "failed", durationMs: 5000, scoreExcluded: false }),
+    ],
+  });
+  const components = computeScoreComponents(result, run);
+  assert.equal(components.duration, 1, "must match backend durationEfficiencyScore empty-set semantics");
+});
+
 test("computeScoreComponents: successful result with passing test judge", () => {
   const result = makeResult({
     judgeResults: [
@@ -82,6 +94,20 @@ test("getCompositeScoreDetails: failed result stays in FAILED_SCORE_BAND [10, 40
   assert.ok(score.total <= 40, `score ${score.total} should be <= 40`);
 });
 
+test("getCompositeScoreDetails: completed execution with critical validation failure stays in [50, 70]", () => {
+  const result = makeResult({
+    status: "failed",
+    executionStatus: "completed",
+    validationStatus: "failed",
+    judgeResults: [
+      { type: "command", success: false, critical: true },
+    ],
+  });
+  const score = getCompositeScoreDetails(result, makeRun());
+  assert.ok(score.total >= 50, `score ${score.total} should be >= 50`);
+  assert.ok(score.total <= 70, `score ${score.total} should be <= 70`);
+});
+
 test("getCompositeScoreDetails: critical judge failure stays in [50, 70]", () => {
   const result = makeResult({
     judgeResults: [
@@ -115,7 +141,16 @@ test("normalizeApplicableWeights excludes precision when no expectedChangedPaths
 
 test("normalizeApplicableWeights includes precision when expectedChangedPaths present", () => {
   const weights = { status: 10, tests: 25, precision: 5, duration: 10 };
-  const result = makeResult();
+  const result = makeResult({
+    diffReliable: true,
+    diffPrecision: {
+      score: 1,
+      expectedScopeCount: 1,
+      totalChangedFiles: 1,
+      matchedFiles: ["src/a.ts"],
+      unexpectedFiles: []
+    }
+  });
   const run = makeRun({ task: { id: "t", expectedChangedPaths: ["src/**"] } });
   const normalized = normalizeApplicableWeights(weights, result, run);
   assert.ok(normalized.precision > 0);

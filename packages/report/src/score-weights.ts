@@ -9,7 +9,7 @@
  * Extracted from scoring.ts for independent testability.
  */
 
-import type { BenchmarkRun } from "@agentarena/core";
+import { type BenchmarkRun, resolveCostQuality } from "@agentarena/core";
 
 /**
  * Legacy "judges" weight split ratio: critical gets 2/3, non-critical gets 1/3.
@@ -45,7 +45,12 @@ export function filterApplicableWeights(
   result: BenchmarkRun["results"][number],
   run: BenchmarkRun
 ): Record<string, number> {
-  const hasPrecision = run.task.expectedChangedPaths && run.task.expectedChangedPaths.length > 0;
+  const hasPrecision = Boolean(
+    run.task.expectedChangedPaths?.length &&
+    result.diff?.reliable !== false &&
+    typeof result.diffPrecision?.score === "number"
+  );
+  const hasCost = resolveCostQuality(result) === "known" && result.estimatedCostUsd > 0;
   const hasTokenEfficiency = typeof result.tokenEfficiencyScore === "number";
   const hasResolutionRate = typeof result.sweBench?.resolutionRate === "number";
   const hasAcceptanceRate = typeof result.cursorBench?.acceptanceRate === "number";
@@ -60,6 +65,7 @@ export function filterApplicableWeights(
     if (key === "tests" && !hasTestJudge) continue;
     if (key === "lint" && !hasLintJudge) continue;
     if (key === "precision" && !hasPrecision) continue;
+    if (key === "cost" && !hasCost) continue;
     if (key === "tokenEfficiency" && !hasTokenEfficiency) continue;
     if (key === "resolutionRate" && !hasResolutionRate) continue;
     if (key === "acceptanceRate" && !hasAcceptanceRate) continue;

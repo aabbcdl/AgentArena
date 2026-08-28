@@ -11,6 +11,7 @@ import {
   ensureDirectory
 } from "@agentarena/core";
 import type { InvocationSpec } from "./adapter-capabilities.js";
+import { UNATTENDED_ACCESS_DISCLOSURE } from "./adapter-capabilities.js";
 import { formatAdapterError } from "./adapter-diagnostics.js";
 import { buildAgentPrompt, createPreflightResult, getChangedFilesFromGit, savePromptArtifact } from "./adapter-helpers.js";
 import { probeHelp, probeInvocationVersion } from "./invocation-probes.js";
@@ -24,10 +25,11 @@ export const QWEN_CODE_CAPABILITY: AdapterCapability = {
   invocationMethod: "Qwen Code CLI headless mode with JSON output",
   authPrerequisites: ["Qwen Code CLI installed and configured with API keys."],
   tokenAvailability: "available",
-  costAvailability: "available",
+  costAvailability: "estimated",
   traceRichness: "partial",
   configurableRuntime: { model: true, reasoningEffort: false },
   knownLimitations: [
+    UNATTENDED_ACCESS_DISCLOSURE,
     "Model selection requires environment configuration (QWEN_CODE_MODEL or settings file).",
     "Model parameter support depends on Qwen CLI version. Falls back to environment config if unsupported.",
     "Cost estimation based on published pricing and may vary.",
@@ -404,6 +406,7 @@ export class QwenCodeAdapter implements AgentAdapter {
         tokenUsage: 0,
         estimatedCostUsd: 0,
         costKnown: false,
+        costQuality: "unavailable",
         changedFilesHint: [],
         resolvedRuntime: runtimeWithVersion
       };
@@ -458,7 +461,8 @@ export class QwenCodeAdapter implements AgentAdapter {
       summary,
       tokenUsage: parsed.tokenUsage,
       estimatedCostUsd: parsed.estimatedCostUsd,
-      costKnown: true,
+      costKnown: false,
+      costQuality: parsed.tokenUsage > 0 ? "estimated" : "unavailable",
       changedFilesHint,
       resolvedRuntime: runtimeWithVersion
     };

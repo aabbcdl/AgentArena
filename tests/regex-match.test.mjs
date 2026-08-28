@@ -118,6 +118,18 @@ test("runRegexMatchJudge enforces maxMatches", async () => {
   });
 });
 
+test("runRegexMatchJudge enforces maxMatches even without the g flag", async () => {
+  // Regression: without `g` the count capped at 1, so a maxMatches ceiling
+  // silently passed on files with more matches. The judge must add `g` itself.
+  await withTempFile("foo foo foo foo foo", async (workspace, file) => {
+    const result = await runRegexMatchJudge(
+      baseJudge({ path: file, pattern: "foo", maxMatches: 2 }),
+      workspace
+    );
+    assert.equal(result.success, false);
+  });
+});
+
 // --- shouldNotMatch ---
 
 test("runRegexMatchJudge with shouldNotMatch succeeds when absent", async () => {

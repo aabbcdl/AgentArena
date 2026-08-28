@@ -33,7 +33,7 @@ import {
   testPassRatio,
   tokenEfficiencyScoreComponent,
 } from "./score-metrics.js";
-import { normalizeApplicableWeights, normalizeWeights } from "./score-weights.js";
+import { normalizeApplicableWeights } from "./score-weights.js";
 
 export { hasCriticalJudgeFailure } from "./score-metrics.js";
 // Re-export for backward compatibility
@@ -41,6 +41,12 @@ export { normalizeApplicableWeights } from "./score-weights.js";
 
 export function isScoreExcluded(result: BenchmarkRun["results"][number]): boolean {
   return result.scoreExcluded === true;
+}
+
+function isExecutionCompleted(result: BenchmarkRun["results"][number]): boolean {
+  return result.executionStatus === undefined
+    ? result.status === "success"
+    : result.executionStatus === "completed";
 }
 
 // ---------------------------------------------------------------------------
@@ -162,7 +168,7 @@ export function computeCompositeScore(
   const weights = scoreWeights ?? getDefaultWeights(scoreMode ?? "practical");
 
   // Rule 1: Failed run → failed band
-  if (result.status !== "success") {
+  if (!isExecutionCompleted(result)) {
     const baseScore = FAILED_SCORE_BAND.min;
     const efficiencyBonus = (
       durationEfficiencyScore(result, run) * FAILED_DURATION_WEIGHT +
@@ -175,14 +181,20 @@ export function computeCompositeScore(
 
   // Rule 2: Critical judge failure → partial band (use only applicable non-critical weights)
   if (hasCriticalJudgeFailure(result)) {
-    // Build partial weights from only the components used in the partial score
+    // Build partial weights from ONLY the six components the partial score sums,
+    // then apply the same applicability filtering as Rule 3. Previously this
+    // included every non-status/criticalJudges weight (resolutionRate,
+    // tokenEfficiency, …) in the denominator while the numerator summed only
+    // six components, deflating the score and diverging from the frontend's
+    // getCompositeScoreDetails (which this must match — see scoring.js Rule 2).
+    const partialWeightKeys = ["tests", "nonCriticalJudges", "lint", "precision", "duration", "cost"];
     const rawPartialWeights: Record<string, number> = {};
-    for (const key of Object.keys(weights)) {
-      if (key !== "status" && key !== "criticalJudges") {
+    for (const key of partialWeightKeys) {
+      if (weights[key] !== undefined) {
         rawPartialWeights[key] = weights[key];
       }
     }
-    const n = normalizeWeights(rawPartialWeights);
+    const n = normalizeApplicableWeights(rawPartialWeights, result, run);
     const weightedPartial =
       components.tests * (n.tests ?? 0) +
       components.nonCriticalJudges * (n.nonCriticalJudges ?? 0) +
@@ -229,7 +241,7 @@ export function computeScoreReasons(result: BenchmarkRun["results"][number], run
     return [result.scoreExclusionReason ?? "not-comparable"];
   }
 
-  if (result.status !== "success") {
+  if (!isExecutionCompleted(result)) {
     reasons.push("failed");
     return reasons;
   }

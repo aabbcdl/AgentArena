@@ -11,6 +11,7 @@ import {
   getClientIp,
   HttpError,
   jsonResponse,
+  normalizeMetricPath,
   setTrustProxy,
   startRateLimitCleanup,
   textResponse,
@@ -47,6 +48,13 @@ test("checkAuthHeader: sensitive API paths require token even on localhost GET",
   const url2 = new URL("http://localhost:3000/api/provider-profiles/my-profile/secret");
   assert.equal(checkAuthHeader(url2, "GET", true, token, undefined), false, "profile secret sub-path should require token");
   assert.equal(checkAuthHeader(url2, "GET", true, token, `Bearer ${token}`), true);
+
+  const runtimeProfilesUrl = new URL("http://localhost:3000/api/runtime-profiles");
+  assert.equal(checkAuthHeader(runtimeProfilesUrl, "GET", true, token, undefined), false);
+  assert.equal(checkAuthHeader(runtimeProfilesUrl, "GET", true, token, `Bearer ${token}`), true);
+  const runtimeVerifyUrl = new URL("http://localhost:3000/api/runtime-profiles/codex-local/verify");
+  assert.equal(checkAuthHeader(runtimeVerifyUrl, "POST", true, token, undefined), false);
+  assert.equal(checkAuthHeader(runtimeVerifyUrl, "POST", true, token, `Bearer ${token}`), true);
 
   // /api/run is sensitive
   const url3 = new URL("http://localhost:3000/api/run");
@@ -105,10 +113,12 @@ test("checkCorsOrigin: 127.0.0.1 origin passes for localhost host", () => {
   assert.equal(checkCorsOrigin("http://127.0.0.1:3000", "localhost", 3000), true);
 });
 
-test("checkCorsOrigin: 0.0.0.0 host allows localhost and 127.0.0.1", () => {
-  assert.equal(checkCorsOrigin("http://localhost:3000", "0.0.0.0", 3000), true);
-  assert.equal(checkCorsOrigin("http://127.0.0.1:3000", "0.0.0.0", 3000), true);
-  assert.equal(checkCorsOrigin("http://0.0.0.0:3000", "0.0.0.0", 3000), true);
+// 0.0.0.0 is not a supported UI bind host (rejected by validateUiCommand).
+// When host is 0.0.0.0, buildAllowedOrigins still includes localhost aliases
+// via the standard local origin set only when they match the normalized host
+// list — foreign origins remain rejected.
+test("checkCorsOrigin: non-local origin is rejected for 127.0.0.1 host", () => {
+  assert.equal(checkCorsOrigin("http://evil.com:3000", "127.0.0.1", 3000), false);
 });
 
 test("checkCorsOrigin: foreign origin is rejected", () => {
@@ -120,11 +130,33 @@ test("checkCorsOrigin: wrong port is rejected", () => {
   assert.equal(checkCorsOrigin("http://localhost:8080", "localhost", 3000), false);
 });
 
+test("checkCorsOrigin: literal 'null' origin is rejected (file:// / sandboxed iframe / privacy redirect)", () => {
+  assert.equal(checkCorsOrigin("null", "localhost", 3000), false);
+  assert.equal(checkCorsOrigin("null", "127.0.0.1", 4320), false);
+});
+
+test("checkCorsOrigin: DNS-rebinding — a foreign Origin against a loopback host is rejected", () => {
+  // A page rebound to 127.0.0.1 still sends its real Origin header; it is not
+  // in the loopback allowlist, so state-changing cross-origin requests fail.
+  assert.equal(checkCorsOrigin("http://attacker.example", "127.0.0.1", 4320), false);
+  assert.equal(checkCorsOrigin("https://attacker.example:4320", "localhost", 4320), false);
+});
+
 // ─── Rate limit tests ───
 
 test("checkRateLimit: allows requests under the limit", () => {
   const result = checkRateLimit("127.0.0.1", "/api/adapters");
   assert.equal(result.allowed, true);
+});
+
+test("normalizeMetricPath: collapses dynamic and unknown paths", () => {
+  assert.equal(normalizeMetricPath("/api/provider-profiles/custom/secret"), "/api/provider-profiles/:id/secret");
+  assert.equal(normalizeMetricPath("/api/runtime-profiles/custom"), "/api/runtime-profiles/:id");
+  assert.equal(normalizeMetricPath("/api/runtime-profiles/custom/secret"), "/api/runtime-profiles/:id/secret");
+  assert.equal(normalizeMetricPath("/api/runtime-profiles/custom/verify"), "/api/runtime-profiles/:id/verify");
+  assert.equal(normalizeMetricPath("/api/adhoc-taskpacks/custom"), "/api/adhoc-taskpacks/:id");
+  assert.equal(normalizeMetricPath("/api/untrusted/random"), "/api/other");
+  assert.equal(normalizeMetricPath("/workbench/assets/app.js"), "/static");
 });
 
 test("checkRateLimit: blocks requests over the general limit", () => {

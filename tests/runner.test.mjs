@@ -1,19 +1,23 @@
-// Allow inline node -e in test fixture task packs. Production task packs
+﻿// Allow inline node -e in test fixture task packs. Production task packs
 // should use script files; tests use inline scripts for brevity.
 process.env.AGENTARENA_ALLOW_EVAL_IN_JUDGES = "1";
 
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { promisify } from "node:util";
 import { AgentLogStore } from "../packages/core/dist/index.js";
+import { CRITICAL_FAIL_SCORE_BAND, computeCompositeScore } from "../packages/report/dist/index.js";
 import { checkTaskCompatibility, runAgent, runBenchmark } from "../packages/runner/dist/index.js";
 import { loadTaskPack } from "../packages/taskpacks/dist/index.js";
 
 const require = createRequire(import.meta.url);
 const nodeFs = require("node:fs").promises;
+const execFileAsync = promisify(execFile);
 
 async function writeJson(filePath, value) {
   await writeFile(filePath, JSON.stringify(value, null, 2), "utf8");
@@ -542,7 +546,7 @@ test("runBenchmark cleans up workspaces when cleanupWorkspaces is enabled", asyn
   await rm(tempDir, { recursive: true, force: true });
 });
 
-test("runBenchmark handles agent process non-zero exit code as failed", async () => {
+test("runBenchmark records a non-critical judge failure as partial validation", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-runner-"));
   const repoPath = path.join(tempDir, "repo");
   const outputPath = path.join(tempDir, "output");
@@ -575,7 +579,9 @@ test("runBenchmark handles agent process non-zero exit code as failed", async ()
       outputPath
     });
 
-    assert.equal(benchmark.results[0].status, "failed");
+    assert.equal(benchmark.results[0].status, "success");
+    assert.equal(benchmark.results[0].executionStatus, "completed");
+    assert.equal(benchmark.results[0].validationStatus, "partial");
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
@@ -638,7 +644,7 @@ test("runBenchmark cancellation signal is propagated and recorded in progress ev
   }
 });
 
-test("runBenchmark isolates failures so one failed agent does not affect others", async () => {
+test("runBenchmark records non-critical validation independently for each agent", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-runner-"));
   const repoPath = path.join(tempDir, "repo");
   const outputPath = path.join(tempDir, "output");
@@ -672,8 +678,9 @@ test("runBenchmark isolates failures so one failed agent does not affect others"
     });
 
     assert.equal(benchmark.results.length, 2);
-    const statuses = benchmark.results.map((r) => r.status);
-    assert.ok(statuses.includes("failed"), "至少有一个 agent 应该失败");
+    assert.ok(benchmark.results.every((result) => result.status === "success"));
+    assert.ok(benchmark.results.every((result) => result.executionStatus === "completed"));
+    assert.ok(benchmark.results.every((result) => result.validationStatus === "partial"));
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
@@ -1220,10 +1227,9 @@ test("runBenchmark returns cancelled results and still runs teardown after abort
     onProgress: (event) => {
       events.push(event);
       if (event.phase === "agent-start") {
-        // Delay must be long enough for setup to complete and the adapter to
-        // actually start executing. Too short and the abort fires during setup,
-        // which has an early-return path that skips teardown.
-        setTimeout(() => controller.abort(), 1000);
+        // Abort shortly after scheduling so faster machines cannot finish the
+        // demo adapter before the cancellation reaches it.
+        setTimeout(() => controller.abort(), 50);
       }
     }
   });
@@ -1375,7 +1381,7 @@ test("runBenchmark surfaces a non-fatal task compatibility warning without throw
   });
 
   const events = [];
-  // Must not throw despite the incompatibility — the run proceeds as before.
+  // Must not throw despite the incompatibility 鈥?the run proceeds as before.
   const benchmark = await runBenchmark({
     repoPath,
     taskPath,
@@ -1743,6 +1749,92 @@ test("runAgent falls back to prompt.txt when adapter.prompt trace omits the full
   }
 });
 
+test("runAgent captures file diffs before teardown modifies the workspace", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-pre-teardown-diff-"));
+  const repoPath = path.join(tempDir, "repo");
+  const outputPath = path.join(tempDir, "output");
+  const workspaceRootPath = path.join(tempDir, "workspaces");
+
+  try {
+    await mkdir(repoPath, { recursive: true });
+    await writeFile(path.join(repoPath, "README.md"), "baseline\n", "utf8");
+    await execFileAsync("git", ["init"], { cwd: repoPath });
+    await execFileAsync("git", ["config", "user.email", "agentarena@example.test"], { cwd: repoPath });
+    await execFileAsync("git", ["config", "user.name", "AgentArena Test"], { cwd: repoPath });
+    await execFileAsync("git", ["add", "README.md"], { cwd: repoPath });
+    await execFileAsync("git", ["commit", "-m", "baseline"], { cwd: repoPath });
+
+    const task = {
+      schemaVersion: "agentarena.taskpack/v1",
+      id: "pre-teardown-diff",
+      title: "Pre-teardown diff",
+      prompt: "Modify README.",
+      envAllowList: [],
+      setupCommands: [],
+      judges: [],
+      teardownCommands: [{
+        id: "rewrite-readme",
+        label: "Rewrite README during teardown",
+        command: "node -e \"require('node:fs').writeFileSync('README.md', 'teardown output\\\\n')\""
+      }]
+    };
+    const capability = {
+      supportTier: "supported",
+      invocationMethod: "test",
+      authPrerequisites: [],
+      tokenAvailability: "available",
+      costAvailability: "available",
+      traceRichness: "partial",
+      knownLimitations: []
+    };
+    const adapter = {
+      id: "pre-teardown-diff-test",
+      title: "Pre-teardown diff test",
+      kind: "external",
+      capability,
+      async preflight() {
+        throw new Error("not used");
+      },
+      async execute(context) {
+        await writeFile(path.join(context.workspacePath, "README.md"), "agent output\n", "utf8");
+        return {
+          status: "success",
+          summary: "done",
+          tokenUsage: 1,
+          estimatedCostUsd: 0,
+          costKnown: true,
+          changedFilesHint: ["README.md"]
+        };
+      }
+    };
+    const preflight = {
+      agentId: adapter.id,
+      baseAgentId: adapter.id,
+      variantId: adapter.id,
+      displayLabel: adapter.title,
+      requestedConfig: {},
+      agentTitle: adapter.title,
+      adapterKind: adapter.kind,
+      status: "ready",
+      summary: "ready",
+      capability,
+      adapter
+    };
+
+    const result = await runAgent(repoPath, outputPath, workspaceRootPath, task, preflight, {});
+
+    assert.equal(result.status, "success");
+    assert.equal(result.teardownResults[0].success, true);
+    assert.equal(await readFile(path.join(result.workspacePath, "README.md"), "utf8"), "teardown output\n");
+    const readmeDiff = result.fileDiffs?.find((entry) => entry.path === "README.md");
+    assert.ok(readmeDiff, "README diff should be persisted");
+    assert.match(readmeDiff.text, /\+agent output/);
+    assert.doesNotMatch(readmeDiff.text, /teardown output/);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("runAgent captures activity lines in the log store and failure tail", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-activity-"));
   const repoPath = path.join(tempDir, "repo");
@@ -1837,6 +1929,245 @@ test("runAgent captures activity lines in the log store and failure tail", async
       "[stdout] stdout line",
       "[stderr] stderr line"
     ]);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("runAgent separates completed execution from judge validation outcomes", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-validation-status-"));
+  const repoPath = path.join(tempDir, "repo");
+  const capability = {
+    supportTier: "supported",
+    invocationMethod: "test",
+    authPrerequisites: [],
+    tokenAvailability: "available",
+    costAvailability: "available",
+    traceRichness: "partial",
+    knownLimitations: []
+  };
+  const adapter = {
+    id: "validation-status-test",
+    title: "Validation Status Test",
+    kind: "external",
+    capability,
+    async preflight() {
+      throw new Error("not used");
+    },
+    async execute() {
+      return {
+        status: "success",
+        summary: "agent completed",
+        tokenUsage: 1,
+        estimatedCostUsd: 0,
+        costKnown: true,
+        changedFilesHint: []
+      };
+    }
+  };
+  const preflight = {
+    agentId: "validation-status-test",
+    baseAgentId: "validation-status-test",
+    variantId: "validation-status-test",
+    displayLabel: "Validation Status Test",
+    requestedConfig: {},
+    agentTitle: "Validation Status Test",
+    adapterKind: "external",
+    status: "ready",
+    summary: "ready",
+    capability,
+    adapter
+  };
+
+  try {
+    await mkdir(repoPath, { recursive: true });
+    await writeFile(path.join(repoPath, "README.md"), "# Validation Status\n", "utf8");
+
+    const runCase = async (critical, suffix) => {
+      const task = {
+        schemaVersion: "agentarena.taskpack/v1",
+        id: `validation-status-${suffix}`,
+        title: "Validation Status",
+        prompt: "Complete successfully, then fail a judge.",
+        envAllowList: [],
+        setupCommands: [],
+        judges: [{
+          id: `failing-${suffix}`,
+          type: "command",
+          label: `Failing ${suffix}`,
+          command: "node -e \"process.exit(1)\"",
+          critical
+        }],
+        teardownCommands: []
+      };
+      const result = await runAgent(
+        repoPath,
+        path.join(tempDir, `output-${suffix}`),
+        path.join(tempDir, `workspaces-${suffix}`),
+        task,
+        preflight,
+        {}
+      );
+      return { result, task };
+    };
+
+    const nonCritical = await runCase(false, "non-critical");
+    assert.equal(nonCritical.result.status, "success");
+    assert.equal(nonCritical.result.executionStatus, "completed");
+    assert.equal(nonCritical.result.validationStatus, "partial");
+
+    const critical = await runCase(true, "critical");
+    assert.equal(critical.result.status, "failed");
+    assert.equal(critical.result.executionStatus, "completed");
+    assert.equal(critical.result.validationStatus, "failed");
+
+    const score = computeCompositeScore(critical.result, {
+      runId: "validation-status-score",
+      createdAt: "2026-07-28T00:00:00.000Z",
+      repoPath,
+      outputPath: path.join(tempDir, "score"),
+      task: critical.task,
+      preflights: [preflight],
+      results: [critical.result]
+    });
+    assert.ok(score >= CRITICAL_FAIL_SCORE_BAND.min);
+    assert.ok(score <= CRITICAL_FAIL_SCORE_BAND.max);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+
+test("runBenchmark rejects resume results when task inputs change despite matching task id", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-resume-fingerprint-"));
+  const repoPath = path.join(tempDir, "repo");
+  const firstOutput = path.join(tempDir, "first");
+  const secondOutput = path.join(tempDir, "second");
+  const taskPath = path.join(tempDir, "task.json");
+  await mkdir(repoPath, { recursive: true });
+  await writeJson(path.join(repoPath, "package.json"), { name: "resume-fingerprint", version: "1.0.0" });
+  const baseTask = {
+    schemaVersion: "agentarena.taskpack/v1",
+    id: "same-task-id",
+    title: "Fingerprint Demo",
+    prompt: "Original prompt",
+    envAllowList: [],
+    setupCommands: [],
+    judges: [],
+    teardownCommands: []
+  };
+  try {
+    await writeJson(taskPath, baseTask);
+    const first = await runBenchmark({ repoPath, taskPath, agentIds: ["demo-fast"], outputPath: firstOutput, cleanupWorkspaces: true });
+    await writeJson(taskPath, { ...baseTask, prompt: "Changed prompt", judges: [{ id: "must-fail", type: "command", label: "Must fail", command: "node -e \"process.exit(1)\"" }] });
+    const second = await runBenchmark({ repoPath, taskPath, agentIds: ["demo-fast"], outputPath: secondOutput, resumeFrom: first.outputPath, cleanupWorkspaces: true });
+    assert.equal(second.results[0].judgeResults.length, 1);
+    assert.equal(second.results[0].status, "success");
+    assert.equal(second.results[0].executionStatus, "completed");
+    assert.equal(second.results[0].validationStatus, "partial");
+    assert.equal(second.results[0].judgeResults[0].success, false);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("changePolicy uses real snapshots and becomes a critical completion gate", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-change-policy-"));
+  const repoPath = path.join(tempDir, "repo");
+  await mkdir(path.join(repoPath, "src"), { recursive: true });
+  await writeFile(path.join(repoPath, "src", "main.js"), "module.exports = 1;\n", "utf8");
+  await writeFile(path.join(repoPath, "README.md"), "baseline\n", "utf8");
+
+  const capability = {
+    supportTier: "supported",
+    invocationMethod: "test",
+    authPrerequisites: [],
+    tokenAvailability: "available",
+    costAvailability: "available",
+    traceRichness: "partial",
+    knownLimitations: []
+  };
+  const task = {
+    schemaVersion: "agentarena.taskpack/v1",
+    id: "change-policy-runner",
+    title: "Change policy runner",
+    prompt: "Make the scoped change.",
+    envAllowList: [],
+    setupCommands: [],
+    judges: [],
+    teardownCommands: [],
+    changePolicy: {
+      requireAgentChange: true,
+      allowedPaths: ["src/main.js"],
+      minChangedFiles: 1,
+      maxChangedFiles: 1
+    }
+  };
+
+  async function runCase(mode) {
+    const adapter = {
+      id: `policy-${mode}`,
+      title: `Policy ${mode}`,
+      kind: "external",
+      capability,
+      async preflight() { throw new Error("not used"); },
+      async execute(context) {
+        if (mode === "allowed") {
+          await writeFile(path.join(context.workspacePath, "src", "main.js"), "module.exports = 2;\n", "utf8");
+        } else if (mode === "forbidden") {
+          await writeFile(path.join(context.workspacePath, "README.md"), "agent changed the wrong file\n", "utf8");
+        }
+        return {
+          status: "success",
+          summary: "done",
+          tokenUsage: 1,
+          estimatedCostUsd: 0,
+          costKnown: true,
+          changedFilesHint: ["src/main.js"]
+        };
+      }
+    };
+    const preflight = {
+      agentId: adapter.id,
+      baseAgentId: adapter.id,
+      variantId: adapter.id,
+      displayLabel: adapter.title,
+      requestedConfig: {},
+      agentTitle: adapter.title,
+      adapterKind: adapter.kind,
+      status: "ready",
+      summary: "ready",
+      capability,
+      adapter
+    };
+    return runAgent(
+      repoPath,
+      path.join(tempDir, `output-${mode}`),
+      path.join(tempDir, `workspace-${mode}`),
+      task,
+      preflight,
+      {}
+    );
+  }
+
+  try {
+    const noOp = await runCase("noop");
+    const noOpPolicy = noOp.judgeResults.find((judge) => judge.judgeId === "agentarena-change-policy");
+    assert.equal(noOp.changedFiles.length, 0);
+    assert.equal(noOpPolicy?.success, false);
+    assert.equal(noOp.status, "failed");
+
+    const allowed = await runCase("allowed");
+    const allowedPolicy = allowed.judgeResults.find((judge) => judge.judgeId === "agentarena-change-policy");
+    assert.deepEqual(allowed.changedFiles, ["src/main.js"]);
+    assert.equal(allowedPolicy?.success, true);
+    assert.equal(allowed.status, "success");
+
+    const forbidden = await runCase("forbidden");
+    const forbiddenPolicy = forbidden.judgeResults.find((judge) => judge.judgeId === "agentarena-change-policy");
+    assert.deepEqual(forbidden.changedFiles, ["README.md"]);
+    assert.equal(forbiddenPolicy?.success, false);
+    assert.equal(forbidden.status, "failed");
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }

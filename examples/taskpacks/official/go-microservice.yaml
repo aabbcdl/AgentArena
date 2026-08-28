@@ -7,6 +7,8 @@ metadata:
     zh-CN:
       title: "Go 微服务功能"
       description: "为 Go 微服务添加新功能"
+      objective: 在 Go 微服务中实现新的处理器或中间件。
+      judgeRationale: Go 编译和测试通过可以验证实现正确。
   source: official
   owner: AgentArena
   difficulty: medium

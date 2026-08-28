@@ -38,7 +38,7 @@ export async function runPatchValidationJudge(
   const cwd = await resolveJudgeWorkingDirectory(workspacePath, judge);
   const environment = buildStepEnvironment(baseAllowedNames, judge);
 
-  const result = await executeCommand(judge.testSuite, cwd, environment, timeoutMs, "Patch Validation Judge", options.signal, undefined, { allowEval: true });
+  const result = await executeCommand(judge.testSuite, cwd, environment, timeoutMs, "Patch Validation Judge", options.signal, undefined, { allowEval: options.allowEval });
 
   try {
     const payload = parseJsonPayload(result.stdout);

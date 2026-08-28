@@ -5,9 +5,10 @@ import type {
   CommandStepResult,
   DiffPrecisionSummary,
   DiffSummary,
+  FileDiffArtifact,
   JudgeResult
 } from "@agentarena/core";
-import { uniqueSorted } from "@agentarena/core";
+import { isAgentArenaAdapterMetadataPath, uniqueSorted } from "@agentarena/core";
 
 // ---------------------------------------------------------------------------
 // Base result factory — single source of truth for AgentRunResult shape
@@ -22,19 +23,30 @@ interface BaseResultOptions {
   tracePath: string;
   workspacePath: string;
   status?: AgentRunResult["status"];
+  executionStatus?: AgentRunResult["executionStatus"];
+  validationStatus?: AgentRunResult["validationStatus"];
   summary?: string;
   durationMs?: number;
   tokenUsage?: number;
   estimatedCostUsd?: number;
   costKnown?: boolean;
+  costQuality?: AgentRunResult["costQuality"];
   tokenUsageReliable?: boolean;
+  /** Propagated from AdapterExecutionResult.dataQualityWarning. */
+  dataQualityWarning?: string;
+  /** Propagated from AdapterExecutionResult.missingCriticalEvents. */
+  missingCriticalEvents?: string[];
+  traceWriteFailed?: boolean;
+  traceDroppedWrites?: number;
   changedFiles?: string[];
   changedFilesHint?: string[];
+  fileDiffs?: FileDiffArtifact[];
   setupResults?: CommandStepResult[];
   judgeResults?: JudgeResult[];
   teardownResults?: CommandStepResult[];
   diff?: DiffSummary;
   diffPrecision?: DiffPrecisionSummary;
+  diffReliable?: boolean;
   resolvedRuntime?: AgentResolvedRuntime;
   tokenUsageBreakdown?: AgentRunResult["tokenUsageBreakdown"];
   tokenEfficiencyScore?: number;
@@ -54,6 +66,7 @@ interface BaseResultOptions {
  */
 export function createBaseResult(options: BaseResultOptions): AgentRunResult {
   const { preflight, tracePath, workspacePath } = options;
+  const status = options.status ?? "failed";
   return {
     agentId: preflight.agentId,
     baseAgentId: preflight.baseAgentId,
@@ -64,15 +77,25 @@ export function createBaseResult(options: BaseResultOptions): AgentRunResult {
     agentTitle: preflight.agentTitle,
     adapterKind: preflight.adapterKind,
     preflight,
-    status: options.status ?? "failed",
+    status,
+    executionStatus:
+      options.executionStatus ??
+      (status === "success" ? "completed" : status === "cancelled" ? "cancelled" : "not-run"),
+    validationStatus: options.validationStatus ?? (status === "success" ? "passed" : "not-run"),
     summary: options.summary ?? preflight.summary,
     durationMs: options.durationMs ?? 0,
     tokenUsage: options.tokenUsage ?? 0,
     estimatedCostUsd: options.estimatedCostUsd ?? 0,
     costKnown: options.costKnown ?? false,
+    costQuality: options.costQuality,
     tokenUsageReliable: options.tokenUsageReliable,
+    dataQualityWarning: options.dataQualityWarning,
+    missingCriticalEvents: options.missingCriticalEvents,
+    traceWriteFailed: options.traceWriteFailed,
+    traceDroppedWrites: options.traceDroppedWrites,
     changedFiles: options.changedFiles ?? [],
     changedFilesHint: options.changedFilesHint ?? [],
+    fileDiffs: options.fileDiffs,
     setupResults: options.setupResults ?? [],
     judgeResults: options.judgeResults ?? [],
     teardownResults: options.teardownResults ?? [],
@@ -80,6 +103,7 @@ export function createBaseResult(options: BaseResultOptions): AgentRunResult {
     workspacePath,
     diff: options.diff ?? { added: [], changed: [], removed: [], skippedLargeFiles: [] },
     diffPrecision: options.diffPrecision,
+    diffReliable: options.diffReliable,
     scoreExcluded: options.scoreExcluded,
     scoreExclusionReason: options.scoreExclusionReason,
     failureCategory: options.failureCategory,
@@ -152,7 +176,8 @@ export function createSkippedRunResult(
 // ---------------------------------------------------------------------------
 
 export function buildChangedFiles(diff: DiffSummary, hints: string[]): string[] {
-  return uniqueSorted([...diff.added, ...diff.changed, ...diff.removed, ...hints]);
+  return uniqueSorted([...diff.added, ...diff.changed, ...diff.removed, ...hints])
+    .filter((filePath) => !isAgentArenaAdapterMetadataPath(filePath));
 }
 
 export function mergeResolvedRuntime(
@@ -166,7 +191,7 @@ export function mergeResolvedRuntime(
   const merged = {
     ...(fallback ?? {}),
     ...(primary ?? {}),
-    notes: [...(fallback?.notes ?? []), ...(primary?.notes ?? [])].filter(Boolean)
+    notes: [...new Set([...(fallback?.notes ?? []), ...(primary?.notes ?? [])].filter(Boolean))]
   };
 
   return {

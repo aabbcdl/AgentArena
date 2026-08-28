@@ -52,6 +52,8 @@ test("generateConclusion: single success", () => {
   assert.equal(conclusion.category, "single-success");
   assert.match(conclusion.verdict, /score 92/);
   assert.match(conclusion.explanation, /1\/1/);
+  assert.match(conclusion.explanation, /one run cannot establish a model capability ranking/);
+  assert.match(conclusion.nextStep, /two explicit model\/reasoning profiles/);
 });
 
 test("generateConclusion: partial success", () => {

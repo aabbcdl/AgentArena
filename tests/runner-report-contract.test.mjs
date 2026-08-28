@@ -1,12 +1,9 @@
-// Allow inline node -e in test fixture task packs. Production task packs
-// should use script files; tests use inline scripts for brevity.
-process.env.AGENTARENA_ALLOW_EVAL_IN_JUDGES = "1";
-
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { buildBenchmarkOutputSummary } from "../packages/cli/dist/output.js";
 import { writeReport } from "../packages/report/dist/index.js";
 import { runBenchmark } from "../packages/runner/dist/index.js";
 
@@ -25,7 +22,7 @@ test("runBenchmark output is directly consumable by writeReport", async () => {
       title: "Runner-Report Contract",
       prompt: "Verify runner output feeds into report without errors.",
       judges: [
-        { id: "pass", type: "command", label: "Always pass", command: "node -e \"process.exit(0)\"" }
+        { id: "pass", type: "file-exists", label: "README exists", path: "README.md" }
       ]
     }), "utf8");
 
@@ -38,14 +35,21 @@ test("runBenchmark output is directly consumable by writeReport", async () => {
 
     assert.equal(benchmark.results.length, 1);
     assert.equal(benchmark.results[0].status, "success");
+    assert.match(benchmark.fairComparison?.taskIdentity ?? "", /^task:[a-f0-9]{64}$/);
+    assert.match(benchmark.fairComparison?.judgeIdentity ?? "", /^judge:[a-f0-9]{64}$/);
+    assert.match(benchmark.fairComparison?.repoBaselineIdentity ?? "", /^repo:[a-f0-9]{64}$/);
 
     const report = await writeReport(benchmark);
+    const summary = JSON.parse(await readFile(report.jsonPath, "utf8"));
+    const cliSummary = buildBenchmarkOutputSummary(benchmark, report);
 
     assert.ok(report.jsonPath.endsWith("summary.json"));
     assert.ok(report.markdownPath.endsWith("summary.md"));
     assert.ok(report.badgePath.endsWith("badge.json"));
     assert.ok(report.prCommentPath.endsWith("pr-comment.md"));
     assert.ok(report.htmlPath.endsWith("report.html"));
+    assert.deepEqual(summary.fairComparison, benchmark.fairComparison);
+    assert.deepEqual(cliSummary.fairComparison, benchmark.fairComparison);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }

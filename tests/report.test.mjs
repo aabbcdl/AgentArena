@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { writeReport } from "../packages/report/dist/index.js";
+import { getComparableRuns, writeReport } from "../packages/report/dist/index.js";
 
 const demoCapability = {
   supportTier: "supported",
@@ -72,6 +72,45 @@ function createResult(outputPath, overrides = {}) {
     failureCategory: overrides.failureCategory
   };
 }
+
+test("report leaderboard uses persisted fair-comparison metadata with legacy fallback", () => {
+  const task = {
+    schemaVersion: "agentarena.taskpack/v1",
+    id: "task-a",
+    title: "Task A",
+    prompt: "Prompt",
+    envAllowList: [],
+    setupCommands: [],
+    judges: [],
+    teardownCommands: []
+  };
+  const createRun = (runId, fairComparison) => ({
+    runId,
+    createdAt: "2026-07-28T00:00:00.000Z",
+    repoPath: ".",
+    outputPath: ".",
+    scoreMode: "practical",
+    task,
+    fairComparison,
+    preflights: [],
+    results: []
+  });
+  const identity = {
+    taskIdentity: "task:a",
+    judgeIdentity: "judge:a",
+    repoBaselineIdentity: "repo:a"
+  };
+  const base = createRun("base", identity);
+  const same = createRun("same", { ...identity });
+  const differentJudge = createRun("different-judge", { ...identity, judgeIdentity: "judge:b" });
+  const differentRepo = createRun("different-repo", { ...identity, repoBaselineIdentity: "repo:b" });
+  const legacy = createRun("legacy", undefined);
+
+  assert.deepEqual(
+    getComparableRuns([base, same, differentJudge, differentRepo, legacy], base).map((run) => run.runId),
+    ["base", "same", "legacy"]
+  );
+});
 
 test("writeReport sanitizes shareable output paths", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-report-"));

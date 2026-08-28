@@ -1,30 +1,5 @@
-import { createHash } from "node:crypto";
-import type { AdapterPreflightResult, BenchmarkRun, TaskJudge, TaskPack } from "@agentarena/core";
+import { type AdapterPreflightResult, type BenchmarkRun, resolveCostQuality } from "@agentarena/core";
 import { enrichRunWithScores } from "@agentarena/report";
-
-function createTaskIdentity(task: TaskPack): string {
-  return task.id ? `task:${task.id}` : `task-title:${task.title}`;
-}
-
-function createJudgeIdentity(task: TaskPack): string {
-  const payload = JSON.stringify(
-    task.judges.map((judge: TaskJudge) => ({
-      id: judge.id,
-      type: judge.type,
-      label: judge.label,
-      critical: judge.critical ?? false
-    }))
-  );
-  return `judge:${createHash("sha256").update(payload).digest("hex")}`;
-}
-
-function createRepoBaselineIdentity(benchmark: BenchmarkRun): string | undefined {
-  const baseCommit = benchmark.task.metadata?.githubIssue?.baseCommit;
-  if (baseCommit) {
-    return `repo-base:${baseCommit}`;
-  }
-  return undefined;
-}
 
 export function formatCapabilitySummary(capability: AdapterPreflightResult["capability"]): string {
   return [
@@ -55,11 +30,7 @@ export function buildBenchmarkOutputSummary(
     scoreWeights: scoredBenchmark.scoreWeights,
     scoreScope: scoredBenchmark.scoreScope,
     scoreValidityNote: scoredBenchmark.scoreValidityNote,
-    fairComparison: {
-      taskIdentity: createTaskIdentity(scoredBenchmark.task),
-      judgeIdentity: createJudgeIdentity(scoredBenchmark.task),
-      repoBaselineIdentity: createRepoBaselineIdentity(scoredBenchmark)
-    },
+    fairComparison: scoredBenchmark.fairComparison,
     task: {
       id: scoredBenchmark.task.id,
       title: scoredBenchmark.task.title,
@@ -78,6 +49,8 @@ export function buildBenchmarkOutputSummary(
       agentTitle: result.agentTitle,
       adapterKind: result.adapterKind,
       status: result.status,
+      executionStatus: result.executionStatus,
+      validationStatus: result.validationStatus,
       summary: result.summary,
       compositeScore: result.compositeScore,
       scoreReasons: result.scoreReasons,
@@ -88,6 +61,7 @@ export function buildBenchmarkOutputSummary(
       tokenUsage: result.tokenUsage,
       estimatedCostUsd: result.estimatedCostUsd,
       costKnown: result.costKnown,
+      costQuality: resolveCostQuality(result),
       changedFiles: result.changedFiles,
       changedFilesCount: result.changedFiles.length,
       tracePath: result.tracePath,
@@ -100,9 +74,9 @@ export function buildBenchmarkOutputSummary(
     totals: {
       tokens: scoredBenchmark.results.reduce((sum, result) => sum + (result.tokenUsage ?? 0), 0),
       costUsd: scoredBenchmark.results
-        .filter((result) => result.costKnown)
+        .filter((result) => resolveCostQuality(result) === "known")
         .reduce((sum, result) => sum + (result.estimatedCostUsd ?? 0), 0),
-      costKnownCount: scoredBenchmark.results.filter((result) => result.costKnown).length,
+      costKnownCount: scoredBenchmark.results.filter((result) => resolveCostQuality(result) === "known").length,
       agentCount: scoredBenchmark.results.length,
       successCount: scoredBenchmark.results.filter((result) => result.status === "success").length
     },

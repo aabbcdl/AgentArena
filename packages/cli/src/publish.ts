@@ -8,7 +8,7 @@ import type {
   CommunityLeaderboardIndex,
   CommunityRunEntry,
 } from "@agentarena/core";
-import { isScoreMode, median } from "@agentarena/core";
+import { isScoreMode, median, resolveCostQuality } from "@agentarena/core";
 import { sanitizeRun } from "@agentarena/report";
 import type { ParsedArgs } from "./args.js";
 
@@ -173,6 +173,7 @@ export function extractCommunityEntry(
       tokenUsage: result.tokenUsage,
       estimatedCostUsd: result.estimatedCostUsd,
       costKnown: result.costKnown,
+      costQuality: resolveCostQuality(result),
       judgePassRate,
     };
   });
@@ -233,7 +234,7 @@ export function buildLeaderboardEntries(
     const allScores = results.map((r) => r.agent.compositeScore).filter((s) => s > 0);
     const allDurations = results.map((r) => r.agent.durationMs).filter((d) => d > 0);
     const allCosts = results
-      .filter((r) => r.agent.costKnown && r.agent.estimatedCostUsd > 0)
+      .filter((r) => resolveCostQuality(r.agent) === "known" && r.agent.estimatedCostUsd > 0)
       .map((r) => r.agent.estimatedCostUsd);
     const successCount = results.filter((r) => r.agent.status === "success").length;
 
@@ -241,8 +242,7 @@ export function buildLeaderboardEntries(
     const runWinMap = new Map<string, boolean>();
     for (const result of results) {
       const runResults = allResults.filter((r) => r.runId === result.runId);
-      const successfulResults = runResults.filter((r) => r.agent.status === "success");
-      const candidates = successfulResults.length > 0 ? successfulResults : runResults;
+      const candidates = runResults.filter((r) => r.agent.status === "success");
       const sorted = [...candidates].sort((a, b) => b.agent.compositeScore - a.agent.compositeScore);
       if (sorted[0]?.agent.baseAgentId === firstAgent.baseAgentId) {
         runWinMap.set(result.runId, true);
@@ -373,6 +373,50 @@ async function fetchExistingRuns(
 }
 
 /**
+ * Verify that the target community leaderboard repository exists and the token
+ * can write to it. Fails fast with an actionable message instead of surfacing
+ * a confusing 404 deep inside the file-write flow.
+ */
+export async function verifyRepoAccess(
+  owner: string,
+  repo: string,
+  token: string
+): Promise<void> {
+  let status = 0;
+  let body: { permissions?: { push?: boolean } } | null = null;
+  try {
+    body = (await ghApi(`/repos/${owner}/${repo}`, token)) as {
+      permissions?: { push?: boolean };
+    };
+  } catch (error: unknown) {
+    if (error instanceof Error && error.message.includes("404")) {
+      status = 404;
+    } else {
+      // Re-throw unexpected API errors (auth, rate limit, etc.)
+      throw error;
+    }
+  }
+
+  if (status === 404) {
+    throw new Error(
+      `Community leaderboard repository "${owner}/${repo}" was not found.\n` +
+      `Before publishing, either:\n` +
+      `  1. Create a public repo named "${repo}" under the "${owner}" account, or\n` +
+      `  2. Point AgentArena at an existing writable repo with:\n` +
+      `     AGENTARENA_COMMUNITY_OWNER=<owner> AGENTARENA_COMMUNITY_REPO=<repo> agentarena publish ...\n`
+    );
+  }
+
+  if (body?.permissions?.push === false) {
+    throw new Error(
+      `The GitHub token does not have write access to "${owner}/${repo}".\n` +
+      `Ensure the token has the "repo" scope (or "public_repo" for public repos) and that\n` +
+      `${owner} has granted your account push permission on "${repo}".`
+    );
+  }
+}
+
+/**
  * Main publish orchestrator
  */
 /**
@@ -459,6 +503,10 @@ export async function runPublish(parsed: ParsedArgs): Promise<void> {
   const token = getGitHubToken(parsed.githubToken);
   const owner = getGitHubOwner();
   const repo = getGitHubRepo();
+
+  // 2a. Verify the target repo exists and is writable before doing any work.
+  console.log(`Verifying community repo ${owner}/${repo}...`);
+  await verifyRepoAccess(owner, repo, token);
 
   // 3. Fetch GitHub username
   console.log("Authenticating with GitHub...");

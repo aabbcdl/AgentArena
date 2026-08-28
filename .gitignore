@@ -60,6 +60,8 @@ examples/taskpacks/task-packs.json
 packages/cli/assets/
 
 # Process/temp files
+output/
+--full-page
 findings.md
 progress.md
 task_plan.md
@@ -74,3 +76,8 @@ scripts/architecture-audit*
 stderr.txt
 test-output*.txt
 test-ux-*.png
+
+# Local scratch (build logs, ad-hoc artifacts)
+.tmp/
+.arts/
+.playwright-cli/

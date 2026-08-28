@@ -8,3 +8,15 @@ services:
       - .:/workspace
     stdin_open: true
     tty: true
+    # Baseline hardening. The runner is a convenience for more reproducible
+    # execution, NOT a security boundary (see SECURITY.md). These options reduce
+    # blast radius without breaking agent CLIs, which still need outbound network
+    # access to reach their LLM providers — so network is intentionally left on.
+    # Restrict egress to the required provider hosts at your network/firewall
+    # layer if you run untrusted task packs.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 512
+    mem_limit: 4g

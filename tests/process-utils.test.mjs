@@ -116,6 +116,73 @@ test("runProcess times out for long-running process", async () => {
   }
 });
 
+test("runProcess enforces an opt-in idle timeout after output stops", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-idle-timeout-"));
+  try {
+    const scriptPath = path.join(tempDir, "idle.js");
+    await writeFile(
+      scriptPath,
+      'process.stdout.write("started\\n");\nsetTimeout(() => {}, 60000);\n',
+      "utf8"
+    );
+    const startedAt = Date.now();
+    const result = await runProcess(
+      process.execPath,
+      [scriptPath],
+      process.cwd(),
+      5_000,
+      undefined,
+      undefined,
+      undefined,
+      { idleTimeoutMs: 200 }
+    );
+
+    assert.equal(result.timedOut, true);
+    assert.equal(result.timeoutKind, "idle");
+    assert.match(result.stdout, /started/);
+    assert.match(result.stderr, /no output.*200ms/i);
+    assert.ok(Date.now() - startedAt < 3_000, "idle timeout should finish before the total timeout");
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("runProcess resets the opt-in idle timeout whenever output arrives", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-idle-activity-"));
+  try {
+    const scriptPath = path.join(tempDir, "active.js");
+    await writeFile(
+      scriptPath,
+      [
+        "let count = 0;",
+        "const timer = setInterval(() => {",
+        // biome-ignore lint/suspicious/noTemplateCurlyInString: The placeholder must remain in the generated JavaScript fixture.
+        '  process.stdout.write(`tick-${++count}\\n`);',
+        "  if (count === 5) { clearInterval(timer); setTimeout(() => process.exit(0), 20); }",
+        "}, 70);"
+      ].join("\n"),
+      "utf8"
+    );
+    const result = await runProcess(
+      process.execPath,
+      [scriptPath],
+      process.cwd(),
+      3_000,
+      undefined,
+      undefined,
+      undefined,
+      { idleTimeoutMs: 500 }
+    );
+
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.equal(result.timedOut, false);
+    assert.equal(result.timeoutKind, undefined);
+    assert.match(result.stdout, /tick-5/);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("runProcess respects abort signal", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-abort-"));
   try {
@@ -234,6 +301,44 @@ test(
 
       assert.equal(result.timedOut, true);
       assert.match(result.stderr, /timed out/i);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  }
+);
+
+test(
+  "runProcess applies idle timeout to detached Windows Claude output files",
+  { skip: process.platform !== "win32" ? "Windows-specific Claude wrapper behavior" : false },
+  async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-claude-idle-timeout-"));
+    try {
+      const scriptPath = path.join(tempDir, "idle.js");
+      const shimPath = path.join(tempDir, "claude.cmd");
+      await writeFile(
+        scriptPath,
+        'process.stdout.write("started\\n");\nsetTimeout(() => {}, 60000);\n',
+        "utf8"
+      );
+      await writeFile(shimPath, `@echo off\n"${process.execPath}" "${scriptPath}" %*\n`, "utf8");
+
+      const startedAt = Date.now();
+      const result = await runProcess(
+        shimPath,
+        ["-p", "--output-format", "stream-json"],
+        tempDir,
+        10_000,
+        process.env,
+        undefined,
+        "READY",
+        { idleTimeoutMs: 1_000 }
+      );
+
+      assert.equal(result.timedOut, true);
+      assert.equal(result.timeoutKind, "idle");
+      assert.match(result.stdout, /started/);
+      assert.match(result.stderr, /no output.*1000ms/i);
+      assert.ok(Date.now() - startedAt < 6_000, "idle timeout should stop the detached process tree");
     } finally {
       await rm(tempDir, { recursive: true, force: true });
     }

@@ -1,22 +1,14 @@
 /**
- * Unified adapter event protocol.
+ * Experimental unified adapter event protocol (NOT the production parse path).
  *
- * Defines the standard JSONL event schema that adapters can emit to produce
- * structured, parseable trace output. The type definitions are actively used
- * by DemoAdapter and serve as the contract for future adapter migration.
+ * Type definitions are used by DemoAdapter for typed event objects.
+ * Production external adapters still parse vendor-native JSONL via
+ * `event-parsers.ts` (parseCodexEvents / parseStreamJsonEvents / …).
  *
- * Current status:
- * - Type definitions: used by DemoAdapter for typed event objects
- * - parseAdapterEvents: exported for future use — will replace the legacy
- *   per-adapter parseCodexEvents/parseClaudeEvents/parseGeminiEvents parsers
- *   once all adapters output this protocol
- * - emitEvent: exported for future use — adapters will call this to emit
- *   standardized JSONL events to stdout
- *
- * Migration path:
- * - New adapters SHOULD use this protocol
- * - Existing adapters continue using their legacy parsers (deprecated)
- * - Legacy parsers will be removed when all adapters are migrated
+ * Do not treat this module as the active contract for Codex/Claude/Gemini
+ * output until a deliberate migration lands. Prefer extending the existing
+ * parsers and their data-quality flags (`formatMismatch`, `tokenCountSuspicious`,
+ * `tokenUsageReliable`, `dataQualityWarning`) for reliability work.
  */
 
 import type { AgentResolvedRuntime } from "@agentarena/core";

@@ -1,3 +1,5 @@
+import { validateSummaryArtifact } from "../core/artifact-contract.js";
+
 export function fetchWithTimeout(url, options = {}, timeoutMs = 15_000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -32,7 +34,12 @@ function normalizeRelativePath(inputPath) {
 
 export async function readRunFromFile(file, { localText }) {
   try {
-    return JSON.parse(await file.text());
+    const parsed = JSON.parse(await file.text());
+    const validation = validateSummaryArtifact(parsed);
+    if (!validation.ok) {
+      throw new Error(validation.errors.join("; "));
+    }
+    return parsed;
   } catch {
     throw new Error(
       localText(

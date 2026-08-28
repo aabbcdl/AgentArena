@@ -1,71 +1,53 @@
 schemaVersion: agentarena.taskpack/v1
-id: official-config-repair
-title: Config Repair
-description: Fix a broken configuration file to match its schema.
+id: config-repair
+title: Repair Typed Configuration
+description: Correct a small JSON configuration while preserving unrelated values.
 metadata:
   source: official
   owner: AgentArena
+  lifecycle: core
   difficulty: easy
-  objective: Fix type mismatches and invalid values in a JSON config.
-  judgeRationale: Behavioral tests verify config is valid JSON with correct types and values.
-  repoTypes: ["node"]
-  tags: ["config", "json", "repair"]
+  objective: Restore the declared types and valid ranges in a configuration fixture.
+  repoTypes: [node]
+  tags: [core, benchmark, json, repair]
   dependencies: []
-  differentiator: Tests attention to detail — weak agents miss type mismatches.
+  judgeRationale: The verifier checks the complete contract and immutable neighboring fields.
+  differentiator: Tests careful JSON editing rather than broad rewrites.
   i18n:
     zh-CN:
-      title: 配置修复
-      description: 修复损坏的配置文件以匹配其 schema。
-      objective: 修复 JSON 配置中的类型不匹配和无效值。
-      judgeRationale: 行为测试验证配置是有效的 JSON，具有正确的类型和值。
-
-repoSource: "builtin://nodejs-app"
-
+      title: 修复类型配置
+      description: 修复一个 JSON 配置，同时保留无关字段。
+      objective: 恢复配置声明的类型和值域。
+      judgeRationale: 验证器检查完整契约以及不应改变的字段。
+repoSource: builtin://nodejs-core
 prompt: |
-  ## Task | 任务
-
-  The config file `fixtures/config.json` has several issues. Fix ALL of them:
-
-  1. `server.port` is the string `"3000"` but must be a number (3000)
-  2. `database.poolSize` is -5 but must be a positive number (at least 1)
-  3. The config must be valid JSON (it already is, but don't break it)
-
-  After fixing, verify:
-  - `typeof config.server.port === "number"`
-  - `config.database.poolSize >= 1`
-  - `config.mode === "production"` (don't change this)
-
-  ## Constraints | 约束
-
-  - Only modify `fixtures/config.json`
-  - Do NOT add or remove fields
-  - Do NOT change `mode`, `version`, `server.host`, or `database.url`
-
-expectedChangedPaths:
-  - fixtures/config.json
-
+  Repair `fixtures/config.json` so it satisfies the repository's configuration
+  contract. The server port must be a positive number, the database pool size
+  must be a positive integer, and the existing mode, version, host, and database
+  URL must remain unchanged. Keep the JSON valid and modify only this fixture.
+expectedChangedPaths: [fixtures/config.json]
+changePolicy:
+  requireAgentChange: true
+  allowedPaths: [fixtures/config.json]
+  forbiddenPaths: ["test/**", "scripts/**", package.json, "src/**"]
+  minChangedFiles: 1
+  maxChangedFiles: 1
 envAllowList: []
-setupCommands: []
-teardownCommands: []
+setupCommands:
+  - id: inject-fault
+    label: Prepare the isolated configuration regression
+    command: node scripts/inject-task-fault.mjs config-repair
+    timeoutMs: 10000
 judges:
-  - id: config-valid
+  - id: behavior
     type: command
-    label: Config is valid and loadable
-    command: |
-      node -e "var c=require('./fixtures/config.json');var a=require('node:assert/strict');a.strictEqual(c.mode,'production');a.strictEqual(typeof c.server.port,'number');a.ok(c.server.port>=1,'port positive');a.ok(c.database.poolSize>=1,'poolSize positive');a.strictEqual(c.version,'1.2.3');console.log('PASS: config valid');"
+    label: Configuration contract is valid
+    command: node scripts/verify-core-task.mjs config-repair
     timeoutMs: 10000
     critical: true
-  - id: port-is-number
+  - id: repository-tests
     type: command
-    label: Port is a number, not a string
-    command: |
-      node -e "var c=require('./fixtures/config.json');var a=require('node:assert/strict');a.strictEqual(typeof c.server.port,'number');a.ok(!isNaN(c.server.port));console.log('PASS: port is number');"
-    timeoutMs: 10000
-    critical: true
-  - id: poolsize-positive
-    type: command
-    label: Pool size is positive
-    command: |
-      node -e "var c=require('./fixtures/config.json');var a=require('node:assert/strict');a.ok(c.database.poolSize>=1,'poolSize must be >=1');console.log('PASS: poolSize positive');"
-    timeoutMs: 10000
+    label: Repository tests remain green
+    command: node --test test/*.test.js
+    timeoutMs: 30000
     critical: true

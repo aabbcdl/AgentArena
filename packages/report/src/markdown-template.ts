@@ -14,7 +14,8 @@ import {
   type Locale,
   type ScoredResult,
   type ScoredRun,
-  summarizeRun
+  summarizeRun,
+  usesThirdPartyProviderConfiguration
 } from "./report-helpers.js";
 
 /**
@@ -41,9 +42,69 @@ function escapeMdInline(value: string): string {
   return escapeMdCell(value).replaceAll("`", "\\`");
 }
 
+function renderExecutionIntegrity(run: BenchmarkRun, locale: Locale): string[] {
+  const manifest = run.jobManifest;
+  if (!manifest) return [];
+  const text = locale === "zh-CN"
+    ? {
+        title: "执行完整性",
+        status: "任务状态",
+        task: "任务身份",
+        repository: "仓库基线",
+        judge: "裁判身份",
+        harness: "Harness",
+        profile: "Profile",
+        model: "规范模型",
+        launch: "LaunchSpec",
+        receipt: "验证凭证",
+        providerPolicy: "Provider 策略",
+        modelParameters: "模型参数",
+        snapshot: "Harness 快照",
+        drift: "运行后漂移"
+      }
+    : {
+        title: "Execution Integrity",
+        status: "Job status",
+        task: "Task identity",
+        repository: "Repository baseline",
+        judge: "Judge identity",
+        harness: "Harness",
+        profile: "Profile",
+        model: "Canonical model",
+        launch: "LaunchSpec",
+        receipt: "Verification receipt",
+        providerPolicy: "Provider policy",
+        modelParameters: "Model parameters",
+        snapshot: "Harness snapshot",
+        drift: "Post-run drift"
+      };
+  const lines = [
+    `## ${text.title}`,
+    "",
+    `- ${text.status}: \`${escapeMdInline(manifest.status)}\``,
+    `- ${text.task}: \`${escapeMdInline(manifest.taskIdentity)}\``,
+    `- ${text.repository}: \`${escapeMdInline(manifest.repositoryBaselineIdentity)}\``,
+    `- ${text.judge}: \`${escapeMdInline(manifest.judgeIdentity)}\``,
+    "",
+    `| ${text.harness} | ${text.profile} | ${text.model} | ${text.launch} | ${text.receipt} | ${text.providerPolicy} | ${text.modelParameters} | ${text.snapshot} | ${text.drift} |`,
+    "| --- | --- | --- | --- | --- | --- | --- | --- | --- |"
+  ];
+  for (const variant of manifest.variants) {
+    lines.push(
+      `| ${escapeMdCell(variant.agentKind)} | ${escapeMdCell(`${variant.profileId} r${variant.profileRevision}/s${variant.secretRevision}`)} | ${escapeMdCell(variant.canonicalModelIdentity ?? "unknown")} | ${escapeMdCell(variant.launchSpecHash)} | ${escapeMdCell(variant.verificationReceiptId)} | ${escapeMdCell(variant.providerPolicyIdentity)} | ${escapeMdCell(variant.modelParametersIdentity)} | ${escapeMdCell(variant.harnessSnapshotId)} | ${escapeMdCell(variant.harnessDrift?.status ?? "not-checked")} |`
+    );
+  }
+  if (manifest.failureSummary) {
+    lines.push("", `- ${locale === "zh-CN" ? "失败摘要" : "Failure summary"}: ${escapeMdCell(manifest.failureSummary)}`);
+  }
+  lines.push("");
+  return lines;
+}
+
 export function renderMarkdown(run: BenchmarkRun, locale: Locale, leaderboard?: LeaderboardData): string {
   const copy = getReportCopy(locale);
   const summary = summarizeRun(run);
+  const knownCostSummary = summary.knownCostCount > 0 ? `$${summary.knownCostUsd.toFixed(2)}` : "n/a";
   const failedResults = run.results.filter((result) => result.status !== "success");
   const lines: string[] = [
     `# ${escapeMdHeading(copy.summaryTitle)}`,
@@ -66,7 +127,7 @@ export function renderMarkdown(run: BenchmarkRun, locale: Locale, leaderboard?: 
     `- ${copy.successRateLabel}: \`${summary.successCount}/${summary.totalAgents}\``,
     `- ${copy.failedLabel}: \`${summary.failedCount}\``,
     `- ${locale === "zh-CN" ? "未评分" : "Not Scored"}: \`${summary.scoreExcludedCount}\``,
-    `- ${copy.totalTokensLabel}: \`${summary.totalTokens}\` | ${copy.knownCostLabel}: \`$${summary.knownCostUsd.toFixed(2)}\``,
+    `- ${copy.totalTokensLabel}: \`${summary.totalTokens}\` | ${copy.knownCostLabel}: \`${knownCostSummary}\``,
     `- ${copy.badgeEndpointLabel}: \`badge.json\``,
     `- ${copy.noteLabel}: ${copy.comparesModelConfigurations} ${copy.baselineRepoHealthNote}`,
     `- ${locale === "zh-CN" ? "分数说明" : "Score Note"}: ${run.scoreValidityNote ?? "Scores only compare variants inside this run."}`,
@@ -82,6 +143,8 @@ export function renderMarkdown(run: BenchmarkRun, locale: Locale, leaderboard?: 
     }
     lines.push("");
   }
+
+  lines.push(...renderExecutionIntegrity(run, locale));
 
   // 添加历史排行榜摘要
   if (leaderboard && leaderboard.rows.length > 0) {
@@ -156,9 +219,21 @@ export function renderMarkdown(run: BenchmarkRun, locale: Locale, leaderboard?: 
     const passedJudgeCount = result.judgeResults.filter((judge) => judge.success).length;
     lines.push(
       `| ${escapeMdCell(result.displayLabel ?? result.agentId)} | ${escapeMdCell(result.baseAgentId)} | ${escapeMdCell(runtime.provider)} | ${escapeMdCell(runtime.providerKind)} | ${escapeMdCell(runtime.model)} | ${escapeMdCell(runtime.reasoning)} | ${escapeMdCell(runtime.version)} | ${escapeMdCell(runtime.verification)}/${escapeMdCell(runtime.source)} | ${result.status} | ${formatCompositeScoreValue(result)} | ${formatDuration(result.durationMs)} | ${result.tokenUsage} | ${
-        result.costKnown ? `$${result.estimatedCostUsd.toFixed(2)}` : "n/a"
+        formatCostUsd(result.estimatedCostUsd, result.costKnown, result.costQuality)
       } | ${result.changedFiles.length} | ${passedJudgeCount}/${result.judgeResults.length} | ${escapeMdCell(formatTestMetric(result))} | ${escapeMdCell(formatLintMetric(result))} | ${escapeMdCell(formatDiffPrecisionMetric(result))} |`
     );
+  }
+
+  const qualityWarnings = scoredResults.filter(
+    (result) => typeof result.dataQualityWarning === "string" && result.dataQualityWarning.trim()
+  );
+  if (qualityWarnings.length > 0) {
+    lines.push("", `## ${locale === "zh-CN" ? "数据质量警告" : "Data Quality Warnings"}`, "");
+    for (const result of qualityWarnings) {
+      lines.push(
+        `- \`${escapeMdInline(result.displayLabel ?? result.agentId)}\`: ${escapeMdCell(result.dataQualityWarning ?? "")}`
+      );
+    }
   }
 
   if (failedResults.length > 0) {
@@ -195,8 +270,8 @@ export function renderMarkdown(run: BenchmarkRun, locale: Locale, leaderboard?: 
       `- Provider Identity: provider=${runtime.provider} | kind=${runtime.providerKind} | provider source=${runtime.providerSource}`,
       `- Model Identity: requested=${result.requestedConfig.model ?? "default"} | requested reasoning=${result.requestedConfig.reasoningEffort ?? "default"} | effective model=${runtime.model} | effective reasoning=${runtime.reasoning} | version=${runtime.version} | version source=${runtime.versionSource} | source=${runtime.source} | verification=${runtime.verification}`
     );
-    if (runtime.providerKind !== "official" && runtime.provider !== "official") {
-      lines.push("- Risk Note: This result was produced through a provider-switched Claude Code configuration.");
+    if (usesThirdPartyProviderConfiguration(result)) {
+      lines.push("- Risk Note: This result was produced through a managed third-party Provider configuration.");
     }
     lines.push(`- Trace: \`${result.tracePath}\``);
     lines.push(`- Workspace: \`${result.workspacePath}\``);
@@ -249,6 +324,7 @@ export function renderMarkdown(run: BenchmarkRun, locale: Locale, leaderboard?: 
 export function renderPrComment(run: BenchmarkRun, locale: Locale, leaderboard?: LeaderboardData): string {
   const copy = getReportCopy(locale);
   const summary = summarizeRun(run);
+  const knownCostSummary = summary.knownCostCount > 0 ? `$${summary.knownCostUsd.toFixed(2)}` : "n/a";
   const scoredResults = run.results as ScoredResult[];
   const failedResults = run.results.filter((result) => result.status !== "success");
   const attentionPreflights = run.preflights.filter((preflight) => preflight.status !== "ready");
@@ -260,7 +336,7 @@ export function renderPrComment(run: BenchmarkRun, locale: Locale, leaderboard?:
     `${locale === "zh-CN" ? "评分模式" : "Score mode"}: \`${getRunScoreMode(run)}\``,
     `${locale === "zh-CN" ? "评分权重" : "Score weights"}: \`${JSON.stringify((run as ScoredRun).scoreWeights ?? {})}\``,
     "",
-    `${copy.overviewLabel}: \`${summary.successCount}/${summary.totalAgents}\`${locale === "zh-CN" ? " 通过" : " passing"} | ${copy.failedLabel}: \`${summary.failedCount}\` | ${copy.totalTokensLabel}: \`${summary.totalTokens}\` | ${copy.knownCostLabel}: \`$${summary.knownCostUsd.toFixed(2)}\``
+    `${copy.overviewLabel}: \`${summary.successCount}/${summary.totalAgents}\`${locale === "zh-CN" ? " 通过" : " passing"} | ${copy.failedLabel}: \`${summary.failedCount}\` | ${copy.totalTokensLabel}: \`${summary.totalTokens}\` | ${copy.knownCostLabel}: \`${knownCostSummary}\``
   ];
 
   // 添加历史排行榜摘要
@@ -312,7 +388,7 @@ export function renderPrComment(run: BenchmarkRun, locale: Locale, leaderboard?:
             : "ready";
     table.push(
       `| ${attention} | ${escapeMdCell(result.displayLabel ?? result.agentId)} | ${escapeMdCell(result.baseAgentId)} | ${escapeMdCell(runtime.provider)} | ${escapeMdCell(runtime.providerKind)} | ${escapeMdCell(runtime.model)} | ${escapeMdCell(runtime.reasoning)} | ${escapeMdCell(runtime.version)} | ${escapeMdCell(runtime.verification)}/${escapeMdCell(runtime.source)} | ${escapeMdCell(result.preflight.capability.supportTier)} | ${escapeMdCell(result.preflight.status)} | ${escapeMdCell(result.status)} | ${formatCompositeScoreValue(result)} | ${formatDuration(result.durationMs)} | ${result.tokenUsage} | ${
-        formatCostUsd(result.estimatedCostUsd, result.costKnown)
+        formatCostUsd(result.estimatedCostUsd, result.costKnown, result.costQuality)
       } | ${passedJudgeCount}/${result.judgeResults.length} | ${escapeMdCell(formatTestMetric(result))} | ${escapeMdCell(formatLintMetric(result))} | ${escapeMdCell(formatDiffPrecisionMetric(result))} | ${result.changedFiles.length} | ${escapeMdCell(note)} |`
     );
   }

@@ -2,6 +2,8 @@ import type { getAdapter } from "@agentarena/adapters";
 import type {
   BenchmarkCancellation,
   buildExecutionEnvironment,
+  ResolvedLaunchSpec,
+  RuntimeSecretValues,
 } from "@agentarena/core";
 import type { loadTaskPack } from "@agentarena/taskpacks";
 import type { JsonlTraceRecorder } from "@agentarena/trace";
@@ -14,7 +16,11 @@ export interface AgentRunContext {
   tracePath: string;
   traceRecorder: JsonlTraceRecorder;
   executionEnvironment: ReturnType<typeof buildExecutionEnvironment>;
+  resolvedLaunchSpec?: ResolvedLaunchSpec;
+  runtimeSecretValues?: RuntimeSecretValues;
+  redactRuntimeValue: <T>(value: T) => T;
   cancellation: BenchmarkCancellation | undefined;
   throwIfCancelled: (stage: string) => void;
   debug: boolean;
+  allowEvalInTaskCommands?: boolean;
 }

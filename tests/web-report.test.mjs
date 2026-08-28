@@ -20,6 +20,7 @@ import {
   formatCompositeScore,
   formatDiffPrecisionMetric,
   getAgentTrendRows,
+  getComparableRuns,
   getCompareResults,
   getCompositeScoreDetails,
   getCrossRunCompareRows,
@@ -32,7 +33,8 @@ import {
   getScoreWeightPreset,
   getSelectionTrustSummary,
   missingCoreComparisonData,
-  resultRecordKey
+  resultRecordKey,
+  usesThirdPartyProviderConfiguration
 } from "../apps/web-report/src/view-model.js";
 
 test("safeExternalHref only allows absolute http and https URLs", () => {
@@ -75,7 +77,7 @@ test("new Codex variants inherit the current local configuration instead of pinn
   assert.equal(variant.source, "codex-config");
 });
 
-test("Claude profile descriptions explain official local use and third-party isolation", () => {
+test("legacy Claude profile descriptions explain compatibility isolation without full permission bypass", () => {
   const localText = (_zh, en) => en;
   const officialDescription = claudeRuntimeModeDescription({ kind: "official" }, localText);
   const isolatedDescription = claudeRuntimeModeDescription({ kind: "openai-proxy" }, localText);
@@ -86,14 +88,41 @@ test("Claude profile descriptions explain official local use and third-party iso
   );
   assert.match(
     isolatedDescription,
-    /isolated temporary configuration/i
+    /legacy compatibility mode/i
   );
   assert.match(
     isolatedDescription,
-    /AGENTS\.md and CLAUDE\.md/i
+    /isolated temporary configuration/i
   );
-  assert.match(officialDescription, /AGENTARENA_SKIP_PERMISSIONS=1/i);
-  assert.match(isolatedDescription, /AGENTARENA_SKIP_PERMISSIONS=1/i);
+  assert.match(officialDescription, /permission-mode dontAsk/i);
+  assert.match(isolatedDescription, /permission-mode dontAsk/i);
+  assert.doesNotMatch(officialDescription, /AGENTARENA_SKIP_PERMISSIONS/i);
+  assert.doesNotMatch(isolatedDescription, /AGENTARENA_SKIP_PERMISSIONS/i);
+});
+
+test("Provider risk labels distinguish inherited local and managed configurations", () => {
+  assert.equal(usesThirdPartyProviderConfiguration({
+    resolvedRuntime: {
+      providerProfileName: "codex-local",
+      providerSource: "unknown",
+      source: "cli-default"
+    }
+  }), false);
+  assert.equal(usesThirdPartyProviderConfiguration({
+    resolvedRuntime: {
+      providerProfileName: "managed-provider",
+      providerSource: "profile-config",
+      source: "profile-config"
+    }
+  }), true);
+  assert.equal(usesThirdPartyProviderConfiguration({
+    resolvedRuntime: {
+      providerProfileName: "official",
+      providerKind: "official",
+      providerSource: "official-login",
+      source: "official-login"
+    }
+  }), false);
 });
 
 test("safeTraceCategoryClass preserves normal trace categories", () => {
@@ -217,6 +246,8 @@ function createResult(agentId, overrides = {}) {
     tokenUsage: overrides.tokenUsage ?? 100,
     estimatedCostUsd: overrides.estimatedCostUsd ?? 0,
     costKnown: overrides.costKnown ?? false,
+    costQuality: overrides.costQuality,
+    scoreExcluded: overrides.scoreExcluded,
     changedFiles: overrides.changedFiles ?? [],
     judgeResults: overrides.judgeResults ?? [],
     diffPrecision: overrides.diffPrecision
@@ -469,7 +500,7 @@ test("getRunVerdict returns best and fastest agents", () => {
   });
 
   const verdict = getRunVerdict(run);
-  assert.equal(verdict.bestAgent.agentId, "slow-success");
+  assert.equal(verdict.bestAgent.agentId, "fast-success");
   assert.equal(verdict.fastest.agentId, "fast-success");
   assert.equal(verdict.lowestKnownCost.agentId, "fast-success");
 });
@@ -663,6 +694,21 @@ test("buildShareCardSvg returns a shareable SVG card", () => {
   assert.match(svg, /Run run-svg/);
 });
 
+test("share cards mark estimated aggregate cost instead of showing zero", () => {
+  const run = createRun("run-estimated-cost", "Estimated Cost", {
+    results: [
+      createResult("demo-fast", { costKnown: false, costQuality: "estimated", estimatedCostUsd: 0.08 }),
+      createResult("demo-thorough", { costKnown: false, costQuality: "estimated", estimatedCostUsd: 0.16 })
+    ]
+  });
+
+  const text = buildShareCard(run);
+  const svg = buildShareCardSvg(run);
+  assert.match(text, /Cost: \u2248\$0\.24/);
+  assert.match(svg, /\u2248\$0\.24/);
+  assert.doesNotMatch(svg, />\$0\.00</);
+});
+
 test("findPreviousComparableRun requires matching task identity, not just title", () => {
   const runs = [
     createRun("run-old", "Task A", { taskId: "task-a-v1", createdAt: "2026-03-14T09:00:00.000Z" }),
@@ -713,14 +759,14 @@ test("getRunToRunAgentDiff computes deltas against the previous comparable run",
   const diff = getRunToRunAgentDiff([currentRun, previousRun], currentRun);
   assert.equal(diff.previousRun.runId, "run-old");
   assert.equal(diff.rows.length, 2);
-  const demoFastRow = diff.rows.find((row) => row.agentId.startsWith("demo-fast"));
+  const demoFastRow = diff.rows.find((row) => row.currentResult?.variantId === "demo-fast");
   assert.equal(demoFastRow.statusChange, "success -> success");
   assert.equal(demoFastRow.durationDeltaMs, -500);
   assert.equal(demoFastRow.tokenDelta, 20);
   assert.ok(Math.abs(demoFastRow.costDelta + 0.05) < 1e-9);
   assert.equal(demoFastRow.judgeDelta, 1);
 
-  const codexRow = diff.rows.find((row) => row.agentId.startsWith("codex"));
+  const codexRow = diff.rows.find((row) => row.currentResult?.variantId === "codex");
   assert.equal(codexRow.statusChange, "failed -> success");
 });
 
@@ -851,6 +897,33 @@ test("getFairComparisonExclusionReasons returns empty when runs are fully compar
   const reasons = getFairComparisonExclusionReasons(candidate, anchor);
 
   assert.deepEqual(reasons, []);
+});
+
+test("legacy getComparableRuns uses persisted fair-comparison metadata", () => {
+  const identity = { taskIdentity: "task:A", judgeIdentity: "judge:x", repoBaselineIdentity: "repo:y" };
+  const results = [createResult("agent-1", { judgeResults: [{ success: true }] })];
+  const base = createRun("run-base", "Task A", { scoreMode: "practical", fairComparison: identity, results });
+  const same = createRun("run-same", "Task A", { scoreMode: "practical", fairComparison: { ...identity }, results });
+  const differentJudge = createRun("run-judge", "Task A", {
+    scoreMode: "practical",
+    fairComparison: { ...identity, judgeIdentity: "judge:z" },
+    results
+  });
+  const differentRepo = createRun("run-repo", "Task A", {
+    scoreMode: "practical",
+    fairComparison: { ...identity, repoBaselineIdentity: "repo:z" },
+    results
+  });
+  const legacy = createRun("run-legacy", "Task A", {
+    scoreMode: "practical",
+    fairComparison: undefined,
+    results
+  });
+
+  assert.deepEqual(
+    getComparableRuns([base, same, differentJudge, differentRepo, legacy], base).map((run) => run.runId),
+    ["run-base", "run-same", "run-legacy"]
+  );
 });
 
 test("getFairComparisonExclusionReasons returns 'different-task-pack' when task identity differs", () => {
@@ -1020,15 +1093,18 @@ test("getRunVerdict handles empty results array", () => {
   assert.ok(verdict);
 });
 
-test("getRunVerdict handles all failed results", () => {
+test("getRunVerdict does not crown failed or score-excluded results", () => {
   const run = createRun("run-all-failed", "Task All Failed", {
     results: [
-      createResult("agent-a", { status: "failed", judgeResults: [{ success: false }] }),
-      createResult("agent-b", { status: "failed", judgeResults: [{ success: false }] })
+      createResult("agent-a", { status: "failed", costKnown: true, estimatedCostUsd: 0.01, judgeResults: [{ success: false }] }),
+      createResult("agent-b", { status: "success", scoreExcluded: true, costKnown: true, estimatedCostUsd: 0.02, judgeResults: [{ success: true }] })
     ]
   });
   const verdict = getRunVerdict(run);
-  assert.ok(verdict);
+  assert.equal(verdict.bestAgent, null);
+  assert.equal(verdict.fastest, null);
+  assert.equal(verdict.lowestKnownCost, null);
+  assert.equal(verdict.highestJudgePassRate, null);
 });
 
 test("getCompositeScoreDetails handles result with no judges", () => {

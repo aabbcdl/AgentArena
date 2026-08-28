@@ -1,67 +1,56 @@
 schemaVersion: agentarena.taskpack/v1
-id: official-repo-health
-title: Official Repo Health
-description: Fix a bug in a utility function and verify existing tests pass.
+id: repo-health
+title: Repair Word Capitalization
+description: Restore word-level capitalization without disturbing neighboring helpers.
 metadata:
   source: official
   owner: AgentArena
+  lifecycle: core
   difficulty: easy
-  objective: Check that an agent can fix a simple bug without breaking existing functionality.
-  repoTypes: ["node"]
-  tags: ["bugfix", "maintenance"]
+  objective: Fix one small observable utility regression and keep the repository green.
+  repoTypes: [node]
+  tags: [core, benchmark, bugfix]
   dependencies: []
-  judgeRationale: Behavioral tests verify the bug is fixed and other functions still work.
-  differentiator: Baseline test - all competent agents should pass.
+  judgeRationale: Behavior and the existing utility suite must both pass; source scope is enforced separately.
+  differentiator: A small regression that rewards reading existing tests before editing.
   i18n:
     zh-CN:
-      title: 仓库健康检查
-      description: 修复工具函数中的 bug 并验证现有测试通过。
-      objective: 检查 Agent 能否在不破坏现有功能的情况下修复简单 bug。
-      judgeRationale: 行为测试验证 bug 已修复且其他函数仍正常工作。
-
-repoSource: "builtin://nodejs-app"
-
+      title: 修复单词首字母大写
+      description: 修复一个字符串工具回归，同时不影响相邻功能。
+      objective: 修复小型可观察行为问题并保持仓库测试通过。
+      judgeRationale: 行为检查和现有工具测试必须同时通过，修改范围另行强制校验。
+repoSource: builtin://nodejs-core
 prompt: |
-  ## Task | 任务
+  Restore the intended behavior of `src/utils.js`.
 
-  The `capitalize` function in `src/utils.js` has a bug: it only capitalizes the first
-  character of the entire string, not the first character of each word.
-
-  For example: `capitalize("hello world")` returns `"Hello world"` instead of `"Hello World"`.
-
-  Fix the function so it capitalizes the first letter of EVERY word.
-
-  ## Constraints | 约束
-
-  - Only modify `src/utils.js`
-  - Do NOT delete or rename any existing functions
-  - Do NOT add new dependencies
-  - The fix must handle: empty string, single word, multiple words, multiple spaces
-
-expectedChangedPaths:
-  - src/utils.js
-
+  `capitalizeWords` should uppercase the first letter of every word while
+  preserving the original whitespace and handling empty input. Keep the public
+  exports and the behavior of `reverse`, `slugify`, and `truncate` unchanged.
+  Work only in the implementation file; do not edit tests, setup scripts, or
+  package metadata.
+expectedChangedPaths: [src/utils.js]
+changePolicy:
+  requireAgentChange: true
+  allowedPaths: [src/utils.js]
+  forbiddenPaths: ["test/**", "scripts/**", package.json, "fixtures/**"]
+  minChangedFiles: 1
+  maxChangedFiles: 1
 envAllowList: []
-setupCommands: []
-teardownCommands: []
+setupCommands:
+  - id: inject-fault
+    label: Prepare the isolated capitalization regression
+    command: node scripts/inject-task-fault.mjs repo-health
+    timeoutMs: 10000
 judges:
-  - id: capitalize-works
+  - id: behavior
     type: command
-    label: capitalize correctly capitalizes every word
-    command: |
-      node -e "var u=require('./src/utils');var a=require('node:assert/strict');a.strictEqual(u.capitalize('hello world'),'Hello World','multi-word');a.strictEqual(u.capitalize('single'),'Single','single word');a.strictEqual(u.capitalize(''),'','empty');a.strictEqual(u.capitalize('a b c'),'A B C','three words');console.log('PASS: capitalize works');"
+    label: Capitalization behavior is restored
+    command: node scripts/verify-core-task.mjs repo-health
     timeoutMs: 10000
     critical: true
-  - id: other-functions-preserved
+  - id: regression-tests
     type: command
-    label: Other functions still work
-    command: |
-      node -e "var u=require('./src/utils');var a=require('node:assert/strict');a.strictEqual(u.reverse('hello'),'olleh');a.strictEqual(u.slugify('Hello World!'),'hello-world');a.strictEqual(u.truncate('Long text',4),'Long...');console.log('PASS: other functions preserved');"
-    timeoutMs: 10000
-    critical: true
-  - id: tests-pass
-    type: command
-    label: All tests pass
+    label: Existing utility tests pass
     command: node --test test/utils.test.js
     timeoutMs: 30000
     critical: true

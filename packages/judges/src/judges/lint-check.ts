@@ -18,7 +18,7 @@ export async function runLintCheckJudge(
   const timeoutMs = judge.timeoutMs ?? defaultJudgeTimeoutMs();
   const cwd = await resolveJudgeWorkingDirectory(workspacePath, judge);
   const environment = buildStepEnvironment(baseAllowedNames, judge);
-  const result = await executeCommand(judge.command, cwd, environment, timeoutMs, "Judge", options.signal, undefined, { allowEval: true });
+  const result = await executeCommand(judge.command, cwd, environment, timeoutMs, "Judge", options.signal, undefined, { allowEval: options.allowEval });
   const maxWarnings = judge.maxWarnings ?? 0;
 
   try {

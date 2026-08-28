@@ -21,8 +21,52 @@ const RATE_LIMIT_EXPENSIVE_PATHS = new Set([
   "/api/quick-preflight",
   "/api/check-compatibility",
   "/api/create-adhoc-taskpack",
-  "/api/provider-profiles"
+  "/api/provider-profiles",
+  "/api/runtime-profiles"
 ]);
+
+const METRIC_API_PATHS = new Set([
+  "/api/auth/bootstrap",
+  "/api/ui-info",
+  "/api/adapters",
+  "/api/preflight",
+  "/api/quick-preflight",
+  "/api/provider-profiles",
+  "/api/runtime-profiles",
+  "/api/create-adhoc-taskpack",
+  "/api/check-compatibility",
+  "/api/adhoc-taskpacks",
+  "/api/taskpacks",
+  "/api/agent-detection",
+  "/api/install-guides",
+  "/api/metrics",
+  "/api/telemetry-summary",
+  "/api/telemetry",
+  "/api/run-status",
+  "/api/agent-logs",
+  "/api/run-stream",
+  "/api/run",
+  "/api/run/cancel",
+  "/api/trace"
+]);
+
+/** Collapse request paths into a bounded set of metric labels. */
+export function normalizeMetricPath(pathname: string): string {
+  if (METRIC_API_PATHS.has(pathname)) return pathname;
+  if (/^\/api\/provider-profiles\/[^/]+(?:\/secret)?$/.test(pathname)) {
+    return pathname.endsWith("/secret") ? "/api/provider-profiles/:id/secret" : "/api/provider-profiles/:id";
+  }
+  if (/^\/api\/runtime-profiles\/[^/]+(?:\/(?:secret|verify))?$/.test(pathname)) {
+    if (pathname.endsWith("/secret")) return "/api/runtime-profiles/:id/secret";
+    if (pathname.endsWith("/verify")) return "/api/runtime-profiles/:id/verify";
+    return "/api/runtime-profiles/:id";
+  }
+  if (/^\/api\/adhoc-taskpacks\/[^/]+$/.test(pathname)) return "/api/adhoc-taskpacks/:id";
+  if (pathname.startsWith("/api/")) return "/api/other";
+  if (pathname === "/" || pathname === "/legacy") return pathname;
+  if (pathname.startsWith("/legacy/")) return "/legacy/static";
+  return "/static";
+}
 
 interface RateLimitEntry {
   timestamps: number[];
@@ -122,7 +166,7 @@ export function checkRateLimit(ip: string, pathname: string): { allowed: boolean
 
   if (isExpensive && entry.expensiveTimestamps.length >= RATE_LIMIT_EXPENSIVE_MAX) {
     const oldest = entry.expensiveTimestamps[0];
-    metrics.rateLimitTriggeredTotal.inc({ clientIp: ip.slice(0, 3) + "***", path: pathname });
+    metrics.rateLimitTriggeredTotal.inc({ clientIp: ip.slice(0, 3) + "***", path: normalizeMetricPath(pathname) });
     logger.warn("server", "rate.limit", "Rate limit exceeded", { metadata: { path: pathname } });
     auditLogger.rateLimitTriggered("Rate limit exceeded", {
       clientIp: ip,
@@ -134,7 +178,7 @@ export function checkRateLimit(ip: string, pathname: string): { allowed: boolean
 
   if (entry.timestamps.length >= RATE_LIMIT_MAX_REQUESTS) {
     const oldest = entry.timestamps[0];
-    metrics.rateLimitTriggeredTotal.inc({ clientIp: ip.slice(0, 3) + "***", path: pathname });
+    metrics.rateLimitTriggeredTotal.inc({ clientIp: ip.slice(0, 3) + "***", path: normalizeMetricPath(pathname) });
     logger.warn("server", "rate.limit", "Rate limit exceeded", { metadata: { path: pathname } });
     auditLogger.rateLimitTriggered("Rate limit exceeded", {
       clientIp: ip,
@@ -205,9 +249,12 @@ function authTokensMatch(expectedToken: string, providedToken: string): boolean 
  * Cache of computed allowed-origin Sets keyed by `host:port`.
  *
  * The host and port are immutable for the lifetime of a server, so the Set
- * (8 entries + the 4-entry `0.0.0.0` extension) can be built once and reused
- * across every request. Previously this was constructed on every CORS check,
- * adding hundreds of needless allocations per second under load.
+ * can be built once and reused across every request. Previously this was
+ * constructed on every CORS check, adding hundreds of needless allocations
+ * per second under load.
+ *
+ * UI host is restricted to local addresses only; there is no special-case
+ * branch for `0.0.0.0` (that bind is rejected at CLI validation).
  */
 // Soft-capped at 16 entries. In practice only 1-2 host:port keys are ever
 // created (single local server), so 16 prevents unbounded growth from edge
@@ -230,12 +277,6 @@ function buildAllowedOrigins(host: string, port: number): Set<string> {
     `https://127.0.0.1:${port}`,
     `https://[::1]:${port}`,
   ]);
-  if (host === "0.0.0.0") {
-    allowed.add(`http://localhost:${port}`);
-    allowed.add(`http://127.0.0.1:${port}`);
-    allowed.add(`https://localhost:${port}`);
-    allowed.add(`https://127.0.0.1:${port}`);
-  }
   // Evict oldest entry if cache grows beyond reasonable bound (single-server model)
   if (corsOriginCache.size > 16) {
     const firstKey = corsOriginCache.keys().next().value;
@@ -258,6 +299,7 @@ export function checkCorsOrigin(origin: string | undefined, host: string, port: 
  */
 const SENSITIVE_API_PATHS = new Set([
   "/api/provider-profiles",
+  "/api/runtime-profiles",
   "/api/run",
   "/api/run/cancel",
   "/api/preflight",
@@ -272,6 +314,7 @@ function isSensitivePath(pathname: string): boolean {
   if (SENSITIVE_API_PATHS.has(pathname)) return true;
   // Match sub-paths: /api/provider-profiles/:id, /api/provider-profiles/:id/secret
   if (pathname.startsWith("/api/provider-profiles/")) return true;
+  if (pathname.startsWith("/api/runtime-profiles/")) return true;
   return false;
 }
 
@@ -300,7 +343,7 @@ export function checkAuthHeader(
     const matches = authTokensMatch(authToken, providedToken);
     if (!matches) {
       const maskedIp = clientIp ? clientIp.slice(0, 3) + "***" : "unknown";
-      metrics.authFailureTotal.inc({ clientIp: maskedIp, path: requestUrl.pathname });
+      metrics.authFailureTotal.inc({ clientIp: maskedIp, path: normalizeMetricPath(requestUrl.pathname) });
       logger.warn("server", "auth.verify", "Authentication failed: token mismatch (length or content)", {
         metadata: { path: requestUrl.pathname, method }
       });

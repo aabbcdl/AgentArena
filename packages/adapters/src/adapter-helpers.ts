@@ -6,22 +6,18 @@ import {
   type AdapterPreflightOptions,
   type AdapterPreflightResult,
   type AgentResolvedRuntime,
+  isAgentArenaGeneratedPath,
   logger
 } from "@agentarena/core";
 import { runProcess } from "./process-utils.js";
 
 const INTERNAL_CHANGED_FILE_PATTERNS = [
-  ".aa-evidence/",
-  "agentarena-demo/",
   ".claude/settings.local.json",
-  "agent-stderr.log",
-  "agent-stdout.jsonl",
-  "prompt.txt"
 ];
 
 function isInternalChangedFile(filePath: string): boolean {
   const normalized = filePath.replace(/\\/g, "/");
-  return INTERNAL_CHANGED_FILE_PATTERNS.some((pattern) =>
+  return isAgentArenaGeneratedPath(normalized) || INTERNAL_CHANGED_FILE_PATTERNS.some((pattern) =>
     pattern.endsWith("/")
       ? normalized.startsWith(pattern)
       : normalized === pattern

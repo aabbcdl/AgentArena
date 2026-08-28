@@ -1,0 +1,8 @@
+{
+  "status": "ready",
+  "items": [
+    { "id": "alpha", "value": 1 },
+    { "id": "beta", "value": 2 }
+  ],
+  "requestId": "req-001"
+}

@@ -135,6 +135,45 @@ test("folder loader surfaces missing and corrupt summary errors in the loader ar
   assert.deepEqual(inlineErrors, globalErrors);
 });
 
+test("folder loader rejects unsupported summary artifact schemas", async () => {
+  const errors = [];
+  const loaders = createResultLoaders({
+    state: {},
+    localText: (_zh, en) => en,
+    render: () => {},
+    renderMarkdownPanel: () => {},
+    applySingleRun: () => {},
+    applyRuns: () => {
+      throw new Error("invalid summaries must not produce runs");
+    },
+    showLoading: () => {},
+    hideLoading: () => {},
+    showError: (message) => errors.push(message),
+    showResultLoaderError: (message) => errors.push(message),
+    clearResultLoaderError: () => {}
+  });
+
+  await loaders.handleFolderSelection({
+    target: {
+      files: [
+        createVirtualFile({
+          name: "summary.json",
+          webkitRelativePath: "unsupported/summary.json",
+          text: JSON.stringify({
+            artifactSchemaVersion: "agentarena.summary/v0",
+            runId: "run-1",
+            results: []
+          })
+        })
+      ]
+    }
+  });
+
+  assert.equal(errors.length, 2);
+  assert.match(errors[0], /failed to parse/i);
+  assert.match(errors[1], /failed to parse/i);
+});
+
 test("trace replay bridge supports Blob/File sources", async () => {
   const ndjson = [
     JSON.stringify({

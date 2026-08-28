@@ -7,6 +7,8 @@ metadata:
     zh-CN:
       title: "React 组件 Bug 修复"
       description: "修复 React 组件中的 bug 并验证修复"
+      objective: 在保持测试覆盖的同时定位并修复 React 组件中的 bug。
+      judgeRationale: 结合测试通过和编译检查，确保修复正确且不破坏构建。
   source: official
   owner: AgentArena
   difficulty: medium

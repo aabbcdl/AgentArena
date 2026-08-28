@@ -7,7 +7,7 @@
  * Extracted from scoring.ts for independent testability and readability.
  */
 
-import type { BenchmarkRun } from "@agentarena/core";
+import { type BenchmarkRun, resolveCostQuality } from "@agentarena/core";
 import { findJudgeByType } from "./report-helpers.js";
 
 // ---------------------------------------------------------------------------
@@ -122,7 +122,10 @@ export function lintQualityScore(result: BenchmarkRun["results"][number]): numbe
 
 /** Duration efficiency: fastest / this result's duration (0–1, higher is better). */
 export function durationEfficiencyScore(result: BenchmarkRun["results"][number], run: BenchmarkRun): number {
-  const durations = run.results.map((entry) => entry.durationMs).filter((value) => value > 0);
+  const durations = run.results
+    .filter((entry) => entry.status === "success" && entry.scoreExcluded !== true)
+    .map((entry) => entry.durationMs)
+    .filter((value) => value > 0);
   if (durations.length === 0) {
     // All results completed instantly — everyone is equally efficient
     return 1;
@@ -133,8 +136,10 @@ export function durationEfficiencyScore(result: BenchmarkRun["results"][number],
 
 /** Cost efficiency: cheapest / this result's cost (0–1, higher is better). */
 export function costEfficiencyScore(result: BenchmarkRun["results"][number], run: BenchmarkRun): number {
-  const costs = run.results.filter((entry) => entry.costKnown && entry.estimatedCostUsd > 0).map((entry) => entry.estimatedCostUsd);
-  if (!result.costKnown || result.estimatedCostUsd <= 0 || costs.length === 0) {
+  const costs = run.results
+    .filter((entry) => entry.status === "success" && entry.scoreExcluded !== true && resolveCostQuality(entry) === "known" && entry.estimatedCostUsd > 0)
+    .map((entry) => entry.estimatedCostUsd);
+  if (resolveCostQuality(result) !== "known" || result.estimatedCostUsd <= 0 || costs.length === 0) {
     return 0;
   }
   const cheapest = Math.min(...costs);
@@ -147,10 +152,10 @@ export function costEfficiencyScore(result: BenchmarkRun["results"][number], run
  */
 export function precisionScore(result: BenchmarkRun["results"][number], run: BenchmarkRun): number {
   const hasExpectedPaths = run.task.expectedChangedPaths && run.task.expectedChangedPaths.length > 0;
-  if (!hasExpectedPaths) {
+  if (!hasExpectedPaths || result.diff?.reliable === false || typeof result.diffPrecision?.score !== "number") {
     return 0;
   }
-  return Math.max(result.diffPrecision?.score ?? 0, 0);
+  return Math.max(result.diffPrecision.score, 0);
 }
 
 /** Resolution rate score (Issue Resolution mode). Falls back to status boolean. */

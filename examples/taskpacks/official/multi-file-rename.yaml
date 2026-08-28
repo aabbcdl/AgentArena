@@ -12,6 +12,12 @@ metadata:
   tags: ["refactor", "rename", "multi-file"]
   dependencies: []
   differentiator: Tests thoroughness — weak agents miss references.
+  i18n:
+    zh-CN:
+      title: 多文件重命名
+      description: 在多个源文件中重命名一个函数。
+      objective: 检验 Agent 协调多文件变更的能力。
+      judgeRationale: 行为测试验证函数在所有位置都已重命名，且功能仍正常。
 
 repoSource: "builtin://nodejs-app"
 

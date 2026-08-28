@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import http from "node:http";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -27,9 +28,9 @@ function request(port, method, pathname, body, token, hostname = "127.0.0.1") {
       res.on("data", (chunk) => { data += chunk; });
       res.on("end", () => {
         try {
-          resolve({ statusCode: res.statusCode, body: JSON.parse(data) });
+          resolve({ statusCode: res.statusCode, headers: res.headers, body: JSON.parse(data) });
         } catch {
-          resolve({ statusCode: res.statusCode, body: data });
+          resolve({ statusCode: res.statusCode, headers: res.headers, body: data });
         }
       });
     });
@@ -82,13 +83,13 @@ async function getAvailablePort(hostname = "127.0.0.1") {
   });
 }
 
-async function startServer(port, authTokenOverride, hostname = "127.0.0.1") {
+async function startServer(port, authTokenOverride, hostname = "127.0.0.1", cwd = REPO_ROOT) {
   // Pre-generate an explicit auth token to avoid token-file race conditions across
   // parallel test runs. The CLI masks tokens in stdout for security, so parsing
   // from stdout no longer works.
   const authToken = authTokenOverride ?? `test-token-${Date.now()}-${port}-${Math.random().toString(36).slice(2, 10)}`;
   const child = spawn(process.execPath, [CLI_ENTRY, "ui", "--host", hostname, "--port", String(port), "--no-open", "--auth-token", authToken], {
-    cwd: REPO_ROOT,
+    cwd,
     stdio: ["ignore", "pipe", "pipe"],
     env: { ...process.env }
   });
@@ -139,15 +140,150 @@ test("GET /api/ui-info returns correct structure", { timeout: 60_000 }, async ()
   }
 });
 
-test("GET / escapes localhost auth token before injecting it into index.html", { timeout: 60_000 }, async () => {
+test("--workspace-root scopes UI state and API paths to the configured directory", { timeout: 60_000 }, async () => {
+  const parentDir = await fs.mkdtemp(path.join(os.tmpdir(), "agentarena-workspace-root-"));
+  const workspaceRoot = path.join(parentDir, "workspace");
+  await fs.mkdir(workspaceRoot, { recursive: true });
+  const port = await getAvailablePort();
+  const authToken = `workspace-token-${Date.now()}`;
+  const child = spawn(process.execPath, [
+    CLI_ENTRY,
+    "ui",
+    "--host",
+    "127.0.0.1",
+    "--port",
+    String(port),
+    "--no-open",
+    "--auth-token",
+    authToken,
+    "--workspace-root",
+    workspaceRoot,
+  ], {
+    cwd: parentDir,
+    stdio: ["ignore", "pipe", "pipe"],
+    env: { ...process.env },
+  });
+
+  try {
+    await waitForServer(port);
+    const info = await request(port, "GET", "/api/ui-info", undefined, authToken);
+    assert.equal(info.statusCode, 200);
+    assert.equal(info.body.workspaceRoot, await fs.realpath(workspaceRoot));
+    assert.equal(info.body.repoPath, await fs.realpath(workspaceRoot));
+    assert.equal(info.body.defaultOutputPath, path.join(await fs.realpath(workspaceRoot), ".agentarena", "ui-runs"));
+    assert.equal(
+      info.body.authTokenFilePath,
+      path.join(await fs.realpath(workspaceRoot), ".agentarena", `last-auth-token-${port}`)
+    );
+  } finally {
+    child.kill("SIGTERM");
+    await new Promise((resolve) => child.once("exit", resolve));
+    await fs.rm(parentDir, { recursive: true, force: true });
+  }
+});
+
+test("explicit local auth token uses admin only when configured and isolates its token file", { timeout: 60_000 }, async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "agentarena-local-auth-"));
+  const port = await getAvailablePort();
+  const child = spawn(process.execPath, [CLI_ENTRY, "ui", "--host", "127.0.0.1", "--port", String(port), "--no-open"], {
+    cwd: tempDir,
+    stdio: ["ignore", "pipe", "pipe"],
+    env: { ...process.env, AGENTARENA_LOCAL_AUTH_TOKEN: "admin", AGENTARENA_AUTH_TOKEN: undefined }
+  });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
+  child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
+
+  try {
+    await waitForServer(port);
+    assert.match(stdout, /auth_mode=password/, stderr);
+
+    const info = await request(port, "GET", "/api/ui-info");
+    assert.equal(info.statusCode, 200);
+    assert.equal(info.body.authTokenSource, "local-env");
+    assert.equal(info.body.authMode, "password");
+    assert.equal(info.body.authSetupRequired, false);
+    assert.match(info.body.authTokenFilePath, new RegExp(`last-auth-token-${port}$`));
+    assert.equal(await fs.readFile(info.body.authTokenFilePath, "utf8"), "admin");
+
+    assert.equal((await request(port, "GET", "/api/runtime-profiles", undefined, "wrong-token")).statusCode, 401);
+    assert.equal((await request(port, "GET", "/api/runtime-profiles", undefined, "admin")).statusCode, 200);
+  } finally {
+    child.kill("SIGTERM");
+    await new Promise((resolve) => child.once("exit", resolve));
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("first local startup can set and later log in with a service password", { timeout: 60_000 }, async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "agentarena-password-auth-"));
+  const port = await getAvailablePort();
+  const childArgs = [CLI_ENTRY, "ui", "--host", "127.0.0.1", "--port", String(port), "--no-open"];
+  const cleanAuthEnv = {
+    ...process.env,
+    AGENTARENA_LOCAL_AUTH_TOKEN: undefined,
+    AGENTARENA_AUTH_TOKEN: undefined
+  };
+  const spawnServer = () => spawn(process.execPath, childArgs, {
+    cwd: tempDir,
+    stdio: ["ignore", "pipe", "pipe"],
+    env: cleanAuthEnv
+  });
+  let child = spawnServer();
+
+  try {
+    await waitForServer(port);
+    const statusBefore = await request(port, "GET", "/api/auth/status");
+    assert.equal(statusBefore.statusCode, 200);
+    assert.deepEqual(statusBefore.body, { mode: "password", setupRequired: true });
+    assert.equal((await request(port, "GET", "/api/runtime-profiles")).statusCode, 401);
+    assert.equal((await request(port, "POST", "/api/auth/setup", { password: "x" })).statusCode, 400);
+
+    const setup = await request(port, "POST", "/api/auth/setup", { password: "admin" });
+    assert.equal(setup.statusCode, 200);
+    assert.equal(typeof setup.body.token, "string");
+    const currentToken = setup.body.token;
+    const statusAfter = await request(port, "GET", "/api/auth/status");
+    assert.deepEqual(statusAfter.body, { mode: "password", setupRequired: false });
+    assert.equal((await request(port, "GET", "/api/runtime-profiles", undefined, currentToken)).statusCode, 200);
+    assert.equal((await request(port, "POST", "/api/auth/setup", { password: "another" })).statusCode, 409);
+    assert.equal((await request(port, "POST", "/api/auth/login", { password: "wrong" })).statusCode, 401);
+    const login = await request(port, "POST", "/api/auth/login", { password: "admin" });
+    assert.equal(login.statusCode, 200);
+    assert.equal(login.body.token, currentToken);
+
+    const configPath = path.join(tempDir, ".agentarena", "ui-auth.json");
+    const config = await fs.readFile(configPath, "utf8");
+    assert.doesNotMatch(config, /admin/);
+
+    child.kill("SIGTERM");
+    await new Promise((resolve) => child.once("exit", resolve));
+    child = spawnServer();
+    await waitForServer(port);
+    const statusAfterRestart = await request(port, "GET", "/api/auth/status");
+    assert.deepEqual(statusAfterRestart.body, { mode: "password", setupRequired: false });
+    const loginAfterRestart = await request(port, "POST", "/api/auth/login", { password: "admin" });
+    assert.equal(loginAfterRestart.statusCode, 200);
+    assert.notEqual(loginAfterRestart.body.token, currentToken);
+    assert.equal((await request(port, "GET", "/api/runtime-profiles", undefined, loginAfterRestart.body.token)).statusCode, 200);
+  } finally {
+    child.kill("SIGTERM");
+    await new Promise((resolve) => child.once("exit", resolve));
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("GET /workbench/ never exposes the localhost auth token in index.html", { timeout: 60_000 }, async () => {
   const port = await getAvailablePort();
   const unsafeToken = 'unsafe"><script>window.__agentarenaXss = true</script>';
   const { child } = await startServer(port, unsafeToken);
   try {
-    const res = await request(port, "GET", "/");
+    const res = await request(port, "GET", "/workbench/");
     assert.equal(res.statusCode, 200);
-    assert.match(res.body, /meta name="agentarena-auth-token"/);
-    assert.match(res.body, /unsafe&quot;&gt;&lt;script&gt;window\.__agentarenaXss = true&lt;\/script&gt;/);
+    assert.doesNotMatch(res.body, /meta name="agentarena-auth-token"/);
+    assert.doesNotMatch(res.body, /agentarena-auth-token/);
+    assert.doesNotMatch(res.body, /unsafe/);
     assert.doesNotMatch(res.body, /<script>window\.__agentarenaXss = true<\/script>/);
   } finally {
     child.kill("SIGTERM");
@@ -406,17 +542,17 @@ test("GET /api/run-stream accepts a valid Authorization header", { timeout: 60_0
 });
 
 test("GET /api/run-status returns idle when no run active", { timeout: 60_000 }, async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "agentarena-run-status-"));
   const port = await getAvailablePort();
-  // Clean up any persisted run state from previous tests
-  const stateDir = path.join(process.cwd(), ".agentarena", "ui");
-  try { await fs.rm(stateDir, { recursive: true, force: true }); } catch { /* best-effort: cleanup */ }
-  const { child } = await startServer(port);
+  const { child } = await startServer(port, undefined, "127.0.0.1", tempDir);
   try {
     const res = await request(port, "GET", "/api/run-status");
     assert.equal(res.statusCode, 200);
     assert.equal(res.body.state, "idle");
   } finally {
     child.kill("SIGTERM");
+    await new Promise((resolve) => child.once("exit", resolve));
+    await fs.rm(tempDir, { recursive: true, force: true });
   }
 });
 
@@ -427,7 +563,46 @@ test("GET /workbench/ serves the nested workbench index", { timeout: 60_000 }, a
     const res = await request(port, "GET", "/workbench/");
     assert.equal(res.statusCode, 200);
     assert.match(String(res.body), /AgentArena Workbench/);
-    assert.match(String(res.body), /agentarena-auth-token/);
+    assert.doesNotMatch(String(res.body), /agentarena-auth-token/);
+  } finally {
+    child.kill("SIGTERM");
+  }
+});
+
+
+test("GET / makes Workbench the default while legacy deep links remain available", { timeout: 60_000 }, async () => {
+  const port = await getAvailablePort();
+  const { child } = await startServer(port);
+  try {
+    const root = await request(port, "GET", "/");
+    assert.equal(root.statusCode, 302);
+    assert.equal(root.headers.location, "/workbench/");
+
+    const english = await request(port, "GET", "/?lang=en");
+    assert.equal(english.statusCode, 302);
+    assert.equal(english.headers.location, "/workbench/?lang=en");
+
+    const deepLink = await request(port, "GET", "/?run=run-1&agent=agent-a");
+    assert.equal(deepLink.statusCode, 302);
+    assert.equal(deepLink.headers.location, "/legacy/?run=run-1&agent=agent-a");
+
+    const legacy = await request(port, "GET", "/legacy/");
+    assert.equal(legacy.statusCode, 200);
+    assert.match(String(legacy.body), /AgentArena/);
+    assert.doesNotMatch(String(legacy.body), /AgentArena Workbench/);
+  } finally {
+    child.kill("SIGTERM");
+  }
+});
+
+test("GET /api/ui-info exposes the dedicated packaged demo task", { timeout: 60_000 }, async () => {
+  const port = await getAvailablePort();
+  const { child } = await startServer(port);
+  try {
+    const res = await request(port, "GET", "/api/ui-info");
+    assert.equal(res.statusCode, 200);
+    assert.match(res.body.demoTaskPath, /taskpacks[\\/]demo[\\/]demo-ui-tour\.yaml$/);
+    assert.notEqual(res.body.demoTaskPath, res.body.defaultTaskPath);
   } finally {
     child.kill("SIGTERM");
   }

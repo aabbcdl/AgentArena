@@ -45,7 +45,7 @@ async function createClaudeShim(tempDir) {
       'if (args.includes("--version")) {',
       '  emitWithDelay(() => console.log("2.1.207"));',
       '} else if (args.includes("--help")) {',
-      '  emitWithDelay(() => console.log("--setting-sources <sources>\\n--strict-mcp-config\\n--no-session-persistence"));',
+      '  emitWithDelay(() => console.log("--setting-sources <sources>\\n--strict-mcp-config\\n--permission-mode <mode>\\n  dontAsk\\n--no-session-persistence"));',
       '} else if (args.includes("stream-json")) {',
       '  const emitResult = () => console.log(JSON.stringify({ type: "result", subtype: "success", result: "READY", usage: { input_tokens: 1, output_tokens: 1 }, total_cost_usd: 0 }));',
       '  emitWithDelay(emitResult);',
@@ -300,9 +300,9 @@ test("third-party Claude quick preflight reports the stored Provider secret inst
       const body = JSON.parse(response.body);
 
       assert.equal(response.statusCode, 200);
-      assert.equal(body.authConfigured, true);
+      assert.equal(body.authConfigured, false);
       assert.match(body.authHint, /isolated Provider secret is stored/i);
-      assert.equal(body.overallStatus, "ready");
+      assert.equal(body.overallStatus, "warning");
     } finally {
       if (originalClaudeBin === undefined) delete process.env.AGENTARENA_CLAUDE_BIN;
       else process.env.AGENTARENA_CLAUDE_BIN = originalClaudeBin;
@@ -312,7 +312,33 @@ test("third-party Claude quick preflight reports the stored Provider secret inst
   });
 });
 
-test("Claude preflight and direct execution block when unattended permissions were not explicitly enabled", async () => {
+test("third-party Claude quick preflight keeps unverified readiness out of authConfigured", async () => {
+  await withTempProvider(async (tempDir, profile) => {
+    const originalClaudeBin = process.env.AGENTARENA_CLAUDE_BIN;
+    const originalSkipPermissions = process.env.AGENTARENA_SKIP_PERMISSIONS;
+    try {
+      process.env.AGENTARENA_CLAUDE_BIN = await createClaudeShim(tempDir);
+      delete process.env.AGENTARENA_SKIP_PERMISSIONS;
+      const response = await handleQuickPreflight(JSON.stringify({
+        baseAgentId: "claude-code",
+        displayLabel: "Claude Isolated",
+        config: { providerProfileId: profile.id }
+      }));
+      const body = JSON.parse(response.body);
+      assert.equal(response.statusCode, 200);
+      assert.equal(body.cliExists, true);
+      assert.equal(body.authConfigured, false);
+      assert.equal(body.overallStatus, "warning");
+    } finally {
+      if (originalClaudeBin === undefined) delete process.env.AGENTARENA_CLAUDE_BIN;
+      else process.env.AGENTARENA_CLAUDE_BIN = originalClaudeBin;
+      if (originalSkipPermissions === undefined) delete process.env.AGENTARENA_SKIP_PERMISSIONS;
+      else process.env.AGENTARENA_SKIP_PERMISSIONS = originalSkipPermissions;
+    }
+  });
+});
+
+test("Claude preflight and direct execution use dontAsk without the legacy full-permission opt-in", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-claude-permission-gate-"));
   const workspacePath = path.join(tempDir, "workspace");
   const capturePath = path.join(tempDir, "capture.jsonl");
@@ -335,8 +361,7 @@ test("Claude preflight and direct execution block when unattended permissions we
       configSource: "test"
     };
     const preflight = await adapter.preflight({ probeAuth: false, selection });
-    assert.equal(preflight.status, "blocked");
-    assert.match(preflight.summary, /unattended permissions/i);
+    assert.equal(preflight.status, "unverified", preflight.summary);
     const preflightCaptureCount = await exists(capturePath)
       ? parseCapture(await readFile(capturePath, "utf8")).length
       : 0;
@@ -359,12 +384,16 @@ test("Claude preflight and direct execution block when unattended permissions we
       },
       trace: async () => {}
     });
-    assert.equal(result.status, "failed");
-    assert.match(result.summary, /AGENTARENA_SKIP_PERMISSIONS=1/i);
+    assert.equal(result.status, "success", result.summary);
     const finalCaptureCount = await exists(capturePath)
       ? parseCapture(await readFile(capturePath, "utf8")).length
       : 0;
-    assert.equal(finalCaptureCount, preflightCaptureCount);
+    assert.ok(finalCaptureCount > preflightCaptureCount);
+    const taskCapture = parseCapture(await readFile(capturePath, "utf8"))
+      .find((capture) => capture.args.includes("stream-json"));
+    assert.ok(taskCapture);
+    assert.equal(taskCapture.args.includes("dontAsk"), true);
+    assert.equal(taskCapture.args.includes("--dangerously-skip-permissions"), false);
   } finally {
     if (originalClaudeBin === undefined) delete process.env.AGENTARENA_CLAUDE_BIN;
     else process.env.AGENTARENA_CLAUDE_BIN = originalClaudeBin;
@@ -376,7 +405,7 @@ test("Claude preflight and direct execution block when unattended permissions we
   }
 });
 
-test("third-party Claude quick preflight exposes the unattended permission gate", async () => {
+test("third-party Claude quick preflight no longer requires the legacy full-permission opt-in", async () => {
   await withTempProvider(async (tempDir, profile) => {
     const originalClaudeBin = process.env.AGENTARENA_CLAUDE_BIN;
     const originalSkipPermissions = process.env.AGENTARENA_SKIP_PERMISSIONS;
@@ -392,8 +421,9 @@ test("third-party Claude quick preflight exposes the unattended permission gate"
       const body = JSON.parse(response.body);
 
       assert.equal(response.statusCode, 200);
-      assert.equal(body.overallStatus, "blocked");
-      assert.match(body.summary, /unattended permissions/i);
+      assert.equal(body.overallStatus, "warning", body.summary);
+      assert.equal(body.authConfigured, false);
+      assert.doesNotMatch(body.summary, /unattended permissions/i);
     } finally {
       if (originalClaudeBin === undefined) delete process.env.AGENTARENA_CLAUDE_BIN;
       else process.env.AGENTARENA_CLAUDE_BIN = originalClaudeBin;

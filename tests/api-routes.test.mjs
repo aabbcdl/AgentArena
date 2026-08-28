@@ -5,7 +5,7 @@
  * so they can be tested without starting an HTTP server.
  */
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -21,6 +21,7 @@ import {
   handleProviderProfileSecret,
   handleProviderProfileUpdate,
   handleTaskpacksList,
+  handleTelemetry,
   handleUiInfo,
 } from "../packages/cli/dist/commands/api-routes.js";
 
@@ -108,6 +109,10 @@ test("handleAdaptersList: returns adapter list with demo adapters", async () => 
   assert.ok(demoFast, "should include demo-fast adapter");
   assert.equal(demoFast.kind, "demo");
   assert.ok(demoFast.capability, "should include capability");
+  assert.deepEqual(
+    body.filter((adapter) => adapter.kind !== "demo").map((adapter) => adapter.id),
+    ["codex", "claude-code"]
+  );
 });
 
 // ─── handleCreateAdhocTaskpack tests ───
@@ -143,6 +148,137 @@ test("handleCreateAdhocTaskpack: creates adhoc taskpack with valid prompt", asyn
   assert.ok(body.id, "should return taskpack id");
   assert.ok(body.path, "should return taskpack path");
   assert.equal(body.title, "Auth Fix");
+});
+
+test("handleCreateAdhocTaskpack: returns a repo-aware preview and persists change policy", async () => {
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "agentarena-adhoc-workspace-"));
+  const repoPath = path.join(workspaceRoot, "safe-demo");
+  await mkdir(repoPath, { recursive: true });
+  await writeFile(path.join(repoPath, "package.json"), JSON.stringify({ scripts: {} }), "utf8");
+  await writeFile(path.join(repoPath, "README.md"), "# Safe demo\n", "utf8");
+
+  try {
+    const res = await handleCreateAdhocTaskpack(JSON.stringify({
+      prompt: "Add validation to the login input.",
+      title: "Login validation",
+      repoPath,
+      expectedChangedPaths: ["src/auth/login.ts", "tests/auth/login.test.ts", "src/auth/login.ts"]
+    }), workspaceRoot);
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.equal(body.preview.repoPath, repoPath);
+    assert.equal(body.preview.source, "adhoc");
+    assert.equal(body.preview.evidenceStrength, "basic");
+    assert.deepEqual(body.preview.expectedChangedPaths, ["src/auth/login.ts", "tests/auth/login.test.ts"]);
+    assert.ok(body.preview.generatedChecks.length > 0);
+    assert.ok(body.preview.warnings.some((warning) => warning.includes("basic repository-health evidence")));
+
+    const { loadTaskPack } = await import("../packages/taskpacks/dist/index.js");
+    const taskpack = await loadTaskPack(body.path);
+    assert.equal(taskpack.repoSource, "user");
+    assert.deepEqual(taskpack.expectedChangedPaths, ["src/auth/login.ts", "tests/auth/login.test.ts"]);
+    assert.equal(taskpack.changePolicy.requireAgentChange, true);
+    assert.deepEqual(taskpack.changePolicy.allowedPaths, taskpack.expectedChangedPaths);
+
+    const list = JSON.parse((await handleAdhocTaskpacksList(undefined, workspaceRoot)).body);
+    const listed = list.find((item) => item.id === body.id);
+    assert.equal(listed.repoPath, repoPath);
+    assert.deepEqual(listed.expectedChangedPaths, taskpack.expectedChangedPaths);
+    assert.equal(listed.evidenceStrength, "basic");
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test("handleCreateAdhocTaskpack: rejects repository and expected-path traversal", async () => {
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "agentarena-adhoc-boundary-"));
+  const outsideRoot = await mkdtemp(path.join(os.tmpdir(), "agentarena-adhoc-outside-"));
+  try {
+    const outside = await handleCreateAdhocTaskpack(JSON.stringify({ prompt: "x", repoPath: outsideRoot }), workspaceRoot);
+    assert.equal(outside.statusCode, 400);
+    assert.match(JSON.parse(outside.body).error, /within the current workspace/i);
+
+    const absolutePath = await handleCreateAdhocTaskpack(JSON.stringify({
+      prompt: "x",
+      repoPath: workspaceRoot,
+      expectedChangedPaths: [path.join(workspaceRoot, "src", "app.ts")]
+    }), workspaceRoot);
+    assert.equal(absolutePath.statusCode, 400);
+    assert.match(JSON.parse(absolutePath.body).error, /repository-relative/i);
+
+    const traversal = await handleCreateAdhocTaskpack(JSON.stringify({
+      prompt: "x",
+      repoPath: workspaceRoot,
+      expectedChangedPaths: ["src/../secret.txt"]
+    }), workspaceRoot);
+    assert.equal(traversal.statusCode, 400);
+    assert.match(JSON.parse(traversal.body).error, /path traversal/i);
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true });
+    await rm(outsideRoot, { recursive: true, force: true });
+  }
+});
+
+test("handleCheckCompatibility: resolves workspace-relative paths from workspace root", async () => {
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "agentarena-compatibility-relative-"));
+  await writeFile(path.join(workspaceRoot, "README.md"), "# Relative compatibility\n", "utf8");
+
+  try {
+    const created = await handleCreateAdhocTaskpack(JSON.stringify({
+      prompt: "Check this workspace",
+      repoPath: "."
+    }), workspaceRoot);
+    assert.equal(created.statusCode, 200);
+    const createdBody = JSON.parse(created.body);
+    const relativeTaskPath = path.relative(workspaceRoot, createdBody.path);
+
+    const checked = await handleCheckCompatibility(JSON.stringify({
+      repoPath: ".",
+      taskPath: relativeTaskPath
+    }), workspaceRoot);
+    assert.equal(checked.statusCode, 200);
+    assert.ok(["compatible", "warning", "incompatible"].includes(JSON.parse(checked.body).status));
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test("handleTelemetry keeps only low-cardinality product properties", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-telemetry-route-"));
+  const telemetryFile = path.join(tempDir, "telemetry.jsonl");
+  const originalEnabled = process.env.AGENTARENA_TELEMETRY;
+  const originalFile = process.env.AGENTARENA_TELEMETRY_FILE;
+  process.env.AGENTARENA_TELEMETRY = "1";
+  process.env.AGENTARENA_TELEMETRY_FILE = telemetryFile;
+
+  try {
+    const res = await handleTelemetry(JSON.stringify({
+      event: "run_started",
+      props: {
+        taskSource: "adhoc",
+        compatibilityStatus: "compatible",
+        agentCount: 2,
+        prompt: "do not persist this prompt",
+        repoPath: "/Users/secret/repository",
+        model: "gpt-5.6-secret",
+        nested: { secret: "value" },
+      },
+    }));
+    assert.equal(res.statusCode, 200);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    const entry = JSON.parse(await readFile(telemetryFile, "utf8"));
+    assert.deepEqual(entry.props, {
+      taskSource: "adhoc",
+      compatibilityStatus: "compatible",
+      agentCount: 2,
+    });
+  } finally {
+    if (originalEnabled === undefined) delete process.env.AGENTARENA_TELEMETRY;
+    else process.env.AGENTARENA_TELEMETRY = originalEnabled;
+    if (originalFile === undefined) delete process.env.AGENTARENA_TELEMETRY_FILE;
+    else process.env.AGENTARENA_TELEMETRY_FILE = originalFile;
+    await rm(tempDir, { recursive: true, force: true });
+  }
 });
 
 // ─── handleProviderProfileCreate tests ───
@@ -182,6 +318,27 @@ test("handleProviderProfileCreate: returns 400 for missing apiFormat", async () 
   assert.equal(res.statusCode, 400);
   const body = JSON.parse(res.body);
   assert.ok(body.error.includes("apiFormat"));
+});
+
+test("provider profile routes reject IDs that secret storage cannot use", async () => {
+  await withTempProviderRegistry(async () => {
+    const payload = JSON.stringify({
+      id: "invalid_profile",
+      name: "Invalid Profile",
+      kind: "anthropic-compatible",
+      apiFormat: "anthropic-messages"
+    });
+    const created = await handleProviderProfileCreate(payload);
+    assert.equal(created.statusCode, 400);
+    assert.match(JSON.parse(created.body).error, /profile id/i);
+
+    const updated = await handleProviderProfileUpdate("invalid_profile", payload);
+    assert.equal(updated.statusCode, 400);
+    const secret = await handleProviderProfileSecret("invalid_profile", JSON.stringify({ secret: "x" }));
+    assert.equal(secret.statusCode, 400);
+    const deleted = await handleProviderProfileDelete("invalid_profile");
+    assert.equal(deleted.statusCode, 400);
+  });
 });
 
 test("provider profile write responses mask extraEnv values", async () => {
@@ -291,6 +448,11 @@ test("handleUiInfo: returns correct structure", async () => {
   assert.equal(body.mode, "local-service");
   assert.ok(typeof body.repoPath === "string");
   assert.ok(Array.isArray(body.claudeProviderProfiles));
+  assert.ok(Array.isArray(body.runtimeProfiles));
+  assert.deepEqual(
+    body.runtimeProfiles.filter((profile) => profile.isBuiltIn).map((profile) => profile.id).sort(),
+    ["claude-local", "codex-local"]
+  );
   assert.equal(body.authRequired, false, "localhost should not require auth");
 });
 
@@ -299,6 +461,15 @@ test("handleUiInfo: authRequired is true for non-localhost", async () => {
   assert.equal(res.statusCode, 200);
   const body = JSON.parse(res.body);
   assert.equal(body.authRequired, true, "non-localhost should require auth");
+});
+
+test("handleUiInfo: exposes token provenance without exposing the token", async () => {
+  const res = await handleUiInfo({}, "127.0.0.1", 4545, true, "C:\\workspace\\.agentarena\\last-auth-token-4545", "local-env");
+  assert.equal(res.statusCode, 200);
+  const body = JSON.parse(res.body);
+  assert.equal(body.authTokenFilePath, "C:\\workspace\\.agentarena\\last-auth-token-4545");
+  assert.equal(body.authTokenSource, "local-env");
+  assert.equal("authToken" in body, false);
 });
 
 // ─── Additional edge case tests ───

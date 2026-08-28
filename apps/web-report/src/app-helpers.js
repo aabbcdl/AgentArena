@@ -21,6 +21,7 @@ const _RUN_CACHE_MAX_BYTES = 1_500_000;
 const AUTH_TOKEN_SESSION_KEY = 'agentarena-auth-token';
 const LEGACY_AUTH_TOKEN_LOCAL_KEY = 'agentarena_token';
 let memoryAuthToken = '';
+let bootstrapInitialization;
 
 function readSessionValue(key) {
   try {
@@ -65,33 +66,11 @@ function removeLocalValue(key) {
 }
 
 /**
- * Get auth token from URL hash, meta tag, or sessionStorage.
- * Priority: URL hash > meta tag (localhost auto-inject) > sessionStorage.
+ * Get auth token from sessionStorage.
  * Legacy localStorage tokens are migrated once and removed.
  * @returns {string}
  */
 function getAuthToken() {
-  // SECURITY: tokens are NEVER read from the URL hash. A token in #token=...
-  // leaks via Referer, browser history, and crash/telemetry tooling. Tokens are
-  // only accepted from the localhost-injected meta tag or sessionStorage.
-  // (Any legacy token present in the hash is intentionally ignored and cleared.)
-  if (window.location.hash) {
-    try {
-      if (/[#&]token=([^&]+)/.test(window.location.hash)) {
-        window.location.hash = '';
-      }
-    } catch { /* ignore */ }
-  }
-
-  // Check meta tag (localhost auto-inject for seamless UX)
-  const metaEl = document.querySelector('meta[name="agentarena-auth-token"]');
-  const metaToken = metaEl instanceof HTMLMetaElement ? metaEl.content : undefined;
-  if (metaToken) {
-    writeSessionValue(AUTH_TOKEN_SESSION_KEY, metaToken);
-    removeLocalValue(LEGACY_AUTH_TOKEN_LOCAL_KEY);
-    return metaToken;
-  }
-
   const sessionToken = readSessionValue(AUTH_TOKEN_SESSION_KEY) || memoryAuthToken;
   if (sessionToken) {
     return sessionToken;
@@ -105,6 +84,55 @@ function getAuthToken() {
   }
 
   return '';
+}
+
+function takeBootstrapCodeFromHash() {
+  const rawHash = window.location.hash.replace(/^#/, '');
+  const routeSeparator = rawHash.startsWith('/') ? rawHash.indexOf('?') : -1;
+  const route = routeSeparator >= 0 ? rawHash.slice(0, routeSeparator) : '';
+  const params = new URLSearchParams(routeSeparator >= 0 ? rawHash.slice(routeSeparator + 1) : rawHash);
+  const bootstrapCode = params.get('bootstrap') || '';
+  const hadCredentialParams = params.has('bootstrap') || params.has('token');
+  params.delete('bootstrap');
+  params.delete('token');
+
+  if (hadCredentialParams) {
+    const remaining = params.toString();
+    const nextHash = route
+      ? route + (remaining ? '?' + remaining : '')
+      : remaining
+        ? '#' + remaining
+        : '';
+    window.history.replaceState(null, '', window.location.pathname + window.location.search + nextHash);
+  }
+
+  return bootstrapCode;
+}
+
+function initializeAuthBootstrap() {
+  if (bootstrapInitialization) return bootstrapInitialization;
+  bootstrapInitialization = (async () => {
+    const code = takeBootstrapCodeFromHash();
+    if (!code) return;
+    const response = await fetch('/api/auth/bootstrap', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code }),
+      cache: 'no-store'
+    });
+    let data = null;
+    try {
+      data = await response.json();
+    } catch {
+      data = null;
+    }
+    if (!response.ok || !data || typeof data.token !== 'string' || !data.token) {
+      throw new Error(typeof data?.error === 'string' ? data.error : 'Authentication bootstrap failed.');
+    }
+    writeSessionValue(AUTH_TOKEN_SESSION_KEY, data.token);
+    removeLocalValue(LEGACY_AUTH_TOKEN_LOCAL_KEY);
+  })();
+  return bootstrapInitialization;
 }
 
 /**
@@ -245,7 +273,8 @@ function handleApiError(response) {
  * @param {RequestInit} [options]
  * @returns {Promise<Response>}
  */
-function apiFetch(url, options = {}) {
+async function apiFetch(url, options = {}) {
+  await initializeAuthBootstrap();
   const token = getAuthToken();
   if (token) {
     options.headers = options.headers || {};
@@ -452,6 +481,7 @@ export {
   formatRelativeTime,
   getAuthToken,
   handleApiError,
+  initializeAuthBootstrap,
   providerDisplayName,
   readLocationState,
   setHidden,

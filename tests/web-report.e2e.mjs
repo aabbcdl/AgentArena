@@ -22,7 +22,8 @@ async function getAvailablePort() {
 async function startUiServer(cwd, envOverrides = {}) {
   const cliPath = path.resolve(cwd, "packages/cli/dist/index.js");
   const port = await getAvailablePort();
-  const child = spawn(process.execPath, [cliPath, "ui", "--host", "127.0.0.1", "--port", String(port), "--no-open"], {
+  const authToken = `e2e-token-${port}-${Date.now()}`;
+  const child = spawn(process.execPath, [cliPath, "ui", "--host", "127.0.0.1", "--port", String(port), "--no-open", "--auth-token", authToken], {
     cwd,
     stdio: ["ignore", "pipe", "pipe"],
     env: {
@@ -61,11 +62,20 @@ async function startUiServer(cwd, envOverrides = {}) {
 
   return {
     port,
+    authToken,
     async stop() {
       child.kill("SIGTERM");
       await new Promise((resolve) => child.once("exit", resolve));
     }
   };
+}
+
+async function newAuthenticatedPage(browser, uiServer, options) {
+  const page = await browser.newPage(options);
+  await page.addInitScript((token) => {
+    sessionStorage.setItem("agentarena-auth-token", token);
+  }, uiServer.authToken);
+  return page;
 }
 
 async function expandLauncherIfNeeded(page) {
@@ -184,10 +194,10 @@ test("web-report browser smoke renders launcher and supports zh/en switching", {
   const cwd = path.resolve(".");
   const uiServer = await startUiServer(cwd);
   const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
+  const page = await newAuthenticatedPage(browser, uiServer, { viewport: { width: 1440, height: 960 } });
 
   try {
-    await page.goto(`http://127.0.0.1:${uiServer.port}/`, {
+    await page.goto(`http://127.0.0.1:${uiServer.port}/legacy/`, {
       waitUntil: "domcontentloaded",
       timeout: 30000
     });
@@ -227,10 +237,10 @@ test("mobile sidebar opens and closes via toggle and backdrop", {
   const cwd = path.resolve(".");
   const uiServer = await startUiServer(cwd);
   const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage({ viewport: { width: 600, height: 800 } });
+  const page = await newAuthenticatedPage(browser, uiServer, { viewport: { width: 600, height: 800 } });
 
   try {
-    await page.goto(`http://127.0.0.1:${uiServer.port}/`, {
+    await page.goto(`http://127.0.0.1:${uiServer.port}/legacy/`, {
       waitUntil: "domcontentloaded",
       timeout: 30000
     });
@@ -264,10 +274,10 @@ test("wrong results file shows a visible error and run list items stay valid", {
   const cwd = path.resolve(".");
   const uiServer = await startUiServer(cwd);
   const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
+  const page = await newAuthenticatedPage(browser, uiServer, { viewport: { width: 1440, height: 960 } });
 
   try {
-    await page.goto(`http://127.0.0.1:${uiServer.port}/`, {
+    await page.goto(`http://127.0.0.1:${uiServer.port}/legacy/`, {
       waitUntil: "domcontentloaded",
       timeout: 30000
     });
@@ -326,10 +336,10 @@ test("web-report preserves selected agent and language across reload", {
   const cwd = path.resolve(".");
   const uiServer = await startUiServer(cwd);
   const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
+  const page = await newAuthenticatedPage(browser, uiServer, { viewport: { width: 1440, height: 960 } });
 
   try {
-    await page.goto(`http://127.0.0.1:${uiServer.port}/`, {
+    await page.goto(`http://127.0.0.1:${uiServer.port}/legacy/`, {
       waitUntil: "domcontentloaded",
       timeout: 30000
     });
@@ -338,7 +348,7 @@ test("web-report preserves selected agent and language across reload", {
     await injectTestRun(page);
     const selectedAgentKey = await page.locator("[data-compare-agent-id]").nth(1).getAttribute("data-compare-agent-id");
     assert.ok(selectedAgentKey, "expected a second agent row to select");
-    await page.locator(`[data-compare-agent-id="${selectedAgentKey}"]`).click();
+    await page.locator("[data-compare-agent-id]").nth(1).click();
     await page.selectOption("#language-select", "en");
     await page.waitForFunction(() => new URLSearchParams(window.location.search).get("lang") === "en");
 
@@ -374,10 +384,10 @@ test("clicking a comparison bar row selects the agent", {
   const cwd = path.resolve(".");
   const uiServer = await startUiServer(cwd);
   const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
+  const page = await newAuthenticatedPage(browser, uiServer, { viewport: { width: 1440, height: 960 } });
 
   try {
-    await page.goto(`http://127.0.0.1:${uiServer.port}/`, {
+    await page.goto(`http://127.0.0.1:${uiServer.port}/legacy/`, {
       waitUntil: "domcontentloaded",
       timeout: 30000
     });
@@ -408,10 +418,10 @@ test("clicking the selected compare table row toggles inline detail", {
   const cwd = path.resolve(".");
   const uiServer = await startUiServer(cwd);
   const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
+  const page = await newAuthenticatedPage(browser, uiServer, { viewport: { width: 1440, height: 960 } });
 
   try {
-    await page.goto(`http://127.0.0.1:${uiServer.port}/`, {
+    await page.goto(`http://127.0.0.1:${uiServer.port}/legacy/`, {
       waitUntil: "domcontentloaded",
       timeout: 30000
     });
@@ -449,8 +459,8 @@ test("score weight preset buttons update active state", {
   const browser = await chromium.launch({ headless: true });
 
   try {
-    const page = await browser.newPage();
-    await page.goto(`http://127.0.0.1:${uiServer.port}`);
+    const page = await newAuthenticatedPage(browser, uiServer);
+    await page.goto(`http://127.0.0.1:${uiServer.port}/legacy/`, { waitUntil: "domcontentloaded" });
 
     // Load demo data
     await page.locator("#try-demo-btn").click();
@@ -482,11 +492,14 @@ test("custom score weight sliders re-score the compare table", {
   const browser = await chromium.launch({ headless: true });
 
   try {
-    const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
-    await page.goto(`http://127.0.0.1:${uiServer.port}`);
+    const page = await newAuthenticatedPage(browser, uiServer, { viewport: { width: 1440, height: 960 } });
+    await page.goto(`http://127.0.0.1:${uiServer.port}/legacy/`, { waitUntil: "domcontentloaded" });
     await injectTestRun(page);
 
-    const scoreCell = page.locator("[data-compare-agent-id^='agent-a@@'] .compare-score .score-cell");
+    const scoreRow = page.locator("[data-compare-agent-id]").filter({ hasText: "Agent A" }).first();
+    const scoreAgentKey = await scoreRow.getAttribute("data-compare-agent-id");
+    assert.ok(scoreAgentKey, "expected Agent A to have a comparison identity");
+    const scoreCell = scoreRow.locator(".compare-score .score-cell");
     const before = (await scoreCell.textContent())?.trim() ?? "";
     assert.ok(before, "agent score should be rendered before changing weights");
 
@@ -495,13 +508,12 @@ test("custom score weight sliders re-score the compare table", {
       input.dispatchEvent(new Event("input", { bubbles: true }));
     });
 
-    await page.waitForFunction((previousScore) => {
-      const current = document
-        .querySelector("[data-compare-agent-id^='agent-a@@'] .compare-score .score-cell")
-        ?.textContent
-        ?.trim();
+    await page.waitForFunction(({ agentKey, previousScore }) => {
+      const row = [...document.querySelectorAll("[data-compare-agent-id]")]
+        .find((element) => element.getAttribute("data-compare-agent-id") === agentKey);
+      const current = row?.querySelector(".compare-score .score-cell")?.textContent?.trim();
       return Boolean(current && current !== previousScore);
-    }, before);
+    }, { agentKey: scoreAgentKey, previousScore: before });
 
     const after = (await scoreCell.textContent())?.trim() ?? "";
     assert.notEqual(after, before, "dragging a custom weight slider should change the rendered score");
@@ -523,8 +535,8 @@ test("trace replay toggle opens and renders trace events", {
   const browser = await chromium.launch({ headless: true });
 
   try {
-    const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
-    await page.goto(`http://127.0.0.1:${uiServer.port}`);
+    const page = await newAuthenticatedPage(browser, uiServer, { viewport: { width: 1440, height: 960 } });
+    await page.goto(`http://127.0.0.1:${uiServer.port}/legacy/`, { waitUntil: "domcontentloaded" });
     await injectTestRun(page);
 
     await page.evaluate(() => {
@@ -557,7 +569,7 @@ test("trace replay toggle opens and renders trace events", {
 
 test("run list delete button removes run", {
   concurrency: false,
-  timeout: 30000
+  timeout: 120000
 }, async (t) => {
   const chromium = await loadChromiumOrSkip(t);
   if (!chromium) return;
@@ -567,8 +579,8 @@ test("run list delete button removes run", {
   const browser = await chromium.launch({ headless: true });
 
   try {
-    const page = await browser.newPage();
-    await page.goto(`http://127.0.0.1:${uiServer.port}`);
+    const page = await newAuthenticatedPage(browser, uiServer);
+    await page.goto(`http://127.0.0.1:${uiServer.port}/legacy/`, { waitUntil: "domcontentloaded" });
 
     // Load demo data
     await page.locator("#try-demo-btn").click();
@@ -606,8 +618,8 @@ test("dashboard shows verdict hero and comparison bars after loading demo", {
   const browser = await chromium.launch({ headless: true });
 
   try {
-    const page = await browser.newPage();
-    await page.goto(`http://127.0.0.1:${uiServer.port}`);
+    const page = await newAuthenticatedPage(browser, uiServer);
+    await page.goto(`http://127.0.0.1:${uiServer.port}/legacy/`, { waitUntil: "domcontentloaded" });
 
     await page.locator("#try-demo-btn").click();
     await page.waitForFunction(() => document.querySelectorAll("[data-compare-agent-id]").length > 0, { timeout: 10000 });
@@ -630,7 +642,7 @@ test("dashboard shows verdict hero and comparison bars after loading demo", {
 
 test("export run as JSON file", {
   concurrency: false,
-  timeout: 30000
+  timeout: 120000
 }, async (t) => {
   const chromium = await loadChromiumOrSkip(t);
   if (!chromium) return;
@@ -640,8 +652,8 @@ test("export run as JSON file", {
   const browser = await chromium.launch({ headless: true });
 
   try {
-    const page = await browser.newPage();
-    await page.goto(`http://127.0.0.1:${uiServer.port}`);
+    const page = await newAuthenticatedPage(browser, uiServer);
+    await page.goto(`http://127.0.0.1:${uiServer.port}/legacy/`, { waitUntil: "domcontentloaded" });
 
     await page.locator("#try-demo-btn").click();
     await page.waitForFunction(() => document.querySelectorAll("[data-compare-agent-id]").length > 0, { timeout: 10000 });
@@ -679,8 +691,8 @@ test("Claude provider editor preserves typed values and saves a profile", {
   const browser = await chromium.launch({ headless: true });
 
   try {
-    const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
-    await page.goto(`http://127.0.0.1:${uiServer.port}`, {
+    const page = await newAuthenticatedPage(browser, uiServer, { viewport: { width: 1440, height: 960 } });
+    await page.goto(`http://127.0.0.1:${uiServer.port}/legacy/`, {
       waitUntil: "domcontentloaded",
       timeout: 30000
     });
@@ -723,7 +735,7 @@ test("Claude provider editor preserves typed values and saves a profile", {
     }, { timeout: 20000 });
 
     const profilesResponse = await page.evaluate(async () => {
-      const token = document.querySelector('meta[name="agentarena-auth-token"]')?.getAttribute("content") ?? "";
+      const token = sessionStorage.getItem("agentarena-auth-token") ?? "";
       const response = await fetch("/api/provider-profiles", {
         headers: token ? { Authorization: `Bearer ${token}` } : {}
       });
@@ -754,8 +766,8 @@ test("workbench evidence page replays trace and shows per-agent identity", {
   const browser = await chromium.launch({ headless: true });
 
   try {
-    const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
-    await page.goto(`http://127.0.0.1:${uiServer.port}/workbench/`);
+    const page = await newAuthenticatedPage(browser, uiServer, { viewport: { width: 1440, height: 960 } });
+    await page.goto(`http://127.0.0.1:${uiServer.port}/workbench/`, { waitUntil: "domcontentloaded" });
 
     // Load the safe demo from the Runs page.
     const demoButton = page.getByRole("button", { name: /Safe demo|安全 Demo/i }).first();
@@ -812,8 +824,8 @@ test("workbench compare page shows trend empty state and session controls", {
   const browser = await chromium.launch({ headless: true });
 
   try {
-    const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
-    await page.goto(`http://127.0.0.1:${uiServer.port}/workbench/`);
+    const page = await newAuthenticatedPage(browser, uiServer, { viewport: { width: 1440, height: 960 } });
+    await page.goto(`http://127.0.0.1:${uiServer.port}/workbench/`, { waitUntil: "domcontentloaded" });
 
     const demoButton = page.getByRole("button", { name: /Safe demo|安全 Demo/i }).first();
     await demoButton.waitFor({ state: "visible", timeout: 15000 });

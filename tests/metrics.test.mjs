@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { Counter, exportAllMetrics, Gauge, Histogram, metrics } from "../packages/core/dist/index.js";
+import { Counter, clearMetricsBuffer, exportAllMetrics, Gauge, getMetricsBuffer, Histogram, metrics } from "../packages/core/dist/index.js";
 
 test("Counter increments correctly", () => {
   const counter = new Counter("test_counter", "Test counter", ["label"]);
@@ -18,6 +18,39 @@ test("Counter exports valid Prometheus format", () => {
   assert.ok(output.includes("test_export_counter"));
   assert.ok(output.includes('env="prod"'));
   assert.ok(output.includes("10"));
+});
+
+test("Metric labels are escaped and series are bounded", () => {
+  const counter = new Counter("test_bounded_counter", "Test bounded counter", ["path"], 3);
+  counter.inc({ path: "quote\"slash\\line\n" });
+  counter.inc({ path: "/second" });
+  counter.inc({ path: "/third" });
+  counter.inc({ path: "/fourth" });
+
+  const output = counter.export();
+  const series = output.split("\n").filter((line) => line.startsWith("test_bounded_counter{"));
+  assert.equal(series.length, 3);
+  assert.ok(output.includes('path="quote\\"slash\\\\line\\n"'));
+  assert.ok(output.includes('path="__overflow__"'));
+});
+
+test("Metric series cap includes the overflow bucket at the minimum", () => {
+  const counter = new Counter("test_minimum_series_counter", "Test minimum series cap", ["path"], 1);
+  counter.inc({ path: "/first" });
+  counter.inc({ path: "/second" });
+
+  const series = counter.export().split("\n").filter((line) => line.startsWith("test_minimum_series_counter{"));
+  assert.equal(series.length, 1);
+  assert.ok(series[0].includes('path="__overflow__"'));
+});
+
+test("Metric event labels follow the bounded series", () => {
+  clearMetricsBuffer();
+  const counter = new Counter("test_buffered_counter", "Test buffered counter", ["path"], 2);
+  counter.inc({ path: "/first" });
+  counter.inc({ path: "/second" });
+  const last = getMetricsBuffer().at(-1);
+  assert.deepEqual(last?.labels, { path: "__overflow__" });
 });
 
 test("Gauge sets and increments values", () => {

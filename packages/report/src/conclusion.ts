@@ -101,17 +101,17 @@ function generateSingleSuccessConclusion(
 
   if (language === "zh-CN") {
     return {
-      verdict: `${result.displayLabel || result.agentId} 完成任务，综合分 ${score}`,
-      explanation: `通过率 ${passRate}，耗时 ${duration}。单 Agent 基线测试通过。`,
-      nextStep: "再加一个 Agent 跑一次，即可解锁对比功能，看到谁更强。",
+      verdict: `${result.displayLabel || result.agentId} 完成任务，任务分 ${score}`,
+      explanation: `通过率 ${passRate}，耗时 ${duration}。本次确认了任务结果，但只有一个运行配置，不能据此生成模型能力排名。`,
+      nextStep: "如果要比较模型，请为同一任务配置两个明确的模型/思考强度，并保持仓库基线和 Judge 一致。",
       category: "single-success"
     };
   }
 
   return {
-    verdict: `${result.displayLabel || result.agentId} completed the task — score ${score}`,
-    explanation: `Pass rate ${passRate}, duration ${duration}. Single-agent baseline test passed.`,
-    nextStep: "Add another agent to unlock comparison and see which setup performs better.",
+    verdict: `${result.displayLabel || result.agentId} completed the task — task score ${score}`,
+    explanation: `Pass rate ${passRate}, duration ${duration}. The task result is confirmed, but one run cannot establish a model capability ranking.`,
+    nextStep: "To compare models, configure two explicit model/reasoning profiles for the same task, repository baseline, and judges.",
     category: "single-success"
   };
 }

@@ -65,6 +65,27 @@ export function assertOptionalNumber(value: unknown, label: string): number | un
   return value;
 }
 
+export function assertOptionalPositiveNumber(value: unknown, label: string): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(
+      `Task pack field "${label}" must be a finite number. ` +
+      `Received: ${value}. ` +
+      `Example: "${label}": 1.5`
+    );
+  }
+  if (value <= 0) {
+    throw new Error(
+      `Task pack field "${label}" must be a positive number. ` +
+      `Received: ${value}. ` +
+      `Example: "${label}": 1.5`
+    );
+  }
+  return value;
+}
+
 export function assertOptionalBoolean(value: unknown, label: string): boolean | undefined {
   if (value === undefined) {
     return undefined;

@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { listAvailableAdapters } from "@agentarena/adapters";
-import { type BenchmarkRun, createCancellation, formatDuration, logger, setJsonOutputMode } from "@agentarena/core";
+import { type BenchmarkRun, type CostQuality, createCancellation, formatDuration, logger, resolveCostQuality, setJsonOutputMode } from "@agentarena/core";
 import {
   aggregateMultiRuns,
   computeVarianceAnalysis,
@@ -21,6 +21,7 @@ import type { ParsedArgs } from "../args.js";
 import { buildBenchmarkOutputSummary } from "../output.js";
 import { type AgentStatus, createStatusRegion, shouldUseTty } from "../ui/status-region.js";
 import {
+  isTrustedBuiltinTaskPack,
   normalizeCliSelections,
   resolveReportLocale,
 } from "./shared.js";
@@ -31,6 +32,11 @@ import {
 // as soon as the cumulative byte count exceeds this threshold.
 const MAX_VARIANCE_BYTES = 50 * 1024 * 1024;
 const MAX_HISTORICAL_RUNS = 50;
+
+function formatCostForOutput(value: number | undefined, quality: CostQuality): string {
+  if (quality === "unavailable" || typeof value !== "number" || !Number.isFinite(value)) return "n/a";
+  return `${quality === "estimated" ? "\u2248" : ""}$${value.toFixed(2)}`;
+}
 
 async function loadHistoricalRuns(
   runsDir: string,
@@ -89,7 +95,7 @@ async function loadHistoricalRuns(
 function printBenchmarkOutput(
   scoredBenchmark: ScoredRun,
   report: { jsonPath: string; markdownPath: string; htmlPath: string; badgePath: string; prCommentPath: string },
-  decisionReport: { recommendations: Array<{ recommendation: string; displayLabel: string; successRate: number; avgCostPerRun: number; confidence: string }> },
+  decisionReport: { recommendations: Array<{ recommendation: string; displayLabel: string; successRate: number; avgCostPerRun: number; costQuality?: CostQuality; confidence: string }> },
   decisionReportPath: string,
   csvPath: string,
   trendReportPath: string | null | undefined,
@@ -131,7 +137,7 @@ function printBenchmarkOutput(
     if (result.resolvedRuntime?.effectiveModel) console.log(`    Model: ${result.resolvedRuntime.effectiveModel}`);
     if (result.resolvedRuntime?.effectiveReasoningEffort) console.log(`    Reasoning: ${result.resolvedRuntime.effectiveReasoningEffort}`);
     if (result.resolvedRuntime?.effectiveAgentVersion) console.log(`    Version: ${result.resolvedRuntime.effectiveAgentVersion}`);
-    console.log(`    Tokens: ${result.tokenUsage} | Cost: ${result.costKnown ? `$${result.estimatedCostUsd.toFixed(2)}` : "n/a"} | Files changed: ${result.changedFiles.length}`);
+    console.log(`    Tokens: ${result.tokenUsage} | Cost: ${formatCostForOutput(result.estimatedCostUsd, resolveCostQuality(result))} | Files changed: ${result.changedFiles.length}`);
     const passedJudges = result.judgeResults.filter((j: { success: boolean }) => j.success).length;
     const totalJudges = result.judgeResults.length;
     if (totalJudges > 0) console.log(`    Judges: ${passedJudges}/${totalJudges} passed`);
@@ -142,7 +148,7 @@ function printBenchmarkOutput(
   console.log(`\nSummary: ${successCount}/${totalCount} agents succeeded`);
 
   const totalTokens = scoredBenchmark.results.reduce((sum: number, r: { tokenUsage?: number }) => sum + (r.tokenUsage ?? 0), 0);
-  const costResults = scoredBenchmark.results.filter((r: { costKnown: boolean }) => r.costKnown);
+  const costResults = scoredBenchmark.results.filter((result) => resolveCostQuality(result) === "known");
   const totalCost = costResults.reduce((sum: number, r: { estimatedCostUsd?: number }) => sum + (r.estimatedCostUsd ?? 0), 0);
   const costCoverage = costResults.length === totalCount ? "" : ` (cost known for ${costResults.length}/${totalCount})`;
   console.log(`Total: ${totalTokens} tokens | $${totalCost.toFixed(2)}${costCoverage}`);
@@ -156,7 +162,7 @@ ${"-".repeat(60)}`);
     console.log(`${"-".repeat(60)}`);
     console.log(`\n🏆 ${copy.recommendationLabel}: ${topRec.displayLabel}`);
     console.log(`   - ${copy.successRateLabel}: ${(topRec.successRate * 100).toFixed(0)}%`);
-    console.log(`   - ${copy.averageCostLabel}: $${topRec.avgCostPerRun.toFixed(2)}/${copy.perRun}`);
+    console.log(`   - ${copy.averageCostLabel}: ${formatCostForOutput(topRec.avgCostPerRun, topRec.costQuality ?? "unavailable")}/${copy.perRun}`);
     console.log(`   - ${copy.confidenceLabel}: ${topRec.confidence}`);
     console.log(`\n📄 ${copy.fullReportLabel}: ${decisionReportPath}`);
     console.log(`${"-".repeat(60)}`);
@@ -490,6 +496,7 @@ export async function runBenchmarkCommand(
         benchmark = await runBenchmark({
           repoPath: parsed.repoPath,
           taskPath: parsed.taskPath,
+          entryPoint: "cli",
           agentIds: selections.map((selection) => selection.baseAgentId),
           agents: selections,
           runId: resumeRunId,
@@ -502,6 +509,8 @@ export async function runBenchmarkCommand(
           scoreMode: parsed.scoreMode,
           tokenBudget: parsed.tokenBudget,
           debug: parsed.debug,
+          allowEvalInTaskCommands:
+            isTrustedBuiltinTaskPack(parsed.taskPath) || process.env.AGENTARENA_ALLOW_EVAL_IN_JUDGES === "1",
           cancellation,
           enableActivityEvents: parsed.jsonEvents || useTty,
           onProgress:
@@ -541,8 +550,8 @@ export async function runBenchmarkCommand(
       statusRegion.destroy();
     }
 
-    const report = await writeReport(benchmark, { locale: reportLocale });
     const scoredBenchmark = enrichRunWithScores(benchmark);
+    const report = await writeReport(scoredBenchmark, { locale: reportLocale });
 
     // Generate CSV export
     const { generateCsv } = await import("@agentarena/report");
@@ -556,7 +565,7 @@ export async function runBenchmarkCommand(
     const DEFAULT_DAILY_RUNS = 5;
     const teamSize = parsed.teamSize ?? DEFAULT_TEAM_SIZE;
     const dailyRuns = parsed.dailyRuns ?? DEFAULT_DAILY_RUNS;
-    const decisionReport = generateDecisionReport(benchmark, {
+    const decisionReport = generateDecisionReport(scoredBenchmark, {
       teamSize,
       dailyRuns,
     });

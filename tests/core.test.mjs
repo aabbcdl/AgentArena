@@ -16,6 +16,7 @@ import {
   normalizePath,
   portableBasename,
   portableRelativePath,
+  relativizeWorkspacePathsInText,
   resolveRepoSource,
   safePathJoin,
   snapshotDirectory,
@@ -34,6 +35,24 @@ async function exists(filePath) {
 
 test("uniqueSorted removes duplicates and sorts values", () => {
   assert.deepEqual(uniqueSorted(["b", "a", "b"]), ["a", "b"]);
+});
+
+test("relativizeWorkspacePathsInText removes Windows and POSIX workspace prefixes", () => {
+  assert.equal(
+    relativizeWorkspacePathsInText(
+      "Updated C:/Users/test/AppData/Local/Temp/agentarena-workspaces/run/src/utils.js.",
+      "C:\\Users\\test\\AppData\\Local\\Temp\\agentarena-workspaces\\run"
+    ),
+    "Updated src/utils.js."
+  );
+  assert.equal(
+    relativizeWorkspacePathsInText("Workspace: /tmp/agentarena/run", "/tmp/agentarena/run"),
+    "Workspace: ."
+  );
+  assert.equal(
+    relativizeWorkspacePathsInText("Keep /tmp/agentarena/run-other/file.ts", "/tmp/agentarena/run"),
+    "Keep /tmp/agentarena/run-other/file.ts"
+  );
 });
 
 test("diffSnapshots reports added, changed, and removed files", () => {
@@ -235,12 +254,17 @@ test("copyRepository does not copy ignored secret files into agent workspaces", 
 
   try {
     await mkdir(path.join(source, "node_modules"), { recursive: true });
+    await mkdir(path.join(source, ".claude"), { recursive: true });
+    await mkdir(path.join(source, ".codex"), { recursive: true });
     await writeFile(path.join(source, ".gitignore"), ".env\nlocal-only.txt\n", "utf8");
     await writeFile(path.join(source, ".env"), "API_KEY=secret", "utf8");
     await writeFile(path.join(source, ".env.local"), "API_KEY=local-secret", "utf8");
     await writeFile(path.join(source, "local-only.txt"), "ignored", "utf8");
     await writeFile(path.join(source, "README.md"), "# public\n", "utf8");
     await writeFile(path.join(source, "node_modules", "module.txt"), "skip", "utf8");
+    await writeFile(path.join(source, ".claude", "settings.json"), '{"hooks":{}}\n', "utf8");
+    await writeFile(path.join(source, ".codex", "config.toml"), "model = 'project-model'\n", "utf8");
+    await writeFile(path.join(source, ".mcp.json"), '{"mcpServers":{}}\n', "utf8");
 
     await copyRepository(source, destination);
 
@@ -249,28 +273,50 @@ test("copyRepository does not copy ignored secret files into agent workspaces", 
     assert.equal(await exists(path.join(destination, "local-only.txt")), false);
     assert.equal(await exists(path.join(destination, "node_modules", "module.txt")), false);
     assert.equal(await readFile(path.join(destination, "README.md"), "utf8"), "# public\n");
+    assert.equal(await readFile(path.join(destination, ".claude", "settings.json"), "utf8"), '{"hooks":{}}\n');
+    assert.equal(await readFile(path.join(destination, ".codex", "config.toml"), "utf8"), "model = 'project-model'\n");
+    assert.equal(await readFile(path.join(destination, ".mcp.json"), "utf8"), '{"mcpServers":{}}\n');
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
 });
 
-test("snapshotDirectory excludes AgentArena runtime artifacts", async () => {
+test("copyRepository preserves a packaged builtin repo ignored by its parent checkout", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-copy-ignored-parent-"));
+  const source = path.resolve("packages/cli/assets/taskpacks/repos/nodejs-app");
+  const destination = path.join(tempDir, "destination");
+
+  try {
+    await copyRepository(source, destination);
+
+    assert.equal(await exists(path.join(destination, "package.json")), true);
+    assert.equal(await exists(path.join(destination, "src", "utils.js")), true);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("snapshotDirectory excludes AgentArena artifacts but tracks project Harness configuration", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "agentarena-snapshot-runtime-"));
 
   try {
     await mkdir(path.join(tempDir, ".aa-evidence"), { recursive: true });
     await mkdir(path.join(tempDir, ".claude"), { recursive: true });
     await mkdir(path.join(tempDir, "agentarena-demo"), { recursive: true });
+    await mkdir(path.join(tempDir, "agentarena-codex"), { recursive: true });
+    await mkdir(path.join(tempDir, "agentarena-claude"), { recursive: true });
     await writeFile(path.join(tempDir, ".aa-evidence", "stdout.log"), "internal", "utf8");
     await writeFile(path.join(tempDir, ".claude", "settings.local.json"), "{}", "utf8");
     await writeFile(path.join(tempDir, "agentarena-demo", "codex-last-message.txt"), "internal", "utf8");
+    await writeFile(path.join(tempDir, "agentarena-codex", "codex-last-message.txt"), "internal", "utf8");
+    await writeFile(path.join(tempDir, "agentarena-claude", "last-message.txt"), "internal", "utf8");
     await writeFile(path.join(tempDir, "agent-stdout.jsonl"), "{}", "utf8");
     await writeFile(path.join(tempDir, "prompt.txt"), "prompt", "utf8");
     await writeFile(path.join(tempDir, "index.js"), "export const ok = true;\n", "utf8");
 
     const snapshot = await snapshotDirectory(tempDir);
 
-    assert.deepEqual([...snapshot.keys()].sort(), ["index.js"]);
+    assert.deepEqual([...snapshot.keys()].sort(), [".claude/settings.local.json", "index.js"]);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }

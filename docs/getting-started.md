@@ -1,24 +1,58 @@
 # Getting Started
 
-This guide walks you through running your first AgentArena benchmark in under 5 minutes.
+This guide walks you through the current local-pilot path for AgentArena.
 
 ## Prerequisites
 
 - **Node.js 22+** — check with `node --version`
-- **npm** (comes with Node) or **pnpm** (faster)
+- A target repository and the language tools that repository itself needs
+- An agent CLI only if you want to run a real external agent
+
+The core AgentArena pilot does not require Android Studio, Docker, Xcode, or a
+Playwright browser. Chromium is only needed for browser E2E validation.
 
 > **Windows users**: Use PowerShell or Git Bash. The default `cmd.exe` also works but PowerShell is recommended.
 
-## Install
+## Install the published CLI
+
+For normal use, install the public CLI package:
 
 ```bash
-npm install -g @agentarena/cli
+npm install --global @agentarena/cli@0.2.1
+agentarena ui
 ```
 
-Verify the installation:
+Open the local URL printed by the command, normally `http://127.0.0.1:4320`.
+On the first startup, Workbench asks you to set a local service password. The
+password is saved as a salted hash in the workspace’s `.agentarena/` directory;
+you do not need to find a Bearer Token. Later sessions can use the same password
+to reconnect.
+
+The published CLI includes the Workbench assets and built-in task packs. You do
+not need pnpm, a source build, Android Studio, Docker, Xcode, or Playwright
+Chromium for the normal local pilot.
+
+## Install from a source checkout
 
 ```bash
-agentarena --version
+pnpm install --frozen-lockfile
+pnpm build
+```
+
+The source checkout requires the repository’s declared pnpm version. Use this
+path when developing AgentArena itself or when you need unbuilt repository
+files.
+
+Verify the checkout:
+
+```bash
+node packages/cli/dist/index.js doctor --agents demo-fast
+```
+
+Start the local-only UI:
+
+```bash
+node packages/cli/dist/index.js ui --no-open
 ```
 
 ## Your First Benchmark (No Auth Required)
@@ -28,13 +62,13 @@ AgentArena includes built-in demo agents that need no API keys or external setup
 ### 1. Create a demo task pack
 
 ```bash
-agentarena init-taskpack --template repo-health --output my-task.yaml
+node packages/cli/dist/index.js init-taskpack --template repo-health --output my-task.yaml
 ```
 
 ### 2. Run the benchmark
 
 ```bash
-agentarena run --repo . --task my-task.yaml --agents demo-fast,demo-thorough
+node packages/cli/dist/index.js run --repo . --task my-task.yaml --agents demo-fast,demo-thorough
 ```
 
 This runs two demo agents against the current directory. You'll see live progress in the terminal.
@@ -42,7 +76,7 @@ This runs two demo agents against the current directory. You'll see live progres
 ### 3. View the results
 
 ```bash
-agentarena ui
+node packages/cli/dist/index.js ui --no-open
 ```
 
 Open `http://127.0.0.1:4320` in your browser. The UI lets you explore scores, diffs, judge results, and traces.
@@ -54,7 +88,7 @@ Once you've verified the flow works, you can benchmark real coding agents.
 ### Step 1: Check which agents are available
 
 ```bash
-agentarena doctor
+node packages/cli/dist/index.js doctor
 ```
 
 This shows which agent CLIs are installed and whether authentication is working.
@@ -62,7 +96,7 @@ This shows which agent CLIs are installed and whether authentication is working.
 ### Step 2: Run with real agents
 
 ```bash
-agentarena run \
+node packages/cli/dist/index.js run \
   --repo /path/to/your/project \
   --task my-task.yaml \
   --agents codex,claude-code \
@@ -76,7 +110,7 @@ The `--probe-auth` flag checks authentication before running, so you don't waste
 After the run, open the UI:
 
 ```bash
-agentarena ui
+node packages/cli/dist/index.js ui --no-open
 ```
 
 Or check the generated files in `.agentarena/runs/<run-id>/`:
@@ -86,10 +120,23 @@ Or check the generated files in `.agentarena/runs/<run-id>/`:
 
 ## Common Workflows
 
+### Create a custom task in Workbench
+
+Open **Plan** and choose **Create custom task**. Enter a natural-language goal,
+the target repository, and optionally one or more expected changed paths. The
+wizard saves a local draft, runs compatibility checks, and shows a preview
+before the task is selected.
+
+The generated build/test/lint checks are only **basic repository-health
+evidence**. They do not prove that the natural-language task is correct. A
+missing expected-path list is shown as an unconstrained change scope, and a
+compatibility failure blocks starting the run. The wizard does not accept
+arbitrary shell commands or change the selected provider, model, or Harness.
+
 ### Compare multiple agents on one task
 
 ```bash
-agentarena run \
+node packages/cli/dist/index.js run \
   --repo . \
   --task my-task.yaml \
   --agents codex,claude-code,cursor,gemini-cli \
@@ -99,7 +146,7 @@ agentarena run \
 ### Use the UI as a launcher
 
 ```bash
-agentarena ui
+node packages/cli/dist/index.js ui --no-open
 ```
 
 The browser UI lets you pick the repo, task pack, and agents interactively. No need to remember CLI flags.
@@ -107,7 +154,7 @@ The browser UI lets you pick the repo, task pack, and agents interactively. No n
 ### Generate a CI workflow
 
 ```bash
-agentarena init-ci --task my-task.yaml --agents codex,claude-code
+node packages/cli/dist/index.js init-ci --task my-task.yaml --agents codex,claude-code
 ```
 
 This creates a GitHub Actions workflow that runs benchmarks on every PR.
@@ -115,7 +162,7 @@ This creates a GitHub Actions workflow that runs benchmarks on every PR.
 ### Run with JSON output (for scripting)
 
 ```bash
-agentarena run --repo . --task my-task.yaml --agents demo-fast --json
+node packages/cli/dist/index.js run --repo . --task my-task.yaml --agents demo-fast --json
 ```
 
 ## Understanding the Output
@@ -147,16 +194,18 @@ You can adjust the scoring weights with `--score-mode`:
 - `rotating-tasks` — category-aware scoring for diverse task sets
 - `comprehensive` — all weight keys enabled, thorough evaluation
 
-## Publishing to the Community Leaderboard
+## Future release work: publishing to the Community Leaderboard
 
-AgentArena can publish your benchmark results to a shared community leaderboard on GitHub. This lets you compare your results against other users' runs.
+Community publishing is not part of the current local pilot. The following
+section documents a future release gate and should not be used as a setup
+requirement.
 
 ### Prerequisites
 
 1. A GitHub account
 2. A GitHub personal access token with `repo` scope, OR the [GitHub CLI](https://cli.github.com/) installed and authenticated (`gh auth login`)
 
-### Publish a run
+### Future publish workflow
 
 After completing a benchmark, publish the results:
 
@@ -202,12 +251,12 @@ By default, results are published to the `agentarena/leaderboard-data` repositor
 AGENTARENA_COMMUNITY_OWNER=your-org AGENTARENA_COMMUNITY_REPO=your-leaderboard agentarena publish --last
 ```
 
-### Viewing the community leaderboard
+### Future community leaderboard
 
 Open the web UI and switch to the **Community** tab to see aggregated results from all published runs:
 
 ```bash
-agentarena ui
+node packages/cli/dist/index.js ui --no-open
 ```
 
 ## Next Steps

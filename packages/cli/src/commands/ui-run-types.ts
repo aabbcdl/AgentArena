@@ -10,6 +10,8 @@ export interface ActiveUiRun {
 }
 
 export interface UiRunRequestContext {
+  /** Explicit filesystem boundary for all UI runs and persisted run state. */
+  workspaceRoot: string;
   authToken: string;
   activeRun: ActiveUiRun | null;
   setActiveRun: (run: ActiveUiRun | null) => void;

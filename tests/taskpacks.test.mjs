@@ -41,6 +41,153 @@ judges:
   }
 });
 
+it("parses a supported taskpack lifecycle", async () => {
+  const yaml = `
+schemaVersion: agentarena.taskpack/v1
+id: lifecycle-task
+title: Lifecycle Task
+prompt: Fix the scoped issue
+metadata:
+  source: official
+  owner: AgentArena
+  lifecycle: core
+`;
+  const filePath = createTempTaskpack(yaml);
+  try {
+    const task = await loadTaskPack(filePath);
+    assert.equal(task.metadata?.lifecycle, "core");
+  } finally {
+    cleanup();
+  }
+});
+
+it("rejects an unsupported taskpack lifecycle", async () => {
+  const yaml = `
+schemaVersion: agentarena.taskpack/v1
+id: invalid-lifecycle-task
+title: Invalid Lifecycle Task
+prompt: Fix the scoped issue
+metadata:
+  source: official
+  owner: AgentArena
+  lifecycle: archived
+`;
+  const filePath = createTempTaskpack(yaml);
+  try {
+    await assert.rejects(
+      () => loadTaskPack(filePath),
+      /metadata\.lifecycle.*core.*legacy.*experimental/i
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+it("propagates judge weight from the taskpack through loadTaskPack", async () => {
+  // Regression: `weight` passed field validation but was dropped by the
+  // per-type normalizers, so every judge fell back to weight 1 and the
+  // weighted pass ratio was dead end-to-end.
+  const yaml = `
+schemaVersion: agentarena.taskpack/v1
+id: weight-task
+title: Weight Task
+prompt: Do the thing
+judges:
+  - type: file-exists
+    label: weighted judge
+    path: main.js
+    weight: 5
+  - type: file-exists
+    label: default weight judge
+    path: other.js
+`;
+  const filePath = createTempTaskpack(yaml);
+  try {
+    const task = await loadTaskPack(filePath);
+    assert.equal(task.judges[0].weight, 5);
+    assert.equal(task.judges[1].weight, undefined);
+  } finally {
+    cleanup();
+  }
+});
+
+it("parses and normalizes a change policy", async () => {
+  const yaml = `
+schemaVersion: agentarena.taskpack/v1
+id: policy-task
+title: Policy Task
+prompt: Make a scoped change
+changePolicy:
+  requireAgentChange: true
+  allowedPaths: ["src/**/*.js"]
+  forbiddenPaths: ["test/**"]
+  minChangedFiles: 1
+  maxChangedFiles: 2
+judges:
+  - type: file-exists
+    label: source exists
+    path: src/main.js
+`;
+  const filePath = createTempTaskpack(yaml);
+  try {
+    const task = await loadTaskPack(filePath);
+    assert.deepEqual(task.changePolicy, {
+      requireAgentChange: true,
+      allowedPaths: ["src/**/*.js"],
+      forbiddenPaths: ["test/**"],
+      minChangedFiles: 1,
+      maxChangedFiles: 2
+    });
+  } finally {
+    cleanup();
+  }
+});
+
+it("rejects an empty or inverted change policy", async () => {
+  const emptyPath = createTempTaskpack(`
+schemaVersion: agentarena.taskpack/v1
+id: empty-policy
+title: Empty Policy
+prompt: Make a change
+changePolicy: {}
+`, "empty-policy.yaml");
+  const invertedPath = createTempTaskpack(`
+schemaVersion: agentarena.taskpack/v1
+id: inverted-policy
+title: Inverted Policy
+prompt: Make a change
+changePolicy:
+  minChangedFiles: 3
+  maxChangedFiles: 1
+`, "inverted-policy.yaml");
+  try {
+    await assert.rejects(() => loadTaskPack(emptyPath), /changePolicy.*constraint/i);
+    await assert.rejects(() => loadTaskPack(invertedPath), /minChangedFiles.*maxChangedFiles/i);
+  } finally {
+    cleanup();
+  }
+});
+
+it("rejects a non-positive judge weight", async () => {
+  const yaml = `
+schemaVersion: agentarena.taskpack/v1
+id: bad-weight-task
+title: Bad Weight Task
+prompt: Do the thing
+judges:
+  - type: file-exists
+    label: bad weight judge
+    path: main.js
+    weight: 0
+`;
+  const filePath = createTempTaskpack(yaml);
+  try {
+    await assert.rejects(() => loadTaskPack(filePath), /weight.*positive/i);
+  } finally {
+    cleanup();
+  }
+});
+
 it("rejects taskpack without id", async () => {
   const yaml = `
 schemaVersion: agentarena.taskpack/v1

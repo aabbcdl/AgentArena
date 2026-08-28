@@ -16,6 +16,7 @@ export interface ProcessResult {
   stdout: string;
   stderr: string;
   timedOut: boolean;
+  timeoutKind?: "total" | "idle";
   signal?: NodeJS.Signals;
   error?: string;
 }
@@ -30,6 +31,12 @@ interface ProcessSpawnSpec {
   command: string;
   args: string[];
   windowsVerbatimArguments?: boolean;
+}
+
+function normalizedIdleTimeoutMs(value: number | undefined): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? Math.max(1, Math.floor(value))
+    : undefined;
 }
 
 function isWindowsClaudeInvocation(command: string, args: string[]): boolean {
@@ -84,7 +91,7 @@ export function preflightTimeoutMs(): number {
 }
 
 /**
- * Default transport timeout: 5 minutes.
+ * Default transport timeout: 10 minutes.
  *
  * Real coding agents can spend several minutes reading, editing, and verifying
  * even tiny tasks on cold starts. Keep this below the per-agent timeout, but
@@ -247,6 +254,10 @@ async function runWindowsClaudeDetached(
   const exitPath = path.join(tempDir, "exit.txt");
 
   try {
+    const idleTimeoutMs = normalizedIdleTimeoutMs(callbacks?.idleTimeoutMs);
+    const pollIntervalMs = idleTimeoutMs
+      ? Math.max(25, Math.min(250, Math.floor(idleTimeoutMs / 4)))
+      : 250;
     if (stdinInput !== undefined) {
       await writeFile(stdinPath, stdinInput, "utf8");
     } else {
@@ -257,6 +268,8 @@ async function runWindowsClaudeDetached(
     const script = [
       "$ErrorActionPreference = 'Stop'",
       `$timeoutMs = ${Math.max(1, Math.floor(timeoutMs))}`,
+      `$idleTimeoutMs = ${idleTimeoutMs ?? 0}`,
+      `$pollIntervalMs = ${pollIntervalMs}`,
       "function Stop-ProcessTree([int]$ProcessId) {",
       "  try {",
       "    Get-CimInstance Win32_Process -Filter \"ParentProcessId = $ProcessId\" | ForEach-Object { Stop-ProcessTree ([int]$_.ProcessId) }",
@@ -264,11 +277,30 @@ async function runWindowsClaudeDetached(
       "  try { Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue } catch {}",
       "}",
       `$p = Start-Process -FilePath ${quotePowerShellSingle(command)} -ArgumentList ${buildPowerShellArray(args)} -WorkingDirectory ${quotePowerShellSingle(cwd)} -WindowStyle Hidden${redirectInput} -RedirectStandardOutput ${quotePowerShellSingle(stdoutPath)} -RedirectStandardError ${quotePowerShellSingle(stderrPath)} -PassThru`,
-      "if (-not $p.WaitForExit($timeoutMs)) {",
+      "$startedAt = [DateTime]::UtcNow",
+      "$lastActivityAt = $startedAt",
+      "$lastStdoutLength = 0L",
+      "$lastStderrLength = 0L",
+      "$timeoutKind = $null",
+      "while (-not $p.HasExited) {",
+      "  Start-Sleep -Milliseconds $pollIntervalMs",
+      `  $stdoutLength = if (Test-Path -LiteralPath ${quotePowerShellSingle(stdoutPath)}) { (Get-Item -LiteralPath ${quotePowerShellSingle(stdoutPath)}).Length } else { 0L }`,
+      `  $stderrLength = if (Test-Path -LiteralPath ${quotePowerShellSingle(stderrPath)}) { (Get-Item -LiteralPath ${quotePowerShellSingle(stderrPath)}).Length } else { 0L }`,
+      "  if ($stdoutLength -ne $lastStdoutLength -or $stderrLength -ne $lastStderrLength) {",
+      "    $lastStdoutLength = $stdoutLength",
+      "    $lastStderrLength = $stderrLength",
+      "    $lastActivityAt = [DateTime]::UtcNow",
+      "  }",
+      "  $now = [DateTime]::UtcNow",
+      "  if (($now - $startedAt).TotalMilliseconds -ge $timeoutMs) { $timeoutKind = 'TIMEOUT'; break }",
+      "  if ($idleTimeoutMs -gt 0 -and ($now - $lastActivityAt).TotalMilliseconds -ge $idleTimeoutMs) { $timeoutKind = 'IDLE_TIMEOUT'; break }",
+      "}",
+      "if ($timeoutKind) {",
       "  Stop-ProcessTree ([int]$p.Id)",
-      "  'TIMEOUT' | Set-Content -Encoding UTF8 " + quotePowerShellSingle(exitPath),
+      `  $timeoutKind | Set-Content -Encoding UTF8 ${quotePowerShellSingle(exitPath)}`,
       "  exit 124",
       "}",
+      "$p.WaitForExit()",
       `$p.ExitCode | Set-Content -Encoding UTF8 ${quotePowerShellSingle(exitPath)}`,
       "exit $p.ExitCode"
     ].filter(Boolean).join("\n");
@@ -297,7 +329,13 @@ async function runWindowsClaudeDetached(
     if (stderr && callbacks?.onStderr) {
       try { callbacks.onStderr(stderr); } catch { /* ignore callback errors */ }
     }
-    const timedOut = wrapperResult.timedOut || exitText.trim() === "TIMEOUT" || wrapperResult.exitCode === 124;
+    const wrapperExit = exitText.trim();
+    const timeoutKind = wrapperExit === "IDLE_TIMEOUT"
+      ? "idle" as const
+      : wrapperResult.timedOut || wrapperExit === "TIMEOUT" || wrapperResult.exitCode === 124
+        ? "total" as const
+        : undefined;
+    const timedOut = timeoutKind !== undefined;
     const exitCode = Number.parseInt(exitText.trim(), 10);
 
     return {
@@ -306,9 +344,14 @@ async function runWindowsClaudeDetached(
       stderr: uniqueLines([
         stderr.trim(),
         wrapperResult.stderr.trim(),
-        timedOut ? formatTimeoutMessage(timeoutMs) : ""
+        timeoutKind === "idle" && idleTimeoutMs
+          ? `Process produced no output for ${idleTimeoutMs}ms.`
+          : timeoutKind === "total"
+            ? formatTimeoutMessage(timeoutMs)
+            : ""
       ]).join("\n"),
       timedOut,
+      timeoutKind,
       signal: wrapperResult.signal,
       error: wrapperResult.error
     };
@@ -394,6 +437,8 @@ export interface RunProcessCallbacks {
   onStdout?: (chunk: string) => void;
   /** Called as stderr data arrives (pre-decode, per-chunk). */
   onStderr?: (chunk: string) => void;
+  /** Optional inactivity deadline. Any stdout or stderr bytes reset it. */
+  idleTimeoutMs?: number;
 }
 
 export async function runProcess(
@@ -420,6 +465,7 @@ export async function runProcess(
     const stdoutChunks: Buffer[] = [];
     const stderrChunks: Buffer[] = [];
     let timedOut = false;
+    let timeoutKind: ProcessResult["timeoutKind"];
     let resolved = false;
     /**
      * cleanedUp guards the cleanup() helper against re-entry. Without it, a
@@ -430,6 +476,7 @@ export async function runProcess(
     let closeSignal: NodeJS.Signals | undefined;
     let processError: string | undefined;
     let timeoutHandle: NodeJS.Timeout | undefined;
+    let idleTimeoutHandle: NodeJS.Timeout | undefined;
     let sigkillHandle: NodeJS.Timeout | undefined;
 
     let stdoutBytes = 0;
@@ -446,6 +493,7 @@ export async function runProcess(
       if (resolved) return;
       resolved = true;
       if (timeoutHandle) clearTimeout(timeoutHandle);
+      if (idleTimeoutHandle) clearTimeout(idleTimeoutHandle);
       if (sigkillHandle) clearTimeout(sigkillHandle);
       signal?.removeEventListener("abort", onAbort);
       resolve(result);
@@ -505,9 +553,20 @@ export async function runProcess(
       });
     };
 
-    const onTimeout = () => {
+    const triggerTimeout = (kind: NonNullable<ProcessResult["timeoutKind"]>) => {
+      if (timedOut || resolved) return;
       timedOut = true;
+      timeoutKind = kind;
+      if (kind === "idle" && timeoutHandle) clearTimeout(timeoutHandle);
+      if (kind === "total" && idleTimeoutHandle) clearTimeout(idleTimeoutHandle);
       cleanup();
+    };
+
+    const idleTimeoutMs = normalizedIdleTimeoutMs(callbacks?.idleTimeoutMs);
+    const resetIdleTimeout = () => {
+      if (!idleTimeoutMs || timedOut || resolved) return;
+      if (idleTimeoutHandle) clearTimeout(idleTimeoutHandle);
+      idleTimeoutHandle = setTimeout(() => triggerTimeout("idle"), idleTimeoutMs);
     };
 
     try {
@@ -545,9 +604,11 @@ export async function runProcess(
       return;
     }
 
-    timeoutHandle = setTimeout(onTimeout, timeoutMs);
+    timeoutHandle = setTimeout(() => triggerTimeout("total"), timeoutMs);
+    resetIdleTimeout();
 
     child.stdout?.on("data", (chunk: Buffer) => {
+      resetIdleTimeout();
       if (stdoutTruncated) return;
       stdoutBytes += chunk.length;
       if (stdoutBytes > MAX_PROCESS_OUTPUT_BYTES) {
@@ -565,6 +626,7 @@ export async function runProcess(
     });
 
     child.stderr?.on("data", (chunk: Buffer) => {
+      resetIdleTimeout();
       if (stderrTruncated) return;
       stderrBytes += chunk.length;
       if (stderrBytes > MAX_PROCESS_OUTPUT_BYTES) {
@@ -595,13 +657,18 @@ export async function runProcess(
 
     child.on("close", (exitCode, closeSignalValue) => {
       closeSignal = closeSignalValue ?? undefined;
-      const timeoutSuffix = timedOut ? `\n${formatTimeoutMessage(timeoutMs)}` : "";
+      const timeoutSuffix = timeoutKind === "idle" && idleTimeoutMs
+        ? `\nProcess produced no output for ${idleTimeoutMs}ms.`
+        : timeoutKind === "total"
+          ? `\n${formatTimeoutMessage(timeoutMs)}`
+          : "";
       const errorSuffix = processError ? `\nProcess error: ${processError}` : "";
       finish({
         exitCode,
         stdout: buildStdout(),
         stderr: `${buildStderr()}${timeoutSuffix}${errorSuffix}`.trim(),
         timedOut,
+        timeoutKind,
         signal: closeSignal
       });
     });

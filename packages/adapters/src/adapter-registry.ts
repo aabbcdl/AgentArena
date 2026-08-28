@@ -7,8 +7,10 @@ import type {
   AgentAdapter,
   AgentResolvedRuntime
 } from "@agentarena/core";
+import { redactSensitiveText } from "@agentarena/core";
 import { demoProfiles } from "./adapter-capabilities.js";
 import { adapterWarn } from "./adapter-diagnostics.js";
+import { createPreflightResult } from "./adapter-helpers.js";
 import { createAiderAdapter } from "./aider-adapter.js";
 import { createAugmentAdapter } from "./augment-adapter.js";
 import { ClaudeCodeAdapter } from "./claude-adapter.js";
@@ -49,6 +51,7 @@ const adapterEntries: Array<[string, AgentAdapter]> = [
 ];
 
 const adapters = new Map<string, AgentAdapter>(adapterEntries);
+const PRODUCT_ADAPTER_IDS = new Set(["codex", "claude-code"]);
 
 const duplicateIds = adapterEntries
   .map(([id]) => id)
@@ -59,6 +62,13 @@ if (duplicateIds.length > 0) {
 
 export function listAvailableAdapters(): AgentAdapter[] {
   return Array.from(adapters.values());
+}
+
+/** Default first-version product surface. Legacy adapters remain available by explicit ID. */
+export function listProductAdapters(): AgentAdapter[] {
+  return listAvailableAdapters().filter(
+    (adapter) => adapter.kind === "demo" || PRODUCT_ADAPTER_IDS.has(adapter.id)
+  );
 }
 
 export function getAdapter(agentId: string): AgentAdapter {
@@ -102,6 +112,23 @@ export async function preflightAdapters(
             );
           })
         ]);
+      } catch (error) {
+        const message = redactSensitiveText(error instanceof Error ? error.message : String(error)).slice(0, 2_000);
+        adapterWarn(`Preflight for "${selection.baseAgentId}" failed without stopping other adapters.`, {
+          error: message
+        });
+        return createPreflightResult(
+          selection,
+          adapter.id,
+          adapter.title,
+          adapter.kind,
+          adapter.capability,
+          "blocked",
+          `${adapter.title} preflight failed before readiness could be determined.`,
+          undefined,
+          undefined,
+          [message]
+        );
       } finally {
         if (timeoutHandle) {
           clearTimeout(timeoutHandle);
@@ -176,10 +203,13 @@ async function checkConfigFiles(relativePaths: string[]): Promise<{ found: strin
  * Returns the version string or undefined if the command fails or produces no version.
  */
 async function probeVersion(binaryName: string, versionArgs: string[], timeoutMs = 10_000): Promise<string | undefined> {
-  const { runProcess } = await import("./process-utils.js");
-  const cmd = process.platform === "win32" && !binaryName.endsWith(".cmd") && !binaryName.endsWith(".bat") && !binaryName.endsWith(".exe")
-    ? `${binaryName}.cmd`
-    : binaryName;
+  const { runProcess, findExecutableOnPath } = await import("./process-utils.js");
+  let cmd = binaryName;
+  if (process.platform === "win32" && !binaryName.endsWith(".cmd") && !binaryName.endsWith(".bat") && !binaryName.endsWith(".exe")) {
+    // Resolve across .cmd/.exe/extensionless so native-exe CLIs are not
+    // misreported as missing; fall back to .cmd when nothing is on PATH.
+    cmd = (await findExecutableOnPath([`${binaryName}.cmd`, `${binaryName}.exe`, binaryName])) ?? `${binaryName}.cmd`;
+  }
 
   try {
     const result = await runProcess(cmd, versionArgs, process.cwd(), timeoutMs);
@@ -211,10 +241,12 @@ async function probeVersion(binaryName: string, versionArgs: string[], timeoutMs
  * `--help` which can succeed for similarly-named binaries. Now we require
  * `--version` to produce a valid version AND check that config files exist.
  */
-export async function detectInstalledAgents(): Promise<AgentDetectionResult[]> {
+export async function detectInstalledAgents(options?: { adapterIds?: readonly string[] }): Promise<AgentDetectionResult[]> {
   const results: AgentDetectionResult[] = [];
+  const selectedIds = options?.adapterIds ? new Set(options.adapterIds) : undefined;
 
   for (const adapter of adapters.values()) {
+    if (selectedIds && !selectedIds.has(adapter.id)) continue;
     // Skip demo adapters — they are always "available"
     if (adapter.kind === "demo") continue;
 

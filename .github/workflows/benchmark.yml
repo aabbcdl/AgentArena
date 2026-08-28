@@ -4,8 +4,9 @@ permissions:
   contents: read
 
 on:
-  pull_request:
-    branches: [main]
+  # PR validation (build + test + a real smoke benchmark) is handled by ci.yml.
+  # This workflow covers release tags and the weekly scheduled benchmark only,
+  # so PRs don't run the full build+test suite twice.
   push:
     tags: ["v*"]
   schedule:

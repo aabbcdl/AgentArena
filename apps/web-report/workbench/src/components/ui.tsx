@@ -2,9 +2,9 @@ import { type ComponentChildren, cloneElement, isValidElement, type VNode } from
 import { useId } from "preact/hooks";
 import type { CopyKey } from "../i18n";
 import { copy } from "../i18n";
-import type { Locale } from "../types";
+import type { CostQuality, Locale } from "../types";
 
-export type IconName = "runs" | "plus" | "compare" | "library" | "environment" | "settings" | "plan" | "live" | "outcome" | "evidence" | "check" | "warning" | "danger" | "info" | "refresh" | "cancel" | "upload" | "clock" | "repo" | "agent" | "trace" | "file" | "cost" | "menu" | "chevron" | "external";
+export type IconName = "runs" | "plus" | "compare" | "library" | "environment" | "settings" | "plan" | "live" | "outcome" | "evidence" | "check" | "warning" | "danger" | "info" | "refresh" | "cancel" | "upload" | "download" | "copy" | "clock" | "repo" | "agent" | "trace" | "file" | "cost" | "menu" | "chevron" | "external";
 
 const paths: Record<IconName, ComponentChildren> = {
   runs: <><path d="M4 5h16v14H4z"/><path d="M8 9h8M8 13h5"/></>,
@@ -24,7 +24,9 @@ const paths: Record<IconName, ComponentChildren> = {
   repo: <><path d="M4 4h6l2 3h8v13H4z"/></>, agent: <><rect x="5" y="7" width="14" height="11" rx="2"/><path d="M12 3v4M9 12h.01M15 12h.01M9 15h6"/></>,
   trace: <><circle cx="5" cy="6" r="2"/><circle cx="19" cy="18" r="2"/><path d="M7 6h4a3 3 0 0 1 3 3v6a3 3 0 0 0 3 3"/></>, file: <><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v5h4"/></>,
   cost: <><circle cx="12" cy="12" r="9"/><path d="M15 8.5c-.7-.7-1.7-1-3-1-1.7 0-3 .8-3 2s1.2 1.8 3 2.2 3 1 3 2.3-1.3 2.5-3 2.5c-1.3 0-2.5-.4-3.2-1.2M12 5v14"/></>,
-  menu: <path d="M4 7h16M4 12h16M4 17h16"/>, chevron: <path d="m9 6 6 6-6 6"/>, external: <><path d="M14 4h6v6M20 4l-9 9"/><path d="M18 13v7H4V6h7"/></>
+  menu: <path d="M4 7h16M4 12h16M4 17h16"/>, chevron: <path d="m9 6 6 6-6 6"/>, external: <><path d="M14 4h6v6M20 4l-9 9"/><path d="M18 13v7H4V6h7"/></>,
+  download: <><path d="M12 4v11M7 11l5 5 5-5"/><path d="M5 20h14"/></>,
+  copy: <><rect x="8" y="8" width="11" height="12" rx="1"/><path d="M16 8V5H5v12h3"/></>
 };
 
 export function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
@@ -36,10 +38,18 @@ export function StatusPill({ tone = "neutral", children }: { tone?: "success" | 
   return <span class={`status-pill status-${tone}`}>{icon && <Icon name={icon}/>}<span>{children}</span></span>;
 }
 
-export function Notice({ kind, children, onClose }: { kind: "info" | "success" | "warning" | "danger"; children: ComponentChildren; onClose?: () => void }) {
+export function Notice({ kind, children, onClose, closeLabel = "Dismiss" }: { kind: "info" | "success" | "warning" | "danger"; children: ComponentChildren; onClose?: () => void; closeLabel?: string }) {
   return <div class={`notice notice-${kind}`} role={kind === "danger" ? "alert" : "status"}>
     <Icon name={kind === "success" ? "check" : kind}/><div class="notice-body">{children}</div>
-    {onClose && <button class="icon-button" type="button" onClick={onClose} aria-label="Dismiss"><Icon name="cancel"/></button>}
+    {onClose && <button class="icon-button" type="button" onClick={onClose} aria-label={closeLabel}><Icon name="cancel"/></button>}
+  </div>;
+}
+
+/** Loading placeholder that is announced to assistive tech (role=status + aria-busy).
+ *  Callers pass a localized `label` so screen readers hear "Loading" in the active locale. */
+export function Skeleton({ lines = 3, large = false, label }: { lines?: number; large?: boolean; label?: string }) {
+  return <div class={`skeleton-lines ${large ? "large" : ""}`} role="status" aria-busy="true" aria-label={label ?? "Loading"}>
+    {Array.from({ length: lines }, (_, index) => <span key={index}/>)}
   </div>;
 }
 
@@ -89,7 +99,7 @@ export function formatDuration(value: number | null, locale: Locale): string {
   return `${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s`;
 }
 
-export function formatCost(value: number | null, locale: Locale): string { return value === null ? t(locale, "unknown") : `$${value.toFixed(2)}`; }
+export function formatCost(value: number | null, locale: Locale, quality: CostQuality = "known"): string { return value === null || quality === "unavailable" ? t(locale, "unknown") : `${quality === "estimated" ? "\u2248" : ""}$${value.toFixed(2)}`; }
 export function formatTime(value: string | null | undefined, locale: Locale): string {
   if (!value) return t(locale, "unknown");
   const date = new Date(value); return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(date);

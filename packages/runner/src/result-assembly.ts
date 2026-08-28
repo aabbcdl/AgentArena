@@ -4,8 +4,9 @@ import type {
   CommandStepResult,
   DiffPrecisionSummary,
   DiffSummary,
+  FileDiffArtifact,
 } from "@agentarena/core";
-import { logger, metrics } from "@agentarena/core";
+import { logger, metrics, relativizeWorkspacePathsInText } from "@agentarena/core";
 import type { runJudges } from "@agentarena/judges";
 import {
   createBaseResult,
@@ -29,10 +30,15 @@ export function buildFinalResult(
   diffPrecision: DiffPrecisionSummary | undefined,
   cancelled: boolean,
   success: boolean,
-  assembledPrompt?: string
+  assembledPrompt?: string,
+  diffReliable?: boolean,
+  fileDiffs?: FileDiffArtifact[],
+  executionStatus?: AgentRunResult["executionStatus"],
+  validationStatus?: AgentRunResult["validationStatus"]
 ): AgentRunResult {
   const { adapter, workspacePath, tracePath, task } = context;
   const durationMs = Date.now() - startedAt;
+  const fileDiffPayload = fileDiffs && fileDiffs.length > 0 ? fileDiffs : undefined;
 
   if (cancelled) {
     return createBaseResult({
@@ -40,15 +46,19 @@ export function buildFinalResult(
       tracePath,
       workspacePath,
       status: "cancelled",
+      executionStatus: executionStatus ?? "cancelled",
+      validationStatus: validationStatus ?? "not-run",
       summary: createCancellationSummary("agent execution"),
       durationMs,
       changedFiles,
       changedFilesHint: changedFiles,
+      fileDiffs: fileDiffPayload,
       setupResults,
       judgeResults,
       teardownResults,
       diff,
       diffPrecision,
+      diffReliable,
       assembledPrompt
     });
   }
@@ -60,13 +70,17 @@ export function buildFinalResult(
       tracePath,
       workspacePath,
       status: "failed",
-      summary: `${adapter.title} crashed: ${errorMessage}`,
+      executionStatus: "failed",
+      validationStatus: "not-run",
+      summary: relativizeWorkspacePathsInText(`${adapter.title} crashed: ${errorMessage}`, workspacePath),
       durationMs,
       changedFiles,
       changedFilesHint: changedFiles,
+      fileDiffs: fileDiffPayload,
       setupResults,
       diff,
       diffPrecision,
+      diffReliable,
       assembledPrompt
     });
   }
@@ -77,13 +91,17 @@ export function buildFinalResult(
       tracePath,
       workspacePath,
       status: "failed",
+      executionStatus: "failed",
+      validationStatus: "not-run",
       summary: `${adapter.title} did not return a result.`,
       durationMs,
       changedFiles,
       changedFilesHint: changedFiles,
+      fileDiffs: fileDiffPayload,
       setupResults,
       diff,
       diffPrecision,
+      diffReliable,
       assembledPrompt
     });
   }
@@ -128,6 +146,9 @@ export function buildFinalResult(
     : undefined;
 
   const finalStatus = success ? "success" : "failed";
+  const finalExecutionStatus =
+    executionStatus ?? (adapterResult.status === "success" ? "completed" : "failed");
+  const finalValidationStatus = validationStatus ?? (success ? "passed" : "not-run");
   const durationSeconds = durationMs / 1000;
 
   metrics.agentStatusTotal.inc({ status: finalStatus, agentId: preflight.agentId, adapterKind: adapter.kind });
@@ -165,19 +186,26 @@ export function buildFinalResult(
     tracePath,
     workspacePath,
     status: success ? "success" : "failed",
-    summary: adapterResult.summary,
+    executionStatus: finalExecutionStatus,
+    validationStatus: finalValidationStatus,
+    summary: relativizeWorkspacePathsInText(adapterResult.summary, workspacePath),
     durationMs,
     tokenUsage: adapterResult.tokenUsage,
     estimatedCostUsd: adapterResult.estimatedCostUsd,
     costKnown: adapterResult.costKnown,
+    costQuality: adapterResult.costQuality,
     tokenUsageReliable: adapterResult.tokenUsageReliable,
+    dataQualityWarning: adapterResult.dataQualityWarning,
+    missingCriticalEvents: adapterResult.missingCriticalEvents,
     changedFiles,
     changedFilesHint: changedFiles,
+    fileDiffs: fileDiffPayload,
     setupResults,
     judgeResults,
     teardownResults,
     diff,
     diffPrecision,
+    diffReliable,
     resolvedRuntime: mergeResolvedRuntime(adapterResult.resolvedRuntime, preflight.resolvedRuntime),
     tokenUsageBreakdown,
     tokenEfficiencyScore,

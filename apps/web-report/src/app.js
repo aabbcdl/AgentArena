@@ -272,7 +272,9 @@ function renderList(element, items) {
 // formatElapsedDuration is imported from ./app-helpers.js
 
 function formatCost(result) {
-  return result.costKnown ? `$${result.estimatedCostUsd.toFixed(2)}` : "n/a";
+  const quality = result.costQuality ?? (result.costKnown ? "known" : "unavailable");
+  if (!Number.isFinite(result.estimatedCostUsd) || quality === "unavailable") return "n/a";
+  return `${quality === "estimated" ? "\u2248" : ""}$${result.estimatedCostUsd.toFixed(2)}`;
 }
 
 function _getNormalizedScoreWeights() {
@@ -444,6 +446,7 @@ const {
   validateLauncher,
   renderLauncherValidation,
   handleLauncherRun,
+  handleQuickStart,
   openProviderEditor,
   saveProviderProfileFromEditor,
   deleteProviderProfileById,
@@ -805,6 +808,46 @@ function sortRuns(runs) {
   return [...runs].sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 }
 
+// ─── Opt-in product telemetry (local-only) ───
+// Sends aggregate, decision-relevant events to the local server, which appends
+// them to .agentarena/telemetry.jsonl ONLY when AGENTARENA_TELEMETRY=1.
+// No repo paths, prompts, or secrets are sent — just counts and identifiers.
+const telemetryViewedRunIds = new Set();
+let telemetryAppOpenedSent = false;
+function trackTelemetry(event, props = {}) {
+  if (!state.serviceInfo?.telemetryEnabled) return;
+  try {
+    apiFetch("/api/telemetry", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ event, props })
+    }).catch(() => { /* telemetry must never break the UI */ });
+  } catch {
+    /* ignore */
+  }
+}
+function trackAppOpened() {
+  if (telemetryAppOpenedSent) return;
+  telemetryAppOpenedSent = true;
+  trackTelemetry("app_opened", {
+    hasAdapters: (state.availableAdapters?.length ?? 0) > 0,
+    language: state.language ?? "en",
+    entryPoint: "legacy"
+  });
+}
+function trackResultViewed(run) {
+  if (!run?.runId) return;
+  if (telemetryViewedRunIds.has(run.runId)) return;
+  telemetryViewedRunIds.add(run.runId);
+  trackTelemetry("result_viewed", {
+    agentCount: run.results?.length ?? 0,
+    taskPackId: run.task?.id ?? "unknown",
+    scoreMode: run.scoreMode ?? "unknown",
+    entryPoint: "legacy",
+    resultIntegrity: run.results?.length ? "complete" : "unavailable"
+  });
+}
+
 function updateCurrentRun() {
   state.run = state.runs.find((run) => run.runId === state.selectedRunId) ?? null;
   if (!state.run) {
@@ -815,6 +858,9 @@ function updateCurrentRun() {
   if (!state.run.results.some((result) => recordKey(result) === state.selectedAgentId)) {
     state.selectedAgentId = recordKey(state.run.results[0] ?? {}) ?? null;
   }
+  // Fire-and-forget: record that this benchmark result was viewed. Deduped
+  // per runId so the same result is not double-counted in a session.
+  trackResultViewed(state.run);
 }
 
 function applyRuns(runs, markdownByRunId = new Map()) {
@@ -1987,9 +2033,26 @@ syncLocationState(state);
 render();
 
 // Demo button event listener
+// Prefer a REAL demo benchmark run when the local service is available —
+// this gives a truthful first impression of what AgentArena actually does.
+// Fall back to static simulated data only when there is no backing server
+// (e.g. a static HTML export) or a run is already in progress.
+function tryDemo() {
+  if (state.serviceInfo && !state.runInProgress) {
+    handleQuickStart().then((started) => {
+      if (!started) loadDemoData();
+    }).catch((err) => {
+      console.warn("[agentarena] Quick start failed, falling back to demo data:", err);
+      loadDemoData();
+    });
+    return;
+  }
+  loadDemoData();
+}
+
 if (elements.tryDemoBtn) {
   elements.tryDemoBtn.addEventListener("click", () => {
-    loadDemoData();
+    tryDemo();
   });
 } else {
   console.warn('try-demo-btn not found, retrying after DOM ready');
@@ -1997,7 +2060,7 @@ if (elements.tryDemoBtn) {
     const btn = document.querySelector("#try-demo-btn");
     if (btn) {
       btn.addEventListener("click", () => {
-        loadDemoData();
+        tryDemo();
       });
     }
   });
@@ -2020,7 +2083,7 @@ document.addEventListener("click", (event) => {
   if (!actionBtn) return;
   const action = actionBtn.dataset.action;
   if (action === "load-demo") {
-    loadDemoData();
+    tryDemo();
   } else if (action === "scroll-to-launcher") {
     const launcherSection = document.querySelector("#launcher-section");
     if (launcherSection) {
@@ -2041,6 +2104,10 @@ const updateBanner = document.getElementById('update-banner');
 const updateReload = document.getElementById('update-reload');
 if (updateReload) {
   updateReload.addEventListener('click', () => {
+    // Mark that this reload is a user-consented update so the controllerchange
+    // handler in index.html actually reloads (first-install changes do not set
+    // this flag and are therefore ignored).
+    globalThis.__agentarenaPendingSwSkip = true;
     const registration = globalThis.__agentarenaSwRegistration;
     if (registration?.waiting) {
       registration.waiting.postMessage({ type: "SKIP_WAITING" });
@@ -2184,7 +2251,11 @@ function showIndexedDBWarning() {
 }
 
 // Run initialization
-detectService();
+// detectService is async and sets state.serviceInfo (including telemetryEnabled).
+// After it resolves, fire the opt-in app_opened event once.
+detectService().finally(() => {
+  try { trackAppOpened(); } catch { /* telemetry must never block init */ }
+});
 syncLocationState(state);
 
 // Wire extracted UI modules before first render

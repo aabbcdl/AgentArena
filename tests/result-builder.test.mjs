@@ -32,6 +32,21 @@ describe("result-builder", () => {
       assert.deepEqual(result.diff, { added: [], changed: [], removed: [], skippedLargeFiles: [] });
     });
 
+    it("preserves estimated cost quality without treating it as known billing", () => {
+      const result = createBaseResult({
+        preflight: mockPreflight,
+        tracePath: "/path/to/trace",
+        workspacePath: "/path/to/workspace",
+        estimatedCostUsd: 0.08,
+        costKnown: false,
+        costQuality: "estimated"
+      });
+
+      assert.equal(result.estimatedCostUsd, 0.08);
+      assert.equal(result.costKnown, false);
+      assert.equal(result.costQuality, "estimated");
+    });
+
     it("creates result with custom options", () => {
       const result = createBaseResult({
         preflight: mockPreflight,
@@ -41,7 +56,8 @@ describe("result-builder", () => {
         durationMs: 12345,
         tokenUsage: 1000,
         estimatedCostUsd: 0.05,
-        costKnown: true
+        costKnown: true,
+        diffReliable: false
       });
 
       assert.equal(result.status, "success");
@@ -49,6 +65,7 @@ describe("result-builder", () => {
       assert.equal(result.tokenUsage, 1000);
       assert.equal(result.estimatedCostUsd, 0.05);
       assert.equal(result.costKnown, true);
+      assert.equal(result.diffReliable, false);
     });
   });
 
@@ -101,17 +118,33 @@ describe("result-builder", () => {
       const result = buildChangedFiles(diff, ["a.js", "b.js"]);
       assert.deepEqual(result, ["a.js", "b.js"]);
     });
+
+    it("excludes AgentArena-owned adapter artifacts from snapshots and hints", () => {
+      const diff = {
+        added: ["agentarena-codex/codex-last-message.txt", "src/utils.js"],
+        changed: ["agentarena-claude/last-message.txt"],
+        removed: [],
+        skippedLargeFiles: []
+      };
+      const result = buildChangedFiles(diff, [
+        "agentarena-qwen\\events.jsonl",
+        "agentarena-copilot/session.json",
+        "agentarena-demo/demo-fast.md",
+        "src/utils.js"
+      ]);
+      assert.deepEqual(result, ["agentarena-demo/demo-fast.md", "src/utils.js"]);
+    });
   });
 
   describe("mergeResolvedRuntime", () => {
     it("merges primary and fallback", () => {
-      const primary = { source: "primary", verification: "verified", notes: ["note1"] };
-      const fallback = { source: "fallback", verification: "unknown", notes: ["note2"] };
+      const primary = { source: "primary", verification: "verified", notes: ["shared", "note1"] };
+      const fallback = { source: "fallback", verification: "unknown", notes: ["note2", "shared"] };
 
       const result = mergeResolvedRuntime(primary, fallback);
       assert.equal(result?.source, "primary");
       assert.equal(result?.verification, "verified");
-      assert.deepEqual(result?.notes, ["note2", "note1"]);
+      assert.deepEqual(result?.notes, ["note2", "shared", "note1"]);
     });
 
     it("handles undefined inputs", () => {
@@ -184,7 +217,6 @@ describe("buildFinalResult tokenUsageReliable handling", () => {
       [], // teardownResults
       { added: [], changed: [], removed: [], skippedLargeFiles: [] }, // diff
       [], // changedFiles
-      [], // collectedFiles
       undefined, // diffPrecision
       false, // cancelled
       true // success
@@ -209,5 +241,122 @@ describe("buildFinalResult tokenUsageReliable handling", () => {
     assert.equal(result.tokenUsageReliable, undefined);
     // budget 4000 / usage 1000 = 4, clamped to 1
     assert.equal(result.tokenEfficiencyScore, 1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R-01: dataQualityWarning propagates from adapterResult to AgentRunResult
+// ---------------------------------------------------------------------------
+
+describe("buildFinalResult dataQualityWarning propagation", () => {
+  function makeContext() {
+    return {
+      adapter: { title: "Test Adapter", kind: "external" },
+      workspacePath: "/workspace",
+      tracePath: "/trace",
+      task: { id: "t", metadata: {} }
+    };
+  }
+
+  function makeAdapterResult(overrides = {}) {
+    return {
+      status: "success",
+      summary: "done",
+      tokenUsage: 1000,
+      estimatedCostUsd: 0,
+      costKnown: false,
+      changedFilesHint: [],
+      ...overrides
+    };
+  }
+
+  function build(adapterResult, diffReliable = true) {
+    return buildFinalResult(
+      mockPreflight,
+      makeContext(),
+      adapterResult,
+      undefined, // adapterError
+      Date.now() - 1000, // startedAt
+      [], // setupResults
+      [], // judgeResults
+      [], // teardownResults
+      { added: [], changed: [], removed: [], skippedLargeFiles: [] }, // diff
+      [], // changedFiles
+      undefined, // diffPrecision
+      false, // cancelled
+      true, // success
+      undefined, // assembledPrompt
+      diffReliable
+    );
+  }
+
+  it("propagates dataQualityWarning from adapterResult to final result", () => {
+    const warning = "CLI output format changed — data may be inaccurate.";
+    const result = build(makeAdapterResult({ dataQualityWarning: warning }));
+    assert.equal(result.dataQualityWarning, warning);
+  });
+
+  it("leaves dataQualityWarning undefined when adapterResult has none", () => {
+    const result = build(makeAdapterResult());
+    assert.equal(result.dataQualityWarning, undefined);
+  });
+
+  it("normalizes temporary workspace paths in the final agent summary", () => {
+    const workspacePath = "C:\\Users\\test\\AppData\\Local\\Temp\\agentarena-workspaces\\run";
+    const context = { ...makeContext(), workspacePath };
+    const result = buildFinalResult(
+      mockPreflight,
+      context,
+      makeAdapterResult({ summary: `Updated ${workspacePath.replace(/\\\\/g, "/")}/src/utils.js` }),
+      undefined,
+      Date.now() - 1000,
+      [],
+      [],
+      [],
+      { added: [], changed: ["src/utils.js"], removed: [], skippedLargeFiles: [] },
+      ["src/utils.js"],
+      undefined,
+      false,
+      true
+    );
+    assert.equal(result.summary, "Updated src/utils.js");
+  });
+
+  it("propagates diff reliability to the final result", () => {
+    const result = build(makeAdapterResult(), false);
+    assert.equal(result.diffReliable, false);
+  });
+
+  it("propagates dataQualityWarning alongside tokenUsageReliable: false", () => {
+    // Adapters set both when a format mismatch is detected.
+    const result = build(makeAdapterResult({
+      dataQualityWarning: "format mismatch",
+      tokenUsageReliable: false
+    }));
+    assert.equal(result.dataQualityWarning, "format mismatch");
+    assert.equal(result.tokenUsageReliable, false);
+    assert.equal(result.tokenEfficiencyScore, undefined, "Unreliable tokens must not produce an efficiency score");
+  });
+
+  it("createBaseResult passes dataQualityWarning through directly", () => {
+    const result = createBaseResult({
+      preflight: mockPreflight,
+      tracePath: "/trace",
+      workspacePath: "/workspace",
+      dataQualityWarning: "direct warning"
+    });
+    assert.equal(result.dataQualityWarning, "direct warning");
+  });
+
+  it("createBaseResult passes trace integrity fields through directly", () => {
+    const result = createBaseResult({
+      preflight: mockPreflight,
+      tracePath: "/trace",
+      workspacePath: "/workspace",
+      traceWriteFailed: true,
+      traceDroppedWrites: 7
+    });
+    assert.equal(result.traceWriteFailed, true);
+    assert.equal(result.traceDroppedWrites, 7);
   });
 });

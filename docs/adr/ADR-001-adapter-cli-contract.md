@@ -54,7 +54,7 @@ Expected JSON-per-line events:
 The `StreamJsonTransport` in `packages/adapters/src/transport.ts` uses these flags:
 
 ```
--p --output-format stream-json --verbose --permission-mode bypassPermissions --no-session-persistence
+--permission-mode dontAsk -p --output-format stream-json --verbose --no-session-persistence
 ```
 
 | Flag | Why | Documented? |
@@ -62,17 +62,24 @@ The `StreamJsonTransport` in `packages/adapters/src/transport.ts` uses these fla
 | `-p` | Pipe prompt from stdin | Yes |
 | `--output-format stream-json` | Structured JSON output | Yes |
 | `--verbose` | Required for full structured output | **No** — undocumented requirement |
-| `--permission-mode bypassPermissions` | Skip interactive permission prompts | **No** — internal flag |
+| `--permission-mode dontAsk` | Deny tool actions that would require an interactive approval | Yes in supported Claude Code versions; preflight blocks older versions. |
 | `--no-session-persistence` | Don't save session state | Yes |
+
+AgentArena does not generate `--dangerously-skip-permissions`. The former `AGENTARENA_SKIP_PERMISSIONS` switch was removed because a host-wide environment toggle could silently broaden every Claude-style transport invocation.
 
 ### 3. Transport Fallback Thresholds
 
 `StreamJsonTransport.shouldFallback()` triggers fallback to `TextTransport` when:
 
-- Timeout + < 100 bytes of stdout → likely provider incompatibility
-- Exit code other than 0 or 1 → unexpected failure mode
+- Timeout + stdout fewer than `timedOutMinStdoutBytes` bytes (default: 100) → likely provider incompatibility
+- Exit code outside `acceptableExitCodes` (default: `[0, 1]`) → unexpected failure mode
 
-These thresholds are empirical, based on observed Claude Code behavior with third-party providers.
+These thresholds are **configurable** via `TransportFallbackThresholds` and can be
+overridden at runtime via environment variables:
+- `AGENTARENA_FALLBACK_MIN_STDOUT_BYTES`
+- `AGENTARENA_FALLBACK_ACCEPTABLE_EXIT_CODES` (comma-separated)
+
+See `docs/adapter-development-guide.md` for details.
 
 ### 4. `changedFilesHint` Semantics
 
@@ -80,7 +87,7 @@ Different adapters populate `changedFilesHint` differently:
 
 | Adapter | Source | Rationale |
 |---------|--------|-----------|
-| Claude Code | Always returns `[]` | Uses runner's snapshot-based diff instead |
+| Claude Code | `git diff`-based hint via `getChangedFilesFromGit` (with `changedFilesHintReliable`); falls back to `[]` on failure paths | Mirrors base-cli-adapter; reliability is surfaced in the trace (`claude-adapter.ts:285`). Earlier revisions always returned `[]` and relied solely on the runner's snapshot diff. |
 | Codex | Parsed from `item.completed` events with `type === "file_change"` | Events provide real-time file changes |
 | Base CLI adapter | `git diff --name-only HEAD` | Git-based detection |
 
@@ -99,13 +106,15 @@ The normalized keys are looked up against hardcoded strings. There is no schema 
 
 - Any CLI version update can silently break token counting and cost tracking
 - The `result` event's "replace vs add" semantic is critical but fragile
-- `--verbose` and `--permission-mode bypassPermissions` are undocumented flags that could be removed
-- The 100-byte threshold for fallback is a magic number based on empirical observation
-- No contract tests exist against real CLI output samples
+- `--verbose` remains an undocumented compatibility dependency; `--permission-mode dontAsk` is capability-probed before background execution
 
-## Mitigations
+## Mitigations (implemented)
 
-1. Store sample CLI output fixtures in `tests/fixtures/` for each supported CLI version
-2. Add contract tests that validate parsers against fixtures
-3. Log warnings when expected fields are missing (not just silently return 0)
-4. Pin CLI version expectations in adapter config
+1. ✅ Sample CLI output fixtures stored in `tests/fixtures/event-parsers/` for Codex, Claude, and Gemini
+2. ✅ Contract tests in `tests/event-parser-contract.test.mjs` validate parsers against fixtures
+3. ✅ `formatMismatch` detection logs warnings when the majority of typed JSON events are unrecognized — sets `dataQualityWarning` and `tokenUsageReliable: false` on the result
+4. ✅ `tokenCountSuspicious` flag warns when result/turn.completed events produce zero tokens
+5. ✅ Fallback thresholds parameterized via `TransportFallbackThresholds` (env vars + programmatic overrides)
+6. ✅ `dataQualityWarning` propagated through `result-assembly.ts` to `AgentRunResult` for report surfacing
+
+See `docs/adapter-development-guide.md` for the full adapter development workflow.

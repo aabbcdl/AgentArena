@@ -1,5 +1,5 @@
-import type { BenchmarkRun } from "@agentarena/core";
-import { median } from "@agentarena/core";
+import type { BenchmarkRun, FairComparisonMetadata } from "@agentarena/core";
+import { median, resolveCostQuality } from "@agentarena/core";
 import { formatRuntimeIdentity, getRunScoreMode, isResultScoreExcluded } from "./report-helpers.js";
 
 /**
@@ -115,6 +115,13 @@ export interface LeaderboardData {
   comparabilityRules: string[];
 }
 
+function completeFairComparison(run: BenchmarkRun): FairComparisonMetadata | undefined {
+  const metadata = run.fairComparison;
+  return metadata?.taskIdentity && metadata.judgeIdentity && metadata.repoBaselineIdentity
+    ? metadata
+    : undefined;
+}
+
 /**
  * 从 runs 中筛选出与当前 run 可比较的 runs
  * @param difficultyFilter 难度筛选：all | easy | medium | hard
@@ -126,18 +133,32 @@ export function getComparableRuns(
 ): BenchmarkRun[] {
   const currentTaskId = currentRun.task.id || currentRun.task.title;
   const currentScoreMode = getRunScoreMode(currentRun);
+  const currentFairComparison = completeFairComparison(currentRun);
 
   return runs.filter((run) => {
     const taskId = run.task.id || run.task.title;
     const scoreMode = getRunScoreMode(run);
     const runDifficulty = run.task.metadata?.difficulty;
+    const runFairComparison = completeFairComparison(run);
     
     // 难度筛选
     if (difficultyFilter && difficultyFilter !== "all" && runDifficulty !== difficultyFilter) {
       return false;
     }
     
-    return taskId === currentTaskId && scoreMode === currentScoreMode;
+    if (scoreMode !== currentScoreMode) {
+      return false;
+    }
+
+    if (currentFairComparison && runFairComparison) {
+      return (
+        runFairComparison.taskIdentity === currentFairComparison.taskIdentity &&
+        runFairComparison.judgeIdentity === currentFairComparison.judgeIdentity &&
+        runFairComparison.repoBaselineIdentity === currentFairComparison.repoBaselineIdentity
+      );
+    }
+
+    return taskId === currentTaskId;
   });
 }
 
@@ -183,8 +204,7 @@ export function buildLeaderboard(
   for (const run of comparableRuns) {
     // 找出这个 run 里的 winner
     const comparableResults = run.results.filter((r) => !isResultScoreExcluded(r));
-    const successfulResults = comparableResults.filter((r) => r.status === "success");
-    const candidates = successfulResults.length > 0 ? successfulResults : comparableResults;
+    const candidates = comparableResults.filter((r) => r.status === "success");
 
     // 按综合分排序
     const sorted = [...candidates].sort((a, b) => {
@@ -219,7 +239,7 @@ export function buildLeaderboard(
     const scores = results.map((r) => (r.compositeScore ?? 0)).filter((s) => s > 0);
     const durations = results.map((r) => r.durationMs).filter((d) => d > 0);
     const costs = results
-      .filter((r) => r.costKnown && r.estimatedCostUsd > 0)
+      .filter((r) => resolveCostQuality(r) === "known" && r.estimatedCostUsd > 0)
       .map((r) => r.estimatedCostUsd);
     const successCount = results.filter((r) => r.status === "success").length;
 
@@ -296,7 +316,9 @@ export function buildLeaderboard(
     excludedRunCount,
     rows,
     comparabilityRules: [
-      "Only runs with the same task are compared",
+      "Only runs with the same task definition are compared",
+      "Only runs with the same judge logic are compared",
+      "Only runs with the same repository baseline are compared",
       "Only runs with the same score mode are compared",
       "Different agent versions are treated as separate entries",
       "Different providers/profiles are treated as separate entries",

@@ -1,78 +1,53 @@
 schemaVersion: agentarena.taskpack/v1
-id: official-json-contract-repair
-title: JSON Contract Repair
-description: Fix a JSON response to match its contract.
+id: json-contract-repair
+title: Repair a JSON Response Contract
+description: Restore a deterministic response fixture to its documented shape.
 metadata:
   source: official
   owner: AgentArena
+  lifecycle: core
   difficulty: easy
-  objective: Fix type errors, wrong values, and extra fields in a JSON response.
-  judgeRationale: Behavioral tests verify JSON matches schema and has correct values.
-  repoTypes: ["node"]
-  tags: ["json", "api", "contract"]
+  objective: Make a JSON response satisfy its required fields and value types.
+  repoTypes: [node]
+  tags: [core, benchmark, json, contract]
   dependencies: []
-  differentiator: Tests attention to detail — weak agents miss type mismatches.
+  judgeRationale: The contract module and a direct structural check must agree on the repaired fixture.
+  differentiator: Separates exact data repair from source-code changes.
   i18n:
     zh-CN:
-      title: JSON 契约修复
-      description: 修复 JSON 响应以匹配其契约。
-      objective: 修复 JSON 响应中的类型错误、错误值和多余字段。
-      judgeRationale: 行为测试验证 JSON 匹配 schema 且具有正确的值。
-
+      title: 修复 JSON 响应契约
+      description: 将确定性的响应数据恢复到文档规定的结构。
+      objective: 让 JSON 响应满足必需字段和值类型。
+      judgeRationale: 契约模块和直接结构检查必须同时认可修复后的数据。
+repoSource: builtin://nodejs-core
 prompt: |
-  ## Task | 任务
-
-  The API response in `fixtures/response.json` has contract violations. Fix ALL of them:
-
-  1. `status` is "pending" but must be "ready"
-  2. `data.items[1].value` is the string "wrong" but must be a number (change to 0)
-  3. `extraJunk` field is not in the schema — remove it
-
-  Read `fixtures/response.schema.json` to understand the required structure.
-
-  ## Constraints | 约束
-
-  - Only modify `fixtures/response.json`
-  - Do NOT modify the schema file
-  - Keep all valid data (id, name, items[0], version)
-
-expectedChangedPaths:
-  - fixtures/response.json
-
+  Repair `fixtures/response.json` to match the contract enforced by
+  `src/json-contract.js`. It must represent a ready response with a non-empty
+  request id, integer item values, and no extra top-level fields. Do not change
+  the contract implementation or any tests.
+expectedChangedPaths: [fixtures/response.json]
+changePolicy:
+  requireAgentChange: true
+  allowedPaths: [fixtures/response.json]
+  forbiddenPaths: ["test/**", "scripts/**", package.json, "src/**"]
+  minChangedFiles: 1
+  maxChangedFiles: 1
 envAllowList: []
 setupCommands:
-  - id: create-fixtures
-    label: Create JSON contract fixtures
-    command: |
-      node -e "var f=require('node:fs');f.mkdirSync('fixtures',{recursive:true});var schema={type:'object',required:['status','data','version'],properties:{status:{type:'string',enum:['ready','pending','error']},data:{type:'object',required:['id','name','items'],properties:{id:{type:'number'},name:{type:'string'},items:{type:'array',items:{type:'object',required:['label','value'],properties:{label:{type:'string'},value:{type:'number'}}}}}},version:{type:'string'}},additionalProperties:false};var response={status:'pending',data:{id:42,name:'Test Widget',items:[{label:'alpha',value:1},{label:'beta',value:'wrong'}]},version:'1.0.0',extraJunk:true};f.writeFileSync('fixtures/response.schema.json',JSON.stringify(schema,null,2));f.writeFileSync('fixtures/response.json',JSON.stringify(response,null,2));console.log('Fixtures created');"
+  - id: inject-fault
+    label: Prepare the isolated response regression
+    command: node scripts/inject-task-fault.mjs json-contract-repair
     timeoutMs: 10000
-teardownCommands: []
 judges:
-  - id: json-valid
+  - id: behavior
     type: command
-    label: JSON is valid and loadable
-    command: |
-      node -e "var c=require('./fixtures/response.json');console.log('PASS: JSON valid');"
+    label: Response matches the JSON contract
+    command: node scripts/verify-core-task.mjs json-contract-repair
     timeoutMs: 10000
     critical: true
-  - id: status-ready
+  - id: regression-tests
     type: command
-    label: Status is "ready"
-    command: |
-      node -e "var c=require('./fixtures/response.json');var a=require('node:assert/strict');a.strictEqual(c.status,'ready');console.log('PASS: status ready');"
-    timeoutMs: 10000
-    critical: true
-  - id: no-extra-fields
-    type: command
-    label: No extra fields (extraJunk removed)
-    command: |
-      node -e "var c=require('./fixtures/response.json');if(c.extraJunk!==undefined){console.error('extraJunk still present');process.exit(1)}console.log('PASS: no extra fields');"
-    timeoutMs: 10000
-    critical: true
-  - id: items-fixed
-    type: command
-    label: items[1].value is a number
-    command: |
-      node -e "var c=require('./fixtures/response.json');var a=require('node:assert/strict');a.strictEqual(typeof c.data.items[1].value,'number');console.log('PASS: items[1].value is number');"
-    timeoutMs: 10000
+    label: Contract tests pass
+    command: node --test test/json-contract.test.js
+    timeoutMs: 30000
     critical: true

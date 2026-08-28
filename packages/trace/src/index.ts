@@ -4,7 +4,7 @@ import path from "node:path";
 import { createInterface } from "node:readline";
 import { pipeline } from "node:stream/promises";
 import { createGunzip, createGzip } from "node:zlib";
-import { ensureDirectory, logger, metrics, type TraceEvent } from "@agentarena/core";
+import { ensureDirectory, logger, metrics, TRACE_ARTIFACT_SCHEMA, type TraceEvent, validateTraceEvent } from "@agentarena/core";
 import { matchesFilter, type TraceFilter, type TraceQueryOptions } from "./types.js";
 
 function logMalformedTraceLine(filePath: string, line: string): void {
@@ -14,6 +14,13 @@ function logMalformedTraceLine(filePath: string, line: string): void {
       preview: line.slice(0, 100)
     }
   });
+}
+
+function parseTraceLine(line: string): TraceEvent {
+  const parsed: unknown = JSON.parse(line);
+  const validation = validateTraceEvent(parsed);
+  if (!validation.ok) throw new Error(validation.errors.join("; "));
+  return parsed as TraceEvent;
 }
 
 /**
@@ -30,7 +37,7 @@ async function readTraceFileStreaming(filePath: string): Promise<{ events: Trace
   for await (const line of rl) {
     if (!line.trim()) continue;
     try {
-      events.push(JSON.parse(line) as TraceEvent);
+      events.push(parseTraceLine(line));
     } catch {
       malformedCount++;
       logMalformedTraceLine(filePath, line);
@@ -64,7 +71,7 @@ async function queryTraceFileStream(
     for await (const line of rl) {
       if (!line.trim()) continue;
       try {
-        const event = JSON.parse(line) as TraceEvent;
+        const event = parseTraceLine(line);
         if (!filter || matchesFilter(event, filter)) {
           filtered.push(event);
         }
@@ -86,7 +93,7 @@ async function queryTraceFileStream(
   for await (const line of rl) {
     if (!line.trim()) continue;
     try {
-      const event = JSON.parse(line) as TraceEvent;
+      const event = parseTraceLine(line);
       if (filter && !matchesFilter(event, filter)) continue;
 
       if (skipped < offset) {
@@ -121,8 +128,20 @@ export class JsonlTraceRecorder {
 
   constructor(
     private readonly filePath: string,
-    private readonly bufferSize: number = 0
+    private readonly bufferSize: number = 0,
+    private readonly transformEvent: (event: TraceEvent) => TraceEvent = (event) => event
   ) {}
+
+  /**
+   * Snapshot of write integrity for the recorder.
+   * Call after `close()`/`flush()` so pending queue work is reflected.
+   */
+  getIntegrity(): { writeFailed: boolean; droppedWrites: number } {
+    return {
+      writeFailed: this.writeFailed,
+      droppedWrites: this.droppedWrites
+    };
+  }
 
   async close(): Promise<void> {
     if (this.flushTimer) {
@@ -135,6 +154,11 @@ export class JsonlTraceRecorder {
       await this.writeEvents(events);
     }
     await this.writeQueue;
+    if (!this.directoryEnsured) {
+      await ensureDirectory(path.dirname(this.filePath));
+      await fs.appendFile(this.filePath, "", "utf8");
+      this.directoryEnsured = true;
+    }
   }
 
   /**
@@ -162,7 +186,7 @@ export class JsonlTraceRecorder {
         await ensureDirectory(path.dirname(filePath));
         this.directoryEnsured = true;
       }
-      const lines = events.map((e) => JSON.stringify(e)).join("\n") + "\n";
+      const lines = events.map((e) => JSON.stringify({ schemaVersion: TRACE_ARTIFACT_SCHEMA, ...e })).join("\n") + "\n";
       await fs.appendFile(filePath, lines, "utf8");
     }, "Trace buffered write");
   }
@@ -213,6 +237,7 @@ export class JsonlTraceRecorder {
       return;
     }
 
+    const persistedEvent = this.transformEvent(event);
     if (this.bufferSize <= 1) {
       const filePath = this.filePath;
       this.enqueue(async () => {
@@ -220,10 +245,10 @@ export class JsonlTraceRecorder {
           await ensureDirectory(path.dirname(filePath));
           this.directoryEnsured = true;
         }
-        await fs.appendFile(filePath, `${JSON.stringify(event)}\n`, "utf8");
+        await fs.appendFile(filePath, `${JSON.stringify({ schemaVersion: TRACE_ARTIFACT_SCHEMA, ...persistedEvent })}\n`, "utf8");
       }, "Trace write");
     } else {
-      this.buffer.push(event);
+      this.buffer.push(persistedEvent);
       if (this.buffer.length >= this.bufferSize) {
         const events = this.buffer;
         this.buffer = [];
@@ -245,13 +270,14 @@ export class JsonlTraceRecorder {
       return;
     }
 
+    const persistedEvents = events.map((event) => this.transformEvent(event));
     const filePath = this.filePath;
     this.enqueue(async () => {
       if (!this.directoryEnsured) {
         await ensureDirectory(path.dirname(filePath));
         this.directoryEnsured = true;
       }
-      const lines = events.map((event) => JSON.stringify(event)).join("\n") + "\n";
+      const lines = persistedEvents.map((event) => JSON.stringify({ schemaVersion: TRACE_ARTIFACT_SCHEMA, ...event })).join("\n") + "\n";
       await fs.appendFile(filePath, lines, "utf8");
     }, "Trace batch write");
 
@@ -321,7 +347,7 @@ export class JsonlTraceRecorder {
       const rl = createInterface({ input: stream, crlfDelay: Infinity });
       for await (const line of rl) {
         if (line.trim()) {
-          try { yield JSON.parse(line) as TraceEvent; } catch { /* skip malformed */ }
+          try { yield parseTraceLine(line); } catch { /* skip malformed */ }
         }
       }
     } catch (error) {
