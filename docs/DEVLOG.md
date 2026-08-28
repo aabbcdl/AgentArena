@@ -5,6 +5,13 @@
 
 ---
 
+## [2026-08-28] pnpm 10 的安全 override 必须放在 workspace 配置
+
+- 现象/目标：GitHub CI 的高危依赖审计因 `fast-uri`、`js-yaml` 和 `nanoid` 失败。
+- 根因/思路：`pnpm audit --fix` 把 override 写入根 `package.json`，但 pnpm 10.6.1 已不读取 `pnpm.overrides`；仓库的 `pnpm-workspace.yaml` 还固定了旧的易受攻击版本。
+- 解法：将最小安全版本统一放入 `pnpm-workspace.yaml` 并重新生成锁文件，`pnpm audit --audit-level=high` 现已通过。
+- 教训/可复用点：pnpm CI 安全修复必须验证 override 实际被解析，不能只看 audit fix 修改了哪个文件。
+
 ## [2026-08-28] 浏览器 E2E 导航等待必须与测试目标解耦
 
 - 现象/目标：完整浏览器命令在单独运行时通过，但并行启动多个服务时偶发卡在 `page.goto(..., waitUntil=load)`。
